@@ -7,10 +7,32 @@ EXTENSION_VERSION=$(grep -m 1 "version" Cargo.toml | cut -d '"' -f 2)
 BINARY_PATH="./target/release/ruby-fast-lsp"
 EXTENSION_DIR="./vsix"
 TARGET_DIR="./target"
+REBUILD_LSP=false
 
-# Check if the binary exists
-if [ ! -f "$BINARY_PATH" ]; then
-    echo "Binary not found at $BINARY_PATH. Building release version..."
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        --rebuild)
+            REBUILD_LSP=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $key"
+            echo "Usage: $0 [--rebuild]"
+            echo "  --rebuild    Force rebuild of the LSP binary"
+            exit 1
+            ;;
+    esac
+done
+
+# Build the binary if it doesn't exist or if rebuild is requested
+if [ ! -f "$BINARY_PATH" ] || [ "$REBUILD_LSP" = true ]; then
+    if [ "$REBUILD_LSP" = true ]; then
+        echo "Rebuilding LSP binary..."
+    else
+        echo "Binary not found at $BINARY_PATH. Building release version..."
+    fi
     cargo build --release
 fi
 
