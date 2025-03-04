@@ -3,11 +3,11 @@
   "displayName": "Ruby Fast LSP",
   "description": "A fast Language Server Protocol implementation for Ruby",
   "version": "0.1.0",
-  "publisher": "ruby-fast-lsp-team",
+  "publisher": "rajnaveen344",
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ruby-fast-lsp-team/ruby-fast-lsp"
+    "url": "https://github.com/rajnaveen344/ruby-fast-lsp"
   },
   "engines": {
     "vscode": "^1.60.0"
