@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{info, warn};
 use lsp_types::{Position, Range, CompletionItem, CompletionItemKind};
-use tree_sitter::{Tree, Node, TreeCursor};
+use tree_sitter::{Tree, Node};
 
 #[derive(Clone)]
 pub struct RubyAnalyzer {
@@ -13,7 +13,7 @@ impl RubyAnalyzer {
         Self {}
     }
 
-    pub fn analyze(&self, tree: Option<&Tree>, source_code: &str) -> Result<()> {
+    pub fn analyze(&self, tree: Option<&Tree>, _source_code: &str) -> Result<()> {
         if let Some(tree) = tree {
             info!("Analyzing Ruby code with tree-sitter");
             let root_node = tree.root_node();
@@ -199,42 +199,47 @@ impl RubyAnalyzer {
 
                 // Based on the node type and context, provide appropriate completions
                 match node.kind() {
-                    "class" => {
-                        // Inside a class, suggest common class methods
-                        items.push(CompletionItem {
-                            label: "initialize".to_string(),
-                            kind: Some(CompletionItemKind::METHOD),
-                            detail: Some("Constructor method".to_string()),
-                            ..CompletionItem::default()
-                        });
-
-                        items.push(CompletionItem {
-                            label: "attr_reader".to_string(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some("Define a read-only attribute".to_string()),
-                            ..CompletionItem::default()
-                        });
-
-                        items.push(CompletionItem {
-                            label: "attr_writer".to_string(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some("Define a write-only attribute".to_string()),
-                            ..CompletionItem::default()
-                        });
-
+                    "class" | "module" => {
+                        // Inside a class or module, suggest class/module specific items
                         items.push(CompletionItem {
                             label: "attr_accessor".to_string(),
                             kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some("Define a read-write attribute".to_string()),
+                            detail: Some("Define attribute accessors".to_string()),
+                            ..CompletionItem::default()
+                        });
+                        
+                        items.push(CompletionItem {
+                            label: "attr_reader".to_string(),
+                            kind: Some(CompletionItemKind::FUNCTION),
+                            detail: Some("Define read-only attributes".to_string()),
+                            ..CompletionItem::default()
+                        });
+                        
+                        items.push(CompletionItem {
+                            label: "attr_writer".to_string(),
+                            kind: Some(CompletionItemKind::FUNCTION),
+                            detail: Some("Define write-only attributes".to_string()),
                             ..CompletionItem::default()
                         });
                     },
-                    "method_call" => {
-                        // For method calls, we could suggest common methods based on the receiver
-                        // This would require more context analysis
+                    "method" => {
+                        // Inside a method, suggest method-specific items
+                        items.push(CompletionItem {
+                            label: "return".to_string(),
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some("Return a value from a method".to_string()),
+                            ..CompletionItem::default()
+                        });
+                        
+                        items.push(CompletionItem {
+                            label: "yield".to_string(),
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some("Yield to a block".to_string()),
+                            ..CompletionItem::default()
+                        });
                     },
                     _ => {
-                        // For other contexts, we could add more specific completions
+                        // Add more context-specific completions as needed
                     }
                 }
             }
@@ -250,10 +255,8 @@ impl RubyAnalyzer {
             row: position.line as usize,
             column: position.character as usize,
         };
-
-        let root_node = tree.root_node();
-        let node = root_node.descendant_for_point_range(point, point)?;
-
+        
+        let node = tree.root_node().named_descendant_for_point_range(point, point)?;
         Some(node)
     }
 
@@ -262,36 +265,34 @@ impl RubyAnalyzer {
             line: node.start_position().row as u32,
             character: node.start_position().column as u32,
         };
-
+        
         let end = Position {
             line: node.end_position().row as u32,
             character: node.end_position().column as u32,
         };
-
+        
         Range { start, end }
     }
 
     fn get_node_text(&self, node: &Node, source_code: &str) -> String {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
-
-        if start_byte <= end_byte && end_byte <= source_code.len() {
-            source_code[start_byte..end_byte].to_string()
-        } else {
-            String::new()
-        }
+        
+        source_code[start_byte..end_byte].to_string()
     }
 
+    // This method is currently unused but might be useful in the future
+    #[allow(dead_code)]
     fn is_inside_class(&self, _tree: &Tree, node: &Node) -> bool {
         let mut current = Some(*node);
-
+        
         while let Some(n) = current {
             if n.kind() == "class" {
                 return true;
             }
             current = n.parent();
         }
-
+        
         false
     }
 }

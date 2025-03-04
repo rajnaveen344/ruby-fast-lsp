@@ -1,2 +1,0 @@
-std::sync::Arc<std::sync::Mutex<server::handlers::RubyLspHandlers>>
-std::option::Option<std::sync::Arc<std::sync::Mutex<server::handlers::RubyLspHandlers>>>

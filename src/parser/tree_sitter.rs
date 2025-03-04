@@ -1,14 +1,14 @@
-use anyhow::anyhow;
-use log::{warn, info};
-
 // External function declaration for tree-sitter-ruby
-extern "C" {
-    fn tree_sitter_ruby() -> ::tree_sitter::Language;
-}
+
+use log::info;
+
+// Import the tree_sitter_ruby function from the tree-sitter-ruby crate
+// This is the correct way to import the function
+use tree_sitter_ruby::language as tree_sitter_ruby;
 
 pub fn ruby_language() -> Option<::tree_sitter::Language> {
     // Try to load the Ruby language
-    match unsafe { tree_sitter_ruby() } {
+    match tree_sitter_ruby() {
         lang => {
             info!("Successfully loaded tree-sitter-ruby language");
             Some(lang)

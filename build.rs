@@ -19,11 +19,14 @@ fn main() {
         // Use the vendor directory
         println!("cargo:rustc-link-search={}", vendor_dir.parent().unwrap().display());
         
+        // Make sure we're linking to the correct library
+        println!("cargo:rustc-link-lib=static=tree-sitter-ruby");
+        
         cc::Build::new()
             .include(&vendor_dir)
             .file(vendor_dir.join("parser.c"))
             .file(vendor_dir.join("scanner.c"))
-            .compile("tree-sitter-ruby");
+            .compile("libtree-sitter-ruby.a");
             
         found_tree_sitter_ruby = true;
     } else if registry_dir.exists() {
@@ -50,11 +53,14 @@ fn main() {
             let downloaded_dir: PathBuf = [".", "vendor", "tree-sitter-ruby", "src"].iter().collect();
             
             if downloaded_dir.exists() {
+                println!("cargo:rustc-link-search={}", downloaded_dir.parent().unwrap().display());
+                println!("cargo:rustc-link-lib=static=tree-sitter-ruby");
+                
                 cc::Build::new()
                     .include(&downloaded_dir)
                     .file(downloaded_dir.join("parser.c"))
                     .file(downloaded_dir.join("scanner.c"))
-                    .compile("tree-sitter-ruby");
+                    .compile("libtree-sitter-ruby.a");
                     
                 found_tree_sitter_ruby = true;
                 println!("cargo:warning=Successfully downloaded and built tree-sitter-ruby.");

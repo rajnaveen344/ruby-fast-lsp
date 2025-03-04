@@ -4,7 +4,6 @@ use lsp_types::{
     CompletionResponse, Hover, HoverContents,
     MarkupContent, MarkupKind, Position, Range,
 };
-use tower_lsp::jsonrpc::Result as LspResult;
 
 use crate::analysis::RubyAnalyzer;
 use crate::parser::{document::RubyDocument, RubyParser};
