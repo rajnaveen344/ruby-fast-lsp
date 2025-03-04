@@ -1,6 +1,7 @@
 mod analysis;
 mod parser;
 mod server;
+mod workspace;
 
 use anyhow::Result;
 use log::{info, error};

@@ -90,15 +90,6 @@ impl RubyLspHandlers {
         };
         
         // Try to parse the document
-        match parser.parse(document.get_content()) {
-            Some(tree) => {
-                info!("Document parsed successfully");
-                Some(tree)
-            },
-            None => {
-                warn!("Failed to parse document");
-                None
-            }
-        }
+        parser.parse(document.get_content())
     }
 }

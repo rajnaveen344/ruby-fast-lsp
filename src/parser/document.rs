@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RubyDocument {
     pub content: String,
     pub version: i32,
