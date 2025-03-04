@@ -1,7 +1,9 @@
 use anyhow::Result;
 use log::{info, warn};
-use lsp_types::{Position, Range, CompletionItem, CompletionItemKind};
+use lsp_types::{Position, Range, CompletionItem, CompletionItemKind, Url};
 use tree_sitter::{Tree, Node};
+use crate::workspace::WorkspaceManager;
+use crate::parser::RubyParser;
 
 #[derive(Clone)]
 pub struct RubyAnalyzer {
@@ -29,7 +31,30 @@ impl RubyAnalyzer {
         }
     }
 
-    pub fn find_definition(&self, tree: Option<&Tree>, source_code: &str, position: Position) -> Option<Range> {
+    pub fn find_definition(
+        &self, 
+        tree: Option<&Tree>, 
+        source_code: &str, 
+        position: Position,
+        workspace: Option<&WorkspaceManager>,
+        uri: &Url
+    ) -> Option<Range> {
+        // First try to find definition in the current file
+        if let Some(range) = self.find_definition_in_file(tree, source_code, position) {
+            return Some(range);
+        }
+
+        // If not found in current file and we have a workspace, search across workspace
+        if let Some(workspace) = workspace {
+            info!("Definition not found in current file, searching workspace");
+            return self.find_definition_in_workspace(workspace, uri, source_code, position);
+        }
+
+        None
+    }
+
+    // Find definition within the current file
+    fn find_definition_in_file(&self, tree: Option<&Tree>, source_code: &str, position: Position) -> Option<Range> {
         let tree = tree?;
 
         // Find the node at the current position
@@ -74,6 +99,97 @@ impl RubyAnalyzer {
             },
             _ => None,
         }
+    }
+
+    // Find definition across workspace files
+    fn find_definition_in_workspace(
+        &self,
+        workspace: &WorkspaceManager,
+        current_uri: &Url,
+        source_code: &str,
+        position: Position
+    ) -> Option<Range> {
+        // Get the identifier at the current position
+        let identifier = self.get_identifier_at_position(source_code, position)?;
+        info!("Searching for '{}' across workspace files", identifier);
+        
+        // Search for the identifier in all indexed files
+        for (file_uri, document) in workspace.get_indexed_files() {
+            // Skip the current file as we've already searched it
+            if file_uri == *current_uri {
+                continue;
+            }
+            
+            // Try to parse the document
+            if let Some(tree) = RubyParser::new().ok()?.parse(document.get_content()) {
+                let root_node = tree.root_node();
+                let mut cursor = root_node.walk();
+                
+                // Look for method/class/module definitions
+                for child in root_node.children(&mut cursor) {
+                    if child.kind() == "method" || child.kind() == "class" || child.kind() == "module" {
+                        // Check if this node defines our identifier
+                        if let Some(name_node) = child.child(0) {
+                            let name = self.get_node_text(&name_node, document.get_content());
+                            
+                            if name == identifier {
+                                info!("Found definition in file: {}", file_uri);
+                                return Some(self.node_to_range(&name_node));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
+    // Helper to extract the identifier at a position
+    fn get_identifier_at_position(&self, source_code: &str, position: Position) -> Option<String> {
+        // Convert position to index in the source code
+        let index = self.position_to_index(source_code, position)?;
+        
+        // Simple approach: extract word at position
+        let mut start = index;
+        let mut end = index;
+        
+        // Find start of word
+        while start > 0 && source_code.as_bytes()[start - 1].is_ascii_alphanumeric() {
+            start -= 1;
+        }
+        
+        // Find end of word
+        while end < source_code.len() && source_code.as_bytes()[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        
+        if start < end {
+            Some(source_code[start..end].to_string())
+        } else {
+            None
+        }
+    }
+    
+    // Helper to convert position to index
+    fn position_to_index(&self, source_code: &str, position: Position) -> Option<usize> {
+        let mut current_line = 0;
+        let mut current_character = 0;
+        
+        for (i, c) in source_code.char_indices() {
+            if current_line == position.line as usize && current_character == position.character as usize {
+                return Some(i);
+            }
+            
+            if c == '\n' {
+                current_line += 1;
+                current_character = 0;
+            } else {
+                current_character += 1;
+            }
+        }
+        
+        None
     }
 
     pub fn get_hover_info(&self, tree: Option<&Tree>, source_code: &str, position: Position) -> Option<String> {

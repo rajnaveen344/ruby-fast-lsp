@@ -1,6 +1,6 @@
 use ruby_fast_lsp::parser::RubyParser;
 use ruby_fast_lsp::analysis::RubyAnalyzer;
-use ruby_fast_lsp::server::handlers::RubyLspHandlers;
+use ruby_fast_lsp::server::RubyLspHandlers;
 use ruby_fast_lsp::parser::document::RubyDocument;
 use lsp_types::Position;
 
@@ -107,7 +107,7 @@ fn test_full_lsp_workflow() {
         character: 10, // Position of 's' in 'sample_method' call
     };
     
-    let definition = handlers.handle_definition(&document, definition_position);
+    let definition = handlers.handle_definition(&document, definition_position, None, &lsp_types::Url::parse("file:///test.rb").unwrap());
     // This is a simplified test - in a real implementation, the handler would need to
     // properly resolve the method call to its definition
     // For now, we just check that the function returns something reasonable

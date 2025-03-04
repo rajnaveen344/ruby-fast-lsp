@@ -1,5 +1,3 @@
-pub mod handlers;
-
 use anyhow::Result;
 use dashmap::DashMap;
 use log::{info, warn};
@@ -7,10 +5,98 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
 
-use self::handlers::RubyLspHandlers;
-use crate::parser::document::RubyDocument;
+use crate::analysis::RubyAnalyzer;
+use crate::parser::{document::RubyDocument, RubyParser};
 use crate::workspace::WorkspaceManager;
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+pub struct RubyLspHandlers {
+    parser: Option<RubyParser>,
+    analyzer: RubyAnalyzer,
+}
+
+impl RubyLspHandlers {
+    pub fn new() -> Result<Self> {
+        let parser = match RubyParser::new() {
+            Ok(parser) => Some(parser),
+            Err(e) => {
+                warn!("Failed to initialize Ruby parser: {}", e);
+                None
+            }
+        };
+        
+        Ok(Self {
+            parser,
+            analyzer: RubyAnalyzer::new(),
+        })
+    }
+
+    pub fn handle_hover(&self, document: &RubyDocument, position: Position) -> Option<Hover> {
+        info!("Handling hover request at position {:?}", position);
+        
+        let tree = self.parse_document(document);
+        
+        // Get hover information
+        let hover_info = self
+            .analyzer
+            .get_hover_info(tree.as_ref(), document.get_content(), position)
+            .unwrap_or_else(|| "No information available".to_string());
+        
+        Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: hover_info,
+            }),
+            range: None,
+        })
+    }
+
+    pub fn handle_completion(
+        &self,
+        document: &RubyDocument,
+        position: Position,
+    ) -> CompletionResponse {
+        info!("Handling completion request at position {:?}", position);
+        
+        let tree = self.parse_document(document);
+        
+        // Get completions from the analyzer
+        let items = self.analyzer.get_completions(tree.as_ref(), document.get_content(), position);
+        
+        CompletionResponse::Array(items)
+    }
+
+    pub fn handle_definition(
+        &self,
+        document: &RubyDocument,
+        position: Position,
+        workspace: Option<&WorkspaceManager>,
+        uri: &Url,
+    ) -> Option<Range> {
+        info!("Handling definition request at position {:?}", position);
+        
+        let tree = self.parse_document(document);
+        
+        // Find definition
+        self.analyzer.find_definition(tree.as_ref(), document.get_content(), position, workspace, uri)
+    }
+    
+    // Helper method to parse a document and return the tree
+    fn parse_document(&self, document: &RubyDocument) -> Option<tree_sitter::Tree> {
+        // If parser is not available, return None
+        let parser = match &self.parser {
+            Some(parser) => parser,
+            None => {
+                warn!("Parser not available for document parsing");
+                return None;
+            }
+        };
+        
+        // Try to parse the document
+        parser.parse(document.get_content())
+    }
+}
 
 pub struct RubyLanguageServer {
     pub client: Client,
@@ -30,18 +116,6 @@ impl RubyLanguageServer {
             handlers,
             workspace_manager: Arc::new(Mutex::new(workspace_manager)),
         })
-    }
-
-    pub fn new_fallback(client: Client) -> Self {
-        warn!("Creating fallback Ruby LSP server with limited functionality");
-        let workspace_manager = WorkspaceManager::new();
-
-        Self {
-            client,
-            document_map: DashMap::new(),
-            handlers: None,
-            workspace_manager: Arc::new(Mutex::new(workspace_manager)),
-        }
     }
 
     // Helper method to get a document either from open documents or from the index
@@ -353,7 +427,10 @@ impl LanguageServer for RubyLanguageServer {
             // Get document either from open documents or from index
             if let Some(doc) = self.get_document(&uri) {
                 if let Ok(handlers) = handlers.lock() {
-                    if let Some(range) = handlers.handle_definition(&doc, position) {
+                    // Get workspace manager with proper error handling
+                    let workspace_opt = self.workspace_manager.lock().ok();
+                    
+                    if let Some(range) = handlers.handle_definition(&doc, position, workspace_opt.as_deref(), &uri) {
                         return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                             uri: uri.clone(),
                             range,

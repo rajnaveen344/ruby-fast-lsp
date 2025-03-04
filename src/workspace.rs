@@ -171,4 +171,10 @@ impl WorkspaceManager {
         let mut indexed_docs = self.indexed_documents.write().unwrap();
         indexed_docs.remove(uri);
     }
+
+    /// Get all indexed files with their documents
+    pub fn get_indexed_files(&self) -> Vec<(Url, RubyDocument)> {
+        let indexed_docs = self.indexed_documents.read().unwrap();
+        indexed_docs.iter().map(|(uri, doc)| (uri.clone(), doc.clone())).collect()
+    }
 }

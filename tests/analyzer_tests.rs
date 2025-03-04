@@ -1,6 +1,7 @@
 use ruby_fast_lsp::analysis::RubyAnalyzer;
 use ruby_fast_lsp::parser::RubyParser;
 use lsp_types::Position;
+use lsp_types::Url;
 
 #[test]
 fn test_analyzer_initialization() {
@@ -91,7 +92,10 @@ fn test_find_definition() {
         character: 2, // Position of 'l' in 'hello'
     };
     
-    let definition = analyzer.find_definition(Some(&tree), source, position);
+    // Create a dummy URL for testing
+    let url = Url::parse("file:///test.rb").unwrap();
+    
+    let definition = analyzer.find_definition(Some(&tree), source, position, None, &url);
     
     // This is a simplified test - in a real implementation, the analyzer would need to
     // properly resolve the method call to its definition
