@@ -5,19 +5,21 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::analysis::RubyAnalyzer;
 use crate::parser::{document::RubyDocument, RubyParser};
 use crate::workspace::WorkspaceManager;
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
-pub struct RubyLspHandlers {
+pub struct RubyLanguageServer {
+    client: Client,
     parser: Option<RubyParser>,
-    analyzer: RubyAnalyzer,
+    workspace_manager: Arc<Mutex<WorkspaceManager>>,
+    document_map: DashMap<Url, RubyDocument>,
 }
 
-impl RubyLspHandlers {
-    pub fn new() -> Result<Self> {
+impl RubyLanguageServer {
+    pub fn new(client: Client) -> Result<Self> {
+        let workspace_manager = WorkspaceManager::new();
+
         let parser = match RubyParser::new() {
             Ok(parser) => Some(parser),
             Err(e) => {
@@ -25,95 +27,11 @@ impl RubyLspHandlers {
                 None
             }
         };
-        
-        Ok(Self {
-            parser,
-            analyzer: RubyAnalyzer::new(),
-        })
-    }
-
-    pub fn handle_hover(&self, document: &RubyDocument, position: Position) -> Option<Hover> {
-        info!("Handling hover request at position {:?}", position);
-        
-        let tree = self.parse_document(document);
-        
-        // Get hover information
-        let hover_info = self
-            .analyzer
-            .get_hover_info(tree.as_ref(), document.get_content(), position)
-            .unwrap_or_else(|| "No information available".to_string());
-        
-        Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: hover_info,
-            }),
-            range: None,
-        })
-    }
-
-    pub fn handle_completion(
-        &self,
-        document: &RubyDocument,
-        position: Position,
-    ) -> CompletionResponse {
-        info!("Handling completion request at position {:?}", position);
-        
-        let tree = self.parse_document(document);
-        
-        // Get completions from the analyzer
-        let items = self.analyzer.get_completions(tree.as_ref(), document.get_content(), position);
-        
-        CompletionResponse::Array(items)
-    }
-
-    pub fn handle_definition(
-        &self,
-        document: &RubyDocument,
-        position: Position,
-        workspace: Option<&WorkspaceManager>,
-        uri: &Url,
-    ) -> Option<Range> {
-        info!("Handling definition request at position {:?}", position);
-        
-        let tree = self.parse_document(document);
-        
-        // Find definition
-        self.analyzer.find_definition(tree.as_ref(), document.get_content(), position, workspace, uri)
-    }
-    
-    // Helper method to parse a document and return the tree
-    fn parse_document(&self, document: &RubyDocument) -> Option<tree_sitter::Tree> {
-        // If parser is not available, return None
-        let parser = match &self.parser {
-            Some(parser) => parser,
-            None => {
-                warn!("Parser not available for document parsing");
-                return None;
-            }
-        };
-        
-        // Try to parse the document
-        parser.parse(document.get_content())
-    }
-}
-
-pub struct RubyLanguageServer {
-    pub client: Client,
-    pub document_map: DashMap<Url, RubyDocument>,
-    handlers: Option<Arc<Mutex<RubyLspHandlers>>>,
-    workspace_manager: Arc<Mutex<WorkspaceManager>>,
-}
-
-impl RubyLanguageServer {
-    pub fn new(client: Client) -> Result<Self> {
-        let workspace_manager = WorkspaceManager::new();
-        let handlers = Some(Arc::new(Mutex::new(RubyLspHandlers::new()?)));
 
         Ok(Self {
             client,
             document_map: DashMap::new(),
-            handlers,
+            parser,
             workspace_manager: Arc::new(Mutex::new(workspace_manager)),
         })
     }
@@ -137,6 +55,21 @@ impl RubyLanguageServer {
 
         document
     }
+
+    // Helper method to parse a document and return the tree
+    fn parse_document(&self, document: &RubyDocument) -> Option<tree_sitter::Tree> {
+        // If parser is not available, return None
+        let parser = match &self.parser {
+            Some(parser) => parser,
+            None => {
+                warn!("Parser not available for document parsing");
+                return None;
+            }
+        };
+
+        // Try to parse the document
+        parser.parse(document.get_content())
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -144,82 +77,7 @@ impl LanguageServer for RubyLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
         info!("Initializing Ruby LSP server");
 
-        // Set the workspace root URI if provided
-        if let Some(workspace_folders) = params.workspace_folders {
-            if let Some(first_folder) = workspace_folders.first() {
-                // Create a scope for the mutex lock to ensure it's dropped properly
-                {
-                    if let Ok(mut workspace) = self.workspace_manager.lock() {
-                        if let Err(e) = workspace.set_root_uri(first_folder.uri.clone()) {
-                            warn!("Failed to set workspace root URI: {}", e);
-                        } else {
-                            info!("Workspace root URI set to: {}", first_folder.uri);
-                        }
-                    }
-                }
-
-                // Start scanning the workspace in the background
-                let workspace_manager = self.workspace_manager.clone();
-                let client = self.client.clone();
-
-                tokio::spawn(async move {
-                    info!("Starting workspace scan");
-                    // Create a separate scope for the mutex lock to ensure it's dropped before any await
-                    let count = {
-                        // Use a separate block to ensure the MutexGuard is dropped
-                        let scan_result = {
-                            if let Ok(workspace) = workspace_manager.lock() {
-                                workspace.scan_workspace()
-                            } else {
-                                return; // Early return if we can't lock the workspace
-                            }
-                        };
-
-                        // Now the MutexGuard is dropped, process the result
-                        match scan_result {
-                            Ok(count) => Some(count),
-                            Err(e) => {
-                                let message = format!("Workspace scan failed: {}", e);
-                                warn!("{}", message);
-                                client.log_message(MessageType::WARNING, message).await;
-                                None
-                            }
-                        }
-                    };
-
-                    if let Some(count) = count {
-                        let message =
-                            format!("Workspace scan complete: indexed {} Ruby files", count);
-                        info!("{}", message);
-                        client.log_message(MessageType::INFO, message).await;
-                    }
-                });
-            }
-        }
-
-        let capabilities = ServerCapabilities {
-            text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                TextDocumentSyncKind::INCREMENTAL,
-            )),
-            hover_provider: Some(HoverProviderCapability::Simple(true)),
-            completion_provider: Some(CompletionOptions {
-                resolve_provider: Some(false),
-                trigger_characters: Some(vec![".".to_string(), "::".to_string()]),
-                work_done_progress_options: Default::default(),
-                all_commit_characters: None,
-                completion_item: None,
-            }),
-            definition_provider: Some(OneOf::Left(true)),
-            // Add more capabilities as you implement them
-            workspace: Some(WorkspaceServerCapabilities {
-                workspace_folders: Some(WorkspaceFoldersServerCapabilities {
-                    supported: Some(true),
-                    change_notifications: Some(OneOf::Left(true)),
-                }),
-                file_operations: None,
-            }),
-            ..ServerCapabilities::default()
-        };
+        let capabilities = ServerCapabilities::default();
 
         Ok(InitializeResult {
             capabilities,
@@ -231,215 +89,27 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        info!("Ruby LSP server initialized!");
-
-        let message = if self.handlers.is_some() {
-            "Ruby LSP server initialized with full functionality!"
-        } else {
-            "Ruby LSP server initialized with limited functionality. Some features may not work correctly."
-        };
-
-        self.client.log_message(MessageType::INFO, message).await;
+        info!("Server initialized");
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        info!("Shutting down Ruby LSP server");
+        info!("Shutting down server");
         Ok(())
     }
 
-    // File events
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        for change in params.changes {
-            match change.typ {
-                FileChangeType::CREATED | FileChangeType::CHANGED => {
-                    // Only update index if the file isn't open
-                    if !self.document_map.contains_key(&change.uri) {
-                        let uri = change.uri.clone();
-                        let workspace_manager = self.workspace_manager.clone();
-
-                        // Use a more robust approach to handle the mutex lock
-                        let updated = workspace_manager
-                            .lock()
-                            .map(|workspace| workspace.update_index_for_file(&uri).unwrap_or(false))
-                            .unwrap_or(false);
-
-                        if updated {
-                            info!("Updated index for file: {}", uri);
-                        }
-                    }
-                }
-                FileChangeType::DELETED => {
-                    // Remove from index
-                    let uri = change.uri.clone();
-
-                    // Clone the workspace manager and use a separate scope to ensure the lock is dropped
-                    let workspace_manager = self.workspace_manager.clone();
-
-                    // Use a separate function to handle the lock to ensure it's dropped properly
-                    let result = workspace_manager
-                        .lock()
-                        .map(|workspace| {
-                            workspace.remove_from_index(&uri);
-                            true
-                        })
-                        .unwrap_or(false);
-
-                    if result {
-                        info!("Removed file from index: {}", uri);
-                    }
-                }
-                _ => {}
-            }
-        }
+        info!("Files changed: {:?}", params);
     }
 
-    // Document synchronization methods
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let text = params.text_document.text;
-        let version = params.text_document.version;
-
-        info!("File opened: {}", uri);
-
-        self.document_map.insert(
-            uri.clone(),
-            RubyDocument {
-                content: text.clone(),
-                version,
-            },
-        );
-
-        self.client
-            .log_message(MessageType::INFO, &format!("Opened document: {}", uri))
-            .await;
+        info!("Document opened: {:?}", params);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let version = params.text_document.version;
-
-        info!("File changed: {}", uri);
-
-        if let Some(mut doc) = self.document_map.get_mut(&uri) {
-            for change in params.content_changes {
-                if let Some(_range) = change.range {
-                    // Handle incremental updates
-                    doc.content = change.text;
-                } else {
-                    // Full document update
-                    doc.content = change.text;
-                }
-                doc.version = version;
-            }
-        }
+        info!("Document changed: {:?}", params);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri = params.text_document.uri;
-
-        info!("File closed: {}", uri);
-
-        self.document_map.remove(&uri);
-
-        self.client
-            .log_message(MessageType::INFO, &format!("Closed document: {}", uri))
-            .await;
-    }
-
-    // Language features
-    async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-
-        info!("Hover request at position {:?} in {}", position, uri);
-
-        if let Some(handlers) = &self.handlers {
-            // Get document either from open documents or from index
-            if let Some(doc) = self.get_document(&uri) {
-                if let Ok(handlers) = handlers.lock() {
-                    return Ok(handlers.handle_hover(&doc, position));
-                }
-            }
-        }
-
-        // Fallback hover response
-        Ok(Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: "Ruby LSP running in fallback mode. Limited functionality available."
-                    .to_string(),
-            }),
-            range: None,
-        }))
-    }
-
-    async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-
-        info!("Completion request at position {:?} in {}", position, uri);
-
-        if let Some(handlers) = &self.handlers {
-            // Get document either from open documents or from index
-            if let Some(doc) = self.get_document(&uri) {
-                if let Ok(handlers) = handlers.lock() {
-                    return Ok(Some(handlers.handle_completion(&doc, position)));
-                }
-            }
-        }
-
-        // Fallback completion response with basic Ruby keywords
-        let items = vec![
-            CompletionItem {
-                label: "def".to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some("Define a method".to_string()),
-                ..CompletionItem::default()
-            },
-            CompletionItem {
-                label: "class".to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some("Define a class".to_string()),
-                ..CompletionItem::default()
-            },
-            CompletionItem {
-                label: "module".to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some("Define a module".to_string()),
-                ..CompletionItem::default()
-            },
-            // Add more basic Ruby keywords as needed
-        ];
-
-        Ok(Some(CompletionResponse::Array(items)))
-    }
-
-    async fn goto_definition(
-        &self,
-        params: GotoDefinitionParams,
-    ) -> LspResult<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-
-        info!("Definition request at position {:?} in {}", position, uri);
-
-        if let Some(handlers) = &self.handlers {
-            // Get document either from open documents or from index
-            if let Some(doc) = self.get_document(&uri) {
-                if let Ok(handlers) = handlers.lock() {
-                    // Get workspace manager with proper error handling
-                    let workspace_opt = self.workspace_manager.lock().ok();
-                    
-                    if let Some(range) = handlers.handle_definition(&doc, position, workspace_opt.as_deref(), &uri) {
-                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                            uri: uri.clone(),
-                            range,
-                        })));
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+        info!("Document closed: {:?}", params);
     }
 }
