@@ -4,6 +4,7 @@
   "description": "A fast Language Server Protocol implementation for Ruby",
   "version": "0.1.0",
   "publisher": "ruby-fast-lsp-team",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/ruby-fast-lsp-team/ruby-fast-lsp"
