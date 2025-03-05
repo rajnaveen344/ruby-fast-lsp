@@ -1,5 +1,4 @@
 use anyhow::Result;
-use dashmap::DashMap;
 use log::info;
 use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -7,30 +6,23 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::analyzer::RubyAnalyzer;
 use crate::capabilities::semantic_tokens::semantic_tokens_options;
-use crate::parser::{document::RubyDocument, RubyParser};
-use crate::workspace::WorkspaceManager;
-use std::sync::{Arc, Mutex};
+use crate::parser::RubyParser;
 
 pub struct RubyLanguageServer {
     client: Client,
     parser: RubyParser,
-    workspace_manager: Arc<Mutex<WorkspaceManager>>,
-    document_map: DashMap<Url, RubyDocument>,
     analyzer: RubyAnalyzer,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
-        let workspace_manager = WorkspaceManager::new();
         let analyzer = RubyAnalyzer {};
 
         let parser = RubyParser::new()?;
 
         Ok(Self {
             client,
-            document_map: DashMap::new(),
             parser,
-            workspace_manager: Arc::new(Mutex::new(workspace_manager)),
             analyzer,
         })
     }
@@ -38,7 +30,7 @@ impl RubyLanguageServer {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for RubyLanguageServer {
-    async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+    async fn initialize(&self, _params: InitializeParams) -> LspResult<InitializeResult> {
         info!("Initializing Ruby LSP server");
 
         let capabilities = ServerCapabilities {

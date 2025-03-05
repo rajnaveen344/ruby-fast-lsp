@@ -2,7 +2,6 @@ pub mod analyzer;
 pub mod capabilities;
 pub mod parser;
 pub mod server;
-pub mod workspace;
 
 use std::process::exit;
 
