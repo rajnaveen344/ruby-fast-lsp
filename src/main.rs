@@ -1,8 +1,8 @@
-mod analysis;
-mod capabilities;
-mod parser;
-mod server;
-mod workspace;
+pub mod analysis;
+pub mod capabilities;
+pub mod parser;
+pub mod server;
+pub mod workspace;
 
 use std::process::exit;
 
