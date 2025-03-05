@@ -6,25 +6,48 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::analyzer::RubyAnalyzer;
 use crate::capabilities::semantic_tokens::semantic_tokens_options;
+use crate::indexer::traverser::RubyIndexer;
 use crate::parser::RubyParser;
 
 pub struct RubyLanguageServer {
     client: Client,
     parser: RubyParser,
     analyzer: RubyAnalyzer,
+    indexer: RubyIndexer,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
         let analyzer = RubyAnalyzer {};
-
         let parser = RubyParser::new()?;
+        let indexer = RubyIndexer::new().map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(Self {
             client,
             parser,
             analyzer,
+            indexer,
         })
+    }
+
+    async fn find_definition_at_position(
+        &self,
+        uri: &Url,
+        _position: Position,
+    ) -> Option<Location> {
+        if let Some(source_code) = self.get_document_content(uri).await {
+            if let Some(_tree) = self.parser.parse(&source_code) {
+                None
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    async fn get_document_content(&self, _uri: &Url) -> Option<String> {
+        None
     }
 }
 
@@ -92,11 +115,27 @@ impl LanguageServer for RubyLanguageServer {
         params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
         info!("Goto definition requested: {:?}", params);
-        Ok(None)
+
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        if let Some(location) = self.find_definition_at_position(&uri, position).await {
+            Ok(Some(GotoDefinitionResponse::Scalar(location)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         info!("References requested: {:?}", params);
-        Ok(None)
+
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        if let Some(definition_location) = self.find_definition_at_position(&uri, position).await {
+            Ok(Some(vec![definition_location]))
+        } else {
+            Ok(None)
+        }
     }
 }
