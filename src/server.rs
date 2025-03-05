@@ -3,36 +3,34 @@ use dashmap::DashMap;
 use log::{info, warn};
 use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp::{Client, LanguageServer, Server};
 
+use crate::analysis::RubyAnalyzer;
 use crate::parser::{document::RubyDocument, RubyParser};
 use crate::workspace::WorkspaceManager;
 use std::sync::{Arc, Mutex};
 
 pub struct RubyLanguageServer {
     client: Client,
-    parser: Option<RubyParser>,
+    parser: RubyParser,
     workspace_manager: Arc<Mutex<WorkspaceManager>>,
     document_map: DashMap<Url, RubyDocument>,
+    analyzer: RubyAnalyzer,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
         let workspace_manager = WorkspaceManager::new();
+        let analyzer = RubyAnalyzer::new();
 
-        let parser = match RubyParser::new() {
-            Ok(parser) => Some(parser),
-            Err(e) => {
-                warn!("Failed to initialize Ruby parser: {}", e);
-                None
-            }
-        };
+        let parser = RubyParser::new()?;
 
         Ok(Self {
             client,
             document_map: DashMap::new(),
             parser,
             workspace_manager: Arc::new(Mutex::new(workspace_manager)),
+            analyzer,
         })
     }
 
@@ -58,17 +56,7 @@ impl RubyLanguageServer {
 
     // Helper method to parse a document and return the tree
     fn parse_document(&self, document: &RubyDocument) -> Option<tree_sitter::Tree> {
-        // If parser is not available, return None
-        let parser = match &self.parser {
-            Some(parser) => parser,
-            None => {
-                warn!("Parser not available for document parsing");
-                return None;
-            }
-        };
-
-        // Try to parse the document
-        parser.parse(document.get_content())
+        self.parser.parse(document.get_content())
     }
 }
 
@@ -77,7 +65,13 @@ impl LanguageServer for RubyLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
         info!("Initializing Ruby LSP server");
 
-        let capabilities = ServerCapabilities::default();
+        let capabilities = ServerCapabilities {
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                TextDocumentSyncKind::INCREMENTAL,
+            )),
+            definition_provider: Some(OneOf::Left(true)),
+            ..ServerCapabilities::default()
+        };
 
         Ok(InitializeResult {
             capabilities,
@@ -111,5 +105,13 @@ impl LanguageServer for RubyLanguageServer {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         info!("Document closed: {:?}", params);
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> LspResult<Option<GotoDefinitionResponse>> {
+        info!("Goto definition requested: {:?}", params);
+        Ok(None)
     }
 }
