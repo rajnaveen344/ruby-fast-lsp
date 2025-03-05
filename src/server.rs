@@ -5,7 +5,7 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::analysis::RubyAnalyzer;
+use crate::analyzer::RubyAnalyzer;
 use crate::capabilities::semantic_tokens::semantic_tokens_options;
 use crate::parser::{document::RubyDocument, RubyParser};
 use crate::workspace::WorkspaceManager;

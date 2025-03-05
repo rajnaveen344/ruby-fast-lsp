@@ -1,4 +1,4 @@
-pub mod analysis;
+pub mod analyzer;
 pub mod capabilities;
 pub mod parser;
 pub mod server;
