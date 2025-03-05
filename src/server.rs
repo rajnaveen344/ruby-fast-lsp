@@ -1,11 +1,12 @@
 use anyhow::Result;
 use dashmap::DashMap;
-use log::{info, warn};
+use log::info;
 use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
-use tower_lsp::{Client, LanguageServer, Server};
+use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::RubyAnalyzer;
+use crate::capabilities::semantic_tokens::semantic_tokens_options;
 use crate::parser::{document::RubyDocument, RubyParser};
 use crate::workspace::WorkspaceManager;
 use std::sync::{Arc, Mutex};
@@ -69,7 +70,11 @@ impl LanguageServer for RubyLanguageServer {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(
                 TextDocumentSyncKind::INCREMENTAL,
             )),
+            semantic_tokens_provider: Some(
+                SemanticTokensServerCapabilities::SemanticTokensOptions(semantic_tokens_options()),
+            ),
             definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
             ..ServerCapabilities::default()
         };
 
@@ -107,11 +112,24 @@ impl LanguageServer for RubyLanguageServer {
         info!("Document closed: {:?}", params);
     }
 
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> LspResult<Option<SemanticTokensResult>> {
+        info!("Semantic tokens requested: {:?}", params);
+        Ok(None)
+    }
+
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
         info!("Goto definition requested: {:?}", params);
+        Ok(None)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
+        info!("References requested: {:?}", params);
         Ok(None)
     }
 }

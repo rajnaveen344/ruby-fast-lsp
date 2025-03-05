@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod capabilities;
 pub mod parser;
 pub mod server;
 pub mod workspace;

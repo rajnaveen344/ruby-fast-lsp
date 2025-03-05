@@ -1,4 +1,5 @@
 mod analysis;
+mod capabilities;
 mod parser;
 mod server;
 mod workspace;
