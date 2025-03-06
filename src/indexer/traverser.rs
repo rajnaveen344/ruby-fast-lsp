@@ -112,31 +112,74 @@ impl RubyIndexer {
         self.traverse_node(root_node, &uri, source_code, &mut context)
     }
 
-    fn traverse_node(
+    pub fn traverse_node(
         &mut self,
         node: Node,
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
     ) -> Result<(), String> {
-        // Get the kind of node
-        let kind = node.kind();
-
-        // Skip comments
-        if kind == "comment" {
-            return Ok(());
-        }
-
-        // Process this node based on its kind
-        match kind {
-            "class" => {
-                self.process_class(node, uri, source_code, context)?;
-            }
-            "module" => {
-                self.process_module(node, uri, source_code, context)?;
-            }
+        match node.kind() {
+            "class" => self.process_class(node, uri, source_code, context)?,
+            "module" => self.process_module(node, uri, source_code, context)?,
             "method" | "singleton_method" => {
-                self.process_method(node, uri, source_code, context)?;
+                self.process_method(node, uri, source_code, context)?
+            }
+            "constant" => {
+                // Try to process constants, but don't fail if we can't
+                if let Err(e) = self.process_constant(node, uri, source_code, context) {
+                    // Log the error and continue
+                    if self.debug_mode {
+                        println!("Error processing constant: {}", e);
+                    }
+                }
+
+                // Continue traversing the children
+                let child_count = node.child_count();
+                for i in 0..child_count {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+            }
+            "block" => {
+                // Process block parameters if they exist
+                if let Some(parameters) = node.child_by_field_name("parameters") {
+                    self.process_block_parameters(parameters, uri, source_code, context)?;
+                }
+
+                // Process block body contents recursively
+                if let Some(body) = node.child_by_field_name("body") {
+                    for i in 0..body.named_child_count() {
+                        if let Some(child) = body.named_child(i) {
+                            self.traverse_node(child, uri, source_code, context)?;
+                        }
+                    }
+                } else {
+                    // If there's no explicit body field, traverse all children
+                    for i in 0..node.named_child_count() {
+                        if let Some(child) = node.named_child(i) {
+                            if child.kind() != "parameters" {
+                                // Skip parameters as we already processed them
+                                self.traverse_node(child, uri, source_code, context)?;
+                            }
+                        }
+                    }
+                }
+            }
+            "block_parameters" => {
+                // Process block parameters directly
+                self.process_block_parameters(node, uri, source_code, context)?;
+            }
+            "parameters" => {
+                // Process method parameters directly
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "method" || parent.kind() == "singleton_method" {
+                        self.process_method_parameters(node, uri, source_code, context)?;
+                    } else if parent.kind() == "block" {
+                        self.process_block_parameters(node, uri, source_code, context)?;
+                    }
+                }
             }
             "call" => {
                 // Check for attr_* method calls like attr_accessor, attr_reader, attr_writer
@@ -179,23 +222,6 @@ impl RubyIndexer {
                     } else if left_kind == "class_variable" {
                         // Process class variable assignment
                         self.process_class_variable(node, uri, source_code, context)?;
-                    }
-                }
-            }
-            "constant" => {
-                // Try to process constants, but don't fail if we can't
-                if let Err(e) = self.process_constant(node, uri, source_code, context) {
-                    // Log the error and continue
-                    if self.debug_mode {
-                        println!("Error processing constant: {}", e);
-                    }
-                }
-
-                // Continue traversing the children
-                let child_count = node.child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
                     }
                 }
             }
@@ -488,6 +514,11 @@ impl RubyIndexer {
 
         // Set the current method before processing the body
         context.current_method = Some(name.clone());
+
+        // Process method parameters if they exist
+        if let Some(parameters) = node.child_by_field_name("parameters") {
+            self.process_method_parameters(parameters, uri, source_code, context)?;
+        }
 
         // Process method body contents recursively
         if let Some(body) = node.child_by_field_name("body") {
@@ -924,6 +955,154 @@ impl RubyIndexer {
             }
         }
 
+        Ok(())
+    }
+
+    // Process method parameters (arguments) in method definitions
+    fn process_method_parameters(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Iterate through all parameter nodes
+        for i in 0..node.named_child_count() {
+            if let Some(param_node) = node.named_child(i) {
+                let param_kind = param_node.kind();
+                let param_name = match param_kind {
+                    "identifier" => self.get_node_text(param_node, source_code),
+                    "optional_parameter"
+                    | "keyword_parameter"
+                    | "rest_parameter"
+                    | "hash_splat_parameter"
+                    | "block_parameter" => {
+                        if let Some(name_node) = param_node.child_by_field_name("name") {
+                            self.get_node_text(name_node, source_code)
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => continue,
+                };
+
+                if param_name.trim().is_empty() {
+                    continue;
+                }
+
+                // Create a range for the definition
+                let range = node_to_range(param_node);
+
+                // Create a fully qualified name for the parameter
+                let current_namespace = context.current_namespace();
+                let current_method = context
+                    .current_method
+                    .as_ref()
+                    .ok_or_else(|| "Method parameter outside of method context".to_string())?;
+
+                let fqn = if current_namespace.is_empty() {
+                    format!("{}${}", current_method, param_name)
+                } else {
+                    format!("{}#{}${}", current_namespace, current_method, param_name)
+                };
+
+                // Create and add the entry
+                let entry = EntryBuilder::new(&param_name)
+                    .fully_qualified_name(&fqn)
+                    .location(uri.clone(), range)
+                    .entry_type(EntryType::LocalVariable)
+                    .metadata("kind", "parameter")
+                    .build()
+                    .map_err(|e| e.to_string())?;
+
+                self.index.add_entry(entry);
+            }
+        }
+
+        Ok(())
+    }
+
+    // Process block parameters in block definitions
+    fn process_block_parameters(
+        &mut self,
+        parameters: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Iterate through all parameter nodes
+        for i in 0..parameters.named_child_count() {
+            if let Some(param) = parameters.named_child(i) {
+                let param_text = match param.kind() {
+                    "identifier" => Some(self.get_node_text(param, source_code)),
+                    "optional_parameter"
+                    | "keyword_parameter"
+                    | "rest_parameter"
+                    | "hash_splat_parameter"
+                    | "block_parameter" => param
+                        .child_by_field_name("name")
+                        .map(|name_node| self.get_node_text(name_node, source_code)),
+                    _ => None,
+                };
+
+                if let Some(param_text) = param_text {
+                    if param_text.trim().is_empty() {
+                        continue;
+                    }
+
+                    // Create a range for the parameter
+                    let range = node_to_range(param);
+
+                    // Find the method that contains this block
+                    let mut current = parameters.clone();
+                    let mut method_name = None;
+
+                    while let Some(p) = current.parent() {
+                        if p.kind() == "method" || p.kind() == "singleton_method" {
+                            if let Some(method_name_node) = p.child_by_field_name("name") {
+                                method_name =
+                                    Some(self.get_node_text(method_name_node, source_code));
+                            }
+                            break;
+                        }
+                        current = p;
+                    }
+
+                    // Build the FQN based on context
+                    let fqn = if let Some(method_name) =
+                        method_name.as_ref().or(context.current_method.as_ref())
+                    {
+                        if context.namespace_stack.is_empty() {
+                            format!("{}$block${}", method_name, param_text)
+                        } else {
+                            format!(
+                                "{}#{}$block${}",
+                                context.current_namespace(),
+                                method_name,
+                                param_text
+                            )
+                        }
+                    } else {
+                        if context.namespace_stack.is_empty() {
+                            format!("$block${}", param_text)
+                        } else {
+                            format!("{}#$block${}", context.current_namespace(), param_text)
+                        }
+                    };
+
+                    // Create and add the entry
+                    let entry = EntryBuilder::new(&param_text)
+                        .fully_qualified_name(&fqn)
+                        .location(uri.clone(), range)
+                        .entry_type(EntryType::LocalVariable)
+                        .metadata("kind", "block_parameter")
+                        .build()
+                        .map_err(|e| e.to_string())?;
+
+                    self.index.add_entry(entry);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -2031,5 +2210,292 @@ end
 
         // References should be consistent after reindexing
         assert_eq!(initial_refs.len(), after_reindex_refs.len());
+    }
+
+    #[test]
+    fn test_index_method_parameters() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r#"
+        class Person
+          def initialize(name, age = 30, *args, **options)
+            @name = name
+            @age = age
+            @args = args
+            @options = options
+          end
+
+          def greet(&block)
+            yield @name if block_given?
+          end
+        end
+
+        Person.new("John").greet do |name|
+          puts "Hello, #{name}!"
+        end
+        "#;
+
+        let (file, path) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file(&path, ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        let index = indexer.index();
+
+        // Verify method parameters were indexed
+        let entries = index.entries.values().flatten().collect::<Vec<_>>();
+
+        // Find the 'name' parameter in initialize method
+        let name_param = entries.iter().find(|e| {
+            e.name == "name"
+                && e.fully_qualified_name == "Person#initialize$name"
+                && e.entry_type == EntryType::LocalVariable
+        });
+        assert!(
+            name_param.is_some(),
+            "Method parameter 'name' should be indexed"
+        );
+
+        // Find the 'age' parameter in initialize method
+        let age_param = entries.iter().find(|e| {
+            e.name == "age"
+                && e.fully_qualified_name == "Person#initialize$age"
+                && e.entry_type == EntryType::LocalVariable
+        });
+        assert!(
+            age_param.is_some(),
+            "Method parameter 'age' should be indexed"
+        );
+
+        // Find the 'block' parameter in greet method
+        let block_param = entries.iter().find(|e| {
+            e.name == "block"
+                && e.fully_qualified_name == "Person#greet$block"
+                && e.entry_type == EntryType::LocalVariable
+        });
+        assert!(
+            block_param.is_some(),
+            "Method parameter 'block' should be indexed"
+        );
+
+        // Find the block parameter 'name'
+        let block_name_param = entries.iter().find(|e| {
+            e.name == "name"
+                && e.entry_type == EntryType::LocalVariable
+                && e.metadata
+                    .get("kind")
+                    .map_or(false, |k| k == "block_parameter")
+                && (e.fully_qualified_name == "$block$name"
+                    || e.fully_qualified_name == "greet$block$name"
+                    || e.fully_qualified_name == "Person#greet$block$name")
+        });
+
+        assert!(
+            block_name_param.is_some(),
+            "Block parameter 'name' should be indexed"
+        );
+
+        // Keep file in scope until end of test
+        drop(file);
+    }
+
+    #[test]
+    fn test_index_block_parameters() {
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        let code = "class User
+  def process_data
+    data = [1, 2, 3]
+    data.map do |value|
+      value * 2
+    end
+  end
+end";
+        let (temp_file, path) = create_temp_ruby_file(code);
+
+        // Index the file
+        indexer
+            .index_file(&path, code)
+            .expect("Failed to index file");
+
+        let entries = indexer
+            .index()
+            .entries
+            .values()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        // Find all block parameters
+        let block_params: Vec<_> = entries
+            .iter()
+            .filter(|e| {
+                e.metadata
+                    .get("kind")
+                    .map_or(false, |k| k == "block_parameter")
+            })
+            .collect();
+
+        // Verify we found the block parameter
+        assert_eq!(block_params.len(), 1, "Expected 1 block parameter");
+
+        // Verify the parameter is properly indexed
+        for param in block_params {
+            assert_eq!(param.entry_type, EntryType::LocalVariable);
+            assert_eq!(param.metadata.get("kind").unwrap(), "block_parameter");
+            assert!(param.fully_qualified_name.contains("$block$"));
+        }
+
+        // Verify specific parameter exists
+        let has_value = entries.iter().any(|e| {
+            e.fully_qualified_name.contains("process_data")
+                && e.fully_qualified_name.contains("$block$value")
+        });
+        assert!(has_value, "Block parameter 'value' not found");
+    }
+
+    #[test]
+    fn test_nested_block_parameters() {
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        let code = r#"
+class DataProcessor
+  def nested_processing
+    items = ['a', 'b']
+    items.each do |item|
+      item.chars.each do |char|
+        puts "\#{item}: #{char}"
+      end
+    end
+  end
+end"#;
+        let (temp_file, path) = create_temp_ruby_file(code);
+
+        // Index the file
+        indexer
+            .index_file(&path, code)
+            .expect("Failed to index file");
+
+        let entries = indexer
+            .index()
+            .entries
+            .values()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        // Find nested block parameters
+        let block_params: Vec<_> = entries
+            .iter()
+            .filter(|e| {
+                e.metadata
+                    .get("kind")
+                    .map_or(false, |k| k == "block_parameter")
+            })
+            .collect();
+
+        // Verify we found both nested parameters
+        assert_eq!(block_params.len(), 2, "Expected 2 block parameters");
+
+        // Verify both parameters are properly indexed
+        for param in block_params {
+            assert_eq!(param.entry_type, EntryType::LocalVariable);
+            assert_eq!(param.metadata.get("kind").unwrap(), "block_parameter");
+            assert!(param.fully_qualified_name.contains("nested_processing"));
+            assert!(param.fully_qualified_name.contains("$block$"));
+        }
+
+        // Verify specific parameters exist
+        let has_item = entries.iter().any(|e| {
+            e.fully_qualified_name.contains("nested_processing")
+                && e.fully_qualified_name.contains("$block$item")
+        });
+        assert!(has_item, "Block parameter 'item' not found");
+
+        let has_char = entries.iter().any(|e| {
+            e.fully_qualified_name.contains("nested_processing")
+                && e.fully_qualified_name.contains("$block$char")
+        });
+        assert!(has_char, "Block parameter 'char' not found");
+    }
+
+    #[test]
+    fn test_block_parameter_references() {
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        let code = r#"
+class DataProcessor
+  def process_data
+    data = [1, 2, 3]
+    data.map do |value|
+      transformed = value * 2
+      puts value
+      value + transformed
+    end
+  end
+
+  def nested_processing
+    items = ['a', 'b']
+    items.each do |item|
+      item.chars.each do |char|
+        puts "\#{item}: #{char}"
+      end
+    end
+  end
+end"#;
+        let (temp_file, path) = create_temp_ruby_file(code);
+
+        // Index the file
+        indexer
+            .index_file(&path, code)
+            .expect("Failed to index file");
+
+        let entries = indexer
+            .index()
+            .entries
+            .values()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        // Test block parameter indexing
+        let value_param = entries.iter().find(|e| {
+            e.fully_qualified_name.contains("process_data")
+                && e.fully_qualified_name.contains("$block$value")
+        });
+        assert!(value_param.is_some(), "Block parameter 'value' not found");
+        let value_param = value_param.unwrap();
+
+        // Find the nested block parameters
+        let item_param = entries.iter().find(|e| {
+            e.fully_qualified_name.contains("nested_processing")
+                && e.fully_qualified_name.contains("$block$item")
+        });
+        assert!(item_param.is_some(), "Block parameter 'item' not found");
+
+        let char_param = entries.iter().find(|e| {
+            e.fully_qualified_name.contains("nested_processing")
+                && e.fully_qualified_name.contains("$block$char")
+        });
+        assert!(char_param.is_some(), "Block parameter 'char' not found");
+
+        // Verify metadata
+        assert_eq!(value_param.entry_type, EntryType::LocalVariable);
+        assert!(value_param.metadata.get("kind").unwrap() == "block_parameter");
+
+        // Verify FQN format for nested blocks
+        assert!(
+            item_param
+                .unwrap()
+                .fully_qualified_name
+                .contains(&format!("DataProcessor#nested_processing$block$item")),
+            "Incorrect FQN format for outer block parameter"
+        );
+        assert!(
+            char_param
+                .unwrap()
+                .fully_qualified_name
+                .contains(&format!("DataProcessor#nested_processing$block$char")),
+            "Incorrect FQN format for inner block parameter"
+        );
     }
 }

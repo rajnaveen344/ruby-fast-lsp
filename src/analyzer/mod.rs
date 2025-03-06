@@ -69,6 +69,35 @@ impl RubyAnalyzer {
             return Some(instance_var_node);
         }
 
+        // Special handling for block parameters
+        if node.kind() == "block_parameters" {
+            for i in 0..node.named_child_count() {
+                if let Some(param) = node.named_child(i) {
+                    let param_range = param.range();
+                    if point.row == param_range.start_point.row
+                        && point.column >= param_range.start_point.column
+                        && point.column <= param_range.end_point.column
+                    {
+                        return Some(param);
+                    }
+                }
+            }
+        } else if node.kind() == "block" {
+            if let Some(params) = node.child_by_field_name("parameters") {
+                for i in 0..params.named_child_count() {
+                    if let Some(param) = params.named_child(i) {
+                        let param_range = param.range();
+                        if point.row == param_range.start_point.row
+                            && point.column >= param_range.start_point.column
+                            && point.column <= param_range.end_point.column
+                        {
+                            return Some(param);
+                        }
+                    }
+                }
+            }
+        }
+
         // Check if any child contains the point
         if cursor.goto_first_child() {
             loop {
@@ -165,6 +194,28 @@ impl RubyAnalyzer {
                     }
                 }
             }
+
+            // Check if this is a method parameter
+            if parent_kind == "parameters"
+                || parent_kind == "optional_parameter"
+                || parent_kind == "keyword_parameter"
+                || parent_kind == "rest_parameter"
+                || parent_kind == "hash_splat_parameter"
+            {
+                // Find the method that contains these parameters
+                let mut current = parent_node.clone();
+                while let Some(p) = current.parent() {
+                    if p.kind() == "method" || p.kind() == "singleton_method" {
+                        return true; // It's a method parameter, which is a kind of local variable
+                    }
+                    current = p;
+                }
+            }
+
+            // Check if this is a block parameter
+            if parent_kind == "block_parameters" {
+                return true; // It's a block parameter, which is a kind of local variable
+            }
         }
 
         // If we got here, it's likely a local variable
@@ -215,16 +266,8 @@ impl RubyAnalyzer {
         node: Node,
         position: Position,
     ) -> String {
-        // Extract the node text from the source code directly
         let source_code = self.document.as_str();
-
-        // Print debug info for text extraction
-        let node_range = node.range();
-        let start_byte = node_range.start_byte;
-        let end_byte = node_range.end_byte;
-
-        // Ensure we're extracting the correct text by using the node's byte range
-        let node_text = &source_code[start_byte..end_byte];
+        let node_text = &source_code[node.range().start_byte..node.range().end_byte];
 
         // Get the current context (namespace)
         let current_context = self.find_current_context(tree, position);
@@ -255,6 +298,122 @@ impl RubyAnalyzer {
                                 return self.determine_method_call_fqn(tree, node, position);
                             }
                         }
+                    }
+
+                    // Check if this is a method parameter
+                    if parent.kind() == "parameters"
+                        || parent.kind() == "optional_parameter"
+                        || parent.kind() == "keyword_parameter"
+                        || parent.kind() == "rest_parameter"
+                        || parent.kind() == "hash_splat_parameter"
+                    {
+                        // Find the method that contains these parameters
+                        let mut current = parent.clone();
+                        let mut method_name = None;
+
+                        while let Some(p) = current.parent() {
+                            if p.kind() == "method" || p.kind() == "singleton_method" {
+                                if let Some(method_name_node) = p.child_by_field_name("name") {
+                                    let method_name_text =
+                                        &source_code[method_name_node.range().start_byte
+                                            ..method_name_node.range().end_byte];
+                                    method_name = Some(method_name_text.to_string());
+                                }
+                                break;
+                            }
+                            current = p;
+                        }
+
+                        if let Some(method_name) = method_name {
+                            // Format for method parameter: namespace#method$param_name
+                            if !current_context.is_empty() {
+                                return format!(
+                                    "{}#{}${}",
+                                    current_context, method_name, node_text
+                                );
+                            } else {
+                                return format!("{}${}", method_name, node_text);
+                            }
+                        }
+                    }
+
+                    // Check if this is a block parameter
+                    if parent.kind() == "block_parameters" {
+                        // Find the method that contains this block
+                        let mut current = parent.clone();
+                        let mut method_name = None;
+
+                        while let Some(p) = current.parent() {
+                            if p.kind() == "method" || p.kind() == "singleton_method" {
+                                if let Some(method_name_node) = p.child_by_field_name("name") {
+                                    let method_name_text =
+                                        &source_code[method_name_node.range().start_byte
+                                            ..method_name_node.range().end_byte];
+                                    method_name = Some(method_name_text.to_string());
+                                }
+                                break;
+                            }
+                            current = p;
+                        }
+
+                        // Format for block parameter: namespace#method$block$param_name or $block$param_name
+                        if let Some(method_name) = method_name.or_else(|| current_method.clone()) {
+                            if !current_context.is_empty() {
+                                return format!(
+                                    "{}#{}$block${}",
+                                    current_context, method_name, node_text
+                                );
+                            } else {
+                                return format!("{}$block${}", method_name, node_text);
+                            }
+                        } else {
+                            if !current_context.is_empty() {
+                                return format!("{}#$block${}", current_context, node_text);
+                            } else {
+                                return format!("$block${}", node_text);
+                            }
+                        }
+                    }
+                }
+
+                // Check if this is a usage of a block parameter
+                // We need to check if we're inside a block and if the identifier matches a block parameter
+                let mut current_node = node.clone();
+                let mut in_block = false;
+                let mut block_params = Vec::new();
+
+                while let Some(parent) = current_node.parent() {
+                    if parent.kind() == "do_block" || parent.kind() == "block" {
+                        in_block = true;
+                        if let Some(params) = parent.child_by_field_name("parameters") {
+                            for i in 0..params.named_child_count() {
+                                if let Some(param) = params.named_child(i) {
+                                    if param.kind() == "identifier" {
+                                        let param_text = &source_code
+                                            [param.range().start_byte..param.range().end_byte];
+                                        block_params.push(param_text.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    current_node = parent;
+                }
+
+                if in_block && block_params.contains(&node_text.to_string()) {
+                    // This is a usage of a block parameter
+                    if let Some(method_name) = current_method {
+                        if !current_context.is_empty() {
+                            return format!(
+                                "{}#{}$block${}",
+                                current_context, method_name, node_text
+                            );
+                        } else {
+                            return format!("{}$block${}", method_name, node_text);
+                        }
+                    } else {
+                        return format!("$block${}", node_text);
                     }
                 }
 
@@ -329,17 +488,66 @@ impl RubyAnalyzer {
     }
 
     // Find the current method at position
-    pub fn find_current_method(&self, _tree: &Tree, _position: Position) -> Option<String> {
-        // In a real implementation, we'd recursively search up to find any containing method
-        // For now, just return None as a placeholder
+    pub fn find_current_method(&self, tree: &Tree, position: Position) -> Option<String> {
+        let point = Point::new(position.line as usize, position.character as usize);
+        let mut cursor = tree.root_node().walk();
+
+        // Find the node at the position
+        if let Some(node) = self.find_node_at_point(&mut cursor, point) {
+            // Walk up the tree to find containing method node
+            let mut current = node;
+            while let Some(parent) = current.parent() {
+                if parent.kind() == "method" || parent.kind() == "singleton_method" {
+                    if let Some(name_node) = parent.child_by_field_name("name") {
+                        return Some(self.get_node_text(name_node));
+                    }
+                }
+                current = parent;
+            }
+        }
+
         None
     }
 
     // Find the current context (class/module) at position
-    pub fn find_current_context(&self, _tree: &Tree, _position: Position) -> String {
-        // This would determine what class/module we're in at the given position
-        // For now, return empty string as placeholder
-        String::new()
+    pub fn find_current_context(&self, tree: &Tree, position: Position) -> String {
+        let point = Point::new(position.line as usize, position.character as usize);
+        let mut cursor = tree.root_node().walk();
+        let mut namespace_stack = Vec::new();
+
+        // Find the node at the position
+        if let Some(node) = self.find_node_at_point(&mut cursor, point) {
+            // Walk up the tree to find containing class/module nodes
+            let mut current = node;
+            while let Some(parent) = current.parent() {
+                if parent.kind() == "class" || parent.kind() == "module" {
+                    if let Some(name_node) = parent.child_by_field_name("name") {
+                        let name = self.get_node_text(name_node);
+                        namespace_stack.push(name);
+                    }
+                }
+                current = parent;
+            }
+        }
+
+        // Reverse the stack to get the correct namespace order (outermost to innermost)
+        namespace_stack.reverse();
+
+        // Join with :: to form the fully qualified namespace
+        namespace_stack.join("::")
+    }
+
+    // Helper to get node text
+    fn get_node_text(&self, node: Node) -> String {
+        let source_code = self.document.as_str();
+        let start_byte = node.start_byte();
+        let end_byte = node.end_byte();
+
+        if start_byte <= end_byte && end_byte <= source_code.len() {
+            source_code[start_byte..end_byte].to_string()
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -491,25 +699,8 @@ person.birthday"#;
         assert!(greeting_fqn.is_some());
         let greeting_id = greeting_fqn.unwrap();
 
-        // Should be "$greeting" (since that's what the current implementation returns)
-        assert_eq!(greeting_id, "$greeting");
-
-        // Test finding the @name instance variable - skipping for now as the current implementation
-        // doesn't properly handle instance variables in string interpolation
-        /*
-        let name_position = Position {
-            line: 9,
-            character: 35, // Points to "@name" in the string interpolation
-        };
-
-        let name_fqn = analyzer.find_identifier_at_position(code, name_position);
-        assert!(name_fqn.is_some());
-        let name_id = name_fqn.unwrap();
-
-        // Should contain "@name" and be scoped to Person class
-        assert!(name_id.contains("name"));
-        assert!(name_id.contains("Person"));
-        */
+        // Should be "Person#greet$greeting" with the new implementation
+        assert_eq!(greeting_id, "Person#greet$greeting");
 
         // Test finding the person local variable
         let person_position = Position {
@@ -768,5 +959,104 @@ end
                 println!("No node found at this position");
             }
         }
+    }
+
+    #[test]
+    fn test_method_and_block_parameters() {
+        let code = r#"
+class Person
+  def initialize(name, age = 30)
+    @name = name
+    @age = age
+  end
+
+  def greet
+    yield @name if block_given?
+  end
+end
+
+person = Person.new("John")
+person.greet do |name|
+  puts "Hello, #{name}!"
+end
+"#;
+        let (mut analyzer, tree) = setup_test(code);
+
+        // Test method parameter 'name' in initialize
+        let position = Position::new(2, 20); // Position at 'name' parameter
+        let identifier = analyzer.find_identifier_at_position(code, position);
+        assert!(
+            identifier.is_some(),
+            "Should find identifier at method parameter position"
+        );
+
+        let name_id = identifier.unwrap();
+        assert!(
+            name_id.contains("initialize$name"),
+            "Method parameter should have correct FQN, got: {}",
+            name_id
+        );
+
+        // Test method parameter 'age' in initialize
+        let position = Position::new(2, 26); // Position at 'age' parameter
+        let identifier = analyzer.find_identifier_at_position(code, position);
+        assert!(
+            identifier.is_some(),
+            "Should find identifier at method parameter position"
+        );
+
+        let age_id = identifier.unwrap();
+        assert!(
+            age_id.contains("initialize$age"),
+            "Method parameter should have correct FQN, got: {}",
+            age_id
+        );
+
+        // Test block parameter 'name'
+        let position = Position::new(13, 18); // Position at block parameter 'name', not 'do'
+        let identifier = analyzer.find_identifier_at_position(code, position);
+
+        assert!(
+            identifier.is_some(),
+            "Should find identifier at block parameter position"
+        );
+
+        let block_param_id = identifier.unwrap();
+        assert!(
+            block_param_id.contains("$block$name"),
+            "Block parameter should have correct FQN, got: {}",
+            block_param_id
+        );
+
+        // Test usage of method parameter inside method body
+        let position = Position::new(3, 13); // Position at 'name' usage in initialize method
+        let identifier = analyzer.find_identifier_at_position(code, position);
+        assert!(
+            identifier.is_some(),
+            "Should find identifier at method parameter usage"
+        );
+
+        let name_usage_id = identifier.unwrap();
+        assert!(
+            name_usage_id.contains("initialize$name"),
+            "Method parameter usage should have correct FQN, got: {}",
+            name_usage_id
+        );
+
+        // Test usage of block parameter inside block body
+        let position = Position::new(14, 20); // Position at 'name' usage in block
+        let identifier = analyzer.find_identifier_at_position(code, position);
+
+        assert!(
+            identifier.is_some(),
+            "Should find identifier at block parameter usage"
+        );
+
+        let block_param_usage_id = identifier.unwrap();
+        assert!(
+            block_param_usage_id.contains("$block$name"),
+            "Block parameter usage should have correct FQN, got: {}",
+            block_param_usage_id
+        );
     }
 }

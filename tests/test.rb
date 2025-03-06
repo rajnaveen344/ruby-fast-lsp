@@ -9,6 +9,13 @@ class Person
   def greet
     greeting = "Hello, my name is #{@name}"  # local variable
     puts greeting
+
+    begin
+      puts greeting
+      raise "Raise an error"
+    rescue => e
+      puts e.message
+    end
   end
 
   def birthday
