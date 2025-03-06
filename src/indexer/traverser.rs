@@ -1,6 +1,8 @@
 use log::info;
+use lsp_types::{Location, Position, Range, Url};
 use std::path::Path;
-use tower_lsp::lsp_types::{Position, Range, Url};
+#[cfg(test)]
+use tempfile::NamedTempFile;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::indexer::{EntryBuilder, EntryType, RubyIndex, Visibility};
@@ -140,6 +142,9 @@ impl RubyIndexer {
                 // Check for attr_* method calls like attr_accessor, attr_reader, attr_writer
                 self.process_attribute_methods(node, uri, source_code, context)?;
 
+                // Process method call references
+                self.process_method_call(node, uri, source_code, context)?;
+
                 // Continue traversing children
                 let child_count = node.child_count();
                 for i in 0..child_count {
@@ -171,6 +176,9 @@ impl RubyIndexer {
                     } else if left_kind == "instance_variable" {
                         // Process instance variable assignment
                         self.process_instance_variable(node, uri, source_code, context)?;
+                    } else if left_kind == "class_variable" {
+                        // Process class variable assignment
+                        self.process_class_variable(node, uri, source_code, context)?;
                     }
                 }
             }
@@ -199,6 +207,17 @@ impl RubyIndexer {
                     // Log the error and continue
                     if self.debug_mode {
                         println!("Error processing instance variable: {}", e);
+                    }
+                }
+            }
+            "class_variable" => {
+                // Process class variable reference
+                if let Err(e) =
+                    self.process_class_variable_reference(node, uri, source_code, context)
+                {
+                    // Log the error and continue
+                    if self.debug_mode {
+                        println!("Error processing class variable: {}", e);
                     }
                 }
             }
@@ -685,7 +704,7 @@ impl RubyIndexer {
         node: Node,
         uri: &Url,
         source_code: &str,
-        _context: &mut TraversalContext,
+        context: &mut TraversalContext,
     ) -> Result<(), String> {
         // Extract the variable name
         let name = self.get_node_text(node, source_code);
@@ -695,8 +714,60 @@ impl RubyIndexer {
             return Ok(());
         }
 
-        // For references, we don't need to create an entry, but in a real implementation
-        // we would track references to variables for "find all references" functionality
+        // Create a range for the reference
+        let range = node_to_range(node);
+
+        // Create a location for this reference
+        let location = Location {
+            uri: uri.clone(),
+            range,
+        };
+
+        // Add reference with just the variable name (e.g., @name)
+        self.index.add_reference(&name, location.clone());
+
+        // Also add reference with class context if available
+        let current_namespace = context.current_namespace();
+        if !current_namespace.is_empty() {
+            let fqn = format!("{}#{}", current_namespace, name);
+            self.index.add_reference(&fqn, location);
+        }
+
+        Ok(())
+    }
+
+    fn process_class_variable(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        let left = node
+            .child_by_field_name("left")
+            .ok_or_else(|| "Failed to get left node of class variable assignment".to_string())?;
+
+        let name = self.get_node_text(left, source_code);
+
+        // Add reference for the class variable
+        let location = Location::new(uri.clone(), node_to_range(left));
+        self.index.add_reference(&name, location);
+
+        Ok(())
+    }
+
+    fn process_class_variable_reference(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        let name = self.get_node_text(node, source_code);
+
+        // Add reference for the class variable
+        let location = Location::new(uri.clone(), node_to_range(node));
+        self.index.add_reference(&name, location);
 
         Ok(())
     }
@@ -790,6 +861,65 @@ impl RubyIndexer {
                             self.index.add_entry(setter_entry);
                         }
                     }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn process_method_call(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Get the method name node
+        if let Some(method_node) = node.child_by_field_name("method") {
+            // Extract the method name
+            let method_name = self.get_node_text(method_node, source_code);
+
+            // Skip if method name is empty or is an attribute method
+            if method_name.trim().is_empty()
+                || method_name == "attr_accessor"
+                || method_name == "attr_reader"
+                || method_name == "attr_writer"
+            {
+                return Ok(());
+            }
+
+            // Create a range for the reference
+            let range = node_to_range(method_node);
+
+            // Create a location for this reference
+            let location = Location {
+                uri: uri.clone(),
+                range,
+            };
+
+            // Add reference with just the method name
+            self.index.add_reference(&method_name, location.clone());
+
+            // If there's a receiver, try to determine its type
+            if let Some(receiver_node) = node.child_by_field_name("receiver") {
+                let receiver_text = self.get_node_text(receiver_node, source_code);
+
+                // If the receiver starts with uppercase, it's likely a class name
+                if receiver_text
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_uppercase())
+                {
+                    let fqn = format!("{}#{}", receiver_text, method_name);
+                    self.index.add_reference(&fqn, location.clone());
+                }
+            } else {
+                // No explicit receiver, use current namespace as context
+                let current_namespace = context.current_namespace();
+                if !current_namespace.is_empty() {
+                    let fqn = format!("{}#{}", current_namespace, method_name);
+                    self.index.add_reference(&fqn, location);
                 }
             }
         }
@@ -1593,5 +1723,313 @@ end
 
         // Clean up
         drop(temp_file);
+    }
+
+    #[test]
+    fn test_process_method_call() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+
+        // Create a simple Ruby file with a method call
+        let ruby_code = r#"
+class Person
+  def greet
+    puts "Hello"
+  end
+end
+
+person = Person.new
+person.greet  # Method call
+"#;
+
+        // Create a temporary file
+        let (temp_file, path) = create_temp_ruby_file(ruby_code);
+        let uri = Url::from_file_path(path.clone()).unwrap();
+
+        // Index the file
+        indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
+
+        // Check if the method call was indexed as a reference
+        let references = indexer.index().find_references("greet");
+
+        // Should have at least one reference
+        assert!(!references.is_empty());
+
+        // The reference should be in our file
+        assert_eq!(references[0].uri, uri);
+
+        // Keep temp file alive until the end of the test
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_process_instance_variable_reference() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+
+        // Create a simple Ruby file with instance variable references
+        let ruby_code = r#"
+class Person
+  def initialize(name)
+    @name = name  # Instance variable assignment
+  end
+
+  def greet
+    puts "Hello, #{@name}"  # Instance variable reference
+  end
+end
+"#;
+
+        // Create a temporary file
+        let (temp_file, path) = create_temp_ruby_file(ruby_code);
+        let uri = Url::from_file_path(path.clone()).unwrap();
+
+        // Index the file
+        indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
+
+        // Check if the instance variable reference was indexed
+        let references = indexer.index().find_references("@name");
+
+        // Should have at least two references (assignment and usage)
+        assert!(references.len() >= 2);
+
+        // All references should be in our file
+        for reference in references {
+            assert_eq!(reference.uri, uri);
+        }
+
+        // Keep temp file alive until the end of the test
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_qualified_method_references() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+
+        // Create a Ruby file with qualified method calls
+        let ruby_code = r#"
+class Calculator
+  def add(a, b)
+    a + b
+  end
+end
+
+class MathHelper
+  def use_calculator
+    calc = Calculator.new
+    calc.add(1, 2)  # Method call with receiver
+  end
+end
+"#;
+
+        // Create a temporary file
+        let (temp_file, path) = create_temp_ruby_file(ruby_code);
+        let uri = Url::from_file_path(path.clone()).unwrap();
+
+        // Index the file
+        indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
+
+        // Check references to the method by unqualified name
+        let unqualified_refs = indexer.index().find_references("add");
+        assert!(!unqualified_refs.is_empty());
+
+        // Check references to the method by qualified name
+        let qualified_refs = indexer.index().find_references("Calculator#add");
+        assert!(!qualified_refs.is_empty());
+
+        // Keep temp file alive until the end of the test
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_complex_project_structure() {
+        let mut indexer = RubyIndexer::new().unwrap();
+
+        // Create test files
+        let user_content = r#"
+            module UserManagement
+              class User
+                include Authentication
+                extend ActiveSupport
+
+                attr_accessor :first_name, :last_name, :email
+                attr_reader :created_at
+
+                @@user_count = 0
+
+                def initialize(attributes = {})
+                  @first_name = attributes[:first_name]
+                  @last_name = attributes[:last_name]
+                  @email = attributes[:email]
+                  @created_at = Time.now
+                  @@user_count += 1
+                end
+
+                def full_name
+                  "\#{@first_name} \#{@last_name}"
+                end
+
+                def self.count
+                  @@user_count
+                end
+
+                private
+
+                def validate_email
+                  @email.match?(/\\A[\\w+\\-.]+@[a-z\\d\\-]+(\\.[a-z\\d\\-]+)*\\.[a-z]+\\z/i)
+                end
+              end
+            end
+        "#;
+
+        let auth_content = r#"
+            module UserManagement
+              module Authentication
+                def authenticate(password)
+                  hash_password(password) == @password_hash
+                end
+
+                private
+
+                def hash_password(password)
+                  Digest::SHA256.hexdigest(password + @salt)
+                end
+              end
+            end
+        "#;
+
+        let order_content = r#"
+            module OrderProcessing
+              class Order
+                include Validatable
+
+                attr_reader :id, :user, :items, :total
+
+                def initialize(user, items = [])
+                  @id = generate_order_id
+                  @user = user
+                  @items = items
+                  @total = calculate_total
+                end
+
+                def add_item(product, quantity = 1)
+                  @items << OrderItem.new(product, quantity)
+                  recalculate_total
+                end
+
+                private
+
+                def calculate_total
+                  @items.sum(&:subtotal)
+                end
+
+                def generate_order_id
+                  "ORD-\#{Time.now.to_i}-\#{rand(1000)}"
+                end
+              end
+            end
+        "#;
+
+        // Create temporary files
+        let (user_file, user_path) = create_temp_ruby_file(user_content);
+        let (auth_file, auth_path) = create_temp_ruby_file(auth_content);
+        let (order_file, order_path) = create_temp_ruby_file(order_content);
+
+        // Index the files
+        indexer.index_file(&user_path, user_content).unwrap();
+        indexer.index_file(&auth_path, auth_content).unwrap();
+        indexer.index_file(&order_path, order_content).unwrap();
+
+        let index = indexer.index();
+
+        // Test class definitions
+        assert!(index.find_definition("UserManagement::User").is_some());
+        assert!(index
+            .find_definition("UserManagement::Authentication")
+            .is_some());
+        assert!(index.find_definition("OrderProcessing::Order").is_some());
+
+        // Test method definitions
+        assert!(index
+            .find_definition("UserManagement::User#full_name")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::User#validate_email")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::Authentication#authenticate")
+            .is_some());
+        assert!(index
+            .find_definition("OrderProcessing::Order#add_item")
+            .is_some());
+
+        // Test instance variable references
+        let email_refs = index.find_references("@email");
+        assert!(email_refs.len() >= 2); // Should find in initialize and validate_email
+
+        let items_refs = index.find_references("@items");
+        assert!(items_refs.len() >= 2); // Should find in initialize and add_item
+
+        // Test class variable references
+        let user_count_refs = index.find_references("@@user_count");
+        assert!(user_count_refs.len() >= 2); // Should find in initialize and self.count
+
+        // Test attr_accessor generated methods
+        assert!(index
+            .find_definition("UserManagement::User#first_name")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::User#first_name=")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::User#last_name")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::User#last_name=")
+            .is_some());
+
+        // Test attr_reader generated methods
+        assert!(index
+            .find_definition("UserManagement::User#created_at")
+            .is_some());
+        assert!(index
+            .find_definition("UserManagement::User#created_at=")
+            .is_none());
+    }
+
+    #[test]
+    fn test_complex_project_reindexing() {
+        let mut indexer = RubyIndexer::new().unwrap();
+
+        let order_content = r#"
+            module OrderProcessing
+              class Order
+                attr_reader :items
+
+                def initialize(items = [])
+                  @items = items
+                end
+
+                def add_item(item)
+                  @items << item
+                end
+              end
+            end
+        "#;
+
+        // Create temporary file
+        let (order_file, order_path) = create_temp_ruby_file(order_content);
+
+        // Initial indexing
+        indexer.index_file(&order_path, order_content).unwrap();
+        let initial_refs = indexer.index().find_references("@items");
+
+        // Reindex the same file
+        indexer.index_file(&order_path, order_content).unwrap();
+        let after_reindex_refs = indexer.index().find_references("@items");
+
+        // References should be consistent after reindexing
+        assert_eq!(initial_refs.len(), after_reindex_refs.len());
     }
 }

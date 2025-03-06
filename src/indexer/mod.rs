@@ -17,6 +17,9 @@ pub struct RubyIndex {
 
     // Namespace hierarchy
     pub namespace_tree: HashMap<String, Vec<String>>,
+
+    // Add a map to track references
+    pub references: HashMap<String, Vec<Location>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +66,7 @@ impl RubyIndex {
             methods_by_name: HashMap::new(),
             constants_by_name: HashMap::new(),
             namespace_tree: HashMap::new(),
+            references: HashMap::new(), // Initialize the references map
         }
     }
 
@@ -165,6 +169,15 @@ impl RubyIndex {
                 }
             }
         }
+
+        // Also clean up references from this URI
+        // We need to iterate through all references and remove those from this URI
+        for refs in self.references.values_mut() {
+            refs.retain(|loc| loc.uri != *uri);
+        }
+
+        // Remove any empty reference entries
+        self.references.retain(|_, refs| !refs.is_empty());
     }
 
     pub fn find_definition(&self, fully_qualified_name: &str) -> Option<&Entry> {
@@ -230,21 +243,67 @@ impl RubyIndex {
         None
     }
 
+    pub fn add_reference(&mut self, fully_qualified_name: &str, location: Location) {
+        let references = self
+            .references
+            .entry(fully_qualified_name.to_string())
+            .or_insert_with(Vec::new);
+        references.push(location);
+    }
+
     pub fn find_references(&self, fully_qualified_name: &str) -> Vec<Location> {
-        // This is a placeholder implementation
-        // A real implementation would need to track references during indexing
-        self.entries
+        // First check if we have direct references to this name
+        let mut locations = self
+            .references
             .get(fully_qualified_name)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .map(|e| Location {
-                        uri: e.location.uri.clone(),
-                        range: e.location.range,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+            .cloned()
+            .unwrap_or_default();
+
+        // Also include the definition locations
+        if let Some(entries) = self.entries.get(fully_qualified_name) {
+            for entry in entries {
+                locations.push(Location {
+                    uri: entry.location.uri.clone(),
+                    range: entry.location.range,
+                });
+            }
+        }
+
+        // For instance variables, also check for references with class prefix
+        if fully_qualified_name.starts_with('@') {
+            // Look for class-qualified references like "Class#@name"
+            for (fqn, refs) in &self.references {
+                if fqn.ends_with(fully_qualified_name) && fqn != fully_qualified_name {
+                    locations.extend(refs.clone());
+                }
+            }
+        }
+        // For methods, check for both simple and qualified references
+        else if !fully_qualified_name.starts_with('$') && !fully_qualified_name.starts_with('@') {
+            // If this is a qualified method name (Class#method)
+            if fully_qualified_name.contains('#') {
+                let parts: Vec<&str> = fully_qualified_name.split('#').collect();
+                if parts.len() == 2 {
+                    let method_name = parts[1];
+
+                    // Also look for unqualified references to this method
+                    if let Some(refs) = self.references.get(method_name) {
+                        locations.extend(refs.clone());
+                    }
+                }
+            }
+            // If this is an unqualified method name
+            else {
+                // Look for qualified references to this method (Class#method)
+                for (fqn, refs) in &self.references {
+                    if fqn.ends_with(&format!("#{}", fully_qualified_name)) {
+                        locations.extend(refs.clone());
+                    }
+                }
+            }
+        }
+
+        locations
     }
 
     // Update the namespace tree with a new fully qualified name
@@ -604,6 +663,191 @@ mod tests {
         // Test finding references for a non-existent name
         let no_refs = index.find_references("nonexistent");
         assert!(no_refs.is_empty());
+    }
+
+    #[test]
+    fn test_add_and_find_method_references() {
+        let mut index = RubyIndex::new();
+
+        // Create a method entry
+        let method_entry = create_test_entry(
+            "greet",
+            "Person#greet",
+            "file:///person.rb",
+            EntryType::Method,
+            Visibility::Public,
+        );
+
+        // Add the method definition
+        index.add_entry(method_entry);
+
+        // Create reference locations
+        let ref_location1 = Location {
+            uri: Url::parse("file:///app.rb").unwrap(),
+            range: Range {
+                start: Position {
+                    line: 10,
+                    character: 5,
+                },
+                end: Position {
+                    line: 10,
+                    character: 10,
+                },
+            },
+        };
+
+        let ref_location2 = Location {
+            uri: Url::parse("file:///test.rb").unwrap(),
+            range: Range {
+                start: Position {
+                    line: 20,
+                    character: 8,
+                },
+                end: Position {
+                    line: 20,
+                    character: 13,
+                },
+            },
+        };
+
+        // Add references to the method
+        index.add_reference("greet", ref_location1.clone());
+        index.add_reference("Person#greet", ref_location2.clone());
+
+        // Test finding references by unqualified name
+        let refs_unqualified = index.find_references("greet");
+        println!("Unqualified references count: {}", refs_unqualified.len());
+        for (i, loc) in refs_unqualified.iter().enumerate() {
+            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
+        }
+
+        // Just check that we found some references
+        assert!(!refs_unqualified.is_empty());
+
+        // Test finding references by qualified name
+        let refs_qualified = index.find_references("Person#greet");
+        println!("Qualified references count: {}", refs_qualified.len());
+        for (i, loc) in refs_qualified.iter().enumerate() {
+            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
+        }
+
+        // Just check that we found some references
+        assert!(!refs_qualified.is_empty());
+    }
+
+    #[test]
+    fn test_add_and_find_instance_variable_references() {
+        let mut index = RubyIndex::new();
+
+        // Create an instance variable entry
+        let var_entry = create_test_entry(
+            "@name",
+            "Person#@name",
+            "file:///person.rb",
+            EntryType::InstanceVariable,
+            Visibility::Public,
+        );
+
+        // Add the variable definition
+        index.add_entry(var_entry);
+
+        // Create reference locations
+        let ref_location1 = Location {
+            uri: Url::parse("file:///person.rb").unwrap(),
+            range: Range {
+                start: Position {
+                    line: 10,
+                    character: 5,
+                },
+                end: Position {
+                    line: 10,
+                    character: 10,
+                },
+            },
+        };
+
+        let ref_location2 = Location {
+            uri: Url::parse("file:///person.rb").unwrap(),
+            range: Range {
+                start: Position {
+                    line: 15,
+                    character: 8,
+                },
+                end: Position {
+                    line: 15,
+                    character: 13,
+                },
+            },
+        };
+
+        // Add references to the instance variable
+        index.add_reference("@name", ref_location1.clone());
+        index.add_reference("Person#@name", ref_location2.clone());
+
+        // Test finding references by unqualified name
+        let refs_unqualified = index.find_references("@name");
+        println!(
+            "Unqualified @name references count: {}",
+            refs_unqualified.len()
+        );
+        for (i, loc) in refs_unqualified.iter().enumerate() {
+            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
+        }
+
+        // Just check that we found some references
+        assert!(!refs_unqualified.is_empty());
+
+        // Test finding references by qualified name
+        let refs_qualified = index.find_references("Person#@name");
+        println!(
+            "Qualified Person#@name references count: {}",
+            refs_qualified.len()
+        );
+        for (i, loc) in refs_qualified.iter().enumerate() {
+            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
+        }
+
+        // Just check that we found some references
+        assert!(!refs_qualified.is_empty());
+    }
+
+    #[test]
+    fn test_references_survive_reindexing() {
+        let mut index = RubyIndex::new();
+
+        // Add a method entry
+        let method_entry = create_test_entry(
+            "calculate",
+            "Math#calculate",
+            "file:///math.rb",
+            EntryType::Method,
+            Visibility::Public,
+        );
+        index.add_entry(method_entry);
+
+        // Add references
+        let ref_location = Location {
+            uri: Url::parse("file:///app.rb").unwrap(),
+            range: Range {
+                start: Position {
+                    line: 5,
+                    character: 10,
+                },
+                end: Position {
+                    line: 5,
+                    character: 19,
+                },
+            },
+        };
+        index.add_reference("calculate", ref_location.clone());
+
+        // Remove entries for the definition file
+        index.remove_entries_for_uri(&Url::parse("file:///math.rb").unwrap());
+
+        // References should still exist
+        let refs = index.find_references("calculate");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].uri.to_string(), "file:///app.rb");
     }
 
     #[test]
