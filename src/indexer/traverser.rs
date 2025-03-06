@@ -1,11 +1,14 @@
 use log::info;
 use lsp_types::{Location, Position, Range, Url};
 use std::path::Path;
-#[cfg(test)]
-use tempfile::NamedTempFile;
 use tree_sitter::{Node, Parser, Tree};
 
-use crate::indexer::{EntryBuilder, EntryType, RubyIndex, Visibility};
+use super::{
+    entry::{EntryBuilder, EntryType, Visibility},
+    index::RubyIndex,
+};
+
+// use crate::indexer::{EntryBuilder, EntryType, RubyIndex, Visibility};
 
 pub struct RubyIndexer {
     // The Ruby index being populated
