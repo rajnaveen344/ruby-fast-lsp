@@ -292,9 +292,10 @@ impl LanguageServer for RubyLanguageServer {
                 all_commit_characters: None,
                 completion_item: None,
             }),
-            semantic_tokens_provider: Some(
-                SemanticTokensServerCapabilities::SemanticTokensOptions(semantic_tokens_options()),
-            ),
+            // TODO: Enable this when we have a semantic tokens provider
+            // semantic_tokens_provider: Some(
+            //     SemanticTokensServerCapabilities::SemanticTokensOptions(semantic_tokens_options()),
+            // ),
             definition_provider: Some(OneOf::Left(true)),
             references_provider: Some(OneOf::Left(true)),
             ..ServerCapabilities::default()
