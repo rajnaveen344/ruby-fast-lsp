@@ -27,9 +27,11 @@ pub enum EntryType {
     Constant,
     ConstantAlias,
     UnresolvedAlias,
+    LocalVariable,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Method visibility in Ruby
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     Public,
     Protected,
@@ -64,14 +66,14 @@ impl RubyIndex {
     }
 
     pub fn add_entry(&mut self, entry: Entry) {
-        // Add to main entries map
+        // Add to the main entries map
         let entries = self
             .entries
             .entry(entry.fully_qualified_name.clone())
             .or_insert_with(Vec::new);
         entries.push(entry.clone());
 
-        // Add to uri_to_entries map
+        // Add to the uri_to_entries map for this file
         let uri_string = entry.location.uri.to_string();
         let uri_entries = self
             .uri_to_entries
@@ -98,6 +100,11 @@ impl RubyIndex {
                     .entry(entry.name.clone())
                     .or_insert_with(Vec::new);
                 constant_entries.push(entry);
+            }
+            EntryType::LocalVariable => {
+                // Local variables are stored in the main entries map but don't need
+                // special lookup maps since they are referenced by their fully qualified name
+                // which includes the method scope they're defined in
             }
         }
     }
@@ -133,7 +140,11 @@ impl RubyIndex {
                         }
                     }
                 }
-                _ => {
+                EntryType::Class
+                | EntryType::Module
+                | EntryType::Constant
+                | EntryType::ConstantAlias
+                | EntryType::UnresolvedAlias => {
                     if let Some(constant_entries) = self.constants_by_name.get_mut(&entry.name) {
                         constant_entries.retain(|e| e.location.uri != *uri);
                         if constant_entries.is_empty() {
@@ -141,14 +152,59 @@ impl RubyIndex {
                         }
                     }
                 }
+                EntryType::LocalVariable => {
+                    // Local variables only exist in the main entries map
+                    // No special lookup maps to update
+                }
             }
         }
     }
 
     pub fn find_definition(&self, fully_qualified_name: &str) -> Option<&Entry> {
-        self.entries
-            .get(fully_qualified_name)
-            .and_then(|entries| entries.first())
+        // First try direct lookup - works for fully qualified names
+        if let Some(entries) = self.entries.get(fully_qualified_name) {
+            return entries.first();
+        }
+
+        // For local variables (those starting with $)
+        if fully_qualified_name.starts_with('$') {
+            // Extract the variable name without the $
+            let var_name = &fully_qualified_name[1..];
+
+            // Try to find any variable entry with this name in a current scope
+            for (fqn, entries) in &self.entries {
+                if fqn.ends_with(&format!("${}", var_name)) && !entries.is_empty() {
+                    if let Some(entry) = entries.first() {
+                        if entry.entry_type == EntryType::LocalVariable {
+                            return Some(entry);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If direct lookup fails, try to extract the method name and search by it
+        // This handles cases where analyzer returns just "method_name" instead of "Class#method_name"
+        if !fully_qualified_name.contains('#') && !fully_qualified_name.contains('$') {
+            // It might be a method call without class context - check methods_by_name
+            if let Some(method_entries) = self.methods_by_name.get(fully_qualified_name) {
+                return method_entries.first();
+            }
+        }
+
+        // For method calls inside a namespace (like "Namespace#method")
+        if fully_qualified_name.contains('#') {
+            let parts: Vec<&str> = fully_qualified_name.split('#').collect();
+            if parts.len() == 2 {
+                let method_name = parts[1];
+                // Try to find the method by name
+                if let Some(method_entries) = self.methods_by_name.get(method_name) {
+                    return method_entries.first();
+                }
+            }
+        }
+
+        None
     }
 
     pub fn find_references(&self, fully_qualified_name: &str) -> Vec<Location> {
@@ -585,5 +641,125 @@ mod tests {
             .location(uri, range)
             .build()
             .unwrap(); // This should fail
+    }
+
+    #[test]
+    fn test_find_definition_with_various_fqns() {
+        let mut index = RubyIndex::new();
+
+        // Set up some test entries with different FQN formats
+        let class_entry = Entry {
+            name: "TestClass".to_string(),
+            fully_qualified_name: "TestClass".to_string(),
+            location: EntryLocation {
+                uri: Url::parse("file:///test/file.rb").unwrap(),
+                range: Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(5, 3),
+                },
+            },
+            entry_type: EntryType::Class,
+            visibility: Visibility::Public,
+            metadata: HashMap::new(),
+        };
+
+        // Method inside a class
+        let method_entry = Entry {
+            name: "test_method".to_string(),
+            fully_qualified_name: "TestClass#test_method".to_string(),
+            location: EntryLocation {
+                uri: Url::parse("file:///test/file.rb").unwrap(),
+                range: Range {
+                    start: Position::new(2, 2),
+                    end: Position::new(4, 5),
+                },
+            },
+            entry_type: EntryType::Method,
+            visibility: Visibility::Public,
+            metadata: HashMap::new(),
+        };
+
+        // Add entries to the index
+        index.add_entry(class_entry);
+        index.add_entry(method_entry);
+
+        // Test lookup by exact FQN
+        let found = index.find_definition("TestClass#test_method");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "test_method");
+
+        // Test lookup by just method name (without class context)
+        let found = index.find_definition("test_method");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "test_method");
+
+        // Test lookup by method with wrong class
+        let found = index.find_definition("WrongClass#test_method");
+        assert!(found.is_some(), "Should still find method by name part");
+        assert_eq!(found.unwrap().name, "test_method");
+
+        // Test non-existent method
+        let not_found = index.find_definition("nonexistent_method");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_find_local_variable_definition() {
+        let mut index = RubyIndex::new();
+
+        // Create a local variable entry with the format used by the traverser
+        let var_entry = Entry {
+            name: "my_var".to_string(),
+            fully_qualified_name: "TestClass#$my_var".to_string(),
+            location: EntryLocation {
+                uri: Url::parse("file:///test/file.rb").unwrap(),
+                range: Range {
+                    start: Position::new(3, 4),
+                    end: Position::new(3, 10),
+                },
+            },
+            entry_type: EntryType::LocalVariable,
+            visibility: Visibility::Public,
+            metadata: HashMap::new(),
+        };
+
+        // Local variable in a nested method
+        let nested_var_entry = Entry {
+            name: "nested_var".to_string(),
+            fully_qualified_name: "Module::Class#method$nested_var".to_string(),
+            location: EntryLocation {
+                uri: Url::parse("file:///test/file.rb").unwrap(),
+                range: Range {
+                    start: Position::new(5, 6),
+                    end: Position::new(5, 16),
+                },
+            },
+            entry_type: EntryType::LocalVariable,
+            visibility: Visibility::Public,
+            metadata: HashMap::new(),
+        };
+
+        // Add entries to the index
+        index.add_entry(var_entry);
+        index.add_entry(nested_var_entry);
+
+        // Test lookup by fully qualified name
+        let found1 = index.find_definition("TestClass#$my_var");
+        assert!(found1.is_some());
+        assert_eq!(found1.unwrap().name, "my_var");
+
+        // Test lookup by just variable name with $ prefix
+        let found2 = index.find_definition("$my_var");
+        assert!(found2.is_some());
+        assert_eq!(found2.unwrap().name, "my_var");
+
+        // Test lookup of nested variable
+        let found3 = index.find_definition("$nested_var");
+        assert!(found3.is_some());
+        assert_eq!(found3.unwrap().name, "nested_var");
+
+        // Test non-existent variable
+        let not_found = index.find_definition("$nonexistent_var");
+        assert!(not_found.is_none());
     }
 }

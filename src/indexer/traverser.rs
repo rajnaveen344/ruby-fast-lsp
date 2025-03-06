@@ -1,3 +1,4 @@
+use log::info;
 use std::path::Path;
 use tower_lsp::lsp_types::{Position, Range, Url};
 use tree_sitter::{Node, Parser, Tree};
@@ -11,9 +12,6 @@ pub struct RubyIndexer {
     // The Tree-sitter parser
     parser: Parser,
 
-    // Current method visibility context
-    current_visibility: Visibility,
-
     // Debug flag for tests
     debug_mode: bool,
 }
@@ -22,6 +20,7 @@ pub struct RubyIndexer {
 struct TraversalContext {
     visibility: Visibility,
     namespace_stack: Vec<String>,
+    current_method: Option<String>,
 }
 
 impl TraversalContext {
@@ -29,6 +28,7 @@ impl TraversalContext {
         TraversalContext {
             visibility: Visibility::Public,
             namespace_stack: Vec::new(),
+            current_method: None,
         }
     }
 
@@ -38,16 +38,15 @@ impl TraversalContext {
 }
 
 impl RubyIndexer {
-    pub fn new() -> Result<Self, &'static str> {
+    pub fn new() -> Result<Self, String> {
         let mut parser = Parser::new();
         parser
             .set_language(tree_sitter_ruby::language())
-            .map_err(|_| "Failed to load Ruby grammar")?;
+            .map_err(|_| "Failed to load Ruby grammar".to_string())?;
 
         Ok(RubyIndexer {
             index: RubyIndex::new(),
             parser,
-            current_visibility: Visibility::Public, // Default visibility is public
             debug_mode: false,
         })
     }
@@ -60,140 +59,135 @@ impl RubyIndexer {
         &mut self.index
     }
 
-    pub fn index_file(&mut self, file_path: &Path, source_code: &str) -> Result<(), &'static str> {
+    pub fn index_file(&mut self, file_path: &Path, source_code: &str) -> Result<(), String> {
+        // Parse the source code
+        let tree = self.parser.parse(source_code, None).ok_or_else(|| {
+            format!(
+                "Failed to parse source code in file: {}",
+                file_path.display()
+            )
+        })?;
+
+        // Get the file URI
+        let uri = Url::from_file_path(file_path).map_err(|_| {
+            format!(
+                "Failed to convert file path to URI: {}",
+                file_path.display()
+            )
+        })?;
+
+        // Process the file for indexing
+        self.process_file(uri, &tree, source_code)
+            .map_err(|e| format!("Failed to index file {}: {}", file_path.display(), e))
+    }
+
+    pub fn index_file_with_uri(&mut self, uri: Url, source_code: &str) -> Result<(), String> {
         // Parse the source code
         let tree = self
             .parser
             .parse(source_code, None)
-            .ok_or("Failed to parse source code")?;
-
-        // Get the file URI
-        let uri =
-            Url::from_file_path(file_path).map_err(|_| "Failed to convert file path to URI")?;
+            .ok_or_else(|| format!("Failed to parse source code in file: {}", uri))?;
 
         // Process the file for indexing
-        self.process_file(uri, &tree, source_code)?;
-
-        Ok(())
+        self.process_file(uri.clone(), &tree, source_code)
+            .map_err(|e| format!("Failed to index file {}: {}", uri, e))
     }
 
     pub fn set_debug_mode(&mut self, debug: bool) {
         self.debug_mode = debug;
     }
 
-    fn process_file(
-        &mut self,
-        uri: Url,
-        tree: &Tree,
-        source_code: &str,
-    ) -> Result<(), &'static str> {
+    fn process_file(&mut self, uri: Url, tree: &Tree, source_code: &str) -> Result<(), String> {
         let root_node = tree.root_node();
 
-        // Reset visibility to public for each new file
-        self.current_visibility = Visibility::Public;
-
-        // In debug mode, print the entire tree structure
-        if self.debug_mode {
-            println!("Tree structure:\n{}", root_node.to_sexp());
-        }
-
-        // Create new traversal context
+        // Reset the traversal context for a new file
         let mut context = TraversalContext::new();
 
-        // Traverse the AST
-        self.traverse_node(root_node, &uri, source_code, &mut context)?;
+        // Pre-process: Remove any existing entries for this URI
+        self.index.remove_entries_for_uri(&uri);
 
-        Ok(())
+        // Traverse the tree to find definitions
+        self.traverse_node(root_node, &uri, source_code, &mut context)
     }
 
-    // Update traverse_node to use the context
     fn traverse_node(
         &mut self,
         node: Node,
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
-    ) -> Result<(), &'static str> {
-        // Debug the node kind
-        let node_kind = node.kind();
+    ) -> Result<(), String> {
+        // Get node type
+        let node_type = node.kind();
 
-        if self.debug_mode {
-            println!(
-                "Node kind: {}, Text: {}",
-                node_kind,
-                if node.end_byte() - node.start_byte() < 100 {
-                    self.get_node_text(node, source_code)
-                } else {
-                    format!(
-                        "<text too long, {} bytes>",
-                        node.end_byte() - node.start_byte()
-                    )
-                }
-            );
-        }
-
-        // TODO: Improve visibility detection for Ruby code
-        // The current implementation doesn't correctly detect Ruby visibility modifiers
-        // like 'private', 'protected', and 'public' when they're used as standalone method
-        // calls without arguments. This is because tree-sitter parses them as identifiers
-        // rather than method calls. A more robust solution would involve tracking the sequence
-        // of nodes and detecting these special identifiers.
-
-        // Special handling for visibility modifiers in Ruby
-        if node_kind == "call" {
-            let method_name = if let Some(method_node) = node.child_by_field_name("method") {
-                self.get_node_text(method_node, source_code)
-            } else {
-                String::new()
-            };
-
-            // Check if this is a visibility modifier (method call without arguments or with nil receiver)
-            let has_arguments = node.child_by_field_name("arguments").is_some();
-
-            if !has_arguments {
-                match method_name.as_str() {
-                    "private" => {
-                        if self.debug_mode {
-                            println!("Setting visibility to PRIVATE");
-                        }
-                        context.visibility = Visibility::Private;
-                        return Ok(());
-                    }
-                    "protected" => {
-                        if self.debug_mode {
-                            println!("Setting visibility to PROTECTED");
-                        }
-                        context.visibility = Visibility::Protected;
-                        return Ok(());
-                    }
-                    "public" => {
-                        if self.debug_mode {
-                            println!("Setting visibility to PUBLIC");
-                        }
-                        context.visibility = Visibility::Public;
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-            }
-        }
+        // TODO: Improve visibility detection
+        // Currently, tree-sitter treats 'private', 'protected', 'public' as identifiers
+        // rather than method calls. A more robust approach would be to track the sequence
+        // of nodes to detect when these special identifiers appear as standalone statements.
 
         // Process different node types
-        match node_kind {
-            "class" | "singleton_class" => {
-                self.process_class(node, uri, source_code, context)?;
+        match node_type {
+            "class" => {
+                // Process the class node
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = self.get_node_text(name_node, source_code);
+
+                    // Process the class
+                    self.process_class(node, uri, source_code, context)
+                        .map_err(|e| format!("Error processing class '{}': {}", name, e))?;
+                } else {
+                    // Process the class even though it doesn't have a name (we handle this in process_class)
+                    self.process_class(node, uri, source_code, context)?;
+                }
             }
             "module" => {
-                self.process_module(node, uri, source_code, context)?;
+                // Process the module node
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = self.get_node_text(name_node, source_code);
+
+                    // Process the module
+                    self.process_module(node, uri, source_code, context)
+                        .map_err(|e| format!("Error processing module '{}': {}", name, e))?;
+                } else {
+                    // Process the module even though it doesn't have a name
+                    self.process_module(node, uri, source_code, context)?;
+                }
             }
             "method" | "singleton_method" => {
                 self.process_method(node, uri, source_code, context)?;
             }
             "assignment" => {
-                // Check if this is a constant assignment
-                if let Some(left) = node.child_by_field_name("left") {
-                    if left.kind() == "constant" {
+                // First check if it's a constant assignment (already handled)
+                if let Some(left_node) = node.child_by_field_name("left") {
+                    let name = self.get_node_text(left_node, source_code);
+
+                    // If it starts with a lowercase letter or underscore, it's a local variable
+                    if name.starts_with(|c: char| c.is_lowercase() || c == '_') {
+                        self.process_local_variable(node, uri, source_code, context)?;
+                    } else if name.starts_with(|c: char| c.is_uppercase()) {
+                        // This is a constant, already handled by process_constant
                         self.process_constant(node, uri, source_code, context)?;
+                    }
+                }
+            }
+            "constant" => {
+                // Process constant but catch any errors and just log them
+                if let Err(e) = self.process_constant(node, uri, source_code, context) {
+                    if self.debug_mode {
+                        info!(
+                            "Error processing constant at {}:{} - {}",
+                            node.start_position().row + 1,
+                            node.start_position().column + 1,
+                            e
+                        );
+                    }
+
+                    // Continue traversing the node's children
+                    let child_count = node.child_count();
+                    for i in 0..child_count {
+                        if let Some(child) = node.child(i) {
+                            self.traverse_node(child, uri, source_code, context)?;
+                        }
                     }
                 }
             }
@@ -218,14 +212,53 @@ impl RubyIndexer {
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), String> {
         // Find the class name node
-        let name_node = node
-            .child_by_field_name("name")
-            .ok_or("Class without a name")?;
+        let name_node = match node.child_by_field_name("name") {
+            Some(node) => node,
+            None => {
+                // Skip anonymous or dynamically defined classes instead of failing
+                if self.debug_mode {
+                    info!(
+                        "Skipping class without a name at {}:{}",
+                        node.start_position().row + 1,
+                        node.start_position().column + 1
+                    );
+                }
+
+                // Still traverse children for any defined methods or constants
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+
+                return Ok(());
+            }
+        };
 
         // Extract the name text
         let name = self.get_node_text(name_node, source_code);
+
+        // Skip classes with empty names or just whitespace
+        if name.trim().is_empty() {
+            if self.debug_mode {
+                info!(
+                    "Skipping class with empty name at {}:{}",
+                    node.start_position().row + 1,
+                    node.start_position().column + 1
+                );
+            }
+
+            // Still traverse children
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    self.traverse_node(child, uri, source_code, context)?;
+                }
+            }
+
+            return Ok(());
+        }
 
         // Create a fully qualified name by joining the namespace stack
         let current_namespace = context.current_namespace();
@@ -285,14 +318,53 @@ impl RubyIndexer {
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), String> {
         // Find the module name node
-        let name_node = node
-            .child_by_field_name("name")
-            .ok_or("Module without a name")?;
+        let name_node = match node.child_by_field_name("name") {
+            Some(node) => node,
+            None => {
+                // Skip anonymous or dynamically defined modules instead of failing
+                if self.debug_mode {
+                    info!(
+                        "Skipping module without a name at {}:{}",
+                        node.start_position().row + 1,
+                        node.start_position().column + 1
+                    );
+                }
+
+                // Still traverse children for any defined methods or constants
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+
+                return Ok(());
+            }
+        };
 
         // Extract the name text
         let name = self.get_node_text(name_node, source_code);
+
+        // Skip modules with empty names or just whitespace
+        if name.trim().is_empty() {
+            if self.debug_mode {
+                info!(
+                    "Skipping module with empty name at {}:{}",
+                    node.start_position().row + 1,
+                    node.start_position().column + 1
+                );
+            }
+
+            // Still traverse children
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    self.traverse_node(child, uri, source_code, context)?;
+                }
+            }
+
+            return Ok(());
+        }
 
         // Create a fully qualified name by joining the namespace stack
         let current_namespace = context.current_namespace();
@@ -352,45 +424,53 @@ impl RubyIndexer {
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), String> {
         // Find the method name node
         let name_node = node
             .child_by_field_name("name")
-            .ok_or("Method without a name")?;
+            .ok_or_else(|| "Method without a name".to_string())?;
 
         // Extract the name text
         let name = self.get_node_text(name_node, source_code);
 
+        // Create a fully qualified name
+        let current_namespace = context.current_namespace();
+        let method_name = name.clone();
+
+        let fqn = if current_namespace.is_empty() {
+            method_name.clone()
+        } else {
+            format!("{}#{}", current_namespace, method_name)
+        };
+
         // Create a range for the definition
         let range = node_to_range(node);
-
-        // Use the current visibility context
-        let visibility = context.visibility.clone();
-
-        if self.debug_mode {
-            println!("Method: {}, Visibility: {:?}", name, visibility);
-        }
-
-        // Determine the fully qualified name
-        let fqn = if context.namespace_stack.is_empty() {
-            name.clone()
-        } else {
-            format!(
-                "{}#{}", // Using # for instance methods
-                context.current_namespace(),
-                name
-            )
-        };
 
         // Create and add the entry
         let entry = EntryBuilder::new(&name)
             .fully_qualified_name(&fqn)
             .location(uri.clone(), range)
             .entry_type(EntryType::Method)
-            .visibility(visibility)
-            .build()?;
+            .visibility(context.visibility)
+            .build()
+            .map_err(|e| e.to_string())?;
 
         self.index.add_entry(entry);
+
+        // Set the current method before processing the body
+        context.current_method = Some(name.clone());
+
+        // Process method body contents recursively
+        if let Some(body) = node.child_by_field_name("body") {
+            for i in 0..body.named_child_count() {
+                if let Some(child) = body.named_child(i) {
+                    self.traverse_node(child, uri, source_code, context)?;
+                }
+            }
+        }
+
+        // Reset the current method after processing
+        context.current_method = None;
 
         Ok(())
     }
@@ -401,20 +481,55 @@ impl RubyIndexer {
         uri: &Url,
         source_code: &str,
         context: &mut TraversalContext,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), String> {
         // For constant assignments, the name is in the "left" field
-        let name_node = node
-            .child_by_field_name("left")
-            .ok_or("Constant assignment without a name")?;
+        let name_node = match node.child_by_field_name("left") {
+            Some(node) => node,
+            None => {
+                // If we encounter a constant node without a left field, it's likely part of another
+                // construct, like a class name or module. Instead of failing, just continue traversal.
+                if self.debug_mode {
+                    info!(
+                        "Skipping constant without a name field at {}:{}",
+                        node.start_position().row + 1,
+                        node.start_position().column + 1
+                    );
+                }
 
-        // Extract the name text
+                // Recursively traverse child nodes
+                let child_count = node.child_count();
+                for i in 0..child_count {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+
+                return Ok(());
+            }
+        };
+
+        // Make sure it's a constant (starts with capital letter)
         let name = self.get_node_text(name_node, source_code);
+        if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
+            // Not a valid constant, just continue traversal
+            // Recursively traverse child nodes
+            let child_count = node.child_count();
+            for i in 0..child_count {
+                if let Some(child) = node.child(i) {
+                    self.traverse_node(child, uri, source_code, context)?;
+                }
+            }
+            return Ok(());
+        }
 
-        // Create a fully qualified name by joining the namespace stack
-        let fqn = if context.namespace_stack.is_empty() {
-            name.clone()
+        // Create a fully qualified name
+        let current_namespace = context.current_namespace();
+        let constant_name = name.clone();
+
+        let fqn = if current_namespace.is_empty() {
+            constant_name.clone()
         } else {
-            format!("{}::{}", context.current_namespace(), name)
+            format!("{}::{}", current_namespace, constant_name)
         };
 
         // Create a range for the definition
@@ -425,9 +540,80 @@ impl RubyIndexer {
             .fully_qualified_name(&fqn)
             .location(uri.clone(), range)
             .entry_type(EntryType::Constant)
-            .build()?;
+            .build()
+            .map_err(|e| e.to_string())?;
 
         self.index.add_entry(entry);
+
+        // Process the right side of the assignment
+        if let Some(right) = node.child_by_field_name("right") {
+            self.traverse_node(right, uri, source_code, context)?;
+        }
+
+        Ok(())
+    }
+
+    // New method to handle local variable assignments
+    fn process_local_variable(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // For local variable assignments, the name is in the "left" field
+        let name_node = node
+            .child_by_field_name("left")
+            .ok_or_else(|| "Variable assignment without a name".to_string())?;
+
+        // Extract the variable name
+        let name = self.get_node_text(name_node, source_code);
+
+        // Skip if name is empty
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+
+        // Create a fully qualified name that includes the current method scope
+        // This is important to prevent collisions between variables in different methods
+        let current_namespace = context.current_namespace();
+
+        // Determine if we're in a method context
+        let current_method = context.current_method.as_ref();
+
+        let fqn = if let Some(method_name) = current_method {
+            // If we're in a method, include it in the FQN
+            if current_namespace.is_empty() {
+                format!("{}#${}", method_name, name)
+            } else {
+                format!("{}#${}${}", current_namespace, method_name, name)
+            }
+        } else {
+            // Otherwise, just use the namespace and name
+            if current_namespace.is_empty() {
+                format!("${}", name)
+            } else {
+                format!("{}#${}", current_namespace, name)
+            }
+        };
+
+        // Create a range for the definition
+        let range = node_to_range(node);
+
+        // Create and add the entry
+        let entry = EntryBuilder::new(&name)
+            .fully_qualified_name(&fqn)
+            .location(uri.clone(), range)
+            .entry_type(EntryType::LocalVariable)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        self.index.add_entry(entry);
+
+        // Continue traversing the right side of the assignment
+        if let Some(right) = node.child_by_field_name("right") {
+            self.traverse_node(right, uri, source_code, context)?;
+        }
 
         Ok(())
     }
@@ -919,5 +1105,245 @@ mod tests {
 
         // Keep file in scope until end of test
         drop(file);
+    }
+
+    #[test]
+    fn test_index_invalid_constant() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        // Test file with invalid constant syntax that could cause parsing issues
+        let content = r#"
+        # This file contains Ruby code with constant-related edge cases
+
+        # An include statement with a constant
+        include SomeModule
+
+        # A constant used in a method call without assignment
+        def some_method
+          OtherModule::SOME_CONSTANT
+        end
+
+        # A namespace resolution operator without a clear constant
+        ::SomeConstant
+
+        # A constant in an unusual position
+        result = CONSTANT if condition
+        "#;
+
+        // Create temp file
+        let (temp_file, path) = create_temp_ruby_file(content);
+
+        // Index the file - this shouldn't panic
+        let result = indexer.index_file(&path, content);
+
+        // Check indexing succeeded
+        assert!(
+            result.is_ok(),
+            "Failed to index file with invalid constants: {:?}",
+            result.err()
+        );
+
+        // Clean up the temp file
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_index_include_statements() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        // Test file that mimics the structure of the problematic file
+        let content = r#"
+        require 'some_module'
+        require 'other_module'
+        include Rack::SomeAuth::Helpers
+
+        class Admin::SomeController < Admin::ApplicationController
+          def initialize
+            super()
+            @show_status = false
+          end
+
+          def some_method
+            variable = SOME_CONSTANT
+          end
+        end
+        "#;
+
+        // Create temp file
+        let (temp_file, path) = create_temp_ruby_file(content);
+
+        // Index the file - this shouldn't panic
+        let result = indexer.index_file(&path, content);
+
+        // Check indexing succeeded
+        assert!(
+            result.is_ok(),
+            "Failed to index file with include statements: {:?}",
+            result.err()
+        );
+
+        // Verify class is indexed
+        let index = indexer.index();
+        let entries = index.entries.get("Admin::SomeController");
+        assert!(entries.is_some(), "Admin::SomeController should be indexed");
+
+        // Clean up the temp file
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_index_nested_includes_and_requires() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        // Test file with deeply nested includes and requires that could cause parsing issues
+        let content = r#"
+        # This mimics some common Ruby patterns that can cause issues with constant handling
+
+        # Multiple levels of module resolution
+        require 'module1/module2/module3'
+
+        # Include with nested modules
+        include Module1::Module2::Module3::Helpers
+
+        # Multiple includes on a single line
+        include Module1, Module2, Module3
+
+        # Include followed by statements without clear separation
+        include ActionController::Base include OtherModule
+
+        # A complex class hierarchy
+        class ComplexClass < BaseClass::SubClass::FinalClass
+          # Method with constants
+          def process
+            result = Module1::Module2::CONSTANT
+            return nil if Module3::Module4::CONSTANT == value
+          end
+        end
+        "#;
+
+        // Create temp file
+        let (temp_file, path) = create_temp_ruby_file(content);
+
+        // Index the file - this shouldn't panic
+        let result = indexer.index_file(&path, content);
+
+        // Check indexing succeeded
+        assert!(
+            result.is_ok(),
+            "Failed to index file with nested includes: {:?}",
+            result.err()
+        );
+
+        // Verify class is indexed
+        let index = indexer.index();
+        let entries = index.entries.get("ComplexClass");
+        assert!(entries.is_some(), "ComplexClass should be indexed");
+
+        // Clean up the temp file
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_index_local_variables_in_methods() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        // Test code that mirrors test.rb structure
+        let test_code = r#"
+class User
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+
+  def adult?
+    age_threshold = 18  # Local variable definition
+    @age >= age_threshold  # Local variable reference
+  end
+
+  def greet
+    greeting = "Hello, #{@name}!"  # Local variable definition
+    puts greeting  # Local variable reference
+    greeting  # Another reference to the same variable
+  end
+end
+
+user = User.new("John", 25)
+puts user.adult?
+puts user.greet
+"#;
+
+        // Create a temporary file to test indexing
+        let (temp_file, temp_path) = create_temp_ruby_file(test_code);
+
+        // Index the file
+        indexer.index_file(&temp_path, test_code).unwrap();
+
+        // Check that the User class was indexed
+        let entries = indexer.index().entries.clone();
+
+        // Verify User class
+        assert!(entries.contains_key("User"), "User class should be indexed");
+
+        // Verify methods
+        assert!(
+            entries.contains_key("User#initialize"),
+            "initialize method should be indexed"
+        );
+        assert!(
+            entries.contains_key("User#adult?"),
+            "adult? method should be indexed"
+        );
+        assert!(
+            entries.contains_key("User#greet"),
+            "greet method should be indexed"
+        );
+
+        // Get all entries
+        let all_entries = indexer.index().entries.clone();
+
+        // Verify local variables
+        // For age_threshold in adult? method
+        let age_threshold_entries = all_entries
+            .iter()
+            .filter(|(k, _)| k.contains("$age_threshold"))
+            .collect::<Vec<_>>();
+
+        assert!(
+            !age_threshold_entries.is_empty(),
+            "age_threshold local variable should be indexed"
+        );
+
+        // For greeting in greet method
+        let greeting_entries = all_entries
+            .iter()
+            .filter(|(k, _)| k.contains("$greeting"))
+            .collect::<Vec<_>>();
+
+        assert!(
+            !greeting_entries.is_empty(),
+            "greeting local variable should be indexed"
+        );
+
+        // Test the lookup of local variables via find_definition
+        let index = indexer.index();
+
+        // Lookup by variable name with $ marker
+        let found2 = index.find_definition("$age_threshold");
+        assert!(
+            found2.is_some(),
+            "Should find age_threshold by $age_threshold"
+        );
+        assert_eq!(found2.unwrap().name, "age_threshold");
+
+        // Clean up
+        drop(temp_file);
     }
 }
