@@ -117,82 +117,93 @@ impl RubyIndexer {
         source_code: &str,
         context: &mut TraversalContext,
     ) -> Result<(), String> {
-        // Get node type
-        let node_type = node.kind();
+        // Get the kind of node
+        let kind = node.kind();
 
-        // TODO: Improve visibility detection
-        // Currently, tree-sitter treats 'private', 'protected', 'public' as identifiers
-        // rather than method calls. A more robust approach would be to track the sequence
-        // of nodes to detect when these special identifiers appear as standalone statements.
+        // Skip comments
+        if kind == "comment" {
+            return Ok(());
+        }
 
-        // Process different node types
-        match node_type {
+        // Process this node based on its kind
+        match kind {
             "class" => {
-                // Process the class node
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = self.get_node_text(name_node, source_code);
-
-                    // Process the class
-                    self.process_class(node, uri, source_code, context)
-                        .map_err(|e| format!("Error processing class '{}': {}", name, e))?;
-                } else {
-                    // Process the class even though it doesn't have a name (we handle this in process_class)
-                    self.process_class(node, uri, source_code, context)?;
-                }
+                self.process_class(node, uri, source_code, context)?;
             }
             "module" => {
-                // Process the module node
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = self.get_node_text(name_node, source_code);
-
-                    // Process the module
-                    self.process_module(node, uri, source_code, context)
-                        .map_err(|e| format!("Error processing module '{}': {}", name, e))?;
-                } else {
-                    // Process the module even though it doesn't have a name
-                    self.process_module(node, uri, source_code, context)?;
-                }
+                self.process_module(node, uri, source_code, context)?;
             }
             "method" | "singleton_method" => {
                 self.process_method(node, uri, source_code, context)?;
             }
-            "assignment" => {
-                // First check if it's a constant assignment (already handled)
-                if let Some(left_node) = node.child_by_field_name("left") {
-                    let name = self.get_node_text(left_node, source_code);
+            "call" => {
+                // Check for attr_* method calls like attr_accessor, attr_reader, attr_writer
+                self.process_attribute_methods(node, uri, source_code, context)?;
 
-                    // If it starts with a lowercase letter or underscore, it's a local variable
-                    if name.starts_with(|c: char| c.is_lowercase() || c == '_') {
-                        self.process_local_variable(node, uri, source_code, context)?;
-                    } else if name.starts_with(|c: char| c.is_uppercase()) {
-                        // This is a constant, already handled by process_constant
+                // Continue traversing children
+                let child_count = node.child_count();
+                for i in 0..child_count {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+            }
+            "assignment" => {
+                let left = node.child_by_field_name("left");
+                if let Some(left_node) = left {
+                    let left_kind = left_node.kind();
+
+                    if left_kind == "constant" {
+                        // Process constant assignment
                         self.process_constant(node, uri, source_code, context)?;
+                    } else if left_kind == "identifier" {
+                        // Process local variable assignment
+                        let name = self.get_node_text(left_node, source_code);
+
+                        // Only process variables that start with lowercase or underscore
+                        if name
+                            .chars()
+                            .next()
+                            .map_or(false, |c| c.is_lowercase() || c == '_')
+                        {
+                            self.process_local_variable(node, uri, source_code, context)?;
+                        }
+                    } else if left_kind == "instance_variable" {
+                        // Process instance variable assignment
+                        self.process_instance_variable(node, uri, source_code, context)?;
                     }
                 }
             }
             "constant" => {
-                // Process constant but catch any errors and just log them
+                // Try to process constants, but don't fail if we can't
                 if let Err(e) = self.process_constant(node, uri, source_code, context) {
+                    // Log the error and continue
                     if self.debug_mode {
-                        info!(
-                            "Error processing constant at {}:{} - {}",
-                            node.start_position().row + 1,
-                            node.start_position().column + 1,
-                            e
-                        );
+                        println!("Error processing constant: {}", e);
                     }
+                }
 
-                    // Continue traversing the node's children
-                    let child_count = node.child_count();
-                    for i in 0..child_count {
-                        if let Some(child) = node.child(i) {
-                            self.traverse_node(child, uri, source_code, context)?;
-                        }
+                // Continue traversing the children
+                let child_count = node.child_count();
+                for i in 0..child_count {
+                    if let Some(child) = node.child(i) {
+                        self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+            }
+            "instance_variable" => {
+                // Process instance variable reference
+                if let Err(e) =
+                    self.process_instance_variable_reference(node, uri, source_code, context)
+                {
+                    // Log the error and continue
+                    if self.debug_mode {
+                        println!("Error processing instance variable: {}", e);
                     }
                 }
             }
             _ => {
-                // Recursively traverse child nodes for all other node types
+                // For other node types, just visit the children
                 let child_count = node.child_count();
                 for i in 0..child_count {
                     if let Some(child) = node.child(i) {
@@ -205,7 +216,6 @@ impl RubyIndexer {
         Ok(())
     }
 
-    // Update other methods to use the TraversalContext
     fn process_class(
         &mut self,
         node: Node,
@@ -618,6 +628,79 @@ impl RubyIndexer {
         Ok(())
     }
 
+    fn process_instance_variable(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // For instance variable assignments, the name is in the "left" field
+        let name_node = node
+            .child_by_field_name("left")
+            .ok_or_else(|| "Instance variable assignment without a name".to_string())?;
+
+        // Extract the variable name
+        let name = self.get_node_text(name_node, source_code);
+
+        // Skip if name is empty
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+
+        // Create a fully qualified name that includes the current class/module context
+        let current_namespace = context.current_namespace();
+
+        // Determine the FQN for the instance variable
+        let fqn = if current_namespace.is_empty() {
+            name.clone()
+        } else {
+            format!("{}#{}", current_namespace, name)
+        };
+
+        // Create a range for the definition
+        let range = node_to_range(name_node);
+
+        // Create and add the entry
+        let entry = EntryBuilder::new(&name)
+            .fully_qualified_name(&fqn)
+            .location(uri.clone(), range)
+            .entry_type(EntryType::InstanceVariable) // Using a new entry type for instance variables
+            .visibility(context.visibility)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        self.index.add_entry(entry);
+
+        // Process the right-hand side of the assignment
+        if let Some(right) = node.child_by_field_name("right") {
+            self.traverse_node(right, uri, source_code, context)?;
+        }
+
+        Ok(())
+    }
+
+    fn process_instance_variable_reference(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        _context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Extract the variable name
+        let name = self.get_node_text(node, source_code);
+
+        // Skip if name is empty
+        if name.trim().is_empty() {
+            return Ok(());
+        }
+
+        // For references, we don't need to create an entry, but in a real implementation
+        // we would track references to variables for "find all references" functionality
+
+        Ok(())
+    }
+
     fn get_node_text(&self, node: Node, source_code: &str) -> String {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
@@ -627,6 +710,91 @@ impl RubyIndexer {
         } else {
             String::new()
         }
+    }
+
+    // Process attr_accessor, attr_reader, attr_writer method calls
+    fn process_attribute_methods(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Check if this is a method call like attr_accessor, attr_reader, attr_writer
+        if let Some(method_node) = node.child_by_field_name("method") {
+            let method_name = self.get_node_text(method_node, source_code);
+
+            // Only process specific attribute method calls
+            if method_name != "attr_accessor"
+                && method_name != "attr_reader"
+                && method_name != "attr_writer"
+            {
+                return Ok(());
+            }
+
+            // Get the arguments (could be multiple symbol arguments)
+            if let Some(args_node) = node.child_by_field_name("arguments") {
+                let args_count = args_node.child_count();
+
+                for i in 0..args_count {
+                    if let Some(arg_node) = args_node.child(i) {
+                        // Skip non-symbol nodes (like commas)
+                        if arg_node.kind() != "simple_symbol" {
+                            continue;
+                        }
+
+                        // Extract the attribute name without the colon
+                        let mut attr_name = self.get_node_text(arg_node, source_code);
+                        if attr_name.starts_with(':') {
+                            attr_name = attr_name[1..].to_string();
+                        }
+
+                        // Get the current namespace (class/module)
+                        let current_namespace = context.current_namespace();
+                        if current_namespace.is_empty() {
+                            continue; // Skip if we're not in a class/module
+                        }
+
+                        // Create a range for the attribute definition
+                        let range = node_to_range(arg_node);
+
+                        // Create entries for the accessor methods
+                        if method_name == "attr_accessor" || method_name == "attr_reader" {
+                            // Add the getter method
+                            let getter_fqn = format!("{}#{}", current_namespace, attr_name);
+                            let getter_entry = EntryBuilder::new(&attr_name)
+                                .fully_qualified_name(&getter_fqn)
+                                .location(uri.clone(), range.clone())
+                                .entry_type(EntryType::Method)
+                                .visibility(context.visibility)
+                                .build()
+                                .map_err(|e| e.to_string())?;
+
+                            // Add the getter method to the index
+                            self.index.add_entry(getter_entry);
+                        }
+
+                        if method_name == "attr_accessor" || method_name == "attr_writer" {
+                            // Add the setter method (name=)
+                            let setter_name = format!("{}=", attr_name);
+                            let setter_fqn = format!("{}#{}", current_namespace, setter_name);
+                            let setter_entry = EntryBuilder::new(&setter_name)
+                                .fully_qualified_name(&setter_fqn)
+                                .location(uri.clone(), range.clone())
+                                .entry_type(EntryType::Method)
+                                .visibility(context.visibility)
+                                .build()
+                                .map_err(|e| e.to_string())?;
+
+                            // Add the setter method to the index
+                            self.index.add_entry(setter_entry);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1342,6 +1510,86 @@ puts user.greet
             "Should find age_threshold by $age_threshold"
         );
         assert_eq!(found2.unwrap().name, "age_threshold");
+
+        // Clean up
+        drop(temp_file);
+    }
+
+    #[test]
+    fn test_index_attr_accessor() {
+        // Create a new indexer
+        let mut indexer = RubyIndexer::new().unwrap();
+        indexer.set_debug_mode(true);
+
+        // Test with a class that has attr_accessor
+        let test_code = r#"
+class Person
+  attr_accessor :name, :age
+  attr_reader :id
+  attr_writer :email
+end
+"#;
+
+        // Create a temporary file to test indexing
+        let (temp_file, temp_path) = create_temp_ruby_file(test_code);
+
+        // Index the file
+        indexer.index_file(&temp_path, test_code).unwrap();
+
+        // Get the index
+        let index = indexer.index();
+
+        // Check that getter methods are indexed
+        let name_getter_entries = index.methods_by_name.get("name");
+        assert!(
+            name_getter_entries.is_some(),
+            "name getter method should be indexed"
+        );
+
+        let age_getter_entries = index.methods_by_name.get("age");
+        assert!(
+            age_getter_entries.is_some(),
+            "age getter method should be indexed"
+        );
+
+        let id_getter_entries = index.methods_by_name.get("id");
+        assert!(
+            id_getter_entries.is_some(),
+            "id getter method should be indexed"
+        );
+
+        // Check that setter methods are indexed
+        let name_setter_entries = index.methods_by_name.get("name=");
+        assert!(
+            name_setter_entries.is_some(),
+            "name= setter method should be indexed"
+        );
+
+        let age_setter_entries = index.methods_by_name.get("age=");
+        assert!(
+            age_setter_entries.is_some(),
+            "age= setter method should be indexed"
+        );
+
+        let email_setter_entries = index.methods_by_name.get("email=");
+        assert!(
+            email_setter_entries.is_some(),
+            "email= setter method should be indexed"
+        );
+
+        // Verify attr_reader doesn't create setter
+        let id_setter_entries = index.methods_by_name.get("id=");
+        assert!(
+            id_setter_entries.is_none(),
+            "id= setter method should not be indexed from attr_reader"
+        );
+
+        // Verify attr_writer doesn't create getter
+        let email_getter_entries = index.methods_by_name.get("email");
+        assert!(
+            email_getter_entries.is_none(),
+            "email getter method should not be indexed from attr_writer"
+        );
 
         // Clean up
         drop(temp_file);

@@ -62,11 +62,18 @@ impl RubyAnalyzer {
             return None;
         }
 
+        // Special handling for instance variables (@var)
+        // If we're at position '@' and the next character would be part of an instance variable,
+        // expand our search to include the entire instance variable
+        if let Some(instance_var_node) = self.check_for_instance_variable(&node, point) {
+            return Some(instance_var_node);
+        }
+
         // Check if any child contains the point
         if cursor.goto_first_child() {
             loop {
-                if let Some(child) = self.find_node_at_point(cursor, point) {
-                    return Some(child);
+                if let Some(child_node) = self.find_node_at_point(cursor, point) {
+                    return Some(child_node);
                 }
 
                 if !cursor.goto_next_sibling() {
@@ -76,12 +83,129 @@ impl RubyAnalyzer {
             cursor.goto_parent();
         }
 
-        // If no children contain the point, return this node if it's an identifier
-        if node.kind() == "identifier" || node.kind() == "constant" {
-            Some(node)
-        } else {
-            None
+        // If no child contains the point, then this node is the smallest containing node
+        Some(node)
+    }
+
+    // Helper method to check if a point is at the start of an instance variable
+    fn check_for_instance_variable<'a>(&self, node: &Node<'a>, point: Point) -> Option<Node<'a>> {
+        // Check if we're on the @ symbol of an instance variable
+        if node.kind() == "instance_variable" {
+            return Some(*node);
         }
+
+        // If we're in a parent node that contains an instance variable that starts at this point
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                if child.kind() == "instance_variable" {
+                    let range = child.range();
+
+                    // If the point is at the start of the instance variable or one character before it
+                    if (point.row == range.start_point.row
+                        && (point.column == range.start_point.column
+                            || point.column + 1 == range.start_point.column))
+                    {
+                        return Some(child);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    // Check if a node is likely a local variable
+    fn is_local_variable(&self, node: &Node, tree: &Tree) -> bool {
+        if node.kind() != "identifier" {
+            return false;
+        }
+
+        // Check if the identifier starts with lowercase letter or underscore
+        let source_code = tree
+            .root_node()
+            .utf8_text(self.document.as_bytes())
+            .unwrap_or("");
+        let node_text = node.utf8_text(source_code.as_bytes()).unwrap_or("");
+
+        if !node_text.starts_with(|c: char| c.is_lowercase() || c == '_') {
+            return false;
+        }
+
+        // Check if this is a method call rather than a local variable
+        // Method calls are usually in a call_method or method context
+        let parent = node.parent();
+        if let Some(parent_node) = parent {
+            let parent_kind = parent_node.kind();
+
+            // If the identifier is part of a call expression and is the method name,
+            // then it's a method call, not a variable
+            if parent_kind == "call" {
+                let method_name = parent_node.child_by_field_name("method");
+                if let Some(method_node) = method_name {
+                    if method_node.id() == node.id() {
+                        return false; // It's a method call, not a variable
+                    }
+                }
+            }
+
+            // Check for method invocation without arguments (e.g., "obj.method")
+            if parent_kind == "method_call" || parent_kind == "call_method" {
+                return false;
+            }
+
+            // Check for attribute accessors in dot notation (e.g., "obj.name")
+            if parent_kind == "call" {
+                // If we're in a call expression with a dot operator
+                // and our node is on the right side of the dot, it's likely a method call
+                if let Some(receiver) = parent_node.child_by_field_name("receiver") {
+                    if let Some(method) = parent_node.child_by_field_name("method") {
+                        if method.id() == node.id() {
+                            return false; // It's an attribute/method call
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we got here, it's likely a local variable
+        true
+    }
+
+    // Determine the fully qualified name when the node is a method call
+    fn determine_method_call_fqn(&self, tree: &Tree, node: Node, position: Position) -> String {
+        let source_code = self.document.as_str();
+        let node_text = &source_code[node.range().start_byte..node.range().end_byte];
+
+        // Get parent node to check context
+        if let Some(parent) = node.parent() {
+            if parent.kind() == "call" {
+                // This is a method call like "obj.method"
+                if let Some(receiver) = parent.child_by_field_name("receiver") {
+                    // Extract receiver text
+                    let receiver_range = receiver.range();
+                    let receiver_text =
+                        &source_code[receiver_range.start_byte..receiver_range.end_byte];
+
+                    // For attribute accessors, try to determine the receiver type
+                    // For now, we just use the receiver name
+                    if receiver_text
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_uppercase())
+                    {
+                        // If receiver starts with uppercase, it's likely a class name
+                        return format!("{}#{}", receiver_text, node_text);
+                    } else {
+                        // For other receivers, try to find their type
+                        // For now, we just return the method name
+                        return node_text.to_string();
+                    }
+                }
+            }
+        }
+
+        // Default to just the method name
+        node_text.to_string()
     }
 
     // Determine the fully qualified name based on context
@@ -111,6 +235,29 @@ impl RubyAnalyzer {
         // Handle different node types
         match node.kind() {
             "identifier" => {
+                // Check if this identifier is a method name in a method definition
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "method" {
+                        // This is likely a method name in a method definition
+                        let method_name = node_text.to_string();
+                        if !current_context.is_empty() {
+                            return format!("{}#{}", current_context, method_name);
+                        } else {
+                            return method_name;
+                        }
+                    }
+
+                    // Check if this is a method call in a call expression
+                    if parent.kind() == "call" {
+                        if let Some(method) = parent.child_by_field_name("method") {
+                            if method.id() == node.id() {
+                                // This is a method call like obj.method
+                                return self.determine_method_call_fqn(tree, node, position);
+                            }
+                        }
+                    }
+                }
+
                 // This could be a local variable or a method call
                 // Check if node is used as a local variable
                 if self.is_local_variable(&node, tree) {
@@ -161,6 +308,14 @@ impl RubyAnalyzer {
                     }
                 }
             }
+            "instance_variable" => {
+                // Format for instance variable: namespace#@varname
+                if !current_context.is_empty() {
+                    format!("{}#{}", current_context, node_text)
+                } else {
+                    node_text.to_string()
+                }
+            }
             "constant" => {
                 // Format for constant: namespace::CONSTNAME
                 if !current_context.is_empty() {
@@ -171,50 +326,6 @@ impl RubyAnalyzer {
             }
             _ => node_text.to_string(), // Default for other node types
         }
-    }
-
-    // Check if a node is likely a local variable
-    fn is_local_variable(&self, node: &Node, tree: &Tree) -> bool {
-        if node.kind() != "identifier" {
-            return false;
-        }
-
-        // Check if the identifier starts with lowercase letter or underscore
-        let source_code = tree
-            .root_node()
-            .utf8_text(self.document.as_bytes())
-            .unwrap_or("");
-        let node_text = node.utf8_text(source_code.as_bytes()).unwrap_or("");
-
-        if !node_text.starts_with(|c: char| c.is_lowercase() || c == '_') {
-            return false;
-        }
-
-        // Check if this is a method call rather than a local variable
-        // Method calls are usually in a call_method or method context
-        let parent = node.parent();
-        if let Some(parent_node) = parent {
-            let parent_kind = parent_node.kind();
-
-            // If the identifier is part of a call expression and is the method name,
-            // then it's a method call, not a variable
-            if parent_kind == "call" {
-                let method_name = parent_node.child_by_field_name("method");
-                if let Some(method_node) = method_name {
-                    if method_node.id() == node.id() {
-                        return false; // It's a method call, not a variable
-                    }
-                }
-            }
-
-            // Check for method invocation without arguments (e.g., "obj.method")
-            if parent_kind == "method_call" || parent_kind == "call_method" {
-                return false;
-            }
-        }
-
-        // If we got here, it's likely a local variable
-        true
     }
 
     // Find the current method at position
@@ -577,5 +688,85 @@ puts user.greet
             fqn.contains("greeting"),
             "FQN should contain the variable name"
         );
+    }
+
+    // Test for the specific instance variable and method name positions in test.rb
+    #[test]
+    fn test_analyzer_instance_vars_and_methods() {
+        let code = r#"
+class Person
+  attr_accessor :name, :age
+
+  def initialize(name, age)
+    @name = name  # instance variable
+    @age = age    # instance variable
+  end
+
+  def greet
+    greeting = "Hello, my name is #{@name}"  # local variable
+    puts greeting
+  end
+
+  def birthday
+    @age += 1
+    puts "Happy Birthday! Now I am #{@age} years old."
+  end
+end
+"#;
+        let mut analyzer = RubyAnalyzer::new();
+        analyzer.document = code.to_string();
+
+        let tree = analyzer.parser.parse(code, None).unwrap();
+        let source_code = code;
+
+        println!("\nAnalyzing nodes in test.rb positions:");
+
+        // Problematic positions from user logs
+        let positions = [
+            (4, 7), // Around 'initialize' method name
+            (5, 7), // Around '@name' instance variable
+        ];
+
+        for (line, character) in positions {
+            println!("\nChecking position ({}, {})", line, character);
+
+            // Get the actual line content for reference
+            if let Some(line_content) = code.lines().nth(line) {
+                println!("Line content: '{}'", line_content);
+            }
+
+            // Find the node at the position
+            let point = Point::new(line as usize, character as usize);
+            let mut cursor = tree.root_node().walk();
+
+            if let Some(node) = analyzer.find_node_at_point(&mut cursor, point) {
+                let node_kind = node.kind();
+                let range = node.range();
+                let node_text = &source_code[range.start_byte..range.end_byte];
+
+                println!("Found node: kind='{}', text='{}'", node_kind, node_text);
+
+                // Check parent node type
+                if let Some(parent) = node.parent() {
+                    let parent_kind = parent.kind();
+                    let parent_range = parent.range();
+                    let parent_text = &source_code[parent_range.start_byte..parent_range.end_byte];
+                    println!(
+                        "Parent node: kind='{}', text='{}'",
+                        parent_kind, parent_text
+                    );
+                }
+
+                // Try to get the fully qualified name
+                let pos = Position {
+                    line: line as u32,
+                    character: character as u32,
+                };
+                let fqn = analyzer.determine_fully_qualified_name(&tree, node, pos);
+                println!("FQN result: '{}'", fqn);
+            } else {
+                println!("No node found at this position");
+            }
+        }
     }
 }

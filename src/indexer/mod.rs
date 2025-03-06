@@ -28,6 +28,7 @@ pub enum EntryType {
     ConstantAlias,
     UnresolvedAlias,
     LocalVariable,
+    InstanceVariable,
 }
 
 /// Method visibility in Ruby
@@ -66,6 +67,13 @@ impl RubyIndex {
     }
 
     pub fn add_entry(&mut self, entry: Entry) {
+        // Update the namespace tree, but not for local variables
+        if entry.entry_type != EntryType::LocalVariable
+            && entry.entry_type != EntryType::InstanceVariable
+        {
+            self.update_namespace_tree(&entry.fully_qualified_name);
+        }
+
         // Add to the main entries map
         let entries = self
             .entries
@@ -101,10 +109,9 @@ impl RubyIndex {
                     .or_insert_with(Vec::new);
                 constant_entries.push(entry);
             }
-            EntryType::LocalVariable => {
-                // Local variables are stored in the main entries map but don't need
-                // special lookup maps since they are referenced by their fully qualified name
-                // which includes the method scope they're defined in
+            EntryType::LocalVariable | EntryType::InstanceVariable => {
+                // Local variables and instance variables are not indexed by name specifically
+                // They are only found by their fully qualified name
             }
         }
     }
@@ -152,9 +159,9 @@ impl RubyIndex {
                         }
                     }
                 }
-                EntryType::LocalVariable => {
-                    // Local variables only exist in the main entries map
-                    // No special lookup maps to update
+                EntryType::LocalVariable | EntryType::InstanceVariable => {
+                    // Local variables and instance variables are not indexed by name
+                    // so we don't need to remove them from any lookup maps
                 }
             }
         }
@@ -164,6 +171,16 @@ impl RubyIndex {
         // First try direct lookup - works for fully qualified names
         if let Some(entries) = self.entries.get(fully_qualified_name) {
             return entries.first();
+        }
+
+        // For instance variables (those starting with @)
+        if fully_qualified_name.starts_with('@') {
+            // Try to find any instance variable entry with this name in a current scope
+            for (fqn, entries) in &self.entries {
+                if fqn.ends_with(fully_qualified_name) && !entries.is_empty() {
+                    return entries.first();
+                }
+            }
         }
 
         // For local variables (those starting with $)
@@ -185,7 +202,10 @@ impl RubyIndex {
 
         // If direct lookup fails, try to extract the method name and search by it
         // This handles cases where analyzer returns just "method_name" instead of "Class#method_name"
-        if !fully_qualified_name.contains('#') && !fully_qualified_name.contains('$') {
+        if !fully_qualified_name.contains('#')
+            && !fully_qualified_name.contains('$')
+            && !fully_qualified_name.starts_with('@')
+        {
             // It might be a method call without class context - check methods_by_name
             if let Some(method_entries) = self.methods_by_name.get(fully_qualified_name) {
                 return method_entries.first();
@@ -197,9 +217,12 @@ impl RubyIndex {
             let parts: Vec<&str> = fully_qualified_name.split('#').collect();
             if parts.len() == 2 {
                 let method_name = parts[1];
-                // Try to find the method by name
-                if let Some(method_entries) = self.methods_by_name.get(method_name) {
-                    return method_entries.first();
+                // If method name doesn't start with $ (not a local variable)
+                if !method_name.starts_with('$') && !method_name.starts_with('@') {
+                    // Try to find the method by name
+                    if let Some(method_entries) = self.methods_by_name.get(method_name) {
+                        return method_entries.first();
+                    }
                 }
             }
         }
@@ -222,6 +245,39 @@ impl RubyIndex {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    // Update the namespace tree with a new fully qualified name
+    fn update_namespace_tree(&mut self, fully_qualified_name: &str) {
+        // If this is a complex name with namespace separators
+        if fully_qualified_name.contains("::") {
+            let parts: Vec<&str> = fully_qualified_name.split("::").collect();
+
+            // Build up the namespace path
+            let mut current_namespace = String::new();
+            for i in 0..(parts.len() - 1) {
+                // Get this part of the namespace
+                let part = parts[i];
+
+                // Record that this child exists in the parent namespace
+                let children = self
+                    .namespace_tree
+                    .entry(current_namespace.clone())
+                    .or_insert_with(Vec::new);
+
+                // Only add if it's not already there
+                if !children.contains(&part.to_string()) {
+                    children.push(part.to_string());
+                }
+
+                // Update current namespace for next level
+                if current_namespace.is_empty() {
+                    current_namespace = part.to_string();
+                } else {
+                    current_namespace = format!("{}::{}", current_namespace, part);
+                }
+            }
+        }
     }
 }
 
