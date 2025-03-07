@@ -8,6 +8,7 @@ module UserManagement
 
     def hash_password(password)
       # Complex password hashing logic
+      a = 1+2 + asdf
       Digest::SHA256.hexdigest(password + @salt)
     end
   end

@@ -2,7 +2,8 @@ use lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, WorkDoneProgressOptions,
 };
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
+use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 // Define token types for our legend - these need to be in the same order as in semantic_tokens_options
 const TOKEN_TYPE_NAMESPACE: u32 = 0;
@@ -29,6 +30,8 @@ const TOKEN_TYPE_REGEXP: u32 = 20;
 const TOKEN_TYPE_OPERATOR: u32 = 21;
 const TOKEN_TYPE_DECORATOR: u32 = 22;
 
+/// Returns the semantic token options for the LSP server.
+/// This defines the token types and modifiers that will be used for highlighting.
 pub fn semantic_tokens_options() -> SemanticTokensOptions {
     // Define semantic token types and modifiers for Ruby
     let token_types = vec![
@@ -84,110 +87,370 @@ pub fn semantic_tokens_options() -> SemanticTokensOptions {
     }
 }
 
-// Maps tree-sitter node types to LSP semantic token types
-fn get_token_type(node_type: &str) -> Option<u32> {
-    match node_type {
-        "class" => Some(TOKEN_TYPE_CLASS),
-        "module" => Some(TOKEN_TYPE_NAMESPACE),
-        "method" => Some(TOKEN_TYPE_METHOD),
-        "singleton_method" => Some(TOKEN_TYPE_METHOD),
-        "identifier" => Some(TOKEN_TYPE_VARIABLE),
-        "constant" => Some(TOKEN_TYPE_TYPE),
-        "string" => Some(TOKEN_TYPE_STRING),
-        "string_literal" => Some(TOKEN_TYPE_STRING),
-        "integer" => Some(TOKEN_TYPE_NUMBER),
-        "float" => Some(TOKEN_TYPE_NUMBER),
+/// Maps tree-sitter highlight scopes to LSP semantic token types.
+/// This is a crucial function that determines how each syntax element is highlighted.
+fn map_highlight_to_token_type(highlight_name: &str) -> Option<u32> {
+    match highlight_name {
+        "variable" | "variable.builtin" => Some(TOKEN_TYPE_VARIABLE),
+        "variable.parameter" | "parameter" => Some(TOKEN_TYPE_PARAMETER),
+        "property" | "property.builtin" | "instance_variable" | "class_variable" => {
+            Some(TOKEN_TYPE_PROPERTY)
+        }
+        "function" | "function.builtin" => Some(TOKEN_TYPE_FUNCTION),
+        "method" | "method.builtin" => Some(TOKEN_TYPE_METHOD),
+        "keyword" | "keyword.type" => Some(TOKEN_TYPE_KEYWORD),
         "comment" => Some(TOKEN_TYPE_COMMENT),
-        "instance_variable" => Some(TOKEN_TYPE_PROPERTY),
-        "class_variable" => Some(TOKEN_TYPE_PROPERTY),
-        "global_variable" => Some(TOKEN_TYPE_VARIABLE),
-        "symbol_literal" => Some(TOKEN_TYPE_PROPERTY),
-        "regex" => Some(TOKEN_TYPE_REGEXP),
-        "hash" => Some(TOKEN_TYPE_STRUCT),
-        "array" => Some(TOKEN_TYPE_STRUCT),
-        "keyword" => Some(TOKEN_TYPE_KEYWORD),
+        "string" | "string.special" => Some(TOKEN_TYPE_STRING),
+        "number" => Some(TOKEN_TYPE_NUMBER),
+        "regexp" | "string.regexp" => Some(TOKEN_TYPE_REGEXP),
+        "operator" => Some(TOKEN_TYPE_OPERATOR),
+        "constant" | "constant.builtin" => Some(TOKEN_TYPE_TYPE),
+        "constructor" => Some(TOKEN_TYPE_FUNCTION),
+        "attribute" => Some(TOKEN_TYPE_PROPERTY),
+        "embedded" => Some(TOKEN_TYPE_MACRO),
+        "tag" => Some(TOKEN_TYPE_DECORATOR),
+        "module" => Some(TOKEN_TYPE_NAMESPACE),
+        "type" | "type.builtin" => Some(TOKEN_TYPE_TYPE),
+        "class" => Some(TOKEN_TYPE_CLASS),
         _ => None,
     }
 }
 
-// Generate semantic tokens from Ruby code
+/// Generate semantic tokens from Ruby code using tree-sitter-highlight
+/// This function uses the tree-sitter-highlight library to parse and highlight Ruby code,
+/// then converts the highlighting events into LSP semantic tokens.
 pub fn generate_semantic_tokens(content: &str) -> Result<Vec<SemanticToken>, String> {
-    let mut parser = Parser::new();
-    let language = tree_sitter_ruby::LANGUAGE;
-    parser
-        .set_language(&language.into())
-        .map_err(|_| "Failed to load Ruby grammar".to_string())?;
+    // Define highlight names that we'll recognize
+    let highlight_names: Vec<&str> = vec![
+        "attribute",
+        "comment",
+        "constant",
+        "constant.builtin",
+        "constructor",
+        "embedded",
+        "function",
+        "function.builtin",
+        "keyword",
+        "method",
+        "method.builtin",
+        "module",
+        "number",
+        "operator",
+        "parameter",
+        "property",
+        "property.builtin",
+        "regexp",
+        "string",
+        "string.special",
+        "tag",
+        "type",
+        "type.builtin",
+        "variable",
+        "variable.parameter",
+        "instance_variable",
+        "class_variable",
+        "string.regexp", // Add string.regexp for regular expressions
+        "keyword.type",  // Add keyword.type for module declarations
+    ];
 
-    let tree = parser
-        .parse(content, None)
-        .ok_or_else(|| "Failed to parse Ruby code".to_string())?;
+    // Create highlighter and configuration
+    let mut highlighter = Highlighter::new();
+    let ruby_language = tree_sitter_ruby::LANGUAGE;
 
+    let mut ruby_config = HighlightConfiguration::new(
+        ruby_language.into(),
+        "ruby",
+        tree_sitter_ruby::HIGHLIGHTS_QUERY,
+        "", // No injections query needed for now
+        tree_sitter_ruby::LOCALS_QUERY,
+    )
+    .map_err(|e| format!("Failed to create highlight configuration: {}", e))?;
+
+    ruby_config.configure(&highlight_names);
+
+    // Generate highlight events
+    let highlight_events = highlighter
+        .highlight(&ruby_config, content.as_bytes(), None, |_| None)
+        .map_err(|e| format!("Failed to highlight code: {}", e))?;
+
+    // Convert highlight events to semantic tokens
     let mut tokens = Vec::new();
-    let root_node = tree.root_node();
+    let mut line = 0;
+    let mut column = 0;
+    let mut current_token_type: Option<u32> = None;
+    let mut token_start_line = 0;
+    let mut token_start_column = 0;
 
-    collect_semantic_tokens(root_node, content, &mut tokens, 0, 0);
+    // Helper function to calculate line and column from byte position
+    let get_position = |pos: usize, content: &str| -> (u32, u32) {
+        let preceding = &content[..pos];
+        let line = preceding.chars().filter(|&c| c == '\n').count() as u32;
+        let last_newline = preceding.rfind('\n').map_or(0, |i| i + 1);
+        let column = preceding[last_newline..].chars().count() as u32;
+        (line, column)
+    };
+
+    // Keep track of previous token positions for delta calculations
+    let mut prev_line = 0;
+    let mut prev_col = 0;
+
+    for event_result in highlight_events {
+        let event = event_result.map_err(|e| format!("Error in highlight event: {}", e))?;
+
+        match event {
+            HighlightEvent::Source { start, end } => {
+                // Calculate position for source span
+                let start_pos = get_position(start, content);
+                let end_pos = get_position(end, content);
+
+                // Only process if we have a current token type and the span is on a single line
+                if start_pos.0 == end_pos.0 && current_token_type.is_some() {
+                    line = start_pos.0;
+                    column = start_pos.1;
+
+                    let length = end_pos.1.saturating_sub(start_pos.1);
+                    if length > 0 {
+                        let token_type = current_token_type.unwrap();
+
+                        // Calculate delta line and start from previous token
+                        let delta_line = if tokens.is_empty() {
+                            line
+                        } else {
+                            line.saturating_sub(prev_line)
+                        };
+
+                        let delta_start = if tokens.is_empty() || delta_line > 0 {
+                            column
+                        } else {
+                            column.saturating_sub(prev_col)
+                        };
+
+                        tokens.push(SemanticToken {
+                            delta_line,
+                            delta_start,
+                            length,
+                            token_type,
+                            token_modifiers_bitset: 0,
+                        });
+
+                        // Update previous token position
+                        prev_line = line;
+                        prev_col = column;
+                    }
+                }
+            }
+            HighlightEvent::HighlightStart(highlight) => {
+                // Map highlight to token type
+                if let Some(highlight_name) = highlight_names.get(highlight.0) {
+                    current_token_type = map_highlight_to_token_type(highlight_name);
+                }
+            }
+            HighlightEvent::HighlightEnd => {
+                current_token_type = None;
+            }
+        }
+    }
 
     Ok(tokens)
 }
 
-// Recursively collect semantic tokens from the tree
-fn collect_semantic_tokens(
-    node: Node,
-    source: &str,
-    tokens: &mut Vec<SemanticToken>,
-    parent_row: u32,
-    parent_col: u32,
-) {
-    if let Some(token_type) = get_token_type(node.kind()) {
-        let start_pos = node.start_position();
-        let end_pos = node.end_position();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
 
-        // Only add tokens for non-empty ranges
-        if start_pos.row < end_pos.row
-            || (start_pos.row == end_pos.row && start_pos.column < end_pos.column)
-        {
-            let delta_line = start_pos.row as u32 - parent_row;
-            let delta_start = if delta_line == 0 {
-                start_pos.column as u32 - parent_col
-            } else {
-                start_pos.column as u32
-            };
+    /// Creates a sample Ruby file for testing
+    fn setup_test_file() -> String {
+        let code = r#"#!/usr/bin/env ruby
 
-            let token_length = if start_pos.row == end_pos.row {
-                end_pos.column as u32 - start_pos.column as u32
-            } else {
-                // Multi-line token, just use the length of the first line
-                let line_end = source[node.start_byte()..node.end_byte()]
-                    .find('\n')
-                    .unwrap_or(node.end_byte() - node.start_byte());
-                line_end as u32
-            };
+# This is a test comment
+module TestModule
+  # Module-level constant
+  VERSION = '1.0.0'
 
-            tokens.push(SemanticToken {
-                delta_line,
-                delta_start,
-                length: token_length,
-                token_type,
-                token_modifiers_bitset: 0,
-            });
+  # Mixin module
+  module Helpers
+    def helper_method
+      puts 'Helper method called'
+    end
+  end
 
-            // Update parent position for children
-            let new_parent_row = start_pos.row as u32;
-            let new_parent_col = start_pos.column as u32;
+  # Main class definition
+  class TestClass
+    include Helpers
+    extend Enumerable
 
-            // Process child nodes
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    collect_semantic_tokens(child, source, tokens, new_parent_row, new_parent_col);
-                }
+    # Class-level instance variable
+    @instances = 0
+
+    # Property accessors with symbols
+    attr_accessor :name, :age
+    attr_reader :created_at
+
+    # Class variable
+    @@total_instances = 0
+
+    # Regular expression constant
+    EMAIL_REGEX = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/
+
+    # Initialize method with default parameter
+    def initialize(name, age = 30)
+      @name = name        # Instance variable
+      @age = age         # Instance variable
+      @created_at = Time.now
+      @@total_instances += 1
+      self.class.increment_instances
+    end
+
+    # Class method using self
+    def self.increment_instances
+      @instances += 1
+    end
+
+    # Instance method with string interpolation
+    def greet
+      # Heredoc usage
+      message = <<~HEREDOC
+        Hello, #{@name}!
+        You are #{@age} years old.
+        You were created at #{@created_at}.
+      HEREDOC
+      puts message
+    end
+
+    # Method with block parameter
+    def self.create_many(count, &block)
+      count.times.map do |i|
+        instance = new("Person #{i}", 20 + i)
+        block.call(instance) if block
+        instance
+      end
+    end
+
+    # Method with keyword arguments
+    def update(name: nil, age: nil)
+      @name = name if name
+      @age = age if age
+    end
+
+    # Method demonstrating various Ruby operators
+    def calculate(x, y)
+      result = case x <=> y
+               when -1 then :less
+               when 0 then :equal
+               when 1 then :greater
+               end
+
+      # Parallel assignment
+      a, b = y, x
+
+      # Range operator
+      (a..b).each { |n| puts n }
+
+      # Safe navigation operator
+      result&.to_s
+    end
+
+    # Method with rescue clause
+    def risky_operation
+      raise 'Error' if @age < 0
+    rescue StandardError => e
+      puts "Caught error: #{e.message}"
+    ensure
+      puts 'Always executed'
+    end
+  end
+end
+
+# Create instances and demonstrate usage
+if __FILE__ == $PROGRAM_NAME
+  # Array of symbols
+  valid_names = %i[john jane alice bob]
+
+  # Hash with symbol keys
+  config = {
+    enabled: true,
+    max_retries: 3,
+    timeout: 30
+  }
+
+  # Block usage with do..end
+  TestModule::TestClass.create_many(3) do |person|
+    person.greet
+  end
+
+  # Block usage with braces
+  %w[Alice Bob].each { |name|
+    person = TestModule::TestClass.new(name)
+    person.update(age: 25)
+  }
+
+  # Regular expression matching
+  name = 'test@example.com'
+  if name =~ TestModule::TestClass::EMAIL_REGEX
+    puts 'Valid email'
+  end
+end"#;
+
+        // Write the code to a file for persistence
+        let file_path = "test_method.rb";
+        fs::write(file_path, code).expect("Failed to write test file");
+        code.to_string()
+    }
+
+    #[test]
+    fn test_semantic_token_generation() {
+        // Setup test file with comments
+        let content = setup_test_file();
+
+        // Generate semantic tokens
+        let tokens =
+            generate_semantic_tokens(&content).expect("Failed to generate semantic tokens");
+
+        // Test that tokens were generated
+        assert!(!tokens.is_empty(), "No semantic tokens were generated");
+
+        // Print tokens for debugging
+        println!("Generated tokens:");
+        let mut line = 0;
+        let mut col = 0;
+        for token in &tokens {
+            line += token.delta_line;
+            if token.delta_line > 0 {
+                col = 0;
             }
+            col += token.delta_start;
+            println!(
+                "Line {}, Col {}, Len {}, Type {}",
+                line, col, token.length, token.token_type
+            );
         }
-    } else {
-        // Process child nodes if this node doesn't generate a token
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                collect_semantic_tokens(child, source, tokens, parent_row, parent_col);
-            }
+
+        // Validate basic token types
+        let has_keywords = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_KEYWORD);
+        assert!(has_keywords, "No keyword tokens found");
+
+        let has_methods = tokens
+            .iter()
+            .any(|t| t.token_type == TOKEN_TYPE_METHOD || t.token_type == TOKEN_TYPE_FUNCTION);
+        assert!(has_methods, "No method/function tokens found");
+
+        let has_comments = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_COMMENT);
+        assert!(has_comments, "No comment tokens found");
+
+        // Validate Ruby-specific token types
+        let has_constants = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_TYPE);
+        assert!(has_constants, "No constant tokens found");
+
+        let has_instance_vars = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_PROPERTY);
+        assert!(has_instance_vars, "No instance variable tokens found");
+
+        let has_operators = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_OPERATOR);
+        assert!(has_operators, "No operator tokens found");
+
+        // Validate token format
+        for token in &tokens {
+            assert!(token.length > 0, "Token has zero length");
         }
     }
 }
