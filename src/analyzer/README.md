@@ -2,6 +2,50 @@
 
 The analyzer component is responsible for analyzing Ruby source code to provide semantic information for the Language Server Protocol (LSP) features. It works with the Tree-sitter parser to extract meaningful information from Ruby code at specific positions, enabling features like go-to-definition, hover information, and code completion.
 
+## Module Structure
+
+After refactoring, the analyzer is organized into several focused modules:
+
+```
+src/analyzer/
+├── mod.rs        - Main module that re-exports public components
+├── core.rs       - Core RubyAnalyzer implementation with basic functionality
+├── position.rs   - Position conversion utilities
+├── identifier.rs - Identifier resolution logic
+└── context.rs    - Code context determination
+```
+
+### Core Module (`core.rs`)
+
+Contains the fundamental `RubyAnalyzer` struct and basic parsing functionality:
+- Parser initialization
+- Tree-sitter integration
+- Node text extraction
+- Node traversal utilities
+
+### Position Module (`position.rs`)
+
+Provides utilities for working with positions:
+- Converting between LSP positions and Tree-sitter points
+- Line/column to offset conversion functions
+- Offset to position mapping
+
+### Identifier Module (`identifier.rs`)
+
+Handles identifier resolution:
+- Finding identifiers at a specific position
+- Determining fully qualified names of symbols
+- Instance variable detection
+- Method call resolution
+
+### Context Module (`context.rs`)
+
+Provides code context awareness:
+- Finding the current method at a position
+- Determining class/module context at a position
+- Building namespace hierarchies
+- Module and class detection
+
 ## Key Components
 
 ### RubyAnalyzer
@@ -11,7 +55,8 @@ The `RubyAnalyzer` struct is the main entry point for code analysis. It uses Tre
 - `find_identifier_at_position`: Finds the identifier at a given position in the document
 - `find_node_at_point`: Locates a specific node in the AST at a given point
 - `determine_fully_qualified_name`: Determines the fully qualified name of a node
-- `determine_method_call_fqn`: Determines the fully qualified name of a method call
+- `find_current_context`: Determines the class/module context at a position
+- `find_current_method`: Finds the method containing a position
 
 ### Position and Node Handling
 
@@ -34,25 +79,64 @@ One of the most critical operations is mapping a cursor position to the relevant
 fn find_node_at_point<'a>(&self, cursor: &mut TreeCursor<'a>, point: Point) -> Option<Node<'a>> {
     let node = cursor.node();
 
-    // Check if the point is within this node's range
-    if !node_contains_point(node, point) {
+    // Check if point is within node bounds
+    if !is_point_within_node(point, node) {
         return None;
     }
 
-    // Check if any children contain the point
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if node_contains_point(child, point) {
-                cursor.reset(child);
-                if let Some(found) = self.find_node_at_point(cursor, point) {
-                    return Some(found);
-                }
+    // First check if any of the children contain the point
+    if cursor.goto_first_child() {
+        loop {
+            if let Some(matching_node) = self.find_node_at_point(cursor, point) {
+                return Some(matching_node);
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+
+    // If no child contains the point, return this node
+    Some(node)
+}
+```
+
+### Context Determination
+
+A significant improvement in the refactored code is the robust context determination logic:
+
+```rust
+pub fn find_current_context(&self, tree: &Tree, position: Position) -> String {
+    let root_node = tree.root_node();
+
+    // Get all modules and classes in the file
+    let mut module_nodes = Vec::new();
+    self.find_modules_and_classes(root_node, &mut module_nodes);
+
+    // Build a context hierarchy
+    let mut contexts = Vec::new();
+
+    // For each module/class, check if it contains the position
+    for node in &module_nodes {
+        // Get the range of lines this module/class covers
+        let start_line = node.start_position().row as u32;
+        let end_line = node.end_position().row as u32;
+
+        // Get the name of the module/class
+        if let Some(name_node) = node.child_by_field_name("name") {
+            let name = self.get_node_text(name_node);
+
+            // Check if the position is within this module/class
+            if position.line >= start_line && position.line <= end_line {
+                // Keep track of it along with its extent
+                contexts.push((name, node.start_byte(), node.end_byte()));
             }
         }
     }
 
-    // If no children contain the point, return this node
-    Some(node)
+    // Sort and organize the context nodes to build the full context string
+    // ...
 }
 ```
 
@@ -71,136 +155,34 @@ The analyzer must correctly identify these nodes to provide accurate information
 
 ## Implementation Details
 
-### Context Resolution
-
-When analyzing a node, the analyzer determines its context by traversing up the AST:
-
-```rust
-fn get_surrounding_context(&self, node: Node) -> (Option<String>, Option<String>) {
-    let mut current = node;
-    let mut class_name = None;
-    let mut method_name = None;
-
-    while let Some(parent) = current.parent() {
-        match parent.kind() {
-            "class" => {
-                if let Some(name_node) = parent.child_by_field_name("name") {
-                    class_name = Some(self.get_node_text(name_node));
-                    break;
-                }
-            },
-            "method" => {
-                if let Some(name_node) = parent.child_by_field_name("name") {
-                    method_name = Some(self.get_node_text(name_node));
-                }
-            },
-            // Handle other node types...
-            _ => {}
-        }
-        current = parent;
-    }
-
-    (class_name, method_name)
-}
-```
-
 ### Method Call Resolution
 
 For method calls, the analyzer needs to determine the target and method name:
 
 ```rust
-fn determine_method_call_fqn(&self, node: Node, position: Position) -> String {
-    // Find receiver and method name
-    let receiver = node.child_by_field_name("receiver");
-    let method = node.child_by_field_name("method");
-
-    if let Some(method_node) = method {
-        let method_name = self.get_node_text(method_node);
-
-        if let Some(receiver_node) = receiver {
-            // Determine the receiver's type/class
-            let receiver_type = self.determine_node_type(receiver_node);
-            return format!("{}#{}", receiver_type, method_name);
-        } else {
-            // No explicit receiver, use context
-            let (class_context, _) = self.get_surrounding_context(node);
-            if let Some(class) = class_context {
-                return format!("{}#{}", class, method_name);
+fn determine_method_call_fqn(&self, tree: &Tree, node: Node, position: Position) -> String {
+    let method_node = if node.kind() == "call" {
+        node.child_by_field_name("method")
+    } else {
+        // If the node itself is an identifier that's part of a call
+        let parent = node.parent();
+        if let Some(p) = parent {
+            if p.kind() == "call" && p.child_by_field_name("method") == Some(node) {
+                Some(node)
             } else {
-                return method_name;
+                None
             }
-        }
-    }
-
-    // Fallback
-    self.get_node_text(node)
-}
-```
-
-### Handling Ruby's Special Methods
-
-Ruby has special methods like attribute accessors that require special handling:
-
-```rust
-fn is_attribute_accessor(&self, method_name: &str, class_name: &str) -> bool {
-    // Check if this is a getter/setter created by attr_accessor
-    if let Some(entries) = self.index.methods_by_name.get(method_name) {
-        for entry in entries {
-            if entry.fully_qualified_name.starts_with(&format!("{}#", class_name)) {
-                return true;
-            }
-        }
-    }
-    false
-}
-```
-
-## Debugging Strategies
-
-When debugging analyzer issues, consider these techniques:
-
-### Position Debugging
-
-Verify that positions are correctly translated between LSP and Tree-sitter:
-
-```rust
-fn debug_position(&self, position: Position, point: Point) {
-    println!("LSP Position: line={}, character={}", position.line, position.character);
-    println!("Tree-sitter Point: row={}, column={}", point.row, point.column);
-}
-```
-
-### Node Path Tracing
-
-Trace the path from a node up to the root to understand its context:
-
-```rust
-fn trace_node_path(&self, node: Node) {
-    let mut current = node;
-    let mut path = vec![format!("{}({})", current.kind(), self.get_node_text(current))];
-
-    while let Some(parent) = current.parent() {
-        path.push(format!("{}({})", parent.kind(), self.get_node_text(parent)));
-        current = parent;
-    }
-
-    println!("Node path (leaf to root): {}", path.join(" -> "));
-}
-```
-
-### Field Availability Check
-
-Check if expected fields are available on nodes:
-
-```rust
-fn check_fields(&self, node: Node) {
-    let fields = ["name", "receiver", "method", "arguments", "body"];
-    for field in fields {
-        if let Some(field_node) = node.child_by_field_name(field) {
-            println!("Field '{}' exists: {}", field, self.get_node_text(field_node));
         } else {
-            println!("Field '{}' does not exist", field);
+            None
         }
+    };
+
+    if let Some(method_node) = method_node {
+        let method_name = self.get_node_text(method_node);
+        // ...determine the method's fully qualified name
+        method_name
+    } else {
+        String::new()
     }
 }
 ```
@@ -217,57 +199,6 @@ fn check_fields(&self, node: Node) {
 
 5. **Ruby's Dynamic Nature**: Ruby's highly dynamic nature means that precise static analysis is challenging. The analyzer can only provide best-effort results.
 
-## Code Examples
-
-### Example: Finding Constant References
-
-```rust
-fn find_constant_references(&self, document: &str, constant_name: &str) -> Vec<Range> {
-    let mut references = Vec::new();
-    let tree = self.parser.parse(document, None).unwrap();
-    let mut cursor = tree.root_node().walk();
-
-    self.traverse_for_constants(&mut cursor, document, constant_name, &mut references);
-
-    references
-}
-
-fn traverse_for_constants(&self, cursor: &mut TreeCursor, document: &str, target: &str, results: &mut Vec<Range>) {
-    let node = cursor.node();
-
-    if node.kind() == "constant" && self.get_node_text(node) == target {
-        results.push(node_to_range(node));
-    }
-
-    // Traverse children
-    let child_count = node.child_count();
-    for i in 0..child_count {
-        if let Some(child) = node.child(i) {
-            cursor.reset(child);
-            self.traverse_for_constants(cursor, document, target, results);
-        }
-    }
-}
-```
-
-### Example: LSP to Tree-sitter Position Conversion
-
-```rust
-fn lsp_position_to_tree_sitter_point(position: Position) -> Point {
-    Point {
-        row: position.line as usize,
-        column: position.character as usize,
-    }
-}
-
-fn tree_sitter_point_to_lsp_position(point: Point) -> Position {
-    Position {
-        line: point.row as u32,
-        character: point.column as u32,
-    }
-}
-```
-
 ## Features
 
 The analyzer supports several key features:
@@ -276,25 +207,6 @@ The analyzer supports several key features:
 2. **Context Awareness**: Understands the context of code (class/module/method scope)
 3. **Method Call Analysis**: Analyzes method calls to determine their targets
 4. **Variable Scope Analysis**: Tracks variable scopes to provide accurate information
-
-## Recent Updates
-
-- Improved handling of method calls and identifier resolution
-- Enhanced support for Ruby's attribute methods (`attr_accessor`, `attr_reader`, `attr_writer`)
-- Fixed issues with position-to-node mapping for better cursor position handling
-
-## Usage
-
-The analyzer is used by the LSP server to provide semantic information about Ruby code. It's typically used to respond to requests like "go to definition" or "hover".
-
-```rust
-// Example usage
-let mut analyzer = RubyAnalyzer::new();
-if let Some(identifier) = analyzer.find_identifier_at_position(document, position) {
-    // Use the identifier for further processing
-    // e.g., look up in the index to find its definition
-}
-```
 
 ## Integration with Indexer
 
@@ -327,7 +239,8 @@ The analyzer includes tests that verify its functionality, including:
 - Identifier extraction
 - Method call identification
 - Node text extraction
-- Handling of complex Ruby classes and modules
+- Context determination
+- Position conversion utilities
 
 Run the tests with:
 

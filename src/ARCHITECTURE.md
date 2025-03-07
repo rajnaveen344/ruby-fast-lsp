@@ -53,13 +53,18 @@ The Analyzer is responsible for understanding Ruby code structure and semantics.
 
 #### Key Files:
 
-- `mod.rs`: Core analyzer implementation
+- `mod.rs`: Central module file that re-exports public components
+- `core.rs`: Core analyzer implementation with basic functionality
+- `identifier.rs`: Identifier resolution and fully qualified name determination
+- `context.rs`: Code context detection (current class, method, etc.)
+- `position.rs`: Position conversion utilities
 
 #### Design Decisions:
 
 - The analyzer focuses on understanding what code means, not where it's located
 - The analyzer is stateless - it analyzes code on demand
 - Analysis is separated from indexing to maintain separation of concerns
+- Structured in smaller files with focused responsibilities
 
 ### 3. Capabilities (`src/capabilities/`)
 
