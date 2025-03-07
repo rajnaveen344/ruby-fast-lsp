@@ -254,6 +254,78 @@ pub fn generate_semantic_tokens(content: &str) -> Result<Vec<SemanticToken>, Str
     Ok(tokens)
 }
 
+/// Generate semantic tokens for a specific range of text
+/// This function extracts the text within the given range and generates tokens for it,
+/// adjusting the token positions relative to the range start.
+pub fn generate_semantic_tokens_for_range(
+    content: &str,
+    range: &lsp_types::Range,
+) -> Result<Vec<SemanticToken>, String> {
+    // Extract the text within the requested range
+    let lines: Vec<&str> = content.lines().collect();
+    let start_line = range.start.line as usize;
+    let end_line = range.end.line as usize;
+
+    if start_line >= lines.len() || end_line >= lines.len() {
+        return Ok(Vec::new());
+    }
+
+    // Build the content for the requested range
+    let range_content = if start_line == end_line {
+        // Single line case
+        let line = lines[start_line];
+        let start_char = range.start.character as usize;
+        let end_char = range.end.character as usize;
+        if start_char >= line.len() || end_char > line.len() {
+            return Ok(Vec::new());
+        }
+        line[start_char..end_char].to_string()
+    } else {
+        // Multi-line case
+        let mut range_lines = Vec::new();
+
+        // First line from start character
+        let first_line = lines[start_line];
+        let start_char = range.start.character as usize;
+        if start_char <= first_line.len() {
+            range_lines.push(&first_line[start_char..]);
+        }
+
+        // Middle lines complete
+        range_lines.extend(&lines[start_line + 1..end_line]);
+
+        // Last line up to end character
+        let last_line = lines[end_line];
+        let end_char = range.end.character as usize;
+        if end_char <= last_line.len() {
+            range_lines.push(&last_line[..end_char]);
+        }
+
+        range_lines.join("\n")
+    };
+
+    // Generate tokens for the range content
+    let mut tokens = generate_semantic_tokens(&range_content)?;
+
+    // Adjust token positions relative to the start of the range
+    if !tokens.is_empty() {
+        // For the first token, we need to adjust its position relative to the range start
+        tokens[0].delta_line = 0;
+        tokens[0].delta_start = range.start.character;
+
+        // For subsequent tokens, we need to maintain their relative positions
+        let mut current_line = 0;
+        for i in 1..tokens.len() {
+            current_line += tokens[i].delta_line;
+            if current_line == 0 {
+                tokens[i].delta_start += range.start.character;
+            }
+        }
+    }
+
+    Ok(tokens)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,5 +524,104 @@ end"#;
         for token in &tokens {
             assert!(token.length > 0, "Token has zero length");
         }
+    }
+
+    #[test]
+    fn test_semantic_token_generation_for_range() {
+        // Setup test file
+        let content = setup_test_file();
+
+        println!("\nTest file content:\n{}", content);
+
+        // Test single-line range containing a module definition
+        let single_line_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 3,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 4,
+                character: 0,
+            },
+        };
+
+        // Print the exact line we're trying to tokenize
+        let lines: Vec<&str> = content.lines().collect();
+        println!(
+            "\nTargeting line {}:\n{}",
+            single_line_range.start.line, lines[single_line_range.start.line as usize]
+        );
+
+        let tokens = generate_semantic_tokens_for_range(&content, &single_line_range)
+            .expect("Failed to generate tokens for single line range");
+
+        println!("\nGenerated tokens for single line range:");
+        for token in &tokens {
+            println!(
+                "Token: delta_line={}, delta_start={}, length={}, type={}",
+                token.delta_line, token.delta_start, token.length, token.token_type
+            );
+        }
+
+        // Verify tokens for "module TestModule" line
+        assert!(
+            !tokens.is_empty(),
+            "No tokens generated for single line range"
+        );
+
+        // Test multi-line range containing module and constant
+        let multi_line_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 3,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 6,
+                character: 0,
+            },
+        };
+
+        println!("\nTargeting multi-line range:");
+        for i in single_line_range.start.line as usize..=multi_line_range.end.line as usize {
+            println!("Line {}: {}", i, lines[i]);
+        }
+
+        let tokens = generate_semantic_tokens_for_range(&content, &multi_line_range)
+            .expect("Failed to generate tokens for multi line range");
+
+        println!("\nGenerated tokens for multi-line range:");
+        for token in &tokens {
+            println!(
+                "Token: delta_line={}, delta_start={}, length={}, type={}",
+                token.delta_line, token.delta_start, token.length, token.token_type
+            );
+        }
+
+        assert!(
+            !tokens.is_empty(),
+            "No tokens generated for multi line range"
+        );
+
+        // Verify we have both keyword and constant tokens
+        let has_keyword = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_KEYWORD);
+        let has_constant = tokens.iter().any(|t| t.token_type == TOKEN_TYPE_TYPE);
+        assert!(has_keyword, "No keyword token found in multi-line range");
+        assert!(has_constant, "No constant token found in multi-line range");
+
+        // Test invalid range
+        let invalid_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 1000,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 1001,
+                character: 10,
+            },
+        };
+
+        let tokens = generate_semantic_tokens_for_range(&content, &invalid_range)
+            .expect("Failed to handle invalid range");
+        assert!(tokens.is_empty(), "Tokens generated for invalid range");
     }
 }

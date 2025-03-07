@@ -272,4 +272,37 @@ impl LanguageServer for RubyLanguageServer {
             }
         }
     }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> LspResult<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+
+        // Get document content from cache
+        let content = match self.get_document_content(&uri).await {
+            Some(content) => content,
+            None => return Ok(None),
+        };
+
+        // Use the semantic tokens capability to generate tokens for the range
+        match crate::capabilities::semantic_tokens::generate_semantic_tokens_for_range(
+            &content, &range,
+        ) {
+            Ok(tokens) => Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens,
+            }))),
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Error generating semantic tokens for range: {}", e),
+                    )
+                    .await;
+                Ok(None)
+            }
+        }
+    }
 }
