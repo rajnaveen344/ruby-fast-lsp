@@ -14,9 +14,11 @@ impl RubyAnalyzer {
     /// Create a new RubyAnalyzer instance
     pub fn new() -> Self {
         let mut parser = Parser::new();
-        parser
-            .set_language(tree_sitter_ruby::language())
-            .expect("Failed to load Ruby grammar");
+        let language = tree_sitter_ruby::LANGUAGE;
+        let _ = parser
+            .set_language(&language.into())
+            .map_err(|_| "Failed to load Ruby grammar".to_string());
+
         RubyAnalyzer {
             parser,
             document: String::new(),

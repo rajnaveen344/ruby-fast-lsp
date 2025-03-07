@@ -12,9 +12,10 @@ pub struct RubyParser {
 impl RubyParser {
     pub fn new() -> Result<Self> {
         let mut parser = Parser::new();
-        let lang = tree_sitter_ruby::language();
-
-        parser.set_language(lang)?;
+        let language = tree_sitter_ruby::LANGUAGE;
+        let _ = parser
+            .set_language(&language.into())
+            .map_err(|_| "Failed to load Ruby grammar".to_string());
 
         Ok(Self {
             parser: Arc::new(Mutex::new(parser)),

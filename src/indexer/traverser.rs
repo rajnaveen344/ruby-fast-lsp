@@ -45,8 +45,9 @@ impl TraversalContext {
 impl RubyIndexer {
     pub fn new() -> Result<Self, String> {
         let mut parser = Parser::new();
+        let language = tree_sitter_ruby::LANGUAGE;
         parser
-            .set_language(tree_sitter_ruby::language())
+            .set_language(&language.into())
             .map_err(|_| "Failed to load Ruby grammar".to_string())?;
 
         Ok(RubyIndexer {

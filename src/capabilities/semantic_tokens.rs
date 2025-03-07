@@ -113,8 +113,9 @@ fn get_token_type(node_type: &str) -> Option<u32> {
 // Generate semantic tokens from Ruby code
 pub fn generate_semantic_tokens(content: &str) -> Result<Vec<SemanticToken>, String> {
     let mut parser = Parser::new();
+    let language = tree_sitter_ruby::LANGUAGE;
     parser
-        .set_language(tree_sitter_ruby::language())
+        .set_language(&language.into())
         .map_err(|_| "Failed to load Ruby grammar".to_string())?;
 
     let tree = parser
