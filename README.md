@@ -17,6 +17,7 @@ The LSP is built with the following components:
 - **Server**: Implements the LSP protocol and handles client communication
 - **Parser**: Uses tree-sitter to parse Ruby code
 - **Analyzer**: Analyzes the parsed code to provide language features
+- **Indexer**: Indexes Ruby symbols for fast lookup and navigation
 
 ## Development
 
@@ -42,6 +43,22 @@ cargo run
 ```bash
 cargo test
 ```
+
+The test suite is organized by component:
+
+- Server tests: `src/tests/server_tests.rs`
+- Parser tests: `src/tests/parser_tests.rs`
+- Indexer tests: `src/tests/indexer_tests.rs`
+- Analyzer tests: `src/tests/analyzer_tests.rs`
+- Integration tests: `src/tests/integration_test.rs`
+
+To run tests for a specific component:
+
+```bash
+cargo test --test server_tests
+```
+
+See `src/tests/README.md` for more details on the test suite.
 
 ## Usage
 

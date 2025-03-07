@@ -1,37 +1,51 @@
 # Tests Directory
 
-This directory contains test files used for manual testing and debugging the Ruby Fast LSP server.
+This directory contains test files used for testing the Ruby Fast LSP server.
 
-## Files
+## Structure
 
-### test.rb
+- **fixtures/**: Contains Ruby files used for testing the parser, indexer, and LSP features
+- **fixtures_integration_test.rs**: Integration tests for verifying that fixtures can be properly parsed and indexed
+- **ruby_language_test.rs**: Tests for verifying Ruby language parsing capabilities
 
-`test.rb` is a simple Ruby class file used for testing the LSP features such as:
+## Fixtures
 
-- Goto Definition
-- Find References
-- Indexing
-- Local variable resolution
+The `fixtures/` directory contains various Ruby files that test different aspects of the Ruby language and LSP functionality. These fixtures include:
 
-The file contains:
-- A `Person` class with instance variables and methods
-- Local variable definitions and references
-- Method calls that can be used to test navigation
+- Class and module definitions
+- Method declarations and calls
+- Variable declarations (local, instance, class)
+- Control flow structures
+- Error handling
+- Blocks and procs
 
-Use this file in your editor when you want to test that LSP features like "goto definition" are working correctly.
+## Integration Tests
 
-## Usage
+The integration tests focus on ensuring that:
 
-To test using this file:
+1. The parser can successfully parse all fixture files
+2. The indexer can process and index the parsed files
+3. Language features like classes, methods, and variables are correctly identified
 
-1. Start the Ruby Fast LSP server:
-   ```
-   ./target/release/ruby-fast-lsp
-   ```
+## Running Tests
 
-2. Open the `test.rb` file in your editor that's configured to use the LSP server
+Run all tests with:
 
-3. Try features like:
-   - Jump to definition on variables like `greeting`, `age_threshold`
-   - Jump to definition on methods like `adult?`, `greet`
-   - Find references to methods and variables
+```bash
+cargo test
+```
+
+Run only the integration tests with:
+
+```bash
+cargo test --test fixtures_integration_test
+cargo test --test ruby_language_test
+```
+
+## Adding Tests
+
+When adding new tests:
+
+1. Add new Ruby fixtures to the `fixtures/` directory
+2. Add test functions to the appropriate test file
+3. Update the `fixtures/README.md` to document the new fixtures
