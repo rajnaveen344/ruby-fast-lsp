@@ -71,6 +71,14 @@ impl RubyLanguageServer {
             }
         }
     }
+
+    pub async fn index_file(&self, file_uri: &Url) {
+        let file_path = file_uri.to_file_path().unwrap();
+        if file_path.extension().map_or(false, |ext| ext == "rb") {
+            let mut indexer = self.indexer.lock().await;
+            let _ = events::index_workspace_file(&mut indexer, &file_path).await;
+        }
+    }
 }
 
 impl Default for RubyLanguageServer {

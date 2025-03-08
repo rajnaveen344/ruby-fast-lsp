@@ -4,7 +4,7 @@ use lsp_types::{Location, Url};
 
 use super::entry::{Entry, EntryType};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RubyIndex {
     // Main index mapping fully qualified names to entries
     pub entries: HashMap<String, Vec<Entry>>,

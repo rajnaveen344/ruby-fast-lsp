@@ -26,9 +26,12 @@ pub async fn handle_initialize(
         *root = Some(root_uri);
     }
 
-    // Start indexing the workspace
     if let Some(root_uri) = lang_server.workspace_root.lock().await.clone() {
-        lang_server.index_workspace_folder(&root_uri).await;
+        if root_uri.scheme() == "file" {
+            lang_server.index_file(&root_uri).await;
+        } else {
+            lang_server.index_workspace_folder(&root_uri).await;
+        }
     }
 
     let capabilities = ServerCapabilities {
