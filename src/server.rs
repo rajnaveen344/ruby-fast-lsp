@@ -9,7 +9,7 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
 
 pub struct RubyLanguageServer {
-    pub client: Client,
+    pub client: Option<Client>,
     pub indexer: Mutex<RubyIndexer>,
     pub document_cache: Mutex<HashMap<Url, String>>,
     pub workspace_root: Mutex<Option<Url>>,
@@ -22,7 +22,7 @@ impl RubyLanguageServer {
         let workspace_root = Mutex::new(None);
 
         Ok(Self {
-            client,
+            client: Some(client),
             indexer: Mutex::new(indexer),
             document_cache,
             workspace_root,
@@ -53,18 +53,33 @@ impl RubyLanguageServer {
 
         if let Err(e) = events::index_workspace_folder(&mut indexer, folder_uri, |msg| {
             let client = self.client.clone();
-            tokio::spawn(async move {
-                client.log_message(MessageType::INFO, msg).await;
-            });
+            if let Some(client) = client {
+                tokio::spawn(async move {
+                    client.log_message(MessageType::INFO, msg).await;
+                });
+            }
         })
         .await
         {
-            self.client
-                .log_message(
-                    MessageType::ERROR,
-                    format!("Error indexing workspace: {:?}", e),
-                )
-                .await;
+            if let Some(client) = self.client.clone() {
+                client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Error indexing workspace: {:?}", e),
+                    )
+                    .await;
+            }
+        }
+    }
+}
+
+impl Default for RubyLanguageServer {
+    fn default() -> Self {
+        RubyLanguageServer {
+            client: None,
+            indexer: Mutex::new(RubyIndexer::new().unwrap()),
+            document_cache: Mutex::new(HashMap::new()),
+            workspace_root: Mutex::new(None),
         }
     }
 }
@@ -76,7 +91,7 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn initialized(&self, params: InitializedParams) {
-        request::handle_initialized(self, params).await
+        notification::handle_initialized(self, params).await
     }
 
     async fn shutdown(&self) -> LspResult<()> {
