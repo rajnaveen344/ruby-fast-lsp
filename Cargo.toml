@@ -39,9 +39,5 @@ cc = "1.0.83"
 
 # Configure integration tests
 [[test]]
-name = "fixtures_integration_test"
-path = "tests/fixtures_integration_test.rs"
-
-[[test]]
-name = "ruby_language_test"
-path = "tests/ruby_language_test.rs"
+name = "integration_test"
+path = "tests/integration_test.rs"
