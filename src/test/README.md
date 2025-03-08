@@ -27,13 +27,7 @@ Additionally, there are LSP-specific fixtures for testing:
 
 ## Integration Tests
 
-The integration tests focus on ensuring that:
-
-1. Basic Ruby fixture files exist and can be read
-2. LSP-specific fixture files exist and can be read
-3. The environment is properly set up for more detailed LSP testing
-
-Note: We avoid testing functionality already covered by the `tower_lsp` crate's own test suite.
+The integration tests focus on ensuring that all LSP related functionalities(goto, references, completion, etc.) is working as expected for all fixtures.
 
 ## Running Tests
 
@@ -55,7 +49,6 @@ When adding new tests:
 
 1. Add new Ruby fixtures to the `fixtures/` directory
 2. Add test functions to the appropriate test file
-3. Update the `fixtures/README.md` to document the new fixtures
 
 ### Adding LSP Integration Tests
 
