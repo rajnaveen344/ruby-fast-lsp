@@ -65,10 +65,31 @@ pub async fn handle_goto_definition(
         .clone();
     let position = params.text_document_position_params.position;
 
-    // Get document content
+    // Get document content - first try from cache, then from filesystem
     let content = match lang_server.get_document_content(&uri).await {
         Some(content) => content,
-        None => return Ok(None),
+        None => {
+            // If not in cache, try to read from filesystem
+            if uri.scheme() == "file" {
+                let file_path = match uri.to_file_path() {
+                    Ok(path) => path,
+                    Err(_) => return Ok(None),
+                };
+
+                match std::fs::read_to_string(file_path) {
+                    Ok(content) => {
+                        // Also update the cache for future use
+                        lang_server
+                            .update_document_content(uri.clone(), content.clone())
+                            .await;
+                        content
+                    }
+                    Err(_) => return Ok(None),
+                }
+            } else {
+                return Ok(None);
+            }
+        }
     };
 
     // Get indexer reference

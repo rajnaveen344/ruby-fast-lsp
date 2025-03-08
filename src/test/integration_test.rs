@@ -17,19 +17,47 @@ fn fixture_uri(file_name: &str) -> Url {
     Url::from_file_path(fixture_dir(file_name)).unwrap()
 }
 
+/// Helper function to initialize the logger once
+fn init_logger() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    });
+}
+
 async fn init_and_open_file(file_name: &str) -> RubyLanguageServer {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_logger();
     let server = RubyLanguageServer::default();
     let params = InitializeParams {
         root_uri: Some(fixture_uri(file_name)),
         ..Default::default()
     };
     let _ = server.initialize(params).await;
+
     server
 }
 
-async fn _init_and_open_folder(_folder_name: &str) -> RubyLanguageServer {
-    todo!()
+async fn _init_and_open_folder(folder_name: &str) -> RubyLanguageServer {
+    init_logger();
+    let server = RubyLanguageServer::default();
+    let folder_uri = fixture_uri(folder_name);
+
+    let params = InitializeParams {
+        root_uri: Some(folder_uri.clone()),
+        workspace_folders: Some(vec![WorkspaceFolder {
+            uri: folder_uri,
+            name: folder_name.to_string(),
+        }]),
+        ..Default::default()
+    };
+
+    let _ = server.initialize(params).await;
+    let initialized_params = InitializedParams {};
+    server.initialized(initialized_params).await;
+
+    server
 }
 
 /// Test goto definition functionality for class_declaration.rb
@@ -46,8 +74,8 @@ async fn test_goto_definition_class_declaration() {
                     uri: fixture_uri(fixture_file),
                 },
                 position: Position {
-                    line: 16,
-                    character: 12,
+                    line: 12,
+                    character: 16,
                 },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),

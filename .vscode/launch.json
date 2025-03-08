@@ -7,7 +7,7 @@
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}/tests"
+        "${workspaceFolder}/src/test/fixtures"
       ],
       "outFiles": [
         "${workspaceFolder}/vsix/**/*.js"

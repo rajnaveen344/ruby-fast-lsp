@@ -47,7 +47,7 @@ impl RubyLanguageServer {
         cache.remove(uri);
     }
 
-    // Add a method to RubyLanguageServer to index workspace
+    // Add a method to RubyLanguageServer to index workspace with caching
     pub async fn index_workspace_folder(&self, folder_uri: &Url) {
         let mut indexer = self.indexer.lock().await;
 
@@ -70,13 +70,34 @@ impl RubyLanguageServer {
                     .await;
             }
         }
+
+        // Cache the content of all indexed files
+        if let Ok(folder_path) = folder_uri.to_file_path() {
+            if let Ok(files) = events::find_ruby_files(&folder_path).await {
+                for file_path in files {
+                    if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+                        if let Ok(file_uri) = Url::from_file_path(&file_path) {
+                            self.update_document_content(file_uri, content).await;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn index_file(&self, file_uri: &Url) {
-        let file_path = file_uri.to_file_path().unwrap();
+        let file_path = file_uri.to_file_path().unwrap_or_default();
         if file_path.extension().map_or(false, |ext| ext == "rb") {
-            let mut indexer = self.indexer.lock().await;
-            let _ = events::index_workspace_file(&mut indexer, &file_path).await;
+            // Read the file content and cache it
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                // Cache the content in document_cache
+                self.update_document_content(file_uri.clone(), content)
+                    .await;
+
+                // Index the file
+                let mut indexer = self.indexer.lock().await;
+                let _ = events::index_workspace_file(&mut indexer, &file_path).await;
+            }
         }
     }
 }
