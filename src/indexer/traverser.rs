@@ -104,16 +104,23 @@ impl RubyIndexer {
     }
 
     fn process_file(&mut self, uri: Url, tree: &Tree, source_code: &str) -> Result<(), String> {
-        let root_node = tree.root_node();
+        // Debug: Print the AST structure if debug mode is enabled
+        if self.debug_mode {
+            info!("AST structure for file: {}", uri);
+            self.print_ast_structure(&tree.root_node(), source_code, 0);
+        }
 
-        // Reset the traversal context for a new file
+        // Create a traversal context
         let mut context = TraversalContext::new();
 
-        // Pre-process: Remove any existing entries for this URI
+        // Pre-process: Remove any existing entries and references for this URI
         self.index.remove_entries_for_uri(&uri);
+        self.index.remove_references_for_uri(&uri);
 
-        // Traverse the tree to find definitions
-        self.traverse_node(root_node, &uri, source_code, &mut context)
+        // Traverse the AST
+        self.traverse_node(tree.root_node(), &uri, source_code, &mut context)?;
+
+        Ok(())
     }
 
     pub fn traverse_node(
@@ -130,11 +137,31 @@ impl RubyIndexer {
                 self.process_method(node, uri, source_code, context)?
             }
             "constant" => {
-                // Try to process constants, but don't fail if we can't
-                if let Err(e) = self.process_constant(node, uri, source_code, context) {
-                    // Log the error and continue
-                    if self.debug_mode {
-                        println!("Error processing constant: {}", e);
+                // Check if this is a reference to a constant (not part of an assignment)
+                let parent = node.parent();
+                let is_reference = parent.map_or(true, |p| {
+                    // If parent is an assignment and this is the left side, it's a definition not a reference
+                    !(p.kind() == "assignment"
+                        && p.child_by_field_name("left")
+                            .map_or(false, |left| left == node))
+                });
+
+                if is_reference {
+                    // Process constant reference
+                    if let Err(e) = self.process_constant_reference(node, uri, source_code, context)
+                    {
+                        // Log the error and continue
+                        if self.debug_mode {
+                            println!("Error processing constant reference: {}", e);
+                        }
+                    }
+                } else {
+                    // Try to process constant definition, but don't fail if we can't
+                    if let Err(e) = self.process_constant(node, uri, source_code, context) {
+                        // Log the error and continue
+                        if self.debug_mode {
+                            println!("Error processing constant: {}", e);
+                        }
                     }
                 }
 
@@ -143,6 +170,71 @@ impl RubyIndexer {
                 for i in 0..child_count {
                     if let Some(child) = node.child(i) {
                         self.traverse_node(child, uri, source_code, context)?;
+                    }
+                }
+            }
+            "identifier" => {
+                // Check if this is a method call without a receiver
+                // This handles cases like 'bar' in 'def another_method; bar; end'
+                let text = self.get_node_text(node, source_code);
+
+                // Skip if it's a keyword or empty
+                if text.trim().is_empty()
+                    || ["self", "super", "nil", "true", "false"].contains(&text.as_str())
+                {
+                    return Ok(());
+                }
+
+                // Check if it's a standalone identifier that could be a method call
+                let parent = node.parent();
+                if parent.map_or(false, |p| {
+                    // If parent is a method body or a block, this could be a method call
+                    p.kind() == "body_statement"
+                }) {
+                    // Skip if this is part of a method definition or parameter
+                    let grandparent = parent.and_then(|p| p.parent());
+                    if grandparent.map_or(false, |gp| {
+                        gp.kind() == "method"
+                            && gp
+                                .child_by_field_name("name")
+                                .map_or(false, |name| name == node)
+                    }) {
+                        return Ok(());
+                    }
+
+                    // Create a range for the reference
+                    let range = node_to_range(node);
+
+                    // Create a location for this reference
+                    let location = Location {
+                        uri: uri.clone(),
+                        range,
+                    };
+
+                    // Add reference with just the method name
+                    self.index.add_reference(&text, location.clone());
+
+                    // Also add reference with class context if available
+                    let current_namespace = context.current_namespace();
+                    if !current_namespace.is_empty() {
+                        let fqn = format!("{}#{}", current_namespace, text);
+                        self.index.add_reference(&fqn, location);
+                    }
+
+                    if self.debug_mode {
+                        info!(
+                            "Processing standalone identifier as method call: {} at line {}:{}",
+                            text,
+                            node.start_position().row + 1,
+                            node.start_position().column + 1
+                        );
+                        info!(
+                            "Method call range: {}:{} to {}:{}",
+                            range.start.line,
+                            range.start.character,
+                            range.end.line,
+                            range.end.character
+                        );
                     }
                 }
             }
@@ -796,13 +888,56 @@ impl RubyIndexer {
         node: Node,
         uri: &Url,
         source_code: &str,
-        context: &mut TraversalContext,
+        _context: &mut TraversalContext,
     ) -> Result<(), String> {
+        // Get the variable name
         let name = self.get_node_text(node, source_code);
 
         // Add reference for the class variable
-        let location = Location::new(uri.clone(), node_to_range(node));
+        let range = node_to_range(node);
+        let location = Location {
+            uri: uri.clone(),
+            range,
+        };
+
         self.index.add_reference(&name, location);
+
+        Ok(())
+    }
+
+    fn process_constant_reference(
+        &mut self,
+        node: Node,
+        uri: &Url,
+        source_code: &str,
+        context: &mut TraversalContext,
+    ) -> Result<(), String> {
+        // Get the constant name
+        let name = self.get_node_text(node, source_code);
+
+        // Skip if name is empty or not a valid constant (should start with uppercase)
+        if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
+            return Ok(());
+        }
+
+        // Create a range for the reference
+        let range = node_to_range(node);
+
+        // Create a location for this reference
+        let location = Location {
+            uri: uri.clone(),
+            range,
+        };
+
+        // Add reference with just the constant name
+        self.index.add_reference(&name, location.clone());
+
+        // Also add reference with namespace context if available
+        let current_namespace = context.current_namespace();
+        if !current_namespace.is_empty() {
+            let fqn = format!("{}::{}", current_namespace, name);
+            self.index.add_reference(&fqn, location);
+        }
 
         Ok(())
     }
@@ -915,6 +1050,16 @@ impl RubyIndexer {
             // Extract the method name
             let method_name = self.get_node_text(method_node, source_code);
 
+            // Debug logging
+            if self.debug_mode {
+                info!(
+                    "Processing method call: {} at line {}:{}",
+                    method_name,
+                    node.start_position().row + 1,
+                    node.start_position().column + 1
+                );
+            }
+
             // Skip if method name is empty or is an attribute method
             if method_name.trim().is_empty()
                 || method_name == "attr_accessor"
@@ -925,7 +1070,23 @@ impl RubyIndexer {
             }
 
             // Create a range for the reference
-            let range = node_to_range(method_node);
+            // For method calls without a receiver, we want to include the entire method call node
+            // to match the expected range in tests
+            let range = if node.child_by_field_name("receiver").is_none() {
+                // For calls like 'bar' without a receiver, use the entire node range
+                node_to_range(node)
+            } else {
+                // For calls with a receiver like 'foo.bar', use just the method name range
+                node_to_range(method_node)
+            };
+
+            // Debug logging for the range
+            if self.debug_mode {
+                info!(
+                    "Method call range: {}:{} to {}:{}",
+                    range.start.line, range.start.character, range.end.line, range.end.character
+                );
+            }
 
             // Create a location for this reference
             let location = Location {
@@ -1108,6 +1269,51 @@ impl RubyIndexer {
             }
         }
         Ok(())
+    }
+
+    // Helper method to print the AST structure for debugging
+    fn print_ast_structure(&self, node: &Node, source_code: &str, indent: usize) {
+        let indent_str = " ".repeat(indent * 2);
+        let node_text = if node.child_count() == 0 {
+            format!(" \"{}\"", self.get_node_text(*node, source_code))
+        } else {
+            String::new()
+        };
+
+        info!("{}{}{}", indent_str, node.kind(), node_text);
+
+        // Print field names and their values
+        for field_name in [
+            "name",
+            "method",
+            "receiver",
+            "left",
+            "right",
+            "body",
+            "parameters",
+        ] {
+            if let Some(field_node) = node.child_by_field_name(field_name) {
+                let field_text = if field_node.child_count() == 0 {
+                    format!(" \"{}\"", self.get_node_text(field_node, source_code))
+                } else {
+                    String::new()
+                };
+                info!(
+                    "{}  {}:{}{}",
+                    indent_str,
+                    field_name,
+                    field_node.kind(),
+                    field_text
+                );
+            }
+        }
+
+        // Recursively print children
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                self.print_ast_structure(&child, source_code, indent + 1);
+            }
+        }
     }
 }
 

@@ -216,6 +216,21 @@ impl RubyIndex {
         references.push(location);
     }
 
+    /// Remove all references for a specific URI
+    pub fn remove_references_for_uri(&mut self, uri: &Url) {
+        let uri_string = uri.to_string();
+
+        // Iterate through all reference entries
+        for references in self.references.values_mut() {
+            // Remove any references that match the URI
+            references.retain(|location| location.uri.to_string() != uri_string);
+        }
+
+        // Remove any empty reference lists
+        self.references
+            .retain(|_, references| !references.is_empty());
+    }
+
     pub fn find_references(&self, fully_qualified_name: &str) -> Vec<Location> {
         // First check if we have direct references to this name
         let mut locations = self

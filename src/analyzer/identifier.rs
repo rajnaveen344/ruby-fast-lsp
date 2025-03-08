@@ -25,6 +25,16 @@ impl RubyAnalyzer {
             return Some(self.get_node_text(instance_var_node));
         }
 
+        // Check if we're on a method definition node or method name
+        if let Some(method_name) = self.check_for_method_definition(&node, point) {
+            let current_context = self.find_current_context(&tree, position);
+            if current_context.is_empty() {
+                return Some(method_name);
+            } else {
+                return Some(format!("{}#{}", current_context, method_name));
+            }
+        }
+
         // For normal method calls and identifiers
         let fully_qualified_name = self.determine_fully_qualified_name(&tree, node, position);
 
@@ -54,6 +64,54 @@ impl RubyAnalyzer {
 
         if parent_kind == "instance_variable" && is_point_within_node(point, parent) {
             return Some(parent);
+        }
+
+        None
+    }
+
+    /// Check if the node is part of a method definition
+    pub fn check_for_method_definition<'a>(&self, node: &Node<'a>, point: Point) -> Option<String> {
+        let node_kind = node.kind();
+
+        // Check if we're directly on a method name node
+        if node_kind == "identifier" {
+            let parent = node.parent()?;
+            if parent.kind() == "method" {
+                let name_node = parent.child_by_field_name("name")?;
+                if name_node == *node {
+                    return Some(self.get_node_text(*node));
+                }
+            }
+        }
+
+        // Check if we're on a method node
+        if node_kind == "method" {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if is_point_within_node(point, name_node) ||
+                   // Also check if we're on the 'def' keyword
+                   (node.start_position().row == point.row &&
+                    node.start_position().column <= point.column &&
+                    point.column <= name_node.start_position().column)
+                {
+                    return Some(self.get_node_text(name_node));
+                }
+            }
+        }
+
+        // Check if parent is a method
+        let parent = node.parent()?;
+        if parent.kind() == "method" {
+            if let Some(name_node) = parent.child_by_field_name("name") {
+                if is_point_within_node(point, name_node) {
+                    return Some(self.get_node_text(name_node));
+                }
+
+                // Check if we're on the 'def' keyword
+                let def_node = parent.child_by_field_name("def")?;
+                if is_point_within_node(point, def_node) {
+                    return Some(self.get_node_text(name_node));
+                }
+            }
         }
 
         None
