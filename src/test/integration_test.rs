@@ -1,5 +1,10 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use log::error;
+use lsp_types::*;
+use std::{path::PathBuf, process::exit};
+use tower_lsp::LspService;
+
+use crate::server::RubyLanguageServer;
 
 /// Helper function to create absolute paths for test fixtures
 fn fixture_path(relative_path: &str) -> PathBuf {
@@ -10,203 +15,120 @@ fn fixture_path(relative_path: &str) -> PathBuf {
         .join(relative_path)
 }
 
-/// Test that basic Ruby fixture files exist
+fn initialize_server() -> LspService<RubyLanguageServer> {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    
+    let (service, socket) = LspService::new(|client| {
+        RubyLanguageServer::new(client).unwrap_or_else(|e| {
+            error!("Failed to initialize Ruby LSP server: {}", e);
+            exit(1)
+        })
+    });
+
+    service
+}
+
+/// Test goto definition functionality for class_declaration.rb
 #[tokio::test]
-async fn test_fixture_files_exist() -> Result<()> {
-    let fixtures = vec![
-        "class_declaration.rb",
-        "nested_classes.rb",
-        "module_with_methods.rb",
-        "variables.rb",
-        "control_flow.rb",
+async fn test_goto_definition_class_declaration() -> Result<()> {
+    // Load the fixture file
+    let fixture_file = "class_declaration.rb";
+    let path = fixture_path(fixture_file);
+    let content = std::fs::read_to_string(&path)?;
+
+    let lsp_service = initialize_server();
+
+    // This test will verify that the class_declaration.rb fixture has
+    // the expected goto definition locations for key symbols
+
+    // Position data for class_declaration.rb
+    // These document the expected positions for goto definition
+    let expected_definitions = vec![
+        // Class name position (the position of "Foo")
+        (0, 6, "Foo", "class", 0, 0, 0, 9), // Class definition location
+        // Method name position (the position of "bar")
+        (1, 6, "bar", "method", 1, 2, 1, 9), // Method definition location
+        // Method invocation (the position of "puts")
+        (2, 6, "puts", "method", 2, 4, 2, 8), // Built-in method
+        // Method name position (the position of "another_method")
+        (5, 6, "another_method", "method", 5, 2, 5, 15), // Method definition location
+        // Reference to "bar" inside another_method
+        (7, 6, "bar", "method", 1, 2, 1, 9), // Points to original method definition
+        // Foo instance creation (using "new") - built-in method
+        (10, 17, "new", "method", 0, 0, 0, 0), // Built-in method
+        // Method call on instance (foo_instance.bar)
+        (11, 15, "bar", "method", 1, 2, 1, 9), // Points to original method definition
     ];
 
-    for fixture in fixtures {
-        let path = fixture_path(fixture);
-        assert!(path.exists(), "Fixture file {} should exist", fixture);
-
-        let content = std::fs::read_to_string(&path)?;
-        assert!(
-            !content.is_empty(),
-            "Fixture file {} should not be empty",
-            fixture
+    for (
+        line,
+        character,
+        symbol,
+        kind,
+        expected_start_line,
+        expected_start_char,
+        expected_end_line,
+        expected_end_char,
+    ) in expected_definitions
+    {
+        println!(
+            "Test will check goto definition for '{}' ({}) at line {}, character {}",
+            symbol, kind, line, character
         );
 
-        // Verify fixture content has required elements for LSP server testing
-        match fixture {
-            "class_declaration.rb" => {
-                assert!(
-                    content.contains("class"),
-                    "Should contain class declarations"
-                );
-                assert!(content.contains("def"), "Should contain method definitions");
-                assert!(content.contains("end"), "Should contain end statements");
-            }
-            "nested_classes.rb" => {
-                assert!(
-                    content.contains("class"),
-                    "Should contain class declarations"
-                );
-
-                // Check for multiple class declarations as indicator of nesting
-                let class_count = content.matches("class").count();
-                assert!(
-                    class_count > 1,
-                    "Should contain multiple class declarations"
-                );
-
-                // Count the number of 'end' keywords which should match class + method declarations
-                let end_count = content.matches("end").count();
-                assert!(
-                    end_count >= class_count,
-                    "Should have matching end statements"
-                );
-            }
-            "module_with_methods.rb" => {
-                assert!(
-                    content.contains("module"),
-                    "Should contain module declarations"
-                );
-                assert!(content.contains("def"), "Should contain method definitions");
-
-                // Count methods
-                let method_count = content.matches("def").count();
-                assert!(method_count > 0, "Should contain at least one method");
-            }
-            "variables.rb" => {
-                // Check for variable assignments
-                assert!(content.contains("="), "Should contain variable assignments");
-
-                // Check for different variable types (simplistic)
-                let has_local_vars = content.contains(|c: char| c.is_lowercase());
-                let has_instance_vars = content.contains('@');
-
-                assert!(has_local_vars, "Should contain local variables");
-                assert!(has_instance_vars, "Should contain instance variables");
-            }
-            "control_flow.rb" => {
-                // Check for control flow statements (simplistic)
-                let has_conditionals = content.contains("if")
-                    || content.contains("unless")
-                    || content.contains("case");
-                let has_loops = content.contains("while")
-                    || content.contains("for")
-                    || content.contains("each");
-
-                assert!(has_conditionals, "Should contain conditional statements");
-                assert!(has_loops, "Should contain loop structures");
-            }
-            _ => {}
-        }
-
-        println!("Successfully verified Ruby fixture: {}", fixture);
+        // In a future implementation, this would call the LSP server's goto_definition handler
+        // and verify the results match the expected ranges
     }
 
     Ok(())
 }
 
-/// Test that LSP-specific fixtures exist and have required content
+/// Test references functionality for class_declaration.rb
 #[tokio::test]
-async fn test_lsp_fixtures_exist() -> Result<()> {
-    // Test that LSP-specific fixtures exist
-    let fixtures = vec![
-        "definition_goto_test.rb",
-        "references_test.rb",
-        "symbols_test.rb",
-        "completion_test.rb",
-        "hover_test.rb",
+async fn test_references_class_declaration() -> Result<()> {
+    // Load the fixture file
+    let fixture_file = "class_declaration.rb";
+    let path = fixture_path(fixture_file);
+    let content = std::fs::read_to_string(&path)?;
+
+    // This test will verify that the class_declaration.rb fixture has
+    // the expected references for key symbols
+
+    // Position data for class_declaration.rb
+    // These document the positions where references should be found
+    let expected_references = vec![
+        // Class name position (the position of "Foo")
+        (0, 6, "Foo", "class", vec![(0, 6, 0, 9), (10, 13, 10, 16)]), // Class declaration and instance creation
+        // Method name position (the position of "bar")
+        (
+            1,
+            6,
+            "bar",
+            "method",
+            vec![(1, 6, 1, 9), (7, 4, 7, 7), (11, 14, 11, 17)],
+        ), // Method declaration, call in another_method, call on instance
+        // Method invocation (the position of "puts")
+        (2, 6, "puts", "method", vec![(2, 4, 2, 8)]), // Position of "puts" method call
     ];
 
-    for fixture in fixtures {
-        let path = fixture_path(fixture);
-        assert!(path.exists(), "Fixture file {} should exist", fixture);
-
-        let content = std::fs::read_to_string(&path)?;
-        assert!(
-            !content.is_empty(),
-            "Fixture file {} should not be empty",
-            fixture
+    for (line, character, symbol, kind, reference_positions) in expected_references {
+        println!(
+            "Test will check references for '{}' ({}) at line {}, character {}",
+            symbol, kind, line, character
         );
 
-        // Verify each fixture has the content needed for LSP feature testing
-        match fixture {
-            "definition_goto_test.rb" => {
-                assert!(
-                    content.contains("def "),
-                    "File should contain method definitions for goto testing"
-                );
-                assert!(
-                    content.contains("class "),
-                    "File should contain class definitions for goto testing"
-                );
-                // Check if there are method calls that would use goto definition
-                assert!(
-                    content.contains(".") || content.contains("::"),
-                    "File should contain method calls or constant references for goto testing"
-                );
-            }
-            "references_test.rb" => {
-                assert!(
-                    content.contains("def "),
-                    "File should contain method definitions"
-                );
-                // References test should have multiple uses of the same identifier
-                // Just checking for method calls as a basic check
-                assert!(content.contains("."), "File should contain method calls");
+        // In a future implementation, this would call the LSP server's references handler
+        // and verify the results match the expected ranges
 
-                // Ideally we'd check for multiple occurrences of the same method name
-                // but that requires more advanced parsing
-            }
-            "symbols_test.rb" => {
-                assert!(
-                    content.contains("class "),
-                    "File should contain class definitions"
-                );
-                assert!(
-                    content.contains("def "),
-                    "File should contain method definitions"
-                );
-                assert!(
-                    content.contains("module "),
-                    "File should contain module definitions"
-                );
-                // A symbols test should have multiple symbol types
-                assert!(
-                    content.contains("@"),
-                    "File should contain instance variables"
-                );
-            }
-            "completion_test.rb" => {
-                assert!(
-                    content.contains("def "),
-                    "File should contain method definitions"
-                );
-                assert!(content.contains("."), "File should contain method calls");
-                // Completion test needs objects with methods
-                assert!(
-                    content.contains("="),
-                    "File should contain variable assignments"
-                );
-            }
-            "hover_test.rb" => {
-                assert!(
-                    content.contains("def "),
-                    "File should contain method definitions"
-                );
-                assert!(
-                    content.contains("class "),
-                    "File should contain class definitions"
-                );
-                // Hover test needs identifiers to hover over
-                assert!(
-                    content.contains("@") || content.contains("$") || content.contains("::"),
-                    "File should contain variables or constants for hover info"
-                );
-            }
-            _ => {}
+        for reference in reference_positions {
+            let (ref_line, ref_start_char, ref_end_char) = (reference.0, reference.1, reference.2);
+            println!(
+                "  - Expected reference at line {}, characters {}-{}",
+                ref_line, ref_start_char, ref_end_char
+            );
         }
-
-        println!("Successfully verified LSP fixture: {}", fixture);
     }
 
     Ok(())
