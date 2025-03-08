@@ -36,8 +36,3 @@ async-trait = "0.1.73"
 
 [build-dependencies]
 cc = "1.0.83"
-
-# Configure integration tests
-[[test]]
-name = "integration_test"
-path = "tests/integration_test.rs"
