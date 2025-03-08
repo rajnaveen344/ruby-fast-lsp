@@ -14,6 +14,8 @@ src/
 ├── parser/         - Ruby parsing utilities
 ├── server.rs       - LSP server coordination
 └── main.rs         - Application entry point
+tests/
+└── fixtures/       - Ruby files to be tested by the LSP
 ```
 
 ### Core Philosophy
