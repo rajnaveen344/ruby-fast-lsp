@@ -1,14 +1,12 @@
 use log::info;
 use lsp_types::*;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::RwLock;
 use tower_lsp::LanguageServer;
 
 use crate::analyzer::RubyAnalyzer;
+use crate::handlers::request;
 use crate::indexer::traverser::RubyIndexer;
 use crate::server::RubyLanguageServer;
-use crate::{handlers::request, server::RubyLanguageServer as Server};
 use tower_lsp::lsp_types::Position;
 
 /// Helper function to create absolute paths for test fixtures
@@ -305,11 +303,6 @@ async fn test_find_references_method() {
 async fn test_find_references_class() {
     let fixture_file = "class_declaration.rb";
     let server = init_and_open_file(fixture_file).await;
-
-    // Get the file content to manually check the identifier
-    let file_uri = fixture_uri(fixture_file);
-    let file_path = file_uri.to_file_path().unwrap();
-    let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
 
     // Use a position that will identify the Foo class
     let pos = Position {

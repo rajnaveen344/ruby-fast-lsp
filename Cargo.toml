@@ -36,3 +36,7 @@ async-trait = "0.1.73"
 
 [build-dependencies]
 cc = "1.0.83"
+
+[profile.release]
+opt-level = "z"
+strip = true
