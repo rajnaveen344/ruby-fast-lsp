@@ -1,4 +1,3 @@
-use lsp_types::Position;
 use tree_sitter::{Node, Parser, Point, Tree, TreeCursor};
 
 /// Central analyzer for Ruby code

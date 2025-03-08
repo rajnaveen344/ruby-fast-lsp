@@ -52,13 +52,6 @@ impl RubyLanguageServer {
 
     // Add a method to RubyLanguageServer to index workspace
     async fn index_workspace_folder(&self, folder_uri: &Url) {
-        let log_message = |message: String| {
-            let client = self.client.clone();
-            async move {
-                client.log_message(MessageType::INFO, message).await;
-            }
-        };
-
         let mut indexer = self.indexer.lock().await;
 
         if let Err(e) = events::index_workspace_folder(&mut indexer, folder_uri, |msg| {
@@ -76,13 +69,6 @@ impl RubyLanguageServer {
                 )
                 .await;
         }
-    }
-
-    // Helper to index a single document
-    async fn index_document(&self, uri: &Url, content: &str) -> Result<()> {
-        let mut indexer = self.indexer.lock().await;
-        events::handle_did_open(&mut indexer, uri.clone(), content)
-            .map_err(|e| anyhow::anyhow!("Failed to index document: {}", e))
     }
 }
 

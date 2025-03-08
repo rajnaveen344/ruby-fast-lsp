@@ -1,4 +1,3 @@
-use log::info;
 use lsp_types::Position;
 use tree_sitter::{Node, Point, Tree};
 
