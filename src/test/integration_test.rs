@@ -536,7 +536,6 @@ async fn test_goto_definition_inner_class() {
 /// Test goto definition functionality for VeryInner class deeply nested
 /// This test is expected to fail until support for deeply nested classes is fixed
 #[tokio::test]
-#[should_panic(expected = "assertion failed: definition.is_some()")]
 async fn test_goto_definition_very_inner_class() {
     let fixture_file = "nested_classes.rb";
     let server = init_and_open_file(fixture_file).await;
@@ -560,19 +559,27 @@ async fn test_goto_definition_very_inner_class() {
     )
     .await;
 
-    assert!(res.is_ok());
-    let definition = res.unwrap();
+    let definition = match res {
+        Ok(Some(GotoDefinitionResponse::Scalar(loc))) => Some(loc),
+        Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => Some(locs[0].clone()),
+        Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => Some(Location::new(
+            links[0].target_uri.clone(),
+            links[0].target_range,
+        )),
+        _ => None,
+    };
 
-    // This assertion will fail until support for deeply nested classes is fixed
-    assert!(definition.is_some());
+    assert!(
+        definition.is_some(),
+        "Definition should be found for VeryInner class"
+    );
 
-    // Verify the location points to the VeryInner class declaration
-    if let Some(GotoDefinitionResponse::Scalar(location)) = definition {
-        assert_eq!(location.uri, fixture_uri(fixture_file));
-        assert_eq!(location.range.start.line, 10); // VeryInner class declaration starts at line 10
-    } else {
-        panic!("Expected scalar response for goto definition of VeryInner class");
-    }
+    // Verify the definition points to the correct location
+    let definition = definition.unwrap();
+    assert_eq!(definition.uri, fixture_uri(fixture_file));
+
+    // The VeryInner class is defined at line 10
+    assert_eq!(definition.range.start.line, 10);
 }
 
 /// Test goto definition functionality for methods in nested classes

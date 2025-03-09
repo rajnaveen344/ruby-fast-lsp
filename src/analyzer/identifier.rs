@@ -187,17 +187,36 @@ impl RubyAnalyzer {
                     .parent()
                     .map_or(false, |p| p.kind() == "scope_resolution")
                 {
-                    // Handle nested constants like A::B
+                    // Handle nested constants like A::B or A::B::C
                     let parent = node.parent().unwrap();
-                    let scope = parent.child(0);
-                    if let Some(scope_node) = scope {
-                        if scope_node.kind() == "constant" {
-                            let scope_text = self.get_node_text(scope_node);
-                            return format!("{}::{}", scope_text, node_text);
+
+                    // Check if this node is the 'name' field of the scope_resolution
+                    if parent
+                        .child_by_field_name("name")
+                        .map_or(false, |n| n == node)
+                    {
+                        // Get the scope part (which could be another scope_resolution or a constant)
+                        if let Some(scope_node) = parent.child_by_field_name("scope") {
+                            // Recursively determine the fully qualified name of the scope
+                            let scope_fqn =
+                                self.determine_fully_qualified_name(tree, scope_node, position);
+                            return format!("{}::{}", scope_fqn, node_text);
                         }
                     }
                 }
                 node_text
+            }
+            "scope_resolution" => {
+                // Handle scope resolution nodes directly
+                if let Some(scope_node) = node.child_by_field_name("scope") {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        let scope_fqn =
+                            self.determine_fully_qualified_name(tree, scope_node, position);
+                        let name_text = self.get_node_text(name_node);
+                        return format!("{}::{}", scope_fqn, name_text);
+                    }
+                }
+                String::new()
             }
             "identifier" => {
                 if self.is_local_variable(&node, tree) {
@@ -328,5 +347,117 @@ mod tests {
         // Position at "@name"
         let result = analyzer.find_identifier_at_position(code, Position::new(3, 14));
         assert_eq!(result, Some("@name".to_string()));
+    }
+
+    #[test]
+    fn test_multi_level_scope_resolution() {
+        let code = r#"
+        module Outer
+          module Inner
+            class VeryInner
+              def method
+                puts "Hello"
+              end
+            end
+          end
+        end
+
+        # Usage
+        Outer::Inner::VeryInner.new.method
+        "#;
+
+        let (mut analyzer, tree) = setup_test(code);
+
+        // Find the scope_resolution node for Outer::Inner::VeryInner
+        let root_node = tree.root_node();
+
+        // Helper function to recursively find a node of a specific kind
+        fn find_node_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+            if node.kind() == kind {
+                return Some(node);
+            }
+
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(found) = find_node_by_kind(child, kind) {
+                    return Some(found);
+                }
+            }
+
+            None
+        }
+
+        // Find a scope_resolution node
+        let scope_node = find_node_by_kind(root_node, "scope_resolution")
+            .expect("Failed to find scope_resolution node in test code");
+
+        // Test the fully qualified name determination
+        let fqn = analyzer.determine_fully_qualified_name(&tree, scope_node, Position::new(12, 10));
+
+        // The test might find any scope_resolution node, so we'll check if it contains "Outer::Inner"
+        assert!(
+            fqn.contains("Outer::Inner"),
+            "FQN '{}' should contain 'Outer::Inner'",
+            fqn
+        );
+    }
+
+    #[test]
+    fn test_multi_level_scope_resolution_exact() {
+        let code = r#"
+        module Outer
+          module Inner
+            class VeryInner
+            end
+          end
+        end
+
+        # Direct reference to the nested class
+        x = Outer::Inner::VeryInner
+        "#;
+
+        let (mut analyzer, tree) = setup_test(code);
+        let root_node = tree.root_node();
+
+        // Helper function to recursively find a node with specific text
+        fn find_node_with_text<'a>(
+            node: Node<'a>,
+            text: &str,
+            analyzer: &RubyAnalyzer,
+        ) -> Option<Node<'a>> {
+            let node_text = analyzer.get_node_text(node);
+            if node_text == text {
+                return Some(node);
+            }
+
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(found) = find_node_with_text(child, text, analyzer) {
+                    return Some(found);
+                }
+            }
+
+            None
+        }
+
+        // Find the exact scope_resolution node for "Outer::Inner::VeryInner"
+        let target_node = find_node_with_text(root_node, "Outer::Inner::VeryInner", &analyzer)
+            .expect("Failed to find 'Outer::Inner::VeryInner' node");
+
+        // Verify it's a scope_resolution node
+        assert_eq!(
+            target_node.kind(),
+            "scope_resolution",
+            "Node should be a scope_resolution"
+        );
+
+        // Test the fully qualified name determination
+        let fqn = analyzer.determine_fully_qualified_name(&tree, target_node, Position::new(9, 15));
+
+        // Verify the exact FQN
+        assert_eq!(
+            fqn, "Outer::Inner::VeryInner",
+            "FQN should be exactly 'Outer::Inner::VeryInner'"
+        );
     }
 }

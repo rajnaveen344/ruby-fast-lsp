@@ -28,6 +28,7 @@ mod context;
 mod core;
 mod identifier;
 mod position;
+mod scope_resolution;
 
 // Re-exports
 pub use self::core::RubyAnalyzer;
