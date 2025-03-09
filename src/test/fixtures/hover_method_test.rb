@@ -19,3 +19,5 @@ end
 calc = Calculator.new
 puts calc.add(5, 3)
 puts calc.subtract(10, 4)
+puts calc.multiply(2, 6)
+puts calc.divide(8, 2)

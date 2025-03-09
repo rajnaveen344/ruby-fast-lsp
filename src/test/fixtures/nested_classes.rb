@@ -15,3 +15,12 @@ class Outer
     end
   end
 end
+
+outer = Outer.new
+outer.outer_method
+
+inner = Outer::Inner.new
+inner.inner_method
+
+very_inner = Outer::Inner::VeryInner.new
+very_inner.very_inner_method
