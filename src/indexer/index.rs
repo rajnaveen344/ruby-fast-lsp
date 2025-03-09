@@ -178,6 +178,49 @@ impl RubyIndex {
             }
         }
 
+        // For plain local variables without any $ prefix
+        // This handles cases where the analyzer returns a simple variable name
+        if !fully_qualified_name.contains('#')
+            && !fully_qualified_name.contains("::")
+            && !fully_qualified_name.contains('$')
+            && !fully_qualified_name.starts_with('@')
+        {
+            // First try to find a local variable with this name
+            for (fqn, entries) in &self.entries {
+                let var_pattern = format!("${}", fully_qualified_name);
+                if fqn.ends_with(&var_pattern) && !entries.is_empty() {
+                    if let Some(entry) = entries.first() {
+                        if entry.entry_type == EntryType::LocalVariable {
+                            return Some(entry);
+                        }
+                    }
+                }
+            }
+        }
+
+        // For nested classes referenced without full scope (like "Inner" instead of "Outer::Inner")
+        if !fully_qualified_name.contains("::")
+            && !fully_qualified_name.contains('#')
+            && !fully_qualified_name.starts_with('$')
+            && !fully_qualified_name.starts_with('@')
+        {
+            // Try to find any class with this name as the last part of the FQN
+            for (fqn, entries) in &self.entries {
+                let class_pattern = format!("::{}", fully_qualified_name);
+                if (fqn.ends_with(&class_pattern) || fqn == fully_qualified_name)
+                    && !entries.is_empty()
+                {
+                    if let Some(entry) = entries.first() {
+                        if entry.entry_type == EntryType::Class
+                            || entry.entry_type == EntryType::Module
+                        {
+                            return Some(entry);
+                        }
+                    }
+                }
+            }
+        }
+
         // If direct lookup fails, try to extract the method name and search by it
         // This handles cases where analyzer returns just "method_name" instead of "Class#method_name"
         if !fully_qualified_name.contains('#')

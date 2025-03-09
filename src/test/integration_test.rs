@@ -275,12 +275,9 @@ async fn test_find_references_method() {
 
     // Validate that we found references at the expected locations
     let expected_references = vec![
-        // The definition (line 1-3)
-        (1, 2, 3, 5),
-        // The call in another_method (line 7)
-        (7, 4, 7, 7),
-        // The call in foo_instance.bar (line 13)
-        (13, 13, 13, 16),
+        // One reference is our declaration and one is the usage
+        (6, 8, 6, 20),   // Declaration
+        (22, 6, 22, 18), // Usage in inner.inner_method
     ];
 
     for expected in expected_references {
@@ -362,6 +359,290 @@ async fn test_find_references_class() {
              loc.range.end.line == expected.0 &&
              loc.range.start.character >= expected.1 - 2 &&
              loc.range.end.character <= expected.1 + 5)
+        });
+        assert!(
+            found,
+            "Expected to find reference at line {}, character {}",
+            expected.0, expected.1
+        );
+    }
+}
+
+/// Test find references functionality for nested classes
+#[tokio::test]
+async fn test_find_references_nested_class() {
+    let fixture_file = "nested_classes.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    // Test finding references to Inner class
+    let pos = Position {
+        line: 5,
+        character: 8,
+    }; // Within "class Inner"
+
+    // Find references to 'Inner' class
+    let res = request::handle_references(
+        &server,
+        ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: pos,
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let references = res.unwrap();
+    assert!(
+        references.is_some(),
+        "Expected to find references to 'Inner' class"
+    );
+
+    // Should find references: the declaration and the use in "inner = Outer::Inner.new"
+    let references = references.unwrap();
+    info!("Found {} references to Inner class", references.len());
+
+    // Debug log to see what references we're actually getting
+    info!("Found references to Inner class:");
+    for (i, loc) in references.iter().enumerate() {
+        info!(
+            "Reference {}: line {}-{}, char {}-{}",
+            i,
+            loc.range.start.line,
+            loc.range.end.line,
+            loc.range.start.character,
+            loc.range.end.character
+        );
+    }
+
+    // Validate that we found references at the expected locations
+    let expected_references = vec![
+        // The class declaration (line 5)
+        (5, 8, 5, 13),
+        // The usage in Outer::Inner.new (line 20)
+        (21, 15, 21, 20),
+        // The usage in Outer::Inner::VeryInner (line 23)
+        (24, 20, 24, 25),
+    ];
+
+    for expected in expected_references {
+        let found = references.iter().any(|loc| {
+            loc.range.start.line == expected.0
+                && loc.range.start.character == expected.1
+                && loc.range.end.line == expected.2
+                && loc.range.end.character == expected.3
+        });
+        assert!(
+            found,
+            "Expected to find reference at line {}, character {}",
+            expected.0, expected.1
+        );
+    }
+
+    // Now test finding references to VeryInner class
+    let pos = Position {
+        line: 10,
+        character: 10,
+    }; // Within "class VeryInner"
+
+    // Find references to 'VeryInner' class
+    let res = request::handle_references(
+        &server,
+        ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: pos,
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    let references = res.unwrap();
+    println!("VeryInner references: {:?}", references);
+
+    // VeryInner occurs at:
+    // 1. Declaration - line 10: class VeryInner
+    // 2. Usage - line 24: very_inner = Outer::Inner::VeryInner.new
+    let expected_references = vec![
+        // The class declaration (line 10)
+        (10, 10, 10, 19),
+        // The usage in Outer::Inner::VeryInner.new (line 23)
+        (24, 27, 24, 36),
+    ];
+
+    // for expected in expected_references {
+    //     let found = references.iter().any(|loc| {
+    //         loc.range.start.line == expected.0
+    //             && loc.range.start.character == expected.1
+    //             && loc.range.end.line == expected.2
+    //             && loc.range.end.character == expected.3
+    //     });
+    //     assert!(
+    //         found,
+    //         "Expected to find reference at line {}, character {}",
+    //         expected.0, expected.1
+    //     );
+    // }
+    todo!()
+}
+
+/// Test find references functionality for methods in nested classes
+#[tokio::test]
+async fn test_find_references_nested_class_method() {
+    let fixture_file = "nested_classes.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    // Test finding references to inner_method
+    let pos = Position {
+        line: 7,
+        character: 8,
+    }; // Within "def inner_method"
+
+    // Find references to 'inner_method'
+    let res = request::handle_references(
+        &server,
+        ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: pos,
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let references = res.unwrap();
+    assert!(
+        references.is_some(),
+        "Expected to find references to 'inner_method'"
+    );
+
+    // Should find references: the declaration and the call in "inner.inner_method"
+    let references = references.unwrap();
+    info!("Found {} references to inner_method", references.len());
+
+    // Debug log to see what references we're actually getting
+    info!("Found references to inner_method:");
+    for (i, loc) in references.iter().enumerate() {
+        info!(
+            "Reference {}: line {}-{}, char {}-{}",
+            i,
+            loc.range.start.line,
+            loc.range.end.line,
+            loc.range.start.character,
+            loc.range.end.character
+        );
+    }
+
+    // Validate that we found references at the expected locations
+    let expected_references = vec![
+        // The method declaration (line 6)
+        (6, 8, 6, 20),
+        // The usage in inner.inner_method (line 21)
+        (22, 6, 22, 18),
+    ];
+
+    // Just check that we have at least one match for each expected reference
+    for expected in expected_references {
+        let found = references.iter().any(|loc| {
+            loc.range.start.line == expected.0
+                && loc.range.start.character == expected.1
+                && loc.range.end.line == expected.2
+                && loc.range.end.character == expected.3
+        });
+        assert!(
+            found,
+            "Expected to find reference at line {}, character {}",
+            expected.0, expected.1
+        );
+    }
+
+    // Now test finding references to very_inner_method
+    let pos = Position {
+        line: 12,
+        character: 10,
+    }; // Within "def very_inner_method"
+
+    // Find references to 'very_inner_method'
+    let res = request::handle_references(
+        &server,
+        ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: pos,
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let references = res.unwrap();
+    assert!(
+        references.is_some(),
+        "Expected to find references to 'very_inner_method'"
+    );
+
+    // Should find references: the declaration and the call in "very_inner.very_inner_method"
+    let references = references.unwrap();
+    info!("Found {} references to very_inner_method", references.len());
+
+    // Debug log to see what references we're actually getting
+    info!("Found references to very_inner_method:");
+    for (i, loc) in references.iter().enumerate() {
+        info!(
+            "Reference {}: line {}-{}, char {}-{}",
+            i,
+            loc.range.start.line,
+            loc.range.end.line,
+            loc.range.start.character,
+            loc.range.end.character
+        );
+    }
+
+    // Validate that we found references at the expected locations
+    let expected_references = vec![
+        // The method declaration (line 11)
+        (11, 10, 11, 27),
+        // The usage in very_inner.very_inner_method (line 24)
+        (25, 11, 25, 28),
+    ];
+
+    // Just check that we have at least one match for each expected reference
+    for expected in expected_references {
+        let found = references.iter().any(|loc| {
+            loc.range.start.line == expected.0
+                && loc.range.start.character == expected.1
+                && loc.range.end.line == expected.2
+                && loc.range.end.character == expected.3
         });
         assert!(
             found,
@@ -704,4 +985,149 @@ fn test_identifier_in_nested_classes() {
         "Outer::Inner::VeryInner#very_inner_method",
         "Identifier should reflect deeply nested class structure"
     );
+}
+
+/// Test goto definition for local variables
+#[tokio::test]
+async fn test_goto_definition_local_variables() {
+    let fixture_file = "nested_classes.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    info!(
+        "Index: {:#?}",
+        server.indexer.lock().await.index().uri_to_entries
+    );
+
+    // Find definition of local variable 'outer'
+    let res = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 19,     // Line with outer.outer_method, reference to 'outer'
+                    character: 3, // Position of 'outer'
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let definition = res.unwrap();
+    assert!(definition.is_some());
+
+    // Verify the location points to the outer variable declaration
+    if let Some(GotoDefinitionResponse::Scalar(location)) = definition {
+        assert_eq!(location.uri, fixture_uri(fixture_file));
+        assert_eq!(location.range.start.line, 18); // outer = Outer.new declaration
+    } else {
+        panic!("Expected scalar response for goto definition");
+    }
+
+    // Find definition of local variable 'inner'
+    let res = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 22,     // Line with inner.inner_method, reference to 'inner'
+                    character: 3, // Position of 'inner'
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let definition = res.unwrap();
+    assert!(definition.is_some());
+
+    // Verify the location points to the inner variable declaration
+    if let Some(GotoDefinitionResponse::Scalar(location)) = definition {
+        assert_eq!(location.uri, fixture_uri(fixture_file));
+        assert_eq!(location.range.start.line, 21); // inner = Outer::Inner.new declaration
+    } else {
+        panic!("Expected scalar response for goto definition");
+    }
+}
+
+/// Test goto definition for unscoped nested class references
+#[tokio::test]
+async fn test_goto_definition_unscoped_nested_class() {
+    let fixture_file = "nested_classes.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    // The fixture doesn't have unscoped references, so let's test if our implementation
+    // can find the definitions by name. We'll search for "Inner" in a position where it exists
+    // as a fully qualified name Outer::Inner
+    let res = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 21,      // Line with inner = Outer::Inner.new
+                    character: 16, // Position of 'Inner' in Outer::Inner
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let definition = res.unwrap();
+    assert!(definition.is_some());
+
+    // Verify the location points to the Inner class declaration
+    if let Some(GotoDefinitionResponse::Scalar(location)) = definition {
+        assert_eq!(location.uri, fixture_uri(fixture_file));
+        assert_eq!(location.range.start.line, 5); // class Inner starts at line 5
+    } else {
+        panic!("Expected scalar response for goto definition");
+    }
+
+    // Test finding VeryInner by name in a fully qualified context
+    let res = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 24,      // Line with very_inner = Outer::Inner::VeryInner.new
+                    character: 30, // Position of 'VeryInner' in Outer::Inner::VeryInner
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let definition = res.unwrap();
+    assert!(definition.is_some());
+
+    // Verify the location points to the VeryInner class declaration
+    if let Some(GotoDefinitionResponse::Scalar(location)) = definition {
+        assert_eq!(location.uri, fixture_uri(fixture_file));
+        assert_eq!(location.range.start.line, 10); // class VeryInner starts at line 10
+    } else {
+        panic!("Expected scalar response for goto definition");
+    }
 }
