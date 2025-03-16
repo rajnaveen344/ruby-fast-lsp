@@ -315,18 +315,101 @@ impl RubyIndex {
             .cloned()
             .unwrap_or_default();
 
-        // Also include the definition locations
-        if let Some(entries) = self.entries.get(fully_qualified_name) {
-            for entry in entries {
-                locations.push(Location {
-                    uri: entry.location.uri.clone(),
-                    range: entry.location.range,
-                });
+        // For classes and modules, also check for references in nested contexts
+        // This handles cases like "Outer::Inner" when searching for "Inner"
+        if !fully_qualified_name.contains('#')
+            && !fully_qualified_name.starts_with('$')
+            && !fully_qualified_name.starts_with('@')
+        {
+            // Get the simple name (last part after ::)
+            let simple_name = if fully_qualified_name.contains("::") {
+                fully_qualified_name
+                    .split("::")
+                    .last()
+                    .unwrap_or(fully_qualified_name)
+            } else {
+                fully_qualified_name
+            };
+
+            // Look for references to this class/module by simple name
+            if simple_name != fully_qualified_name {
+                if let Some(refs) = self.references.get(simple_name) {
+                    locations.extend(refs.clone());
+                }
+            }
+
+            // Look for references in qualified names (like Outer::Inner)
+            for (fqn, refs) in &self.references {
+                // Check if the FQN contains our name as a segment
+                if fqn.contains("::") && fqn != fully_qualified_name {
+                    let segments: Vec<&str> = fqn.split("::").collect();
+                    for segment in segments {
+                        if segment == simple_name {
+                            locations.extend(refs.clone());
+                            break;
+                        }
+                    }
+                }
             }
         }
+        // For methods, check for both simple and qualified references
+        else if fully_qualified_name.contains('#') {
+            let parts: Vec<&str> = fully_qualified_name.split('#').collect();
+            if parts.len() == 2 {
+                let class_name = parts[0];
+                let method_name = parts[1];
 
+                // Also look for unqualified references to this method
+                if let Some(refs) = self.references.get(method_name) {
+                    locations.extend(refs.clone());
+                }
+
+                // Look for references to this method in all classes
+                // This is important for finding references to methods in nested classes
+                for (fqn, refs) in &self.references {
+                    // Check for method calls on any class that might be this method
+                    if fqn.contains('#') && fqn.ends_with(&format!("#{}", method_name)) {
+                        // Include references to methods with the same name in other classes
+                        locations.extend(refs.clone());
+                    }
+
+                    // Check for method declarations in the class hierarchy
+                    if fqn.contains("::") && fqn.ends_with(&format!("::{}", class_name)) {
+                        // This might be a parent class or nested class
+                        if let Some(class_refs) =
+                            self.references.get(&format!("{}#{}", fqn, method_name))
+                        {
+                            locations.extend(class_refs.clone());
+                        }
+                    }
+                }
+
+                // For nested classes, also check for references using the fully qualified path
+                if class_name.contains("::") {
+                    // Get the simple class name (last part after ::)
+                    let simple_class_name = class_name.split("::").last().unwrap_or(class_name);
+
+                    // Look for references to this method using the simple class name
+                    if let Some(refs) = self
+                        .references
+                        .get(&format!("{}#{}", simple_class_name, method_name))
+                    {
+                        locations.extend(refs.clone());
+                    }
+                }
+            }
+        }
+        // For unqualified method names
+        else if !fully_qualified_name.starts_with('$') && !fully_qualified_name.starts_with('@') {
+            // Look for qualified references to this method (Class#method)
+            for (fqn, refs) in &self.references {
+                if fqn.ends_with(&format!("#{}", fully_qualified_name)) {
+                    locations.extend(refs.clone());
+                }
+            }
+        }
         // For instance variables, also check for references with class prefix
-        if fully_qualified_name.starts_with('@') {
+        else if fully_qualified_name.starts_with('@') {
             // Look for class-qualified references like "Class#@name"
             for (fqn, refs) in &self.references {
                 if fqn.ends_with(fully_qualified_name) && fqn != fully_qualified_name {
@@ -334,27 +417,20 @@ impl RubyIndex {
                 }
             }
         }
-        // For methods, check for both simple and qualified references
-        else if !fully_qualified_name.starts_with('$') && !fully_qualified_name.starts_with('@') {
-            // If this is a qualified method name (Class#method)
-            if fully_qualified_name.contains('#') {
-                let parts: Vec<&str> = fully_qualified_name.split('#').collect();
-                if parts.len() == 2 {
-                    let method_name = parts[1];
 
-                    // Also look for unqualified references to this method
-                    if let Some(refs) = self.references.get(method_name) {
-                        locations.extend(refs.clone());
-                    }
-                }
-            }
-            // If this is an unqualified method name
-            else {
-                // Look for qualified references to this method (Class#method)
-                for (fqn, refs) in &self.references {
-                    if fqn.ends_with(&format!("#{}", fully_qualified_name)) {
-                        locations.extend(refs.clone());
-                    }
+        // Also include the definition locations
+        if let Some(entries) = self.entries.get(fully_qualified_name) {
+            for entry in entries {
+                let definition_location = Location {
+                    uri: entry.location.uri.clone(),
+                    range: entry.location.range,
+                };
+
+                // Avoid duplicates
+                if !locations.iter().any(|loc| {
+                    loc.uri == definition_location.uri && loc.range == definition_location.range
+                }) {
+                    locations.push(definition_location);
                 }
             }
         }

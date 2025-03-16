@@ -423,6 +423,23 @@ impl RubyIndexer {
         // Create a range for the definition
         let range = node_to_range(node);
 
+        // Create a range for the class name reference
+        let name_range = node_to_range(name_node);
+
+        // Create a location for this reference
+        let location = Location {
+            uri: uri.clone(),
+            range: name_range,
+        };
+
+        // Add reference to the class name
+        self.index.add_reference(&name, location.clone());
+
+        // Add reference to the fully qualified name
+        if name != fqn {
+            self.index.add_reference(&fqn, location);
+        }
+
         // Create and add the entry
         let entry = EntryBuilder::new(&name)
             .fully_qualified_name(&fqn)
@@ -596,6 +613,35 @@ impl RubyIndexer {
 
         // Create a range for the definition
         let range = node_to_range(node);
+
+        // Create a range for the method name reference
+        let name_range = node_to_range(name_node);
+
+        // Create a location for this reference
+        let location = Location {
+            uri: uri.clone(),
+            range: name_range,
+        };
+
+        // Add reference to the method name
+        self.index.add_reference(&name, location.clone());
+
+        // Add reference to the fully qualified name
+        if name != fqn {
+            self.index.add_reference(&fqn, location.clone());
+        }
+
+        // Also add a reference to the method declaration itself
+        // This is important for finding references to method declarations
+        let declaration_location = Location {
+            uri: uri.clone(),
+            range,
+        };
+        self.index
+            .add_reference(&name, declaration_location.clone());
+        if name != fqn {
+            self.index.add_reference(&fqn, declaration_location);
+        }
 
         // Create and add the entry
         let entry = EntryBuilder::new(&name)
@@ -1110,6 +1156,25 @@ impl RubyIndexer {
                     let fqn = format!("{}#{}", receiver_text, method_name);
                     self.index.add_reference(&fqn, location.clone());
                 }
+
+                // Handle scope resolution operator for nested classes
+                if receiver_node.kind() == "scope_resolution" {
+                    if let Some(scope_text) =
+                        self.get_fully_qualified_scope(receiver_node, source_code)
+                    {
+                        let fqn = format!("{}#{}", scope_text, method_name);
+                        self.index.add_reference(&fqn, location.clone());
+                    }
+                }
+
+                // Add references for all possible class combinations
+                // This helps with finding references in nested classes
+                let current_namespace = context.current_namespace();
+                if !current_namespace.is_empty() {
+                    // Try with current namespace as prefix
+                    let fqn = format!("{}::{}#{}", current_namespace, receiver_text, method_name);
+                    self.index.add_reference(&fqn, location.clone());
+                }
             } else {
                 // No explicit receiver, use current namespace as context
                 let current_namespace = context.current_namespace();
@@ -1121,6 +1186,36 @@ impl RubyIndexer {
         }
 
         Ok(())
+    }
+
+    // Helper method to get the fully qualified name from a scope resolution node
+    fn get_fully_qualified_scope(&self, node: Node, source_code: &str) -> Option<String> {
+        if node.kind() != "scope_resolution" {
+            return None;
+        }
+
+        let mut parts = Vec::new();
+
+        // Get the constant part (right side of ::)
+        if let Some(name_node) = node.child_by_field_name("name") {
+            parts.push(self.get_node_text(name_node, source_code));
+        }
+
+        // Get the scope part (left side of ::)
+        if let Some(scope_node) = node.child_by_field_name("scope") {
+            if scope_node.kind() == "scope_resolution" {
+                // Recursive case for nested scopes
+                if let Some(parent_scope) = self.get_fully_qualified_scope(scope_node, source_code)
+                {
+                    parts.insert(0, parent_scope);
+                }
+            } else {
+                // Base case - just a constant
+                parts.insert(0, self.get_node_text(scope_node, source_code));
+            }
+        }
+
+        Some(parts.join("::"))
     }
 
     // Process method parameters (arguments) in method definitions
