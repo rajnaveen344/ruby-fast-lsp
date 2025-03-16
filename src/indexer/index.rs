@@ -7,19 +7,52 @@ use super::entry::{Entry, EntryType};
 #[derive(Clone, Debug)]
 pub struct RubyIndex {
     // Main index mapping fully qualified names to entries
+    // Stores all indexed elements by their fully qualified name (FQN)
+    // Examples:
+    //   "User" -> [Class entry for User]
+    //   "User#save" -> [Method entry for User#save]
+    //   "ActiveRecord::Base" -> [Class entry for ActiveRecord::Base]
     pub entries: HashMap<String, Vec<Entry>>,
 
     // Map file URIs to their entries for efficient updates
+    // Allows quick access to all entries defined in a specific file
+    // Used for efficient reindexing when files change
+    // Examples:
+    //   "file:///app/models/user.rb" -> [All entries defined in user.rb]
+    //   "file:///app/controllers/users_controller.rb" -> [All entries in users_controller.rb]
     pub uri_to_entries: HashMap<String, Vec<Entry>>,
 
     // Maps for quick lookups by specific criteria
+    // Stores all method entries by their simple name for quick lookup
+    // Useful for finding methods without knowing their class context
+    // Examples:
+    //   "save" -> [User#save, Post#save, Comment#save]
+    //   "validate" -> [User#validate, Product#validate]
     pub methods_by_name: HashMap<String, Vec<Entry>>,
+
+    // Stores all constant entries (classes, modules, constants) by their simple name
+    // Useful for finding constants without knowing their namespace
+    // Examples:
+    //   "User" -> [User, Admin::User, API::User]
+    //   "VERSION" -> [APP::VERSION, API::VERSION]
     pub constants_by_name: HashMap<String, Vec<Entry>>,
 
     // Namespace hierarchy
+    // Tracks parent-child relationships between namespaces
+    // Used for resolving nested constants and building completion suggestions
+    // Examples:
+    //   "" -> ["ActiveRecord", "Rails", "User"]
+    //   "ActiveRecord" -> ["Base", "Migration", "Relation"]
+    //   "Rails" -> ["Application", "Configuration"]
     pub namespace_tree: HashMap<String, Vec<String>>,
 
     // Add a map to track references
+    // Stores all references to symbols throughout the codebase
+    // Used for finding all usages of a symbol
+    // Examples:
+    //   "User" -> [Locations where User is referenced]
+    //   "User#save" -> [Locations where User#save is called]
+    //   "@name" -> [Locations where @name is accessed]
     pub references: HashMap<String, Vec<Location>>,
 }
 
