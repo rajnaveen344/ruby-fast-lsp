@@ -4,7 +4,7 @@ use lsp_types::Url;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
-use super::traverser::RubyIndexer;
+use super::RubyIndexer;
 
 pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Result<()> {
     info!("Indexing workspace folder: {}", folder_uri);

@@ -1,5 +1,5 @@
 use crate::handlers::{notification, request};
-use crate::indexer::traverser::RubyIndexer;
+use crate::indexer::RubyIndexer;
 use anyhow::Result;
 use lsp_types::*;
 use tokio::sync::Mutex;

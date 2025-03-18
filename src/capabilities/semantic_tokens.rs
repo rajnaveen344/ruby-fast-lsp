@@ -2,7 +2,6 @@ use lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, WorkDoneProgressOptions,
 };
-use tree_sitter::Node;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 // Define token types for our legend - these need to be in the same order as in semantic_tokens_options

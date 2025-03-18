@@ -2,7 +2,7 @@ use log::info;
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer::RubyAnalyzer;
-use crate::indexer::traverser::RubyIndexer;
+use crate::indexer::RubyIndexer;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(

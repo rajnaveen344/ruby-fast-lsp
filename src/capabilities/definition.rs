@@ -2,7 +2,7 @@ use log::info;
 use lsp_types::{GotoDefinitionResponse, Location, Position, Url};
 
 use crate::analyzer::RubyAnalyzer;
-use crate::indexer::traverser::RubyIndexer;
+use crate::indexer::RubyIndexer;
 
 /// Find definition of a symbol at the given position in a file.
 pub async fn find_definition_at_position(

@@ -1,31 +1,18 @@
 use log::info;
 use lsp_types::{Location, Position, Range, Url};
-use std::path::Path;
 use tree_sitter::{Node, Parser, Tree};
 
 use super::{
     entry::{EntryBuilder, EntryType, Visibility},
     index::RubyIndex,
+    RubyIndexer,
 };
 
-// use crate::indexer::{EntryBuilder, EntryType, RubyIndex, Visibility};
-
-pub struct RubyIndexer {
-    // The Ruby index being populated
-    index: RubyIndex,
-
-    // The Tree-sitter parser
-    parser: Parser,
-
-    // Debug flag for tests
-    debug_mode: bool,
-}
-
 // Add a context struct to track more state during traversal
-struct TraversalContext {
-    visibility: Visibility,
-    namespace_stack: Vec<String>,
-    current_method: Option<String>,
+pub struct TraversalContext {
+    pub visibility: Visibility,
+    pub namespace_stack: Vec<String>,
+    pub current_method: Option<String>,
 }
 
 impl TraversalContext {
@@ -65,49 +52,27 @@ impl RubyIndexer {
         &mut self.index
     }
 
-    pub fn index_file(&mut self, file_path: &Path, source_code: &str) -> Result<(), String> {
-        // Parse the source code
-        let tree = self.parser.parse(source_code, None).ok_or_else(|| {
-            format!(
-                "Failed to parse source code in file: {}",
-                file_path.display()
-            )
-        })?;
-
-        // Get the file URI
-        let uri = Url::from_file_path(file_path).map_err(|_| {
-            format!(
-                "Failed to convert file path to URI: {}",
-                file_path.display()
-            )
-        })?;
-
-        // Process the file for indexing
-        self.process_file(uri, &tree, source_code)
-            .map_err(|e| format!("Failed to index file {}: {}", file_path.display(), e))
-    }
-
-    pub fn index_file_with_uri(&mut self, uri: Url, source_code: &str) -> Result<(), String> {
-        // Parse the source code
-        let tree = self
-            .parser
-            .parse(source_code, None)
-            .ok_or_else(|| format!("Failed to parse source code in file: {}", uri))?;
-
-        // Process the file for indexing
-        self.process_file(uri.clone(), &tree, source_code)
-            .map_err(|e| format!("Failed to index file {}: {}", uri, e))
-    }
-
     pub fn set_debug_mode(&mut self, debug: bool) {
         self.debug_mode = debug;
     }
 
-    fn process_file(&mut self, uri: Url, tree: &Tree, source_code: &str) -> Result<(), String> {
+    pub fn index_file_with_uri(&mut self, uri: Url, content: &str) -> Result<(), String> {
+        // Parse the source code
+        let tree = self
+            .parser
+            .parse(content, None)
+            .ok_or_else(|| format!("Failed to parse source code in file: {}", uri))?;
+
+        // Process the file for indexing
+        self.process_file(uri.clone(), &tree, content)
+            .map_err(|e| format!("Failed to index file {}: {}", uri, e))
+    }
+
+    fn process_file(&mut self, uri: Url, tree: &Tree, content: &str) -> Result<(), String> {
         // Debug: Print the AST structure if debug mode is enabled
         if self.debug_mode {
             info!("AST structure for file: {}", uri);
-            self.print_ast_structure(&tree.root_node(), source_code, 0);
+            self.print_ast_structure(&tree.root_node(), content, 0);
         }
 
         // Create a traversal context
@@ -118,7 +83,7 @@ impl RubyIndexer {
         self.index.remove_references_for_uri(&uri);
 
         // Traverse the AST
-        self.traverse_node(tree.root_node(), &uri, source_code, &mut context)?;
+        self.traverse_node(tree.root_node(), &uri, content, &mut context)?;
 
         Ok(())
     }
@@ -914,7 +879,7 @@ impl RubyIndexer {
         node: Node,
         uri: &Url,
         source_code: &str,
-        context: &mut TraversalContext,
+        _context: &mut TraversalContext,
     ) -> Result<(), String> {
         let left = node
             .child_by_field_name("left")
@@ -1433,16 +1398,16 @@ fn node_to_range(node: Node) -> Range {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::path::PathBuf;
     use tempfile::NamedTempFile;
 
     // Helper function to create a temporary Ruby file with given content
-    fn create_temp_ruby_file(content: &str) -> (NamedTempFile, PathBuf) {
+    fn create_temp_ruby_file(content: &str) -> (NamedTempFile, Url) {
         let mut file = NamedTempFile::new().expect("Failed to create temp file");
         file.write_all(content.as_bytes())
             .expect("Failed to write to temp file");
         let path = file.path().to_path_buf();
-        (file, path)
+        let uri = Url::from_file_path(path).unwrap();
+        (file, uri)
     }
 
     #[test]
@@ -1457,9 +1422,9 @@ mod tests {
     #[test]
     fn test_index_empty_file() {
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
-        let (file, path) = create_temp_ruby_file("");
+        let (file, uri) = create_temp_ruby_file("");
 
-        let result = indexer.index_file(&path, "");
+        let result = indexer.index_file_with_uri(uri, "");
         assert!(result.is_ok(), "Should be able to index an empty file");
 
         // Index should be empty
@@ -1486,9 +1451,9 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         let index = indexer.index();
@@ -1528,9 +1493,9 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         let index = indexer.index();
@@ -1576,9 +1541,9 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         let index = indexer.index();
@@ -1613,8 +1578,8 @@ mod tests {
         end
         "#;
 
-        let (file1, path1) = create_temp_ruby_file(ruby_code1);
-        let result1 = indexer.index_file(&path1, ruby_code1);
+        let (file1, uri1) = create_temp_ruby_file(ruby_code1);
+        let result1 = indexer.index_file_with_uri(uri1, ruby_code1);
         assert!(result1.is_ok(), "Should be able to index the first file");
 
         // Second file with reopened class
@@ -1626,8 +1591,8 @@ mod tests {
         end
         "#;
 
-        let (file2, path2) = create_temp_ruby_file(ruby_code2);
-        let result2 = indexer.index_file(&path2, ruby_code2);
+        let (file2, uri2) = create_temp_ruby_file(ruby_code2);
+        let result2 = indexer.index_file_with_uri(uri2, ruby_code2);
         assert!(result2.is_ok(), "Should be able to index the second file");
 
         let index = indexer.index();
@@ -1680,9 +1645,9 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         let index = indexer.index();
@@ -1765,8 +1730,8 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
-        let result = indexer.index_file(&path, ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         // Get mutable access to the index
@@ -1843,10 +1808,10 @@ mod tests {
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
         // First, index the file
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         // Verify class and methods were indexed
@@ -1863,9 +1828,6 @@ mod tests {
             index.methods_by_name.get("method2").is_some(),
             "method2 should be indexed"
         );
-
-        // Now remove entries for this URI
-        let uri = Url::from_file_path(&path).expect("Failed to convert path to URI");
 
         // Get mutable reference to index and remove entries
         indexer.index_mut().remove_entries_for_uri(&uri);
@@ -1915,10 +1877,10 @@ mod tests {
         "#;
 
         // Create temp file
-        let (temp_file, path) = create_temp_ruby_file(content);
+        let (temp_file, uri) = create_temp_ruby_file(content);
 
         // Index the file - this shouldn't panic
-        let result = indexer.index_file(&path, content);
+        let result = indexer.index_file_with_uri(uri, content);
 
         // Check indexing succeeded
         assert!(
@@ -1956,10 +1918,10 @@ mod tests {
         "#;
 
         // Create temp file
-        let (temp_file, path) = create_temp_ruby_file(content);
+        let (temp_file, uri) = create_temp_ruby_file(content);
 
         // Index the file - this shouldn't panic
-        let result = indexer.index_file(&path, content);
+        let result = indexer.index_file_with_uri(uri, content);
 
         // Check indexing succeeded
         assert!(
@@ -2010,10 +1972,10 @@ mod tests {
         "#;
 
         // Create temp file
-        let (temp_file, path) = create_temp_ruby_file(content);
+        let (temp_file, uri) = create_temp_ruby_file(content);
 
         // Index the file - this shouldn't panic
-        let result = indexer.index_file(&path, content);
+        let result = indexer.index_file_with_uri(uri, content);
 
         // Check indexing succeeded
         assert!(
@@ -2063,10 +2025,10 @@ puts user.greet
 "#;
 
         // Create a temporary file to test indexing
-        let (temp_file, temp_path) = create_temp_ruby_file(test_code);
+        let (temp_file, uri) = create_temp_ruby_file(test_code);
 
         // Index the file
-        indexer.index_file(&temp_path, test_code).unwrap();
+        indexer.index_file_with_uri(uri, test_code).unwrap();
 
         // Check that the User class was indexed
         let entries = indexer.index().entries.clone();
@@ -2145,10 +2107,10 @@ end
 "#;
 
         // Create a temporary file to test indexing
-        let (temp_file, temp_path) = create_temp_ruby_file(test_code);
+        let (temp_file, uri) = create_temp_ruby_file(test_code);
 
         // Index the file
-        indexer.index_file(&temp_path, test_code).unwrap();
+        indexer.index_file_with_uri(uri, test_code).unwrap();
 
         // Get the index
         let index = indexer.index();
@@ -2227,8 +2189,7 @@ person.greet  # Method call
 "#;
 
         // Create a temporary file
-        let (temp_file, path) = create_temp_ruby_file(ruby_code);
-        let uri = Url::from_file_path(path.clone()).unwrap();
+        let (temp_file, uri) = create_temp_ruby_file(ruby_code);
 
         // Index the file
         indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
@@ -2265,8 +2226,7 @@ end
 "#;
 
         // Create a temporary file
-        let (temp_file, path) = create_temp_ruby_file(ruby_code);
-        let uri = Url::from_file_path(path.clone()).unwrap();
+        let (temp_file, uri) = create_temp_ruby_file(ruby_code);
 
         // Index the file
         indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
@@ -2308,8 +2268,7 @@ end
 "#;
 
         // Create a temporary file
-        let (temp_file, path) = create_temp_ruby_file(ruby_code);
-        let uri = Url::from_file_path(path.clone()).unwrap();
+        let (temp_file, uri) = create_temp_ruby_file(ruby_code);
 
         // Index the file
         indexer.index_file_with_uri(uri.clone(), ruby_code).unwrap();
@@ -2416,14 +2375,16 @@ end
         "#;
 
         // Create temporary files
-        let (user_file, user_path) = create_temp_ruby_file(user_content);
-        let (auth_file, auth_path) = create_temp_ruby_file(auth_content);
-        let (order_file, order_path) = create_temp_ruby_file(order_content);
+        let (_, user_uri) = create_temp_ruby_file(user_content);
+        let (_, auth_uri) = create_temp_ruby_file(auth_content);
+        let (_, order_uri) = create_temp_ruby_file(order_content);
 
         // Index the files
-        indexer.index_file(&user_path, user_content).unwrap();
-        indexer.index_file(&auth_path, auth_content).unwrap();
-        indexer.index_file(&order_path, order_content).unwrap();
+        indexer.index_file_with_uri(user_uri, user_content).unwrap();
+        indexer.index_file_with_uri(auth_uri, auth_content).unwrap();
+        indexer
+            .index_file_with_uri(order_uri, order_content)
+            .unwrap();
 
         let index = indexer.index();
 
@@ -2503,14 +2464,18 @@ end
         "#;
 
         // Create temporary file
-        let (order_file, order_path) = create_temp_ruby_file(order_content);
+        let (_, order_uri) = create_temp_ruby_file(order_content);
 
         // Initial indexing
-        indexer.index_file(&order_path, order_content).unwrap();
+        indexer
+            .index_file_with_uri(order_uri.clone(), order_content)
+            .unwrap();
         let initial_refs = indexer.index().find_references("@items");
 
         // Reindex the same file
-        indexer.index_file(&order_path, order_content).unwrap();
+        indexer
+            .index_file_with_uri(order_uri, order_content)
+            .unwrap();
         let after_reindex_refs = indexer.index().find_references("@items");
 
         // References should be consistent after reindexing
@@ -2539,9 +2504,9 @@ end
         end
         "#;
 
-        let (file, path) = create_temp_ruby_file(ruby_code);
+        let (file, uri) = create_temp_ruby_file(ruby_code);
 
-        let result = indexer.index_file(&path, ruby_code);
+        let result = indexer.index_file_with_uri(uri, ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
         let index = indexer.index();
@@ -2616,11 +2581,11 @@ end
     end
   end
 end";
-        let (temp_file, path) = create_temp_ruby_file(code);
+        let (_, uri) = create_temp_ruby_file(code);
 
         // Index the file
         indexer
-            .index_file(&path, code)
+            .index_file_with_uri(uri, code)
             .expect("Failed to index file");
 
         let entries = indexer
@@ -2674,11 +2639,11 @@ class DataProcessor
     end
   end
 end"#;
-        let (temp_file, path) = create_temp_ruby_file(code);
+        let (_, uri) = create_temp_ruby_file(code);
 
         // Index the file
         indexer
-            .index_file(&path, code)
+            .index_file_with_uri(uri, code)
             .expect("Failed to index file");
 
         let entries = indexer
@@ -2748,11 +2713,11 @@ class DataProcessor
     end
   end
 end"#;
-        let (temp_file, path) = create_temp_ruby_file(code);
+        let (_, uri) = create_temp_ruby_file(code);
 
         // Index the file
         indexer
-            .index_file(&path, code)
+            .index_file_with_uri(uri, code)
             .expect("Failed to index file");
 
         let entries = indexer
