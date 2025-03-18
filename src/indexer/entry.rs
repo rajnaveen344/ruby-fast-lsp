@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lsp_types::{Range, Url};
+use lsp_types::{Location, Range, Url};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryType {
@@ -26,23 +26,17 @@ pub enum Visibility {
 pub struct Entry {
     pub name: String,                      // The name of the entity
     pub fully_qualified_name: String,      // Complete namespace path
-    pub location: EntryLocation,           // Where this entry is defined
+    pub location: Location,                // Where this entry is defined
     pub entry_type: EntryType,             // Type of entry
     pub visibility: Visibility,            // Public, protected, private
     pub metadata: HashMap<String, String>, // Additional information
-}
-
-#[derive(Debug, Clone)]
-pub struct EntryLocation {
-    pub uri: Url,     // File URI
-    pub range: Range, // Position in the file
 }
 
 // Helper struct for building a new entry
 pub struct EntryBuilder {
     name: String,
     fully_qualified_name: Option<String>,
-    location: Option<EntryLocation>,
+    location: Option<Location>,
     entry_type: Option<EntryType>,
     visibility: Option<Visibility>,
     metadata: HashMap<String, String>,
@@ -65,8 +59,8 @@ impl EntryBuilder {
         self
     }
 
-    pub fn location(mut self, uri: Url, range: Range) -> Self {
-        self.location = Some(EntryLocation { uri, range });
+    pub fn location(mut self, location: Location) -> Self {
+        self.location = Some(location);
         self
     }
 
@@ -133,7 +127,7 @@ mod tests {
 
         EntryBuilder::new(name)
             .fully_qualified_name(fqn)
-            .location(uri, range)
+            .location(Location { uri, range })
             .entry_type(entry_type)
             .visibility(visibility)
             .build()
@@ -291,7 +285,10 @@ mod tests {
         // Create an entry using the builder
         let entry = EntryBuilder::new("MyClass")
             .fully_qualified_name("MyClass")
-            .location(uri.clone(), range)
+            .location(Location {
+                uri: uri.clone(),
+                range,
+            })
             .entry_type(EntryType::Class)
             .visibility(Visibility::Public)
             .build()
@@ -318,7 +315,7 @@ mod tests {
         // Create an entry with only the required fields
         let entry = EntryBuilder::new("my_method")
             .fully_qualified_name("MyClass#my_method")
-            .location(uri.clone(), range)
+            .location(Location { uri, range })
             .entry_type(EntryType::Method)
             .build()
             .unwrap(); // Unwrap the Result
@@ -339,7 +336,7 @@ mod tests {
 
         // Try to build without setting fully_qualified_name
         let _ = EntryBuilder::new("MyClass")
-            .location(uri, range)
+            .location(Location { uri, range })
             .entry_type(EntryType::Class)
             .build()
             .unwrap(); // This should fail
@@ -368,7 +365,7 @@ mod tests {
         // Try to build without setting entry_type
         let _ = EntryBuilder::new("MyClass")
             .fully_qualified_name("MyClass")
-            .location(uri, range)
+            .location(Location { uri, range })
             .build()
             .unwrap(); // This should fail
     }

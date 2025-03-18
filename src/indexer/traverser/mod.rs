@@ -1,12 +1,19 @@
-use log::info;
-use lsp_types::{Location, Position, Range, Url};
-use tree_sitter::{Node, Parser, Tree};
+mod block_node;
+mod call_node;
+mod class_node;
+mod constant_node;
+mod method_node;
+mod module_node;
+mod parameter_node;
+mod utils;
+mod variable_node;
 
-use super::{
-    entry::{EntryBuilder, EntryType, Visibility},
-    index::RubyIndex,
-    RubyIndexer,
-};
+use log::info;
+use lsp_types::{Location, Url};
+use tree_sitter::{Node, Parser, Tree};
+use utils::node_to_range;
+
+use super::{entry::Visibility, index::RubyIndex, RubyIndexer};
 
 // Add a context struct to track more state during traversal
 pub struct TraversalContext {
@@ -96,10 +103,10 @@ impl RubyIndexer {
         context: &mut TraversalContext,
     ) -> Result<(), String> {
         match node.kind() {
-            "class" => self.process_class(node, uri, source_code, context)?,
-            "module" => self.process_module(node, uri, source_code, context)?,
+            "class" => class_node::process(self, node, uri, source_code, context)?,
+            "module" => module_node::process(self, node, uri, source_code, context)?,
             "method" | "singleton_method" => {
-                self.process_method(node, uri, source_code, context)?
+                method_node::process(self, node, uri, source_code, context)?
             }
             "constant" => {
                 // Check if this is a reference to a constant (not part of an assignment)
@@ -113,8 +120,13 @@ impl RubyIndexer {
 
                 if is_reference {
                     // Process constant reference
-                    if let Err(e) = self.process_constant_reference(node, uri, source_code, context)
-                    {
+                    if let Err(e) = constant_node::process_constant_reference(
+                        self,
+                        node,
+                        uri,
+                        source_code,
+                        context,
+                    ) {
                         // Log the error and continue
                         if self.debug_mode {
                             println!("Error processing constant reference: {}", e);
@@ -122,7 +134,9 @@ impl RubyIndexer {
                     }
                 } else {
                     // Try to process constant definition, but don't fail if we can't
-                    if let Err(e) = self.process_constant(node, uri, source_code, context) {
+                    if let Err(e) =
+                        constant_node::process_constant(self, node, uri, source_code, context)
+                    {
                         // Log the error and continue
                         if self.debug_mode {
                             println!("Error processing constant: {}", e);
@@ -203,60 +217,12 @@ impl RubyIndexer {
                     }
                 }
             }
-            "block" => {
-                // Process block parameters if they exist
-                if let Some(parameters) = node.child_by_field_name("parameters") {
-                    self.process_block_parameters(parameters, uri, source_code, context)?;
-                }
-
-                // Process block body contents recursively
-                if let Some(body) = node.child_by_field_name("body") {
-                    for i in 0..body.named_child_count() {
-                        if let Some(child) = body.named_child(i) {
-                            self.traverse_node(child, uri, source_code, context)?;
-                        }
-                    }
-                } else {
-                    // If there's no explicit body field, traverse all children
-                    for i in 0..node.named_child_count() {
-                        if let Some(child) = node.named_child(i) {
-                            if child.kind() != "parameters" {
-                                // Skip parameters as we already processed them
-                                self.traverse_node(child, uri, source_code, context)?;
-                            }
-                        }
-                    }
-                }
-            }
+            "block" => block_node::process(self, node, uri, source_code, context)?,
             "block_parameters" => {
-                // Process block parameters directly
-                self.process_block_parameters(node, uri, source_code, context)?;
+                block_node::process_block_parameters(self, node, uri, source_code, context)?
             }
-            "parameters" => {
-                // Process method parameters directly
-                if let Some(parent) = node.parent() {
-                    if parent.kind() == "method" || parent.kind() == "singleton_method" {
-                        self.process_method_parameters(node, uri, source_code, context)?;
-                    } else if parent.kind() == "block" {
-                        self.process_block_parameters(node, uri, source_code, context)?;
-                    }
-                }
-            }
-            "call" => {
-                // Check for attr_* method calls like attr_accessor, attr_reader, attr_writer
-                self.process_attribute_methods(node, uri, source_code, context)?;
-
-                // Process method call references
-                self.process_method_call(node, uri, source_code, context)?;
-
-                // Continue traversing children
-                let child_count = node.child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-            }
+            "parameters" => parameter_node::process(self, node, uri, source_code, context)?,
+            "call" => call_node::process(self, node, uri, source_code, context)?,
             "assignment" => {
                 let left = node.child_by_field_name("left");
                 if let Some(left_node) = left {
@@ -264,7 +230,7 @@ impl RubyIndexer {
 
                     if left_kind == "constant" {
                         // Process constant assignment
-                        self.process_constant(node, uri, source_code, context)?;
+                        constant_node::process_constant(self, node, uri, source_code, context)?;
                     } else if left_kind == "identifier" {
                         // Process local variable assignment
                         let name = self.get_node_text(left_node, source_code);
@@ -275,22 +241,44 @@ impl RubyIndexer {
                             .next()
                             .map_or(false, |c| c.is_lowercase() || c == '_')
                         {
-                            self.process_local_variable(node, uri, source_code, context)?;
+                            variable_node::process_local_variable(
+                                self,
+                                node,
+                                uri,
+                                source_code,
+                                context,
+                            )?;
                         }
                     } else if left_kind == "instance_variable" {
                         // Process instance variable assignment
-                        self.process_instance_variable(node, uri, source_code, context)?;
+                        variable_node::process_instance_variable(
+                            self,
+                            node,
+                            uri,
+                            source_code,
+                            context,
+                        )?;
                     } else if left_kind == "class_variable" {
                         // Process class variable assignment
-                        self.process_class_variable(node, uri, source_code, context)?;
+                        variable_node::process_class_variable(
+                            self,
+                            node,
+                            uri,
+                            source_code,
+                            context,
+                        )?;
                     }
                 }
             }
             "instance_variable" => {
                 // Process instance variable reference
-                if let Err(e) =
-                    self.process_instance_variable_reference(node, uri, source_code, context)
-                {
+                if let Err(e) = variable_node::process_instance_variable_reference(
+                    self,
+                    node,
+                    uri,
+                    source_code,
+                    context,
+                ) {
                     // Log the error and continue
                     if self.debug_mode {
                         println!("Error processing instance variable: {}", e);
@@ -299,9 +287,13 @@ impl RubyIndexer {
             }
             "class_variable" => {
                 // Process class variable reference
-                if let Err(e) =
-                    self.process_class_variable_reference(node, uri, source_code, context)
-                {
+                if let Err(e) = variable_node::process_class_variable_reference(
+                    self,
+                    node,
+                    uri,
+                    source_code,
+                    context,
+                ) {
                     // Log the error and continue
                     if self.debug_mode {
                         println!("Error processing class variable: {}", e);
@@ -322,637 +314,6 @@ impl RubyIndexer {
         Ok(())
     }
 
-    fn process_class(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Find the class name node
-        let name_node = match node.child_by_field_name("name") {
-            Some(node) => node,
-            None => {
-                // Skip anonymous or dynamically defined classes instead of failing
-                if self.debug_mode {
-                    info!(
-                        "Skipping class without a name at {}:{}",
-                        node.start_position().row + 1,
-                        node.start_position().column + 1
-                    );
-                }
-
-                // Still traverse children for any defined methods or constants
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-
-                return Ok(());
-            }
-        };
-
-        // Extract the name text
-        let name = self.get_node_text(name_node, source_code);
-
-        // Skip classes with empty names or just whitespace
-        if name.trim().is_empty() {
-            if self.debug_mode {
-                info!(
-                    "Skipping class with empty name at {}:{}",
-                    node.start_position().row + 1,
-                    node.start_position().column + 1
-                );
-            }
-
-            // Still traverse children
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    self.traverse_node(child, uri, source_code, context)?;
-                }
-            }
-
-            return Ok(());
-        }
-
-        // Create a fully qualified name by joining the namespace stack
-        let current_namespace = context.current_namespace();
-
-        let fqn = if current_namespace.is_empty() {
-            name.clone()
-        } else {
-            format!("{}::{}", current_namespace, name)
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(node);
-
-        // Create a range for the class name reference
-        let name_range = node_to_range(name_node);
-
-        // Create a location for this reference
-        let location = Location {
-            uri: uri.clone(),
-            range: name_range,
-        };
-
-        // Add reference to the class name
-        self.index.add_reference(&name, location.clone());
-
-        // Add reference to the fully qualified name
-        if name != fqn {
-            self.index.add_reference(&fqn, location);
-        }
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::Class)
-            .build()?;
-
-        self.index.add_entry(entry);
-
-        // Add to namespace tree
-        let parent_namespace = if context.namespace_stack.is_empty() {
-            String::new()
-        } else {
-            current_namespace
-        };
-
-        let children = self
-            .index
-            .namespace_tree
-            .entry(parent_namespace)
-            .or_insert_with(Vec::new);
-
-        if !children.contains(&name) {
-            children.push(name.clone());
-        }
-
-        // Push the class name onto the namespace stack
-        context.namespace_stack.push(name);
-
-        // Process the body of the class
-        if let Some(body_node) = node.child_by_field_name("body") {
-            self.traverse_node(body_node, uri, source_code, context)?;
-        }
-
-        // Pop the namespace when done
-        context.namespace_stack.pop();
-
-        Ok(())
-    }
-
-    fn process_module(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Find the module name node
-        let name_node = match node.child_by_field_name("name") {
-            Some(node) => node,
-            None => {
-                // Skip anonymous or dynamically defined modules instead of failing
-                if self.debug_mode {
-                    info!(
-                        "Skipping module without a name at {}:{}",
-                        node.start_position().row + 1,
-                        node.start_position().column + 1
-                    );
-                }
-
-                // Still traverse children for any defined methods or constants
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-
-                return Ok(());
-            }
-        };
-
-        // Extract the name text
-        let name = self.get_node_text(name_node, source_code);
-
-        // Skip modules with empty names or just whitespace
-        if name.trim().is_empty() {
-            if self.debug_mode {
-                info!(
-                    "Skipping module with empty name at {}:{}",
-                    node.start_position().row + 1,
-                    node.start_position().column + 1
-                );
-            }
-
-            // Still traverse children
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    self.traverse_node(child, uri, source_code, context)?;
-                }
-            }
-
-            return Ok(());
-        }
-
-        // Create a fully qualified name by joining the namespace stack
-        let current_namespace = context.current_namespace();
-
-        let fqn = if current_namespace.is_empty() {
-            name.clone()
-        } else {
-            format!("{}::{}", current_namespace, name)
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(node);
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::Module)
-            .build()?;
-
-        self.index.add_entry(entry);
-
-        // Add to namespace tree
-        let parent_namespace = if context.namespace_stack.is_empty() {
-            String::new()
-        } else {
-            current_namespace
-        };
-
-        let children = self
-            .index
-            .namespace_tree
-            .entry(parent_namespace)
-            .or_insert_with(Vec::new);
-
-        if !children.contains(&name) {
-            children.push(name.clone());
-        }
-
-        // Push the module name onto the namespace stack
-        context.namespace_stack.push(name);
-
-        // Process the body of the module
-        if let Some(body_node) = node.child_by_field_name("body") {
-            self.traverse_node(body_node, uri, source_code, context)?;
-        }
-
-        // Pop the namespace when done
-        context.namespace_stack.pop();
-
-        Ok(())
-    }
-
-    fn process_method(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Find the method name node
-        let name_node = node
-            .child_by_field_name("name")
-            .ok_or_else(|| "Method without a name".to_string())?;
-
-        // Extract the name text
-        let name = self.get_node_text(name_node, source_code);
-
-        // Create a fully qualified name
-        let current_namespace = context.current_namespace();
-        let method_name = name.clone();
-
-        let fqn = if current_namespace.is_empty() {
-            method_name.clone()
-        } else {
-            format!("{}#{}", current_namespace, method_name)
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(node);
-
-        // Create a range for the method name reference
-        let name_range = node_to_range(name_node);
-
-        // Create a location for this reference
-        let location = Location {
-            uri: uri.clone(),
-            range: name_range,
-        };
-
-        // Add reference to the method name
-        self.index.add_reference(&name, location.clone());
-
-        // Add reference to the fully qualified name
-        if name != fqn {
-            self.index.add_reference(&fqn, location.clone());
-        }
-
-        // Also add a reference to the method declaration itself
-        // This is important for finding references to method declarations
-        let declaration_location = Location {
-            uri: uri.clone(),
-            range,
-        };
-        self.index
-            .add_reference(&name, declaration_location.clone());
-        if name != fqn {
-            self.index.add_reference(&fqn, declaration_location);
-        }
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::Method)
-            .visibility(context.visibility)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        self.index.add_entry(entry);
-
-        // Set the current method before processing the body
-        context.current_method = Some(name.clone());
-
-        // Process method parameters if they exist
-        if let Some(parameters) = node.child_by_field_name("parameters") {
-            self.process_method_parameters(parameters, uri, source_code, context)?;
-        }
-
-        // Process method body contents recursively
-        if let Some(body) = node.child_by_field_name("body") {
-            for i in 0..body.named_child_count() {
-                if let Some(child) = body.named_child(i) {
-                    self.traverse_node(child, uri, source_code, context)?;
-                }
-            }
-        }
-
-        // Reset the current method after processing
-        context.current_method = None;
-
-        Ok(())
-    }
-
-    fn process_constant(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // For constant assignments, the name is in the "left" field
-        let name_node = match node.child_by_field_name("left") {
-            Some(node) => node,
-            None => {
-                // If we encounter a constant node without a left field, it's likely part of another
-                // construct, like a class name or module. Instead of failing, just continue traversal.
-                if self.debug_mode {
-                    info!(
-                        "Skipping constant without a name field at {}:{}",
-                        node.start_position().row + 1,
-                        node.start_position().column + 1
-                    );
-                }
-
-                // Recursively traverse child nodes
-                let child_count = node.child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-
-                return Ok(());
-            }
-        };
-
-        // Make sure it's a constant (starts with capital letter)
-        let name = self.get_node_text(name_node, source_code);
-        if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
-            // Not a valid constant, just continue traversal
-            // Recursively traverse child nodes
-            let child_count = node.child_count();
-            for i in 0..child_count {
-                if let Some(child) = node.child(i) {
-                    self.traverse_node(child, uri, source_code, context)?;
-                }
-            }
-            return Ok(());
-        }
-
-        // Create a fully qualified name
-        let current_namespace = context.current_namespace();
-        let constant_name = name.clone();
-
-        let fqn = if current_namespace.is_empty() {
-            constant_name.clone()
-        } else {
-            format!("{}::{}", current_namespace, constant_name)
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(node);
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::Constant)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        self.index.add_entry(entry);
-
-        // Process the right side of the assignment
-        if let Some(right) = node.child_by_field_name("right") {
-            self.traverse_node(right, uri, source_code, context)?;
-        }
-
-        Ok(())
-    }
-
-    // New method to handle local variable assignments
-    fn process_local_variable(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // For local variable assignments, the name is in the "left" field
-        let name_node = node
-            .child_by_field_name("left")
-            .ok_or_else(|| "Variable assignment without a name".to_string())?;
-
-        // Extract the variable name
-        let name = self.get_node_text(name_node, source_code);
-
-        // Skip if name is empty
-        if name.trim().is_empty() {
-            return Ok(());
-        }
-
-        // Create a fully qualified name that includes the current method scope
-        // This is important to prevent collisions between variables in different methods
-        let current_namespace = context.current_namespace();
-
-        // Determine if we're in a method context
-        let current_method = context.current_method.as_ref();
-
-        let fqn = if let Some(method_name) = current_method {
-            // If we're in a method, include it in the FQN
-            if current_namespace.is_empty() {
-                format!("{}#${}", method_name, name)
-            } else {
-                format!("{}#${}${}", current_namespace, method_name, name)
-            }
-        } else {
-            // Otherwise, just use the namespace and name
-            if current_namespace.is_empty() {
-                format!("${}", name)
-            } else {
-                format!("{}#${}", current_namespace, name)
-            }
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(node);
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::LocalVariable)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        self.index.add_entry(entry);
-
-        // Continue traversing the right side of the assignment
-        if let Some(right) = node.child_by_field_name("right") {
-            self.traverse_node(right, uri, source_code, context)?;
-        }
-
-        Ok(())
-    }
-
-    fn process_instance_variable(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // For instance variable assignments, the name is in the "left" field
-        let name_node = node
-            .child_by_field_name("left")
-            .ok_or_else(|| "Instance variable assignment without a name".to_string())?;
-
-        // Extract the variable name
-        let name = self.get_node_text(name_node, source_code);
-
-        // Skip if name is empty
-        if name.trim().is_empty() {
-            return Ok(());
-        }
-
-        // Create a fully qualified name that includes the current class/module context
-        let current_namespace = context.current_namespace();
-
-        // Determine the FQN for the instance variable
-        let fqn = if current_namespace.is_empty() {
-            name.clone()
-        } else {
-            format!("{}#{}", current_namespace, name)
-        };
-
-        // Create a range for the definition
-        let range = node_to_range(name_node);
-
-        // Create and add the entry
-        let entry = EntryBuilder::new(&name)
-            .fully_qualified_name(&fqn)
-            .location(uri.clone(), range)
-            .entry_type(EntryType::InstanceVariable) // Using a new entry type for instance variables
-            .visibility(context.visibility)
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        self.index.add_entry(entry);
-
-        // Process the right-hand side of the assignment
-        if let Some(right) = node.child_by_field_name("right") {
-            self.traverse_node(right, uri, source_code, context)?;
-        }
-
-        Ok(())
-    }
-
-    fn process_instance_variable_reference(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Extract the variable name
-        let name = self.get_node_text(node, source_code);
-
-        // Skip if name is empty
-        if name.trim().is_empty() {
-            return Ok(());
-        }
-
-        // Create a range for the reference
-        let range = node_to_range(node);
-
-        // Create a location for this reference
-        let location = Location {
-            uri: uri.clone(),
-            range,
-        };
-
-        // Add reference with just the variable name (e.g., @name)
-        self.index.add_reference(&name, location.clone());
-
-        // Also add reference with class context if available
-        let current_namespace = context.current_namespace();
-        if !current_namespace.is_empty() {
-            let fqn = format!("{}#{}", current_namespace, name);
-            self.index.add_reference(&fqn, location);
-        }
-
-        Ok(())
-    }
-
-    fn process_class_variable(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        _context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        let left = node
-            .child_by_field_name("left")
-            .ok_or_else(|| "Failed to get left node of class variable assignment".to_string())?;
-
-        let name = self.get_node_text(left, source_code);
-
-        // Add reference for the class variable
-        let location = Location::new(uri.clone(), node_to_range(left));
-        self.index.add_reference(&name, location);
-
-        Ok(())
-    }
-
-    fn process_class_variable_reference(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        _context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Get the variable name
-        let name = self.get_node_text(node, source_code);
-
-        // Add reference for the class variable
-        let range = node_to_range(node);
-        let location = Location {
-            uri: uri.clone(),
-            range,
-        };
-
-        self.index.add_reference(&name, location);
-
-        Ok(())
-    }
-
-    fn process_constant_reference(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Get the constant name
-        let name = self.get_node_text(node, source_code);
-
-        // Skip if name is empty or not a valid constant (should start with uppercase)
-        if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
-            return Ok(());
-        }
-
-        // Create a range for the reference
-        let range = node_to_range(node);
-
-        // Create a location for this reference
-        let location = Location {
-            uri: uri.clone(),
-            range,
-        };
-
-        // Add reference with just the constant name
-        self.index.add_reference(&name, location.clone());
-
-        // Also add reference with namespace context if available
-        let current_namespace = context.current_namespace();
-        if !current_namespace.is_empty() {
-            let fqn = format!("{}::{}", current_namespace, name);
-            self.index.add_reference(&fqn, location);
-        }
-
-        Ok(())
-    }
-
     fn get_node_text(&self, node: Node, source_code: &str) -> String {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
@@ -962,373 +323,6 @@ impl RubyIndexer {
         } else {
             String::new()
         }
-    }
-
-    // Process attr_accessor, attr_reader, attr_writer method calls
-    fn process_attribute_methods(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Check if this is a method call like attr_accessor, attr_reader, attr_writer
-        if let Some(method_node) = node.child_by_field_name("method") {
-            let method_name = self.get_node_text(method_node, source_code);
-
-            // Only process specific attribute method calls
-            if method_name != "attr_accessor"
-                && method_name != "attr_reader"
-                && method_name != "attr_writer"
-            {
-                return Ok(());
-            }
-
-            // Get the arguments (could be multiple symbol arguments)
-            if let Some(args_node) = node.child_by_field_name("arguments") {
-                let args_count = args_node.child_count();
-
-                for i in 0..args_count {
-                    if let Some(arg_node) = args_node.child(i) {
-                        // Skip non-symbol nodes (like commas)
-                        if arg_node.kind() != "simple_symbol" {
-                            continue;
-                        }
-
-                        // Extract the attribute name without the colon
-                        let mut attr_name = self.get_node_text(arg_node, source_code);
-                        if attr_name.starts_with(':') {
-                            attr_name = attr_name[1..].to_string();
-                        }
-
-                        // Get the current namespace (class/module)
-                        let current_namespace = context.current_namespace();
-                        if current_namespace.is_empty() {
-                            continue; // Skip if we're not in a class/module
-                        }
-
-                        // Create a range for the attribute definition
-                        let range = node_to_range(arg_node);
-
-                        // Create entries for the accessor methods
-                        if method_name == "attr_accessor" || method_name == "attr_reader" {
-                            // Add the getter method
-                            let getter_fqn = format!("{}#{}", current_namespace, attr_name);
-                            let getter_entry = EntryBuilder::new(&attr_name)
-                                .fully_qualified_name(&getter_fqn)
-                                .location(uri.clone(), range.clone())
-                                .entry_type(EntryType::Method)
-                                .visibility(context.visibility)
-                                .build()
-                                .map_err(|e| e.to_string())?;
-
-                            // Add the getter method to the index
-                            self.index.add_entry(getter_entry);
-                        }
-
-                        if method_name == "attr_accessor" || method_name == "attr_writer" {
-                            // Add the setter method (name=)
-                            let setter_name = format!("{}=", attr_name);
-                            let setter_fqn = format!("{}#{}", current_namespace, setter_name);
-                            let setter_entry = EntryBuilder::new(&setter_name)
-                                .fully_qualified_name(&setter_fqn)
-                                .location(uri.clone(), range.clone())
-                                .entry_type(EntryType::Method)
-                                .visibility(context.visibility)
-                                .build()
-                                .map_err(|e| e.to_string())?;
-
-                            // Add the setter method to the index
-                            self.index.add_entry(setter_entry);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn process_method_call(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Get the method name node
-        if let Some(method_node) = node.child_by_field_name("method") {
-            // Extract the method name
-            let method_name = self.get_node_text(method_node, source_code);
-
-            // Debug logging
-            if self.debug_mode {
-                info!(
-                    "Processing method call: {} at line {}:{}",
-                    method_name,
-                    node.start_position().row + 1,
-                    node.start_position().column + 1
-                );
-            }
-
-            // Skip if method name is empty or is an attribute method
-            if method_name.trim().is_empty()
-                || method_name == "attr_accessor"
-                || method_name == "attr_reader"
-                || method_name == "attr_writer"
-            {
-                return Ok(());
-            }
-
-            // Create a range for the reference
-            // For method calls without a receiver, we want to include the entire method call node
-            // to match the expected range in tests
-            let range = if node.child_by_field_name("receiver").is_none() {
-                // For calls like 'bar' without a receiver, use the entire node range
-                node_to_range(node)
-            } else {
-                // For calls with a receiver like 'foo.bar', use just the method name range
-                node_to_range(method_node)
-            };
-
-            // Debug logging for the range
-            if self.debug_mode {
-                info!(
-                    "Method call range: {}:{} to {}:{}",
-                    range.start.line, range.start.character, range.end.line, range.end.character
-                );
-            }
-
-            // Create a location for this reference
-            let location = Location {
-                uri: uri.clone(),
-                range,
-            };
-
-            // Add reference with just the method name
-            self.index.add_reference(&method_name, location.clone());
-
-            // If there's a receiver, try to determine its type
-            if let Some(receiver_node) = node.child_by_field_name("receiver") {
-                let receiver_text = self.get_node_text(receiver_node, source_code);
-
-                // If the receiver starts with uppercase, it's likely a class name
-                if receiver_text
-                    .chars()
-                    .next()
-                    .map_or(false, |c| c.is_uppercase())
-                {
-                    let fqn = format!("{}#{}", receiver_text, method_name);
-                    self.index.add_reference(&fqn, location.clone());
-                }
-
-                // Handle scope resolution operator for nested classes
-                if receiver_node.kind() == "scope_resolution" {
-                    if let Some(scope_text) =
-                        self.get_fully_qualified_scope(receiver_node, source_code)
-                    {
-                        let fqn = format!("{}#{}", scope_text, method_name);
-                        self.index.add_reference(&fqn, location.clone());
-                    }
-                }
-
-                // Add references for all possible class combinations
-                // This helps with finding references in nested classes
-                let current_namespace = context.current_namespace();
-                if !current_namespace.is_empty() {
-                    // Try with current namespace as prefix
-                    let fqn = format!("{}::{}#{}", current_namespace, receiver_text, method_name);
-                    self.index.add_reference(&fqn, location.clone());
-                }
-            } else {
-                // No explicit receiver, use current namespace as context
-                let current_namespace = context.current_namespace();
-                if !current_namespace.is_empty() {
-                    let fqn = format!("{}#{}", current_namespace, method_name);
-                    self.index.add_reference(&fqn, location);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    // Helper method to get the fully qualified name from a scope resolution node
-    fn get_fully_qualified_scope(&self, node: Node, source_code: &str) -> Option<String> {
-        if node.kind() != "scope_resolution" {
-            return None;
-        }
-
-        let mut parts = Vec::new();
-
-        // Get the constant part (right side of ::)
-        if let Some(name_node) = node.child_by_field_name("name") {
-            parts.push(self.get_node_text(name_node, source_code));
-        }
-
-        // Get the scope part (left side of ::)
-        if let Some(scope_node) = node.child_by_field_name("scope") {
-            if scope_node.kind() == "scope_resolution" {
-                // Recursive case for nested scopes
-                if let Some(parent_scope) = self.get_fully_qualified_scope(scope_node, source_code)
-                {
-                    parts.insert(0, parent_scope);
-                }
-            } else {
-                // Base case - just a constant
-                parts.insert(0, self.get_node_text(scope_node, source_code));
-            }
-        }
-
-        Some(parts.join("::"))
-    }
-
-    // Process method parameters (arguments) in method definitions
-    fn process_method_parameters(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Iterate through all parameter nodes
-        for i in 0..node.named_child_count() {
-            if let Some(param_node) = node.named_child(i) {
-                let param_kind = param_node.kind();
-                let param_name = match param_kind {
-                    "identifier" => self.get_node_text(param_node, source_code),
-                    "optional_parameter"
-                    | "keyword_parameter"
-                    | "rest_parameter"
-                    | "hash_splat_parameter"
-                    | "block_parameter" => {
-                        if let Some(name_node) = param_node.child_by_field_name("name") {
-                            self.get_node_text(name_node, source_code)
-                        } else {
-                            continue;
-                        }
-                    }
-                    _ => continue,
-                };
-
-                if param_name.trim().is_empty() {
-                    continue;
-                }
-
-                // Create a range for the definition
-                let range = node_to_range(param_node);
-
-                // Create a fully qualified name for the parameter
-                let current_namespace = context.current_namespace();
-                let current_method = context
-                    .current_method
-                    .as_ref()
-                    .ok_or_else(|| "Method parameter outside of method context".to_string())?;
-
-                let fqn = if current_namespace.is_empty() {
-                    format!("{}${}", current_method, param_name)
-                } else {
-                    format!("{}#{}${}", current_namespace, current_method, param_name)
-                };
-
-                // Create and add the entry
-                let entry = EntryBuilder::new(&param_name)
-                    .fully_qualified_name(&fqn)
-                    .location(uri.clone(), range)
-                    .entry_type(EntryType::LocalVariable)
-                    .metadata("kind", "parameter")
-                    .build()
-                    .map_err(|e| e.to_string())?;
-
-                self.index.add_entry(entry);
-            }
-        }
-
-        Ok(())
-    }
-
-    // Process block parameters in block definitions
-    fn process_block_parameters(
-        &mut self,
-        parameters: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        // Iterate through all parameter nodes
-        for i in 0..parameters.named_child_count() {
-            if let Some(param) = parameters.named_child(i) {
-                let param_text = match param.kind() {
-                    "identifier" => Some(self.get_node_text(param, source_code)),
-                    "optional_parameter"
-                    | "keyword_parameter"
-                    | "rest_parameter"
-                    | "hash_splat_parameter"
-                    | "block_parameter" => param
-                        .child_by_field_name("name")
-                        .map(|name_node| self.get_node_text(name_node, source_code)),
-                    _ => None,
-                };
-
-                if let Some(param_text) = param_text {
-                    if param_text.trim().is_empty() {
-                        continue;
-                    }
-
-                    // Create a range for the parameter
-                    let range = node_to_range(param);
-
-                    // Find the method that contains this block
-                    let mut current = parameters.clone();
-                    let mut method_name = None;
-
-                    while let Some(p) = current.parent() {
-                        if p.kind() == "method" || p.kind() == "singleton_method" {
-                            if let Some(method_name_node) = p.child_by_field_name("name") {
-                                method_name =
-                                    Some(self.get_node_text(method_name_node, source_code));
-                            }
-                            break;
-                        }
-                        current = p;
-                    }
-
-                    // Build the FQN based on context
-                    let fqn = if let Some(method_name) =
-                        method_name.as_ref().or(context.current_method.as_ref())
-                    {
-                        if context.namespace_stack.is_empty() {
-                            format!("{}$block${}", method_name, param_text)
-                        } else {
-                            format!(
-                                "{}#{}$block${}",
-                                context.current_namespace(),
-                                method_name,
-                                param_text
-                            )
-                        }
-                    } else {
-                        if context.namespace_stack.is_empty() {
-                            format!("$block${}", param_text)
-                        } else {
-                            format!("{}#$block${}", context.current_namespace(), param_text)
-                        }
-                    };
-
-                    // Create and add the entry
-                    let entry = EntryBuilder::new(&param_text)
-                        .fully_qualified_name(&fqn)
-                        .location(uri.clone(), range)
-                        .entry_type(EntryType::LocalVariable)
-                        .metadata("kind", "block_parameter")
-                        .build()
-                        .map_err(|e| e.to_string())?;
-
-                    self.index.add_entry(entry);
-                }
-            }
-        }
-        Ok(())
     }
 
     // Helper method to print the AST structure for debugging
@@ -1377,25 +371,10 @@ impl RubyIndexer {
     }
 }
 
-// Helper function to convert a tree-sitter node to an LSP Range
-fn node_to_range(node: Node) -> Range {
-    let start_point = node.start_position();
-    let end_point = node.end_position();
-
-    Range {
-        start: Position {
-            line: start_point.row as u32,
-            character: start_point.column as u32,
-        },
-        end: Position {
-            line: end_point.row as u32,
-            character: end_point.column as u32,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::indexer::entry::EntryType;
+
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;

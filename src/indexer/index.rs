@@ -474,7 +474,7 @@ impl RubyIndex {
 
 #[cfg(test)]
 mod tests {
-    use crate::indexer::entry::{EntryBuilder, EntryLocation, Visibility};
+    use crate::indexer::entry::{EntryBuilder, Visibility};
 
     use super::*;
     use tower_lsp::lsp_types::{Position, Range, Url};
@@ -500,7 +500,7 @@ mod tests {
 
         EntryBuilder::new(name)
             .fully_qualified_name(fqn)
-            .location(uri, range)
+            .location(Location { uri, range })
             .entry_type(entry_type)
             .visibility(visibility)
             .build()
@@ -785,7 +785,7 @@ mod tests {
         let class_entry = Entry {
             name: "TestClass".to_string(),
             fully_qualified_name: "TestClass".to_string(),
-            location: EntryLocation {
+            location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
                 range: Range {
                     start: Position::new(0, 0),
@@ -801,7 +801,7 @@ mod tests {
         let method_entry = Entry {
             name: "test_method".to_string(),
             fully_qualified_name: "TestClass#test_method".to_string(),
-            location: EntryLocation {
+            location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
                 range: Range {
                     start: Position::new(2, 2),
@@ -845,7 +845,7 @@ mod tests {
         let var_entry = Entry {
             name: "my_var".to_string(),
             fully_qualified_name: "TestClass#$my_var".to_string(),
-            location: EntryLocation {
+            location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
                 range: Range {
                     start: Position::new(3, 4),
@@ -861,7 +861,7 @@ mod tests {
         let nested_var_entry = Entry {
             name: "nested_var".to_string(),
             fully_qualified_name: "Module::Class#method$nested_var".to_string(),
-            location: EntryLocation {
+            location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
                 range: Range {
                     start: Position::new(5, 6),
