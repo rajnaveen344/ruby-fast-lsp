@@ -134,9 +134,7 @@ impl RubyIndexer {
                     }
                 } else {
                     // Try to process constant definition, but don't fail if we can't
-                    if let Err(e) =
-                        constant_node::process_constant(self, node, uri, source_code, context)
-                    {
+                    if let Err(e) = constant_node::process(self, node, uri, source_code, context) {
                         // Log the error and continue
                         if self.debug_mode {
                             println!("Error processing constant: {}", e);
@@ -219,7 +217,7 @@ impl RubyIndexer {
             }
             "block" => block_node::process(self, node, uri, source_code, context)?,
             "block_parameters" => {
-                block_node::process_block_parameters(self, node, uri, source_code, context)?
+                parameter_node::process_block_parameters(self, node, uri, source_code, context)?
             }
             "parameters" => parameter_node::process(self, node, uri, source_code, context)?,
             "call" => call_node::process(self, node, uri, source_code, context)?,
@@ -230,7 +228,7 @@ impl RubyIndexer {
 
                     if left_kind == "constant" {
                         // Process constant assignment
-                        constant_node::process_constant(self, node, uri, source_code, context)?;
+                        constant_node::process(self, node, uri, source_code, context)?;
                     } else if left_kind == "identifier" {
                         // Process local variable assignment
                         let name = get_indexer_node_text(self, left_node, source_code);

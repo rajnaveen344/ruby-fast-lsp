@@ -2,6 +2,7 @@ use crate::indexer::{
     entry::{EntryBuilder, EntryType},
     RubyIndexer,
 };
+use log::info;
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
@@ -17,62 +18,26 @@ pub fn process_local_variable(
     source_code: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
-    // For local variable assignments, the name is in the "left" field
-    let name_node = node
-        .child_by_field_name("left")
-        .ok_or_else(|| "Variable assignment without a name".to_string())?;
-
-    // Extract the variable name
-    let name = get_indexer_node_text(indexer, name_node, source_code);
+    // Extract the name node
+    let name_node = extract_variable_name_node(node)?;
+    let var_name = get_indexer_node_text(indexer, name_node, source_code);
 
     // Skip if name is empty
-    if name.trim().is_empty() {
+    if var_name.trim().is_empty() {
         return Ok(());
     }
 
-    // Create a fully qualified name that includes the current method scope
-    // This is important to prevent collisions between variables in different methods
-    let current_namespace = context.current_namespace();
+    // Create fully qualified name with method context if available
+    let fqn = create_variable_fqn(&var_name, context);
 
-    // Determine if we're in a method context
-    let current_method = context.current_method.as_ref();
+    // Debug logging
+    log_variable_processing(indexer, "local", &var_name, &fqn, name_node);
 
-    let fqn = if let Some(method_name) = current_method {
-        // If we're in a method, include it in the FQN
-        if current_namespace.is_empty() {
-            format!("{}#${}", method_name, name)
-        } else {
-            format!("{}#${}${}", current_namespace, method_name, name)
-        }
-    } else {
-        // Otherwise, just use the namespace and name
-        if current_namespace.is_empty() {
-            format!("${}", name)
-        } else {
-            format!("{}#${}", current_namespace, name)
-        }
-    };
+    // Create and add references
+    add_variable_references(indexer, &var_name, &fqn, uri, name_node);
 
-    // Create a range for the definition
-    let range = node_to_range(node);
-
-    // Create and add the entry
-    let entry = EntryBuilder::new(&name)
-        .fully_qualified_name(&fqn)
-        .location(Location {
-            uri: uri.clone(),
-            range,
-        })
-        .entry_type(EntryType::LocalVariable)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    indexer.index.add_entry(entry);
-
-    // Continue traversing the right side of the assignment
-    if let Some(right) = node.child_by_field_name("right") {
-        indexer.traverse_node(right, uri, source_code, context)?;
-    }
+    // Process the right-hand side of the assignment
+    process_assignment_rhs(indexer, node, uri, source_code, context)?;
 
     Ok(())
 }
@@ -84,79 +49,26 @@ pub fn process_instance_variable(
     source_code: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
-    // For instance variable assignments, the name is in the "left" field
-    let name_node = node
-        .child_by_field_name("left")
-        .ok_or_else(|| "Instance variable assignment without a name".to_string())?;
+    // Extract the name node
+    let name_node = extract_variable_name_node(node)?;
+    let var_name = get_indexer_node_text(indexer, name_node, source_code);
 
-    // Extract the variable name
-    let name = get_indexer_node_text(indexer, name_node, source_code);
-
-    // Skip if name is empty
-    if name.trim().is_empty() {
+    // Skip if name is empty or doesn't start with @
+    if var_name.trim().is_empty() || !var_name.starts_with('@') {
         return Ok(());
     }
 
-    // Create a fully qualified name that includes the current class/module context
-    let current_namespace = context.current_namespace();
+    // Create fully qualified name with class context
+    let fqn = create_instance_variable_fqn(&var_name, context);
 
-    // Determine the FQN for the instance variable
-    let fqn = if current_namespace.is_empty() {
-        name.clone()
-    } else {
-        format!("{}#{}", current_namespace, name)
-    };
+    // Debug logging
+    log_variable_processing(indexer, "instance", &var_name, &fqn, name_node);
 
-    // Create a range for the definition
-    let range = node_to_range(name_node);
-
-    // Create and add the entry
-    let entry = EntryBuilder::new(&name)
-        .fully_qualified_name(&fqn)
-        .location(Location {
-            uri: uri.clone(),
-            range,
-        })
-        .entry_type(EntryType::InstanceVariable)
-        .visibility(context.visibility)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    indexer.index.add_entry(entry);
+    // Create and add references
+    add_variable_references(indexer, &var_name, &fqn, uri, name_node);
 
     // Process the right-hand side of the assignment
-    if let Some(right) = node.child_by_field_name("right") {
-        indexer.traverse_node(right, uri, source_code, context)?;
-    }
-
-    Ok(())
-}
-
-pub fn process_instance_variable_reference(
-    indexer: &mut RubyIndexer,
-    node: Node,
-    uri: &Url,
-    source_code: &str,
-    context: &mut TraversalContext,
-) -> Result<(), String> {
-    // Extract the variable name
-    let name = get_indexer_node_text(indexer, node, source_code);
-
-    // Skip if name is empty
-    if name.trim().is_empty() {
-        return Ok(());
-    }
-
-    // Add reference with just the variable name (e.g., @name)
-    add_reference(indexer, &name, uri, node);
-
-    // Also add reference with class context if available
-    let current_namespace = context.current_namespace();
-    if !current_namespace.is_empty() {
-        let fqn = format!("{}#{}", current_namespace, name);
-        let location = create_location(uri, node);
-        indexer.index.add_reference(&fqn, location);
-    }
+    process_assignment_rhs(indexer, node, uri, source_code, context)?;
 
     Ok(())
 }
@@ -166,16 +78,145 @@ pub fn process_class_variable(
     node: Node,
     uri: &Url,
     source_code: &str,
-    _context: &mut TraversalContext,
+    context: &mut TraversalContext,
 ) -> Result<(), String> {
-    let left = node
-        .child_by_field_name("left")
-        .ok_or_else(|| "Failed to get left node of class variable assignment".to_string())?;
+    // Extract the name node
+    let name_node = extract_variable_name_node(node)?;
+    let var_name = get_indexer_node_text(indexer, name_node, source_code);
 
-    let name = get_indexer_node_text(indexer, left, source_code);
+    // Skip if name is empty or doesn't start with @@
+    if var_name.trim().is_empty() || !var_name.starts_with("@@") {
+        return Ok(());
+    }
 
-    // Add reference for the class variable
-    add_reference(indexer, &name, uri, left);
+    // Create fully qualified name with class context
+    let fqn = create_class_variable_fqn(&var_name, context);
+
+    // Debug logging
+    log_variable_processing(indexer, "class", &var_name, &fqn, name_node);
+
+    // Create and add references
+    add_variable_references(indexer, &var_name, &fqn, uri, name_node);
+
+    // Process the right-hand side of the assignment
+    process_assignment_rhs(indexer, node, uri, source_code, context)?;
+
+    Ok(())
+}
+
+fn extract_variable_name_node(node: Node) -> Result<Node, String> {
+    // Extract the variable name node from an assignment
+    match node.child_by_field_name("left") {
+        Some(left_node) => Ok(left_node),
+        None => Err("Variable node missing left field".to_string()),
+    }
+}
+
+fn create_variable_fqn(var_name: &str, context: &TraversalContext) -> String {
+    // Create a fully qualified name for a local variable
+    if let Some(method_name) = &context.current_method {
+        // If we're in a method, qualify with method name
+        let current_ns = context.current_namespace();
+        if current_ns.is_empty() {
+            format!("{}#{}", method_name, var_name)
+        } else {
+            format!("{}#{}#{}", current_ns, method_name, var_name)
+        }
+    } else {
+        // Otherwise use just the variable name
+        var_name.to_string()
+    }
+}
+
+fn create_instance_variable_fqn(var_name: &str, context: &TraversalContext) -> String {
+    // Create a fully qualified name for an instance variable
+    let current_ns = context.current_namespace();
+    if current_ns.is_empty() {
+        var_name.to_string()
+    } else {
+        format!("{}#{}", current_ns, var_name)
+    }
+}
+
+fn create_class_variable_fqn(var_name: &str, context: &TraversalContext) -> String {
+    // Create a fully qualified name for a class variable
+    let current_ns = context.current_namespace();
+    if current_ns.is_empty() {
+        var_name.to_string()
+    } else {
+        format!("{}#{}", current_ns, var_name)
+    }
+}
+
+fn log_variable_processing(
+    indexer: &RubyIndexer,
+    var_type: &str,
+    var_name: &str,
+    fqn: &str,
+    node: Node,
+) {
+    // Log variable processing if debug mode is enabled
+    if indexer.debug_mode {
+        info!(
+            "Processing {} variable: {} (FQN: {}) at {}:{}",
+            var_type,
+            var_name,
+            fqn,
+            node.start_position().row + 1,
+            node.start_position().column + 1
+        );
+    }
+}
+
+fn add_variable_references(
+    indexer: &mut RubyIndexer,
+    var_name: &str,
+    fqn: &str,
+    uri: &Url,
+    node: Node,
+) {
+    // Add references for both the variable name and its fully qualified form
+    add_reference(indexer, var_name, uri, node);
+    add_reference(indexer, fqn, uri, node);
+}
+
+fn process_assignment_rhs(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &mut TraversalContext,
+) -> Result<(), String> {
+    // Process the right side of the assignment if it exists
+    if let Some(right) = node.child_by_field_name("right") {
+        indexer.traverse_node(right, uri, source_code, context)?;
+    }
+    Ok(())
+}
+
+pub fn process_instance_variable_reference(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &TraversalContext,
+) -> Result<(), String> {
+    // Extract the variable name
+    let var_name = get_indexer_node_text(indexer, node, source_code);
+
+    // Skip if name is empty or invalid
+    if var_name.trim().is_empty() || !var_name.starts_with('@') {
+        return Ok(());
+    }
+
+    // Create the fully qualified name
+    let fqn = create_instance_variable_fqn(&var_name, context);
+
+    // Debug logging
+    log_variable_processing(indexer, "instance", &var_name, &fqn, node);
+
+    // Add references
+    add_variable_references(indexer, &var_name, &fqn, uri, node);
 
     Ok(())
 }
@@ -185,13 +226,24 @@ pub fn process_class_variable_reference(
     node: Node,
     uri: &Url,
     source_code: &str,
-    _context: &mut TraversalContext,
+    context: &TraversalContext,
 ) -> Result<(), String> {
-    // Get the variable name
-    let name = get_indexer_node_text(indexer, node, source_code);
+    // Extract the variable name
+    let var_name = get_indexer_node_text(indexer, node, source_code);
 
-    // Add reference for the class variable
-    add_reference(indexer, &name, uri, node);
+    // Skip if name is empty or invalid
+    if var_name.trim().is_empty() || !var_name.starts_with("@@") {
+        return Ok(());
+    }
+
+    // Create the fully qualified name
+    let fqn = create_class_variable_fqn(&var_name, context);
+
+    // Debug logging
+    log_variable_processing(indexer, "class", &var_name, &fqn, node);
+
+    // Add references
+    add_variable_references(indexer, &var_name, &fqn, uri, node);
 
     Ok(())
 }
@@ -217,29 +269,33 @@ mod tests {
 
     #[test]
     fn test_local_variable_processing() {
+        // Create a new indexer
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        indexer.set_debug_mode(true);
+
+        // Define test data with local variables
         let ruby_code = r##"
-        def process_data
-          result = "hello"
-          final = result.upcase
-          return final
-        end
+def process_data(input)
+  # Local variable
+  result = input * 2
 
-        def another_method
-          # Same name but different scope
-          result = 42
-          result += 10
-        end
-        "##;
+  # Use the variable
+  final = result + 10
 
+  return final
+end
+"##;
+
+        // Create a temporary file
         let (file, uri) = create_temp_ruby_file(ruby_code);
 
+        // Index the file
         let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
-        // Check if entries were indexed
-        let entries = &indexer.index().entries;
-        assert!(!entries.is_empty(), "Should have indexed entries");
+        // Verify the entries were indexed
+        let entries = indexer.index().entries.len();
+        assert!(entries > 0, "Should have indexed some entries");
 
         // Clean up
         drop(file);
@@ -247,32 +303,33 @@ mod tests {
 
     #[test]
     fn test_instance_variable_processing() {
+        // Create a new indexer
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        indexer.set_debug_mode(true);
+
+        // Define test data with instance variables
         let ruby_code = r##"
-        class Person
-          def initialize(name, age)
-            @name = name
-            @age = age
-          end
+class Person
+  def initialize(name)
+    @name = name
+  end
 
-          def greet
-            "Hello, " + @name + "! You are " + @age.to_s + " years old."
-          end
+  def greet
+    puts "Hello, " + @name
+  end
+end
+"##;
 
-          def birthday
-            @age += 1
-          end
-        end
-        "##;
-
+        // Create a temporary file
         let (file, uri) = create_temp_ruby_file(ruby_code);
 
+        // Index the file
         let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
-        // Check for instance variable entries
-        let entries = &indexer.index().entries;
-        assert!(!entries.is_empty(), "Should have indexed entries");
+        // Verify the entries were indexed
+        let entries = indexer.index().entries.len();
+        assert!(entries > 0, "Should have indexed some entries");
 
         // Clean up
         drop(file);
@@ -280,33 +337,35 @@ mod tests {
 
     #[test]
     fn test_class_variable_processing() {
+        // Create a new indexer
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        indexer.set_debug_mode(true);
+
+        // Define test data with class variables
         let ruby_code = r##"
-        class Counter
-          @@count = 0
+class Logger
+  @@log_level = "INFO"
 
-          def self.increment
-            @@count += 1
-          end
+  def self.log(message)
+    puts "[" + @@log_level + "] " + message
+  end
 
-          def self.current_count
-            @@count
-          end
+  def self.set_level(level)
+    @@log_level = level
+  end
+end
+"##;
 
-          def report
-            "Current count: " + @@count.to_s
-          end
-        end
-        "##;
-
+        // Create a temporary file
         let (file, uri) = create_temp_ruby_file(ruby_code);
 
+        // Index the file
         let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
-        // Check if entries were indexed
-        let entries = &indexer.index().entries;
-        assert!(!entries.is_empty(), "Should have indexed entries");
+        // Verify the entries were indexed
+        let entries = indexer.index().entries.len();
+        assert!(entries > 0, "Should have indexed some entries");
 
         // Clean up
         drop(file);
@@ -314,39 +373,41 @@ mod tests {
 
     #[test]
     fn test_nested_variable_scopes() {
+        // Create a new indexer
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        indexer.set_debug_mode(true);
+
+        // Define test data with nested scopes and variables
         let ruby_code = r##"
-        class ShoppingCart
-          @@tax_rate = 0.08
+module TestModule
+  @@module_var = "module value"
 
-          def initialize(items = [])
-            @items = items
-            @total = 0
-          end
+  class TestClass
+    @@class_var = "class value"
 
-          def calculate_total
-            subtotal = 0
-            @items.each do |item|
-              price = item[:price]
-              subtotal += price
-            end
+    def instance_method
+      @instance_var = "instance value"
+      local_var = "local value"
 
-            # Local and instance variables interacting
-            @total = subtotal * (1 + @@tax_rate)
+      puts @instance_var
+      puts local_var
+      puts @@class_var
+      puts @@module_var
+    end
+  end
+end
+"##;
 
-            return @total
-          end
-        end
-        "##;
-
+        // Create a temporary file
         let (file, uri) = create_temp_ruby_file(ruby_code);
 
+        // Index the file
         let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
-        // Check if entries were indexed
-        let entries = &indexer.index().entries;
-        assert!(!entries.is_empty(), "Should have indexed entries");
+        // Verify the entries were indexed
+        let entries = indexer.index().entries.len();
+        assert!(entries > 0, "Should have indexed some entries");
 
         // Clean up
         drop(file);
