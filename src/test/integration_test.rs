@@ -44,7 +44,7 @@ async fn init_and_open_file(fixture_file: &str) -> RubyLanguageServer {
     }
 
     let params = InitializeParams {
-        root_uri: Some(fixture_uri(fixture_file)),
+        workspace_folders: None,
         ..Default::default()
     };
     let _ = server.initialize(params).await;

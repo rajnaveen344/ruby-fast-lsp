@@ -1,17 +1,13 @@
 use anyhow::Result;
-use log::info;
+use log::{error, info};
 use lsp_types::Url;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use super::traverser::RubyIndexer;
 
-pub async fn index_workspace_folder(
-    indexer: &mut RubyIndexer,
-    folder_uri: &Url,
-    log_message: impl Fn(String) -> (),
-) -> Result<()> {
-    log_message(format!("Indexing workspace folder: {}", folder_uri));
+pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Result<()> {
+    info!("Indexing workspace folder: {}", folder_uri);
 
     // Convert URI to filesystem path
     let folder_path = folder_uri
@@ -20,25 +16,55 @@ pub async fn index_workspace_folder(
 
     // Find all Ruby files in the workspace
     let files = find_ruby_files(&folder_path).await?;
-    log_message(format!("Found {} Ruby files to index", files.len()));
+    info!("Found {} Ruby files to index", files.len());
 
     // Index each file
     for file_path in files {
         if let Err(e) = index_workspace_file(indexer, &file_path).await {
-            log_message(format!(
-                "Error indexing file {}: {:?}",
-                file_path.display(),
-                e
-            ));
+            error!("Error indexing file {}: {:?}", file_path.display(), e);
         }
     }
 
-    log_message("Workspace indexing completed".to_string());
+    info!("Workspace indexing completed");
     Ok(())
 }
 
+// Handler for didOpen notification
+pub fn file_opened(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
+    // Remove any existing entries for this file (in case it was previously indexed)
+    indexer.index_mut().remove_entries_for_uri(&uri);
+
+    // Index the file
+    indexer.index_file_with_uri(uri, content)
+}
+
+// Handler for didChange/didClose notification
+pub fn file_changed(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
+    // Remove existing entries
+    indexer.index_mut().remove_entries_for_uri(&uri);
+
+    // Re-index with new content
+    indexer.index_file_with_uri(uri, content)
+}
+
+pub fn file_created(_indexer: &mut RubyIndexer, _uri: Url) -> Result<(), String> {
+    todo!()
+}
+
+pub fn file_renamed(
+    _indexer: &mut RubyIndexer,
+    _old_uri: Url,
+    _new_uri: Url,
+) -> Result<(), String> {
+    todo!()
+}
+
+pub fn file_deleted(_indexer: &mut RubyIndexer, _uri: Url) -> Result<(), String> {
+    todo!()
+}
+
 // Helper to find all Ruby files in a directory recursively
-pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
+async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut ruby_files = Vec::new();
     let mut dirs_to_process = vec![dir.to_path_buf()];
 
@@ -68,7 +94,7 @@ pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 // Helper to index a single workspace file
-pub async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -> Result<()> {
+async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -> Result<()> {
     // Read the file content
     let content = fs::read_to_string(file_path).await?;
 
@@ -82,30 +108,6 @@ pub async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -
         .map_err(|e| anyhow::anyhow!("Failed to index file: {}", e))?;
 
     Ok(())
-}
-
-// Handler for didOpen notification
-pub fn handle_did_open(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
-    // Remove any existing entries for this file (in case it was previously indexed)
-    indexer.index_mut().remove_entries_for_uri(&uri);
-
-    // Index the file
-    indexer.index_file_with_uri(uri, content)
-}
-
-// Handler for didChange notification
-pub fn handle_did_change(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
-    // Remove existing entries
-    indexer.index_mut().remove_entries_for_uri(&uri);
-
-    // Re-index with new content
-    indexer.index_file_with_uri(uri, content)
-}
-
-// Handler for didClose notification
-pub fn handle_did_close(indexer: &mut RubyIndexer, uri: &Url) {
-    // Just remove entries for this file
-    indexer.index_mut().remove_entries_for_uri(uri);
 }
 
 #[cfg(test)]

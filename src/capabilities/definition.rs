@@ -1,5 +1,5 @@
 use log::info;
-use lsp_types::{Location, Position, Url};
+use lsp_types::{GotoDefinitionResponse, Location, Position, Url};
 
 use crate::analyzer::RubyAnalyzer;
 use crate::indexer::traverser::RubyIndexer;
@@ -10,7 +10,7 @@ pub async fn find_definition_at_position(
     uri: &Url,
     position: Position,
     content: &str,
-) -> Option<Location> {
+) -> Option<GotoDefinitionResponse> {
     // Use the analyzer to find the identifier at the position and get its fully qualified name
     let mut analyzer = RubyAnalyzer::new();
     let fully_qualified_name = match analyzer.find_identifier_at_position(content, position) {
@@ -35,8 +35,8 @@ pub async fn find_definition_at_position(
     info!("Found definition at {:?}", entry.location);
 
     // Return the location of the definition
-    Some(Location {
+    Some(GotoDefinitionResponse::Scalar(Location {
         uri: entry.location.uri.clone(),
         range: entry.location.range,
-    })
+    }))
 }
