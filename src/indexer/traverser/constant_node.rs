@@ -125,3 +125,124 @@ pub fn process_constant_reference(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    use crate::indexer::entry::EntryType;
+
+    use super::*;
+
+    // Helper function to create a temporary Ruby file with given content
+    fn create_temp_ruby_file(content: &str) -> (NamedTempFile, Url) {
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write to temp file");
+        let path = file.path().to_path_buf();
+        let uri = Url::from_file_path(path).unwrap();
+        (file, uri)
+    }
+
+    #[test]
+    fn test_index_constants() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r#"
+        module Config
+          VERSION = "1.0.0"
+
+          class Settings
+            DEFAULT_TIMEOUT = 30
+          end
+        end
+        "#;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri, ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        let index = indexer.index();
+
+        // Verify constants were indexed
+        let version_entries = index.entries.get("Config::VERSION");
+        assert!(
+            version_entries.is_some(),
+            "VERSION constant should be indexed"
+        );
+        assert_eq!(
+            version_entries.unwrap()[0].entry_type,
+            EntryType::Constant,
+            "VERSION should be a constant"
+        );
+
+        let timeout_entries = index.entries.get("Config::Settings::DEFAULT_TIMEOUT");
+        assert!(
+            timeout_entries.is_some(),
+            "DEFAULT_TIMEOUT constant should be indexed"
+        );
+        assert_eq!(
+            timeout_entries.unwrap()[0].entry_type,
+            EntryType::Constant,
+            "DEFAULT_TIMEOUT should be a constant"
+        );
+
+        // Keep file in scope until end of test
+        drop(file);
+    }
+
+    #[test]
+    fn test_constant_references() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r##"
+        module Colors
+          RED = "FF0000"
+          GREEN = "00FF00"
+          BLUE = "0000FF"
+        end
+
+        # Reference constants
+        puts Colors::RED
+        background = Colors::BLUE
+        puts Colors::GREEN
+        "##;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        let index = indexer.index();
+
+        // Verify constants were indexed
+        let red_entries = index.entries.get("Colors::RED");
+        assert!(red_entries.is_some(), "RED constant should be indexed");
+
+        // Verify references were indexed
+        let red_refs = index.find_references("RED");
+        assert!(!red_refs.is_empty(), "Should have references to RED");
+
+        let colors_red_refs = index.find_references("Colors::RED");
+        assert!(
+            !colors_red_refs.is_empty(),
+            "Should have references to Colors::RED"
+        );
+
+        // Verify at least one reference to each constant with the correct URI
+        let has_red_uri_ref = red_refs.iter().any(|loc| loc.uri == uri);
+        assert!(
+            has_red_uri_ref,
+            "Should have a RED reference with the correct URI"
+        );
+
+        let blue_refs = index.find_references("Colors::BLUE");
+        assert!(
+            !blue_refs.is_empty(),
+            "Should have references to Colors::BLUE"
+        );
+
+        // Keep file in scope until end of test
+        drop(file);
+    }
+}
