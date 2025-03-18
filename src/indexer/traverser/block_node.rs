@@ -5,7 +5,10 @@ use crate::indexer::{
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{get_indexer_node_text, node_to_range},
+    TraversalContext,
+};
 
 pub fn process(
     indexer: &mut RubyIndexer,
@@ -48,81 +51,64 @@ pub fn process_block_parameters(
     source_code: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
-    // Iterate through all parameter nodes
+    // Process block parameters as local variables
     for i in 0..parameters.named_child_count() {
         if let Some(param) = parameters.named_child(i) {
-            let param_text = match param.kind() {
-                "identifier" => Some(indexer.get_node_text(param, source_code)),
-                "optional_parameter"
-                | "keyword_parameter"
-                | "rest_parameter"
-                | "hash_splat_parameter"
-                | "block_parameter" => param
-                    .child_by_field_name("name")
-                    .map(|name_node| indexer.get_node_text(name_node, source_code)),
-                _ => None,
+            // Extract parameter name
+            let name = get_indexer_node_text(indexer, param, source_code);
+            if name.trim().is_empty() {
+                continue;
+            }
+
+            // Create a range for the parameter declaration
+            let range = node_to_range(param);
+
+            // Use the current namespace and method to create a fully qualified name
+            let current_namespace = context.current_namespace();
+            let block_var_prefix = if let Some(method_name) = &context.current_method {
+                format!(
+                    "{}{}#block-{}",
+                    if current_namespace.is_empty() {
+                        ""
+                    } else {
+                        &current_namespace
+                    },
+                    if current_namespace.is_empty() {
+                        ""
+                    } else {
+                        "::"
+                    },
+                    method_name
+                )
+            } else {
+                format!(
+                    "{}block",
+                    if current_namespace.is_empty() {
+                        ""
+                    } else {
+                        &current_namespace
+                    }
+                )
             };
 
-            if let Some(param_text) = param_text {
-                if param_text.trim().is_empty() {
-                    continue;
-                }
+            // Create the fully qualified name
+            let fqn = format!("{}${}", block_var_prefix, name);
 
-                // Create a range for the parameter
-                let range = node_to_range(param);
+            // Create and add the entry
+            let entry = EntryBuilder::new(&name)
+                .fully_qualified_name(&fqn)
+                .location(Location {
+                    uri: uri.clone(),
+                    range,
+                })
+                .entry_type(EntryType::LocalVariable)
+                .metadata("kind", "block_parameter")
+                .build()
+                .map_err(|e| e.to_string())?;
 
-                // Find the method that contains this block
-                let mut current = parameters.clone();
-                let mut method_name = None;
-
-                while let Some(p) = current.parent() {
-                    if p.kind() == "method" || p.kind() == "singleton_method" {
-                        if let Some(method_name_node) = p.child_by_field_name("name") {
-                            method_name =
-                                Some(indexer.get_node_text(method_name_node, source_code));
-                        }
-                        break;
-                    }
-                    current = p;
-                }
-
-                // Build the FQN based on context
-                let fqn = if let Some(method_name) =
-                    method_name.as_ref().or(context.current_method.as_ref())
-                {
-                    if context.namespace_stack.is_empty() {
-                        format!("{}$block${}", method_name, param_text)
-                    } else {
-                        format!(
-                            "{}#{}$block${}",
-                            context.current_namespace(),
-                            method_name,
-                            param_text
-                        )
-                    }
-                } else {
-                    if context.namespace_stack.is_empty() {
-                        format!("$block${}", param_text)
-                    } else {
-                        format!("{}#$block${}", context.current_namespace(), param_text)
-                    }
-                };
-
-                // Create and add the entry
-                let entry = EntryBuilder::new(&param_text)
-                    .fully_qualified_name(&fqn)
-                    .location(Location {
-                        uri: uri.clone(),
-                        range,
-                    })
-                    .entry_type(EntryType::LocalVariable)
-                    .metadata("kind", "block_parameter")
-                    .build()
-                    .map_err(|e| e.to_string())?;
-
-                indexer.index.add_entry(entry);
-            }
+            indexer.index.add_entry(entry);
         }
     }
+
     Ok(())
 }

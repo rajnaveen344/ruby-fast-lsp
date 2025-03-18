@@ -2,11 +2,13 @@ use crate::indexer::{
     entry::{EntryBuilder, EntryType},
     RubyIndexer,
 };
-use log::info;
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{add_reference, create_location, get_fqn, get_indexer_node_text, node_to_range},
+    TraversalContext,
+};
 
 pub fn process(
     indexer: &mut RubyIndexer,
@@ -15,103 +17,71 @@ pub fn process(
     source_code: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
-    // Find the module name node
+    // Extract the module name
     let name_node = match node.child_by_field_name("name") {
         Some(node) => node,
-        None => {
-            // Skip anonymous or dynamically defined modules instead of failing
-            if indexer.debug_mode {
-                info!(
-                    "Skipping module without a name at {}:{}",
-                    node.start_position().row + 1,
-                    node.start_position().column + 1
-                );
-            }
-
-            // Still traverse children for any defined methods or constants
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    indexer.traverse_node(child, uri, source_code, context)?;
-                }
-            }
-
-            return Ok(());
-        }
+        None => return Err("Module without a name".to_string()),
     };
 
-    // Extract the name text
-    let name = indexer.get_node_text(name_node, source_code);
+    let module_name = get_indexer_node_text(indexer, name_node, source_code);
+    let current_namespace = context.current_namespace();
+    let module_fqn = get_fqn(&current_namespace, &module_name);
 
-    // Skip modules with empty names or just whitespace
-    if name.trim().is_empty() {
-        if indexer.debug_mode {
-            info!(
-                "Skipping module with empty name at {}:{}",
-                node.start_position().row + 1,
-                node.start_position().column + 1
-            );
-        }
+    // Add references for the module name
+    add_reference(indexer, &module_name, uri, name_node);
 
-        // Still traverse children
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                indexer.traverse_node(child, uri, source_code, context)?;
-            }
-        }
-
-        return Ok(());
+    // Also add a reference to the fully qualified name if different
+    if module_name != module_fqn {
+        let location = create_location(uri, name_node);
+        indexer.index.add_reference(&module_fqn, location);
     }
 
-    // Create a fully qualified name by joining the namespace stack
-    let current_namespace = context.current_namespace();
-
-    let fqn = if current_namespace.is_empty() {
-        name.clone()
-    } else {
-        format!("{}::{}", current_namespace, name)
-    };
-
-    // Create a range for the definition
+    // Create module entry
     let range = node_to_range(node);
-
-    // Create and add the entry
-    let entry = EntryBuilder::new(&name)
-        .fully_qualified_name(&fqn)
+    let entry = EntryBuilder::new(&module_name)
+        .fully_qualified_name(&module_fqn)
         .location(Location {
             uri: uri.clone(),
             range,
         })
         .entry_type(EntryType::Module)
-        .build()?;
+        .build()
+        .map_err(|e| e.to_string())?;
 
+    // Add entry to index
     indexer.index.add_entry(entry);
 
-    // Add to namespace tree
+    // Update namespace tree
     let parent_namespace = if context.namespace_stack.is_empty() {
         String::new()
     } else {
         current_namespace
     };
 
+    // Add this module to its parent's children
     let children = indexer
         .index
         .namespace_tree
         .entry(parent_namespace)
         .or_insert_with(Vec::new);
 
-    if !children.contains(&name) {
-        children.push(name.clone());
+    if !children.contains(&module_fqn) {
+        children.push(module_fqn.clone());
     }
 
-    // Push the module name onto the namespace stack
-    context.namespace_stack.push(name);
+    // Push module to namespace stack
+    context.namespace_stack.push(module_name);
 
-    // Process the body of the module
-    if let Some(body_node) = node.child_by_field_name("body") {
-        indexer.traverse_node(body_node, uri, source_code, context)?;
+    // Process module body
+    if let Some(body) = node.child_by_field_name("body") {
+        for i in 0..body.named_child_count() {
+            if let Some(child) = body.named_child(i) {
+                indexer.traverse_node(child, uri, source_code, context)?;
+            }
+        }
     }
 
-    // Pop the namespace when done
+    // Pop module from namespace stack
     context.namespace_stack.pop();
 
     Ok(())

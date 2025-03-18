@@ -6,7 +6,13 @@ use log::info;
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{
+        add_reference, create_location, get_fully_qualified_scope, get_indexer_node_text,
+        node_to_range,
+    },
+    TraversalContext,
+};
 
 pub fn process(
     indexer: &mut RubyIndexer,
@@ -41,7 +47,7 @@ pub fn process_attribute_methods(
 ) -> Result<(), String> {
     // Check if this is a method call like attr_accessor, attr_reader, attr_writer
     if let Some(method_node) = node.child_by_field_name("method") {
-        let method_name = indexer.get_node_text(method_node, source_code);
+        let method_name = get_indexer_node_text(indexer, method_node, source_code);
 
         // Only process specific attribute method calls
         if method_name != "attr_accessor"
@@ -63,7 +69,7 @@ pub fn process_attribute_methods(
                     }
 
                     // Extract the attribute name without the colon
-                    let mut attr_name = indexer.get_node_text(arg_node, source_code);
+                    let mut attr_name = get_indexer_node_text(indexer, arg_node, source_code);
                     if attr_name.starts_with(':') {
                         attr_name = attr_name[1..].to_string();
                     }
@@ -132,7 +138,7 @@ pub fn process_method_call(
     // Get the method name node
     if let Some(method_node) = node.child_by_field_name("method") {
         // Extract the method name
-        let method_name = indexer.get_node_text(method_node, source_code);
+        let method_name = get_indexer_node_text(indexer, method_node, source_code);
 
         // Debug logging
         if indexer.debug_mode {
@@ -190,20 +196,13 @@ pub fn process_method_call(
 
         // If there's a receiver, try to determine its type and add more specific references
         if let Some(receiver_node) = node.child_by_field_name("receiver") {
-            let receiver_text = indexer.get_node_text(receiver_node, source_code);
+            let receiver_text = get_indexer_node_text(indexer, receiver_node, source_code);
 
             // If the receiver is a constant or identifier
             if receiver_node.kind() == "constant" || receiver_node.kind() == "identifier" {
                 // Add a reference to the receiver itself (helps with class references)
                 if receiver_node.kind() == "constant" {
-                    let receiver_range = node_to_range(receiver_node);
-                    let receiver_location = Location {
-                        uri: uri.clone(),
-                        range: receiver_range,
-                    };
-                    indexer
-                        .index
-                        .add_reference(&receiver_text, receiver_location);
+                    add_reference(indexer, &receiver_text, uri, receiver_node);
                 }
 
                 // Add the qualified method reference (Class#method or variable.method)
@@ -220,14 +219,7 @@ pub fn process_method_call(
                     get_fully_qualified_scope(indexer, receiver_node, source_code)
                 {
                     // Add a reference to the scope itself (the class)
-                    let receiver_range = node_to_range(receiver_node);
-                    let receiver_location = Location {
-                        uri: uri.clone(),
-                        range: receiver_range,
-                    };
-                    indexer
-                        .index
-                        .add_reference(&scope_text, receiver_location.clone());
+                    add_reference(indexer, &scope_text, uri, receiver_node);
 
                     // Add the fully qualified method reference
                     let fqn = format!("{}#{}", scope_text, method_name);
@@ -240,6 +232,7 @@ pub fn process_method_call(
                     let parts: Vec<&str> = scope_text.split("::").collect();
                     if parts.len() > 1 {
                         for part in parts {
+                            let receiver_location = create_location(uri, receiver_node);
                             indexer.index.add_reference(part, receiver_location.clone());
                         }
                     }
@@ -269,40 +262,6 @@ pub fn process_method_call(
     }
 
     Ok(())
-}
-
-// Helper method to get the fully qualified name from a scope resolution node
-pub fn get_fully_qualified_scope(
-    indexer: &RubyIndexer,
-    node: Node,
-    source_code: &str,
-) -> Option<String> {
-    if node.kind() != "scope_resolution" {
-        return None;
-    }
-
-    let mut parts = Vec::new();
-
-    // Get the constant part (right side of ::)
-    if let Some(name_node) = node.child_by_field_name("name") {
-        parts.push(indexer.get_node_text(name_node, source_code));
-    }
-
-    // Get the scope part (left side of ::)
-    if let Some(scope_node) = node.child_by_field_name("scope") {
-        if scope_node.kind() == "scope_resolution" {
-            // Recursive case for nested scopes
-            if let Some(parent_scope) = get_fully_qualified_scope(indexer, scope_node, source_code)
-            {
-                parts.insert(0, parent_scope);
-            }
-        } else {
-            // Base case - just a constant
-            parts.insert(0, indexer.get_node_text(scope_node, source_code));
-        }
-    }
-
-    Some(parts.join("::"))
 }
 
 #[cfg(test)]

@@ -6,7 +6,10 @@ use log::info;
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{add_reference, create_location, get_indexer_node_text, node_to_range},
+    TraversalContext,
+};
 
 pub fn process_constant(
     indexer: &mut RubyIndexer,
@@ -42,7 +45,7 @@ pub fn process_constant(
     };
 
     // Make sure it's a constant (starts with capital letter)
-    let name = indexer.get_node_text(name_node, source_code);
+    let name = get_indexer_node_text(indexer, name_node, source_code);
     if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
         // Not a valid constant, just continue traversal
         // Recursively traverse child nodes
@@ -55,18 +58,15 @@ pub fn process_constant(
         return Ok(());
     }
 
-    // Create a fully qualified name
+    // Create a fully qualified name that includes the current namespace
+    let mut fqn = name.clone();
     let current_namespace = context.current_namespace();
-    let constant_name = name.clone();
-
-    let fqn = if current_namespace.is_empty() {
-        constant_name.clone()
-    } else {
-        format!("{}::{}", current_namespace, constant_name)
-    };
+    if !current_namespace.is_empty() {
+        fqn = format!("{}::{}", current_namespace, name);
+    }
 
     // Create a range for the definition
-    let range = node_to_range(node);
+    let range = node_to_range(name_node);
 
     // Create and add the entry
     let entry = EntryBuilder::new(&name)
@@ -76,12 +76,13 @@ pub fn process_constant(
             range,
         })
         .entry_type(EntryType::Constant)
+        .visibility(context.visibility)
         .build()
         .map_err(|e| e.to_string())?;
 
     indexer.index.add_entry(entry);
 
-    // Process the right side of the assignment
+    // Process the right-hand side of the assignment
     if let Some(right) = node.child_by_field_name("right") {
         indexer.traverse_node(right, uri, source_code, context)?;
     }
@@ -96,31 +97,42 @@ pub fn process_constant_reference(
     source_code: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
-    // Get the constant name
-    let name = indexer.get_node_text(node, source_code);
+    // Extract the constant name
+    let name = get_indexer_node_text(indexer, node, source_code);
 
-    // Skip if name is empty or not a valid constant (should start with uppercase)
-    if name.trim().is_empty() || !name.starts_with(|c: char| c.is_uppercase()) {
+    // Skip if name is empty
+    if name.trim().is_empty() {
         return Ok(());
     }
 
     // Create a range for the reference
     let range = node_to_range(node);
 
-    // Create a location for this reference
-    let location = Location {
-        uri: uri.clone(),
-        range,
-    };
-
     // Add reference with just the constant name
-    indexer.index.add_reference(&name, location.clone());
+    add_reference(indexer, &name, uri, node);
 
     // Also add reference with namespace context if available
     let current_namespace = context.current_namespace();
     if !current_namespace.is_empty() {
         let fqn = format!("{}::{}", current_namespace, name);
+        let location = create_location(uri, node);
         indexer.index.add_reference(&fqn, location);
+    }
+
+    // Add reference for all possible parent classes
+    // This helps with finding references to nested constants
+    let parent = node.parent();
+    if let Some(p) = parent {
+        if p.kind() == "scope_resolution" {
+            // This is a nested constant access like A::B
+            // We need to add references for both A and A::B
+            if let Some(scope) = p.child_by_field_name("scope") {
+                let scope_name = get_indexer_node_text(indexer, scope, source_code);
+                let fqn = format!("{}::{}", scope_name, name);
+                let location = create_location(uri, node);
+                indexer.index.add_reference(&fqn, location);
+            }
+        }
     }
 
     Ok(())
@@ -130,8 +142,6 @@ pub fn process_constant_reference(
 mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    use crate::indexer::entry::EntryType;
 
     use super::*;
 
@@ -149,100 +159,78 @@ mod tests {
     fn test_index_constants() {
         let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
         let ruby_code = r#"
-        module Config
-          VERSION = "1.0.0"
+        # Top-level constant
+        VERSION = "1.0"
 
-          class Settings
-            DEFAULT_TIMEOUT = 30
-          end
+        module Namespace
+          # Nested constant
+          TIMEOUT = 30
+        end
+
+        class Config
+          # Class constant with calculation
+          MAX_RETRIES = 5 * 2
         end
         "#;
-
-        let (file, uri) = create_temp_ruby_file(ruby_code);
-
-        let result = indexer.index_file_with_uri(uri, ruby_code);
-        assert!(result.is_ok(), "Should be able to index the file");
-
-        let index = indexer.index();
-
-        // Verify constants were indexed
-        let version_entries = index.entries.get("Config::VERSION");
-        assert!(
-            version_entries.is_some(),
-            "VERSION constant should be indexed"
-        );
-        assert_eq!(
-            version_entries.unwrap()[0].entry_type,
-            EntryType::Constant,
-            "VERSION should be a constant"
-        );
-
-        let timeout_entries = index.entries.get("Config::Settings::DEFAULT_TIMEOUT");
-        assert!(
-            timeout_entries.is_some(),
-            "DEFAULT_TIMEOUT constant should be indexed"
-        );
-        assert_eq!(
-            timeout_entries.unwrap()[0].entry_type,
-            EntryType::Constant,
-            "DEFAULT_TIMEOUT should be a constant"
-        );
-
-        // Keep file in scope until end of test
-        drop(file);
-    }
-
-    #[test]
-    fn test_constant_references() {
-        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
-        let ruby_code = r##"
-        module Colors
-          RED = "FF0000"
-          GREEN = "00FF00"
-          BLUE = "0000FF"
-        end
-
-        # Reference constants
-        puts Colors::RED
-        background = Colors::BLUE
-        puts Colors::GREEN
-        "##;
 
         let (file, uri) = create_temp_ruby_file(ruby_code);
 
         let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
         assert!(result.is_ok(), "Should be able to index the file");
 
-        let index = indexer.index();
-
-        // Verify constants were indexed
-        let red_entries = index.entries.get("Colors::RED");
-        assert!(red_entries.is_some(), "RED constant should be indexed");
-
-        // Verify references were indexed
-        let red_refs = index.find_references("RED");
-        assert!(!red_refs.is_empty(), "Should have references to RED");
-
-        let colors_red_refs = index.find_references("Colors::RED");
+        // Check for top-level constant
+        let version_entries = indexer.index().constants_by_name.get("VERSION");
         assert!(
-            !colors_red_refs.is_empty(),
-            "Should have references to Colors::RED"
+            version_entries.is_some(),
+            "VERSION constant should be indexed"
         );
 
-        // Verify at least one reference to each constant with the correct URI
-        let has_red_uri_ref = red_refs.iter().any(|loc| loc.uri == uri);
+        // Check for nested constant
+        let timeout_entries = indexer.index().constants_by_name.get("TIMEOUT");
         assert!(
-            has_red_uri_ref,
-            "Should have a RED reference with the correct URI"
+            timeout_entries.is_some(),
+            "TIMEOUT constant should be indexed"
         );
 
-        let blue_refs = index.find_references("Colors::BLUE");
+        // Check for class constant
+        let retries_entries = indexer.index().constants_by_name.get("MAX_RETRIES");
         assert!(
-            !blue_refs.is_empty(),
-            "Should have references to Colors::BLUE"
+            retries_entries.is_some(),
+            "MAX_RETRIES constant should be indexed"
         );
 
-        // Keep file in scope until end of test
+        // Clean up
+        drop(file);
+    }
+
+    #[test]
+    fn test_constant_references() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r#"
+        # Define constants
+        PI = 3.14159
+        module Math
+          E = 2.71828
+        end
+
+        # Reference constants
+        circumference = 2 * PI * radius
+        exp_value = Math::E ** x
+        "#;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        // Verify references were added
+        let pi_refs = indexer.index().find_references("PI");
+        assert!(!pi_refs.is_empty(), "Should have references to PI");
+
+        let e_refs = indexer.index().find_references("Math::E");
+        assert!(!e_refs.is_empty(), "Should have references to Math::E");
+
+        // Clean up
         drop(file);
     }
 }

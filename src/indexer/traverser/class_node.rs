@@ -7,7 +7,7 @@ use crate::indexer::{
 };
 
 use super::{
-    utils::{get_fqn, get_node_text, node_to_range},
+    utils::{add_reference, create_location, get_fqn, get_indexer_node_text, node_to_range},
     TraversalContext,
 };
 
@@ -19,9 +19,22 @@ pub fn process(
     context: &mut TraversalContext,
 ) -> Result<(), String> {
     let current_namespace = context.current_namespace();
-    let class_name = get_class_name(node, content);
+    let class_name = get_class_name(indexer, node, content);
     let class_fqn = get_fqn(&current_namespace, &class_name);
     let range = node_to_range(node);
+
+    // Find the class name node for reference
+    if let Some(name_node) = node.child_by_field_name("name") {
+        // Add reference to the class name
+        add_reference(indexer, &class_name, uri, name_node);
+
+        // Add reference to fully qualified name if different
+        if class_name != class_fqn {
+            let location = create_location(uri, name_node);
+            indexer.index.add_reference(&class_fqn, location);
+        }
+    }
+
     let location = Location {
         uri: uri.clone(),
         range,
@@ -49,30 +62,35 @@ pub fn process(
         .entry(parent_namespace)
         .or_insert_with(Vec::new);
 
-    if !children.contains(&class_name) {
-        children.push(class_name.clone());
+    if !children.contains(&class_fqn) {
+        children.push(class_fqn.clone());
     }
 
-    // Push the class name onto the namespace stack
+    // Push class to namespace stack
     context.namespace_stack.push(class_name);
 
-    // Process the body of the class
-    if let Some(body_node) = node.child_by_field_name("body") {
-        indexer.traverse_node(body_node, uri, content, context)?;
+    // Process class body
+    if let Some(body) = node.child_by_field_name("body") {
+        for i in 0..body.named_child_count() {
+            if let Some(child) = body.named_child(i) {
+                indexer.traverse_node(child, uri, content, context)?;
+            }
+        }
     }
 
-    // Pop the namespace when done
+    // Pop class from namespace stack
     context.namespace_stack.pop();
 
     Ok(())
 }
 
-fn get_class_name(node: Node, content: &str) -> String {
-    let name_node = match node.child_by_field_name("name") {
-        Some(node) => node,
-        None => return String::new(),
-    };
-    get_node_text(name_node, content)
+fn get_class_name(indexer: &RubyIndexer, node: Node, content: &str) -> String {
+    if let Some(name_node) = node.child_by_field_name("name") {
+        get_indexer_node_text(indexer, name_node, content)
+    } else {
+        // Fallback in case we can't find the name node
+        "UnknownClass".to_string()
+    }
 }
 
 #[cfg(test)]

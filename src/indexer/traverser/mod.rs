@@ -11,7 +11,7 @@ mod variable_node;
 use log::info;
 use lsp_types::{Location, Url};
 use tree_sitter::{Node, Parser, Tree};
-use utils::node_to_range;
+use utils::{get_indexer_node_text, node_to_range};
 
 use super::{entry::Visibility, index::RubyIndex, RubyIndexer};
 
@@ -155,7 +155,7 @@ impl RubyIndexer {
             "identifier" => {
                 // Check if this is a method call without a receiver
                 // This handles cases like 'bar' in 'def another_method; bar; end'
-                let text = self.get_node_text(node, source_code);
+                let text = get_indexer_node_text(self, node, source_code);
 
                 // Skip if it's a keyword or empty
                 if text.trim().is_empty()
@@ -233,7 +233,7 @@ impl RubyIndexer {
                         constant_node::process_constant(self, node, uri, source_code, context)?;
                     } else if left_kind == "identifier" {
                         // Process local variable assignment
-                        let name = self.get_node_text(left_node, source_code);
+                        let name = get_indexer_node_text(self, left_node, source_code);
 
                         // Only process variables that start with lowercase or underscore
                         if name
@@ -314,15 +314,8 @@ impl RubyIndexer {
         Ok(())
     }
 
-    fn get_node_text(&self, node: Node, source_code: &str) -> String {
-        let start_byte = node.start_byte();
-        let end_byte = node.end_byte();
-
-        if start_byte <= end_byte && end_byte <= source_code.len() {
-            source_code[start_byte..end_byte].to_string()
-        } else {
-            String::new()
-        }
+    pub fn get_node_text(&self, node: Node, source_code: &str) -> String {
+        utils::get_node_text(node, source_code)
     }
 
     // Helper method to print the AST structure for debugging

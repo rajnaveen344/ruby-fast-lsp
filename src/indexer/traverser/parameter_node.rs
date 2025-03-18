@@ -5,7 +5,10 @@ use crate::indexer::{
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{get_indexer_node_text, node_to_range},
+    TraversalContext,
+};
 
 pub fn process(
     indexer: &mut RubyIndexer,
@@ -38,14 +41,14 @@ pub fn process_method_parameters(
         if let Some(param_node) = node.named_child(i) {
             let param_kind = param_node.kind();
             let param_name = match param_kind {
-                "identifier" => indexer.get_node_text(param_node, source_code),
+                "identifier" => get_indexer_node_text(indexer, param_node, source_code),
                 "optional_parameter"
                 | "keyword_parameter"
                 | "rest_parameter"
                 | "hash_splat_parameter"
                 | "block_parameter" => {
                     if let Some(name_node) = param_node.child_by_field_name("name") {
-                        indexer.get_node_text(name_node, source_code)
+                        get_indexer_node_text(indexer, name_node, source_code)
                     } else {
                         continue;
                     }

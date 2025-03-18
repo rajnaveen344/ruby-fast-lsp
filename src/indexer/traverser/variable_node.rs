@@ -5,7 +5,10 @@ use crate::indexer::{
 use lsp_types::{Location, Url};
 use tree_sitter::Node;
 
-use super::{utils::node_to_range, TraversalContext};
+use super::{
+    utils::{add_reference, create_location, get_indexer_node_text, node_to_range},
+    TraversalContext,
+};
 
 pub fn process_local_variable(
     indexer: &mut RubyIndexer,
@@ -20,7 +23,7 @@ pub fn process_local_variable(
         .ok_or_else(|| "Variable assignment without a name".to_string())?;
 
     // Extract the variable name
-    let name = indexer.get_node_text(name_node, source_code);
+    let name = get_indexer_node_text(indexer, name_node, source_code);
 
     // Skip if name is empty
     if name.trim().is_empty() {
@@ -87,7 +90,7 @@ pub fn process_instance_variable(
         .ok_or_else(|| "Instance variable assignment without a name".to_string())?;
 
     // Extract the variable name
-    let name = indexer.get_node_text(name_node, source_code);
+    let name = get_indexer_node_text(indexer, name_node, source_code);
 
     // Skip if name is empty
     if name.trim().is_empty() {
@@ -137,29 +140,21 @@ pub fn process_instance_variable_reference(
     context: &mut TraversalContext,
 ) -> Result<(), String> {
     // Extract the variable name
-    let name = indexer.get_node_text(node, source_code);
+    let name = get_indexer_node_text(indexer, node, source_code);
 
     // Skip if name is empty
     if name.trim().is_empty() {
         return Ok(());
     }
 
-    // Create a range for the reference
-    let range = node_to_range(node);
-
-    // Create a location for this reference
-    let location = Location {
-        uri: uri.clone(),
-        range,
-    };
-
     // Add reference with just the variable name (e.g., @name)
-    indexer.index.add_reference(&name, location.clone());
+    add_reference(indexer, &name, uri, node);
 
     // Also add reference with class context if available
     let current_namespace = context.current_namespace();
     if !current_namespace.is_empty() {
         let fqn = format!("{}#{}", current_namespace, name);
+        let location = create_location(uri, node);
         indexer.index.add_reference(&fqn, location);
     }
 
@@ -177,11 +172,10 @@ pub fn process_class_variable(
         .child_by_field_name("left")
         .ok_or_else(|| "Failed to get left node of class variable assignment".to_string())?;
 
-    let name = indexer.get_node_text(left, source_code);
+    let name = get_indexer_node_text(indexer, left, source_code);
 
     // Add reference for the class variable
-    let location = Location::new(uri.clone(), node_to_range(left));
-    indexer.index.add_reference(&name, location);
+    add_reference(indexer, &name, uri, left);
 
     Ok(())
 }
@@ -194,16 +188,10 @@ pub fn process_class_variable_reference(
     _context: &mut TraversalContext,
 ) -> Result<(), String> {
     // Get the variable name
-    let name = indexer.get_node_text(node, source_code);
+    let name = get_indexer_node_text(indexer, node, source_code);
 
     // Add reference for the class variable
-    let range = node_to_range(node);
-    let location = Location {
-        uri: uri.clone(),
-        range,
-    };
-
-    indexer.index.add_reference(&name, location);
+    add_reference(indexer, &name, uri, node);
 
     Ok(())
 }
