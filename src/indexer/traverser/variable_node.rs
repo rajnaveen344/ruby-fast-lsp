@@ -207,3 +207,160 @@ pub fn process_class_variable_reference(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    use crate::indexer::entry::EntryType;
+
+    use super::*;
+
+    // Helper function to create a temporary Ruby file with given content
+    fn create_temp_ruby_file(content: &str) -> (NamedTempFile, Url) {
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write to temp file");
+        let path = file.path().to_path_buf();
+        let uri = Url::from_file_path(path).unwrap();
+        (file, uri)
+    }
+
+    #[test]
+    fn test_local_variable_processing() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r##"
+        def process_data
+          result = "hello"
+          final = result.upcase
+          return final
+        end
+
+        def another_method
+          # Same name but different scope
+          result = 42
+          result += 10
+        end
+        "##;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        // Check if entries were indexed
+        let entries = &indexer.index().entries;
+        assert!(!entries.is_empty(), "Should have indexed entries");
+
+        // Clean up
+        drop(file);
+    }
+
+    #[test]
+    fn test_instance_variable_processing() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r##"
+        class Person
+          def initialize(name, age)
+            @name = name
+            @age = age
+          end
+
+          def greet
+            "Hello, " + @name + "! You are " + @age.to_s + " years old."
+          end
+
+          def birthday
+            @age += 1
+          end
+        end
+        "##;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        // Check for instance variable entries
+        let entries = &indexer.index().entries;
+        assert!(!entries.is_empty(), "Should have indexed entries");
+
+        // Clean up
+        drop(file);
+    }
+
+    #[test]
+    fn test_class_variable_processing() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r##"
+        class Counter
+          @@count = 0
+
+          def self.increment
+            @@count += 1
+          end
+
+          def self.current_count
+            @@count
+          end
+
+          def report
+            "Current count: " + @@count.to_s
+          end
+        end
+        "##;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        // Check if entries were indexed
+        let entries = &indexer.index().entries;
+        assert!(!entries.is_empty(), "Should have indexed entries");
+
+        // Clean up
+        drop(file);
+    }
+
+    #[test]
+    fn test_nested_variable_scopes() {
+        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let ruby_code = r##"
+        class ShoppingCart
+          @@tax_rate = 0.08
+
+          def initialize(items = [])
+            @items = items
+            @total = 0
+          end
+
+          def calculate_total
+            subtotal = 0
+            @items.each do |item|
+              price = item[:price]
+              subtotal += price
+            end
+
+            # Local and instance variables interacting
+            @total = subtotal * (1 + @@tax_rate)
+
+            return @total
+          end
+        end
+        "##;
+
+        let (file, uri) = create_temp_ruby_file(ruby_code);
+
+        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
+        assert!(result.is_ok(), "Should be able to index the file");
+
+        // Check if entries were indexed
+        let entries = &indexer.index().entries;
+        assert!(!entries.is_empty(), "Should have indexed entries");
+
+        // Clean up
+        drop(file);
+    }
+}
