@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lsp_types::{Location, Range, Url};
+use lsp_types::Location;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryType {

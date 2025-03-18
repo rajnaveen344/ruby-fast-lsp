@@ -1,4 +1,3 @@
-use crate::indexer::RubyIndexer;
 use lsp_types::{Position, Range};
 use tree_sitter::Node;
 
@@ -35,9 +34,4 @@ pub fn get_fqn(namespace: &str, name: &str) -> String {
     } else {
         format!("{}::{}", namespace, name)
     }
-}
-
-// Helper function to extract node text from the RubyIndexer context
-pub fn get_indexer_node_text(indexer: &RubyIndexer, node: Node, source_code: &str) -> String {
-    indexer.get_node_text(node, source_code)
 }
