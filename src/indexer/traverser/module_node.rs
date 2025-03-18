@@ -18,44 +18,77 @@ pub fn process(
     context: &mut TraversalContext,
 ) -> Result<(), String> {
     // Extract the module name
-    let name_node = match node.child_by_field_name("name") {
-        Some(node) => node,
-        None => return Err("Module without a name".to_string()),
-    };
-
+    let name_node = extract_module_name(node)?;
     let module_name = get_indexer_node_text(indexer, name_node, source_code);
+
+    // Get namespace information
     let current_namespace = context.current_namespace();
     let module_fqn = get_fqn(&current_namespace, &module_name);
 
-    // Add references for the module name
-    add_reference(indexer, &module_name, uri, name_node);
+    // Add references
+    add_module_references(indexer, &module_name, &module_fqn, uri, name_node);
+
+    // Create and add the module entry
+    let entry = create_module_entry(&module_name, &module_fqn, uri, node)?;
+    indexer.index.add_entry(entry);
+
+    // Update namespace tree
+    update_namespace_tree(indexer, context, &module_fqn);
+
+    // Process module body
+    process_module_body(indexer, node, uri, source_code, context, module_name)?;
+
+    Ok(())
+}
+
+fn extract_module_name(node: Node) -> Result<Node, String> {
+    match node.child_by_field_name("name") {
+        Some(node) => Ok(node),
+        None => Err("Module without a name".to_string()),
+    }
+}
+
+fn add_module_references(
+    indexer: &mut RubyIndexer,
+    module_name: &str,
+    module_fqn: &str,
+    uri: &Url,
+    name_node: Node,
+) {
+    // Add reference to the module name
+    add_reference(indexer, module_name, uri, name_node);
 
     // Also add a reference to the fully qualified name if different
     if module_name != module_fqn {
         let location = create_location(uri, name_node);
-        indexer.index.add_reference(&module_fqn, location);
+        indexer.index.add_reference(module_fqn, location);
     }
+}
 
-    // Create module entry
+fn create_module_entry(
+    module_name: &str,
+    module_fqn: &str,
+    uri: &Url,
+    node: Node,
+) -> Result<crate::indexer::entry::Entry, String> {
     let range = node_to_range(node);
-    let entry = EntryBuilder::new(&module_name)
-        .fully_qualified_name(&module_fqn)
+    EntryBuilder::new(module_name)
+        .fully_qualified_name(module_fqn)
         .location(Location {
             uri: uri.clone(),
             range,
         })
         .entry_type(EntryType::Module)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    // Add entry to index
-    indexer.index.add_entry(entry);
-
-    // Update namespace tree
+fn update_namespace_tree(indexer: &mut RubyIndexer, context: &TraversalContext, module_fqn: &str) {
+    // Determine parent namespace
     let parent_namespace = if context.namespace_stack.is_empty() {
         String::new()
     } else {
-        current_namespace
+        context.current_namespace()
     };
 
     // Add this module to its parent's children
@@ -65,10 +98,19 @@ pub fn process(
         .entry(parent_namespace)
         .or_insert_with(Vec::new);
 
-    if !children.contains(&module_fqn) {
-        children.push(module_fqn.clone());
+    if !children.contains(&module_fqn.to_string()) {
+        children.push(module_fqn.to_string());
     }
+}
 
+fn process_module_body(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &mut TraversalContext,
+    module_name: String,
+) -> Result<(), String> {
     // Push module to namespace stack
     context.namespace_stack.push(module_name);
 

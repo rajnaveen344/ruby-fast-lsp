@@ -23,6 +23,28 @@ pub fn process(
         .child_by_field_name("name")
         .ok_or_else(|| "Method without a name".to_string())?;
 
+    // Extract method name information
+    let (name, method_name, fqn) = extract_method_info(indexer, name_node, source_code, context);
+
+    // Add references for method name
+    add_method_references(indexer, &name, &fqn, uri, name_node, context);
+
+    // Create and add the method entry
+    let entry = create_method_entry(node, &name, &fqn, uri, context)?;
+    indexer.index.add_entry(entry);
+
+    // Process method body and parameters
+    process_method_contents(indexer, node, uri, source_code, context, method_name)?;
+
+    Ok(())
+}
+
+fn extract_method_info(
+    indexer: &RubyIndexer,
+    name_node: Node,
+    source_code: &str,
+    context: &TraversalContext,
+) -> (String, String, String) {
     // Extract the name text
     let name = get_indexer_node_text(indexer, name_node, source_code);
 
@@ -36,17 +58,37 @@ pub fn process(
         format!("{}#{}", current_namespace, method_name)
     };
 
-    // Create a range for the definition
-    let range = node_to_range(node);
+    (name, method_name, fqn)
+}
 
+fn add_method_references(
+    indexer: &mut RubyIndexer,
+    name: &str,
+    fqn: &str,
+    uri: &Url,
+    name_node: Node,
+    context: &TraversalContext,
+) {
     // Add reference to the method name
-    add_reference(indexer, &name, uri, name_node);
+    add_reference(indexer, name, uri, name_node);
 
-    // Add reference to the fully qualified name
+    // Add reference to the fully qualified name if in a namespace
+    let current_namespace = context.current_namespace();
     if !current_namespace.is_empty() {
         let location = create_location(uri, name_node);
-        indexer.index.add_reference(&fqn, location);
+        indexer.index.add_reference(fqn, location);
     }
+}
+
+fn create_method_entry(
+    node: Node,
+    name: &str,
+    fqn: &str,
+    uri: &Url,
+    context: &TraversalContext,
+) -> Result<crate::indexer::entry::Entry, String> {
+    // Create a range for the definition
+    let range = node_to_range(node);
 
     // Create a method type based on node kind
     let entry_type = if node.kind() == "singleton_method" {
@@ -55,9 +97,9 @@ pub fn process(
         EntryType::Method
     };
 
-    // Create and add the entry
-    let entry = EntryBuilder::new(&name)
-        .fully_qualified_name(&fqn)
+    // Create the entry
+    EntryBuilder::new(name)
+        .fully_qualified_name(fqn)
         .location(Location {
             uri: uri.clone(),
             range,
@@ -65,20 +107,53 @@ pub fn process(
         .entry_type(entry_type)
         .visibility(context.visibility)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    indexer.index.add_entry(entry);
-
+fn process_method_contents(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &mut TraversalContext,
+    method_name: String,
+) -> Result<(), String> {
     // Record the method name in the context for parameter and variable scoping
     let previous_method = context.current_method.clone();
     context.current_method = Some(method_name);
 
     // Process method parameters if present
+    process_method_parameters(indexer, node, uri, source_code, context)?;
+
+    // Process method body
+    process_method_body(indexer, node, uri, source_code, context)?;
+
+    // Restore previous method context
+    context.current_method = previous_method;
+
+    Ok(())
+}
+
+fn process_method_parameters(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &mut TraversalContext,
+) -> Result<(), String> {
     if let Some(parameters) = node.child_by_field_name("parameters") {
         parameter_node::process_method_parameters(indexer, parameters, uri, source_code, context)?;
     }
+    Ok(())
+}
 
-    // Process method body
+fn process_method_body(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    source_code: &str,
+    context: &mut TraversalContext,
+) -> Result<(), String> {
     if let Some(body) = node.child_by_field_name("body") {
         for i in 0..body.named_child_count() {
             if let Some(child) = body.named_child(i) {
@@ -86,10 +161,6 @@ pub fn process(
             }
         }
     }
-
-    // Restore previous method context
-    context.current_method = previous_method;
-
     Ok(())
 }
 

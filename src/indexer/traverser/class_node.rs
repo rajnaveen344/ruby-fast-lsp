@@ -18,42 +18,73 @@ pub fn process(
     content: &str,
     context: &mut TraversalContext,
 ) -> Result<(), String> {
+    // Get class name and namespace information
     let current_namespace = context.current_namespace();
     let class_name = get_class_name(indexer, node, content);
     let class_fqn = get_fqn(&current_namespace, &class_name);
-    let range = node_to_range(node);
 
+    // Add references for class name
+    add_class_references(indexer, node, uri, &class_name, &class_fqn);
+
+    // Create and add the class entry
+    let entry = create_class_entry(node, uri, &class_name, &class_fqn)?;
+    indexer.index.add_entry(entry);
+
+    // Update namespace tree
+    update_namespace_tree(indexer, context, &class_fqn);
+
+    // Process class body with proper namespace context
+    process_class_body(indexer, node, uri, content, context, class_name)?;
+
+    Ok(())
+}
+
+fn add_class_references(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    class_name: &str,
+    class_fqn: &str,
+) {
     // Find the class name node for reference
     if let Some(name_node) = node.child_by_field_name("name") {
         // Add reference to the class name
-        add_reference(indexer, &class_name, uri, name_node);
+        add_reference(indexer, class_name, uri, name_node);
 
         // Add reference to fully qualified name if different
         if class_name != class_fqn {
             let location = create_location(uri, name_node);
-            indexer.index.add_reference(&class_fqn, location);
+            indexer.index.add_reference(class_fqn, location);
         }
     }
+}
 
+fn create_class_entry(
+    node: Node,
+    uri: &Url,
+    class_name: &str,
+    class_fqn: &str,
+) -> Result<crate::indexer::entry::Entry, String> {
+    let range = node_to_range(node);
     let location = Location {
         uri: uri.clone(),
         range,
     };
 
-    let entry = EntryBuilder::new(&class_name)
-        .fully_qualified_name(&class_fqn)
+    EntryBuilder::new(class_name)
+        .fully_qualified_name(class_fqn)
         .location(location)
         .entry_type(EntryType::Class)
-        .build()?;
+        .build()
+        .map_err(|e| e.to_string())
+}
 
-    // Add entry to index
-    indexer.index.add_entry(entry);
-
+fn update_namespace_tree(indexer: &mut RubyIndexer, context: &TraversalContext, class_fqn: &str) {
     // Add to namespace tree
     let parent_namespace = if context.namespace_stack.is_empty() {
         String::new()
     } else {
-        current_namespace
+        context.current_namespace()
     };
 
     let children = indexer
@@ -62,10 +93,19 @@ pub fn process(
         .entry(parent_namespace)
         .or_insert_with(Vec::new);
 
-    if !children.contains(&class_fqn) {
-        children.push(class_fqn.clone());
+    if !children.contains(&class_fqn.to_string()) {
+        children.push(class_fqn.to_string());
     }
+}
 
+fn process_class_body(
+    indexer: &mut RubyIndexer,
+    node: Node,
+    uri: &Url,
+    content: &str,
+    context: &mut TraversalContext,
+    class_name: String,
+) -> Result<(), String> {
     // Push class to namespace stack
     context.namespace_stack.push(class_name);
 
