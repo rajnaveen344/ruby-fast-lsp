@@ -18,6 +18,7 @@ use super::{
 pub struct Visitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
+    pub content: String,
     pub visibility_stack: Vec<Visibility>,
     pub current_method: Option<String>,
     pub namespace_stack: Vec<ShortName>,
@@ -25,10 +26,11 @@ pub struct Visitor {
 }
 
 impl Visitor {
-    pub fn new(index: Arc<Mutex<RubyIndex>>, uri: Url) -> Self {
+    pub fn new(index: Arc<Mutex<RubyIndex>>, uri: Url, content: String) -> Self {
         Self {
             index,
             uri,
+            content,
             visibility_stack: vec![Visibility::Public],
             current_method: None,
             namespace_stack: vec![],
@@ -40,11 +42,35 @@ impl Visitor {
         let start_offset = loc.start_offset();
         let end_offset = loc.end_offset();
         let uri = self.uri.clone();
+
+        // Calculate correct line and character positions by counting newlines
+        let (start_line, start_character) = self.offset_to_position(&self.content, start_offset);
+        let (end_line, end_character) = self.offset_to_position(&self.content, end_offset);
+
         let range = Range::new(
-            Position::new(start_offset as u32, 0),
-            Position::new(end_offset as u32, 0),
+            Position::new(start_line, start_character),
+            Position::new(end_line, end_character),
         );
         LspLocation::new(uri, range)
+    }
+
+    // Helper function to convert byte offset to (line, character) position
+    fn offset_to_position(&self, content: &str, offset: usize) -> (u32, u32) {
+        let mut line = 0;
+        let mut line_start_offset = 0;
+
+        // Find the line containing the offset by counting newlines
+        for (i, c) in content.chars().take(offset).enumerate() {
+            if c == '\n' {
+                line += 1;
+                line_start_offset = i + 1; // +1 to skip the newline character
+            }
+        }
+
+        // Character offset within the line
+        let character = (offset - line_start_offset) as u32;
+
+        (line, character)
     }
 
     fn push_namespace(&mut self, short_name: ShortName, entry: Entry) {

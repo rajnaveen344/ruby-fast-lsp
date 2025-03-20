@@ -40,7 +40,7 @@ impl RubyIndexer {
 
         let parse_result = parse(content.as_bytes());
         let node = parse_result.node();
-        let mut visitor = Visitor::new(self.index.clone(), uri.clone());
+        let mut visitor = Visitor::new(self.index.clone(), uri.clone(), content.to_string());
 
         visitor.visit(&node);
 
