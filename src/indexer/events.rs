@@ -32,19 +32,19 @@ pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Resul
 // Handler for didOpen notification
 pub fn file_opened(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
     // Remove any existing entries for this file (in case it was previously indexed)
-    indexer.index_mut().remove_entries_for_uri(&uri);
+    indexer.index().lock().unwrap().remove_entries_for_uri(&uri);
 
     // Index the file
-    indexer.index_file_with_uri(uri, content)
+    indexer.process_file(uri, content)
 }
 
 // Handler for didChange/didClose notification
 pub fn file_changed(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
     // Remove existing entries
-    indexer.index_mut().remove_entries_for_uri(&uri);
+    indexer.index().lock().unwrap().remove_entries_for_uri(&uri);
 
     // Re-index with new content
-    indexer.index_file_with_uri(uri, content)
+    indexer.process_file(uri, content)
 }
 
 pub fn file_created(_indexer: &mut RubyIndexer, _uri: Url) -> Result<(), String> {
@@ -104,7 +104,7 @@ async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -> Re
 
     // Index the file
     indexer
-        .index_file_with_uri(uri, &content)
+        .process_file(uri, &content)
         .map_err(|e| anyhow::anyhow!("Failed to index file: {}", e))?;
 
     Ok(())

@@ -7,7 +7,7 @@
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}/src/test/fixtures"
+        "${workspaceFolder}/src/test/fixtures/nested_classes.rb"
       ],
       "outFiles": [
         "${workspaceFolder}/vsix/**/*.js"

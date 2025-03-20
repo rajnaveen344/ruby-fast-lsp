@@ -1,10 +1,14 @@
+use std::cmp::{Eq, PartialEq};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::hash::Hash;
 
 use lsp_types::Location;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryType {
     Class,
+    SingletonClass,
     Module,
     Method,
     Constant,
@@ -22,20 +26,64 @@ pub enum Visibility {
     Private,
 }
 
+/// A short name for an entry
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct ShortName(String);
+
+impl From<String> for ShortName {
+    fn from(value: String) -> Self {
+        ShortName(value)
+    }
+}
+
+impl From<&str> for ShortName {
+    fn from(value: &str) -> Self {
+        ShortName(value.to_string())
+    }
+}
+
+impl Display for ShortName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A fully qualified name for an entry
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct FullyQualifiedName(String);
+
+impl From<String> for FullyQualifiedName {
+    fn from(value: String) -> Self {
+        FullyQualifiedName(value)
+    }
+}
+
+impl From<&str> for FullyQualifiedName {
+    fn from(value: &str) -> Self {
+        FullyQualifiedName(value.to_string())
+    }
+}
+
+impl Display for FullyQualifiedName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
-    pub name: String,                      // The name of the entity
-    pub fully_qualified_name: String,      // Complete namespace path
-    pub location: Location,                // Where this entry is defined
-    pub entry_type: EntryType,             // Type of entry
-    pub visibility: Visibility,            // Public, protected, private
-    pub metadata: HashMap<String, String>, // Additional information
+    pub short_name: ShortName,                    // The name of the entity
+    pub fully_qualified_name: FullyQualifiedName, // Complete namespace path
+    pub location: Location,                       // Where this entry is defined
+    pub entry_type: EntryType,                    // Type of entry
+    pub visibility: Visibility,                   // Public, protected, private
+    pub metadata: HashMap<String, String>,        // Additional information
 }
 
 // Helper struct for building a new entry
 pub struct EntryBuilder {
-    name: String,
-    fully_qualified_name: Option<String>,
+    short_name: ShortName,
+    fully_qualified_name: Option<FullyQualifiedName>,
     location: Option<Location>,
     entry_type: Option<EntryType>,
     visibility: Option<Visibility>,
@@ -43,9 +91,9 @@ pub struct EntryBuilder {
 }
 
 impl EntryBuilder {
-    pub fn new(name: &str) -> Self {
+    pub fn new(short_name: ShortName) -> Self {
         EntryBuilder {
-            name: name.to_string(),
+            short_name,
             fully_qualified_name: None,
             location: None,
             entry_type: None,
@@ -55,7 +103,7 @@ impl EntryBuilder {
     }
 
     pub fn fully_qualified_name(mut self, fqn: &str) -> Self {
-        self.fully_qualified_name = Some(fqn.to_string());
+        self.fully_qualified_name = Some(FullyQualifiedName(fqn.to_string()));
         self
     }
 
@@ -88,7 +136,7 @@ impl EntryBuilder {
         let visibility = self.visibility.unwrap_or(Visibility::Public);
 
         Ok(Entry {
-            name: self.name,
+            short_name: self.short_name,
             fully_qualified_name,
             location,
             entry_type,
@@ -125,7 +173,7 @@ mod tests {
             },
         };
 
-        EntryBuilder::new(name)
+        EntryBuilder::new(name.to_string().into())
             .fully_qualified_name(fqn)
             .location(Location { uri, range })
             .entry_type(entry_type)
@@ -283,8 +331,8 @@ mod tests {
         };
 
         // Create an entry using the builder
-        let entry = EntryBuilder::new("MyClass")
-            .fully_qualified_name("MyClass")
+        let entry = EntryBuilder::new("MyClass".into())
+            .fully_qualified_name("MyClass".into())
             .location(Location {
                 uri: uri.clone(),
                 range,
@@ -295,8 +343,8 @@ mod tests {
             .unwrap(); // Unwrap the Result
 
         // Verify the entry was built correctly
-        assert_eq!(entry.name, "MyClass");
-        assert_eq!(entry.fully_qualified_name, "MyClass");
+        assert_eq!(entry.short_name, "MyClass".into());
+        assert_eq!(entry.fully_qualified_name, "MyClass".into());
         assert_eq!(entry.location.uri, uri);
         assert_eq!(entry.location.range, range);
         assert_eq!(entry.entry_type, EntryType::Class);
@@ -313,8 +361,8 @@ mod tests {
         };
 
         // Create an entry with only the required fields
-        let entry = EntryBuilder::new("my_method")
-            .fully_qualified_name("MyClass#my_method")
+        let entry = EntryBuilder::new("my_method".into())
+            .fully_qualified_name("MyClass#my_method".into())
             .location(Location { uri, range })
             .entry_type(EntryType::Method)
             .build()
@@ -335,7 +383,7 @@ mod tests {
         };
 
         // Try to build without setting fully_qualified_name
-        let _ = EntryBuilder::new("MyClass")
+        let _ = EntryBuilder::new("MyClass".into())
             .location(Location { uri, range })
             .entry_type(EntryType::Class)
             .build()
@@ -346,8 +394,8 @@ mod tests {
     #[should_panic]
     fn test_entry_builder_missing_location() {
         // Try to build without setting location
-        let _ = EntryBuilder::new("MyClass")
-            .fully_qualified_name("MyClass")
+        let _ = EntryBuilder::new("MyClass".into())
+            .fully_qualified_name("MyClass".into())
             .entry_type(EntryType::Class)
             .build()
             .unwrap(); // This should fail
@@ -363,7 +411,7 @@ mod tests {
         };
 
         // Try to build without setting entry_type
-        let _ = EntryBuilder::new("MyClass")
+        let _ = EntryBuilder::new("MyClass".into())
             .fully_qualified_name("MyClass")
             .location(Location { uri, range })
             .build()

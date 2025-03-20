@@ -19,11 +19,20 @@ pub async fn find_references_at_position(
     info!("Looking for references to: {}", fully_qualified_name);
 
     // Use the indexer to find all references
-    let mut locations = indexer.index().find_references(&fully_qualified_name);
+    let mut locations = indexer
+        .index()
+        .lock()
+        .unwrap()
+        .find_references(&fully_qualified_name);
 
     // Optionally include the declaration
     if include_declaration {
-        if let Some(entry) = indexer.index().find_definition(&fully_qualified_name) {
+        if let Some(entry) = indexer
+            .index()
+            .lock()
+            .unwrap()
+            .find_definition(&fully_qualified_name)
+        {
             let declaration_location = Location {
                 uri: entry.location.uri.clone(),
                 range: entry.location.range,

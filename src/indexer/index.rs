@@ -73,15 +73,14 @@ impl RubyIndex {
         if entry.entry_type != EntryType::LocalVariable
             && entry.entry_type != EntryType::InstanceVariable
         {
-            self.update_namespace_tree(&entry.fully_qualified_name);
+            self.update_namespace_tree(&entry.fully_qualified_name.to_string());
         }
 
         // Add to the main entries map
-        let entries = self
-            .entries
-            .entry(entry.fully_qualified_name.clone())
-            .or_insert_with(Vec::new);
-        entries.push(entry.clone());
+        self.entries
+            .entry(entry.fully_qualified_name.to_string())
+            .or_insert_with(Vec::new)
+            .push(entry.clone());
 
         // Add to the uri_to_entries map for this file
         let uri_string = entry.location.uri.to_string();
@@ -96,24 +95,28 @@ impl RubyIndex {
             EntryType::Method => {
                 let method_entries = self
                     .methods_by_name
-                    .entry(entry.name.clone())
+                    .entry(entry.short_name.to_string())
                     .or_insert_with(Vec::new);
                 method_entries.push(entry);
             }
             EntryType::Class
             | EntryType::Module
+            | EntryType::SingletonClass
             | EntryType::Constant
             | EntryType::ConstantAlias
             | EntryType::UnresolvedAlias => {
                 let constant_entries = self
                     .constants_by_name
-                    .entry(entry.name.clone())
+                    .entry(entry.short_name.to_string())
                     .or_insert_with(Vec::new);
                 constant_entries.push(entry);
             }
             EntryType::LocalVariable | EntryType::InstanceVariable => {
-                // Local variables and instance variables are not indexed by name specifically
-                // They are only found by their fully qualified name
+                // Don't index these in by_name maps
+                self.uri_to_entries
+                    .entry(entry.location.uri.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(entry);
             }
         }
     }
@@ -132,32 +135,41 @@ impl RubyIndex {
         // Remove each entry from the main map and lookup maps
         for entry in entries {
             // Remove from entries map
-            if let Some(fqn_entries) = self.entries.get_mut(&entry.fully_qualified_name) {
+            if let Some(fqn_entries) = self
+                .entries
+                .get_mut(&entry.fully_qualified_name.to_string())
+            {
                 fqn_entries.retain(|e| e.location.uri != *uri);
                 if fqn_entries.is_empty() {
-                    self.entries.remove(&entry.fully_qualified_name);
+                    self.entries.remove(&entry.fully_qualified_name.to_string());
                 }
             }
 
             // Remove from lookup maps
             match entry.entry_type {
                 EntryType::Method => {
-                    if let Some(method_entries) = self.methods_by_name.get_mut(&entry.name) {
+                    if let Some(method_entries) =
+                        self.methods_by_name.get_mut(&entry.short_name.to_string())
+                    {
                         method_entries.retain(|e| e.location.uri != *uri);
                         if method_entries.is_empty() {
-                            self.methods_by_name.remove(&entry.name);
+                            self.methods_by_name.remove(&entry.short_name.to_string());
                         }
                     }
                 }
                 EntryType::Class
                 | EntryType::Module
+                | EntryType::SingletonClass
                 | EntryType::Constant
                 | EntryType::ConstantAlias
                 | EntryType::UnresolvedAlias => {
-                    if let Some(constant_entries) = self.constants_by_name.get_mut(&entry.name) {
+                    if let Some(constant_entries) = self
+                        .constants_by_name
+                        .get_mut(&entry.short_name.to_string())
+                    {
                         constant_entries.retain(|e| e.location.uri != *uri);
                         if constant_entries.is_empty() {
-                            self.constants_by_name.remove(&entry.name);
+                            self.constants_by_name.remove(&entry.short_name.to_string());
                         }
                     }
                 }
@@ -178,26 +190,26 @@ impl RubyIndex {
         self.references.retain(|_, refs| !refs.is_empty());
     }
 
-    pub fn find_definition(&self, fully_qualified_name: &str) -> Option<&Entry> {
+    pub fn find_definition(&self, name: &str) -> Option<&Entry> {
         // First try direct lookup - works for fully qualified names
-        if let Some(entries) = self.entries.get(fully_qualified_name) {
+        if let Some(entries) = self.entries.get(name) {
             return entries.first();
         }
 
         // For instance variables (those starting with @)
-        if fully_qualified_name.starts_with('@') {
+        if name.starts_with('@') {
             // Try to find any instance variable entry with this name in a current scope
             for (fqn, entries) in &self.entries {
-                if fqn.ends_with(fully_qualified_name) && !entries.is_empty() {
+                if fqn.ends_with(name) && !entries.is_empty() {
                     return entries.first();
                 }
             }
         }
 
         // For local variables (those starting with $)
-        if fully_qualified_name.starts_with('$') {
+        if name.starts_with('$') {
             // Extract the variable name without the $
-            let var_name = &fully_qualified_name[1..];
+            let var_name = &name[1..];
 
             // Try to find any variable entry with this name in a current scope
             for (fqn, entries) in &self.entries {
@@ -213,14 +225,14 @@ impl RubyIndex {
 
         // For plain local variables without any $ prefix
         // This handles cases where the analyzer returns a simple variable name
-        if !fully_qualified_name.contains('#')
-            && !fully_qualified_name.contains("::")
-            && !fully_qualified_name.contains('$')
-            && !fully_qualified_name.starts_with('@')
+        if !name.contains('#')
+            && !name.contains("::")
+            && !name.contains('$')
+            && !name.starts_with('@')
         {
             // First try to find a local variable with this name
             for (fqn, entries) in &self.entries {
-                let var_pattern = format!("${}", fully_qualified_name);
+                let var_pattern = format!("${}", name);
                 if fqn.ends_with(&var_pattern) && !entries.is_empty() {
                     if let Some(entry) = entries.first() {
                         if entry.entry_type == EntryType::LocalVariable {
@@ -232,17 +244,15 @@ impl RubyIndex {
         }
 
         // For nested classes referenced without full scope (like "Inner" instead of "Outer::Inner")
-        if !fully_qualified_name.contains("::")
-            && !fully_qualified_name.contains('#')
-            && !fully_qualified_name.starts_with('$')
-            && !fully_qualified_name.starts_with('@')
+        if !name.contains("::")
+            && !name.contains('#')
+            && !name.starts_with('$')
+            && !name.starts_with('@')
         {
             // Try to find any class with this name as the last part of the FQN
             for (fqn, entries) in &self.entries {
-                let class_pattern = format!("::{}", fully_qualified_name);
-                if (fqn.ends_with(&class_pattern) || fqn == fully_qualified_name)
-                    && !entries.is_empty()
-                {
+                let class_pattern = format!("::{}", name);
+                if (fqn.ends_with(&class_pattern) || fqn == name) && !entries.is_empty() {
                     if let Some(entry) = entries.first() {
                         if entry.entry_type == EntryType::Class
                             || entry.entry_type == EntryType::Module
@@ -256,19 +266,16 @@ impl RubyIndex {
 
         // If direct lookup fails, try to extract the method name and search by it
         // This handles cases where analyzer returns just "method_name" instead of "Class#method_name"
-        if !fully_qualified_name.contains('#')
-            && !fully_qualified_name.contains('$')
-            && !fully_qualified_name.starts_with('@')
-        {
+        if !name.contains('#') && !name.contains('$') && !name.starts_with('@') {
             // It might be a method call without class context - check methods_by_name
-            if let Some(method_entries) = self.methods_by_name.get(fully_qualified_name) {
+            if let Some(method_entries) = self.methods_by_name.get(name) {
                 return method_entries.first();
             }
         }
 
         // For method calls inside a namespace (like "Namespace#method")
-        if fully_qualified_name.contains('#') {
-            let parts: Vec<&str> = fully_qualified_name.split('#').collect();
+        if name.contains('#') {
+            let parts: Vec<&str> = name.split('#').collect();
             if parts.len() == 2 {
                 let method_name = parts[1];
                 // If method name doesn't start with $ (not a local variable)
@@ -541,7 +548,7 @@ mod tests {
         // Verify the correct definition was found
         assert!(definition.is_some());
         let def = definition.unwrap();
-        assert_eq!(def.name, "Product");
+        assert_eq!(def.short_name, "Product");
         assert_eq!(def.fully_qualified_name, "Product");
         assert_eq!(def.entry_type, EntryType::Class);
 
@@ -783,7 +790,7 @@ mod tests {
 
         // Set up some test entries with different FQN formats
         let class_entry = Entry {
-            name: "TestClass".to_string(),
+            short_name: "TestClass".to_string(),
             fully_qualified_name: "TestClass".to_string(),
             location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
@@ -799,7 +806,7 @@ mod tests {
 
         // Method inside a class
         let method_entry = Entry {
-            name: "test_method".to_string(),
+            short_name: "test_method".to_string(),
             fully_qualified_name: "TestClass#test_method".to_string(),
             location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
@@ -820,17 +827,17 @@ mod tests {
         // Test lookup by exact FQN
         let found = index.find_definition("TestClass#test_method");
         assert!(found.is_some());
-        assert_eq!(found.unwrap().name, "test_method");
+        assert_eq!(found.unwrap().short_name, "test_method");
 
         // Test lookup by just method name (without class context)
         let found = index.find_definition("test_method");
         assert!(found.is_some());
-        assert_eq!(found.unwrap().name, "test_method");
+        assert_eq!(found.unwrap().short_name, "test_method");
 
         // Test lookup by method with wrong class
         let found = index.find_definition("WrongClass#test_method");
         assert!(found.is_some(), "Should still find method by name part");
-        assert_eq!(found.unwrap().name, "test_method");
+        assert_eq!(found.unwrap().short_name, "test_method");
 
         // Test non-existent method
         let not_found = index.find_definition("nonexistent_method");
@@ -843,7 +850,7 @@ mod tests {
 
         // Create a local variable entry with the format used by the traverser
         let var_entry = Entry {
-            name: "my_var".to_string(),
+            short_name: "my_var".to_string(),
             fully_qualified_name: "TestClass#$my_var".to_string(),
             location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
@@ -859,7 +866,7 @@ mod tests {
 
         // Local variable in a nested method
         let nested_var_entry = Entry {
-            name: "nested_var".to_string(),
+            short_name: "nested_var".to_string(),
             fully_qualified_name: "Module::Class#method$nested_var".to_string(),
             location: Location {
                 uri: Url::parse("file:///test/file.rb").unwrap(),
@@ -880,17 +887,17 @@ mod tests {
         // Test lookup by fully qualified name
         let found1 = index.find_definition("TestClass#$my_var");
         assert!(found1.is_some());
-        assert_eq!(found1.unwrap().name, "my_var");
+        assert_eq!(found1.unwrap().short_name, "my_var");
 
         // Test lookup by just variable name with $ prefix
         let found2 = index.find_definition("$my_var");
         assert!(found2.is_some());
-        assert_eq!(found2.unwrap().name, "my_var");
+        assert_eq!(found2.unwrap().short_name, "my_var");
 
         // Test lookup of nested variable
         let found3 = index.find_definition("$nested_var");
         assert!(found3.is_some());
-        assert_eq!(found3.unwrap().name, "nested_var");
+        assert_eq!(found3.unwrap().short_name, "nested_var");
 
         // Test non-existent variable
         let not_found = index.find_definition("$nonexistent_var");

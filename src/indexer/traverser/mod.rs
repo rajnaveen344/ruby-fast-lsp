@@ -1,464 +1,353 @@
-mod block_node;
-mod call_node;
-mod class_node;
-mod constant_node;
-mod method_node;
-mod module_node;
-mod parameter_node;
-mod utils;
-mod variable_node;
+use std::sync::{Arc, Mutex};
 
 use log::info;
-use lsp_types::{Location, Url};
-use tree_sitter::{Node, Parser, Tree};
-use utils::{get_indexer_node_text, node_to_range};
+use lsp_types::{Location as LspLocation, Position, Range, Url};
+use ruby_prism::{
+    visit_call_node, visit_class_node, visit_def_node, visit_module_node,
+    visit_singleton_class_node, CallNode, ClassNode, DefNode, Location as PrismLocation,
+    ModuleNode, SingletonClassNode, Visit,
+};
 
-use super::{entry::Visibility, index::RubyIndex, RubyIndexer};
+use crate::indexer::entry::{EntryBuilder, EntryType};
 
-// Add a context struct to track more state during traversal
-pub struct TraversalContext {
-    pub visibility: Visibility,
-    pub namespace_stack: Vec<String>,
+use super::{
+    entry::{Entry, ShortName, Visibility},
+    index::RubyIndex,
+};
+
+pub struct Visitor {
+    pub index: Arc<Mutex<RubyIndex>>,
+    pub uri: Url,
+    pub visibility_stack: Vec<Visibility>,
     pub current_method: Option<String>,
+    pub namespace_stack: Vec<ShortName>,
+    pub owner_stack: Vec<Entry>,
 }
 
-impl TraversalContext {
-    fn new() -> Self {
-        TraversalContext {
-            visibility: Visibility::Public,
-            namespace_stack: Vec::new(),
+impl Visitor {
+    pub fn new(index: Arc<Mutex<RubyIndex>>, uri: Url) -> Self {
+        Self {
+            index,
+            uri,
+            visibility_stack: vec![Visibility::Public],
             current_method: None,
+            namespace_stack: vec![],
+            owner_stack: vec![],
         }
     }
 
-    fn current_namespace(&self) -> String {
-        self.namespace_stack.join("::")
+    fn prism_loc_to_lsp_loc(&self, loc: PrismLocation) -> LspLocation {
+        let start_offset = loc.start_offset();
+        let end_offset = loc.end_offset();
+        let uri = self.uri.clone();
+        let range = Range::new(
+            Position::new(start_offset as u32, 0),
+            Position::new(end_offset as u32, 0),
+        );
+        LspLocation::new(uri, range)
+    }
+
+    fn push_namespace(&mut self, short_name: ShortName, entry: Entry) {
+        self.namespace_stack.push(short_name);
+        self.visibility_stack.push(entry.visibility);
+        self.owner_stack.push(entry.clone());
+        self.index.lock().unwrap().add_entry(entry.clone());
+    }
+
+    fn pop_namespace(&mut self) {
+        self.namespace_stack.pop();
+        self.visibility_stack.pop();
+        self.owner_stack.pop();
+    }
+
+    fn build_fully_qualified_name(&self, name: &str) -> String {
+        if self.namespace_stack.is_empty() {
+            name.to_string()
+        } else {
+            let namespace = self
+                .namespace_stack
+                .iter()
+                .map(|sn| sn.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            format!("{}::{}", namespace, name)
+        }
     }
 }
 
-impl RubyIndexer {
-    pub fn new() -> Result<Self, String> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_ruby::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .map_err(|_| "Failed to load Ruby grammar".to_string())?;
+impl Visit<'_> for Visitor {
+    fn visit_module_node(&mut self, node: &ModuleNode) {
+        info!(
+            "Visiting module node: {}",
+            String::from_utf8_lossy(node.name().as_slice())
+        );
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let const_path = node.constant_path();
+        let full_loc = node.location();
+        let name_loc = const_path.location();
+        let fqn = self.build_fully_qualified_name(&name);
 
-        Ok(RubyIndexer {
-            index: RubyIndex::new(),
-            parser,
-            debug_mode: false,
-        })
+        info!("Module name: {}", name);
+        info!("Module full location: {:?}", full_loc);
+        info!("Module name location: {:?}", name_loc);
+        info!("Module FQN: {}", fqn);
+
+        let entry = EntryBuilder::new(ShortName::from(name.clone()))
+            .fully_qualified_name(&fqn)
+            .location(self.prism_loc_to_lsp_loc(full_loc))
+            .entry_type(EntryType::Module)
+            .build()
+            .unwrap();
+
+        self.push_namespace(ShortName::from(name), entry);
+
+        visit_module_node(self, node);
+
+        self.pop_namespace();
     }
 
-    pub fn index(&self) -> &RubyIndex {
-        &self.index
-    }
+    fn visit_class_node(&mut self, node: &ClassNode) {
+        info!(
+            "Visiting class node: {}",
+            String::from_utf8_lossy(node.name().as_slice())
+        );
 
-    pub fn index_mut(&mut self) -> &mut RubyIndex {
-        &mut self.index
-    }
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let const_path = node.constant_path();
+        let full_loc = node.location();
+        let name_loc = const_path.location();
+        let fqn = self.build_fully_qualified_name(&name);
 
-    pub fn set_debug_mode(&mut self, debug: bool) {
-        self.debug_mode = debug;
-    }
-
-    pub fn index_file_with_uri(&mut self, uri: Url, content: &str) -> Result<(), String> {
-        // Parse the source code
-        let tree = self
-            .parser
-            .parse(content, None)
-            .ok_or_else(|| format!("Failed to parse source code in file: {}", uri))?;
-
-        // Process the file for indexing
-        self.process_file(uri.clone(), &tree, content)
-            .map_err(|e| format!("Failed to index file {}: {}", uri, e))
-    }
-
-    fn process_file(&mut self, uri: Url, tree: &Tree, content: &str) -> Result<(), String> {
-        // Debug: Print the AST structure if debug mode is enabled
-        if self.debug_mode {
-            info!("AST structure for file: {}", uri);
-            self.print_ast_structure(&tree.root_node(), content, 0);
-        }
-
-        // Create a traversal context
-        let mut context = TraversalContext::new();
-
-        // Pre-process: Remove any existing entries and references for this URI
-        self.index.remove_entries_for_uri(&uri);
-        self.index.remove_references_for_uri(&uri);
-
-        // Traverse the AST
-        self.traverse_node(tree.root_node(), &uri, content, &mut context)?;
-
-        Ok(())
-    }
-
-    pub fn traverse_node(
-        &mut self,
-        node: Node,
-        uri: &Url,
-        source_code: &str,
-        context: &mut TraversalContext,
-    ) -> Result<(), String> {
-        match node.kind() {
-            "class" => class_node::process(self, node, uri, source_code, context)?,
-            "module" => module_node::process(self, node, uri, source_code, context)?,
-            "method" | "singleton_method" => {
-                method_node::process(self, node, uri, source_code, context)?
+        // Extract parent class information if available
+        let parent_class = if let Some(superclass) = node.superclass() {
+            if let Some(cread) = superclass.as_constant_read_node() {
+                Some(String::from_utf8_lossy(cread.name().as_slice()).to_string())
+            } else if let Some(_) = superclass.as_constant_path_node() {
+                // For constant path nodes, we can't easily access the name
+                // Just record a marker for now
+                Some("ParentClass".to_string())
+            } else {
+                None
             }
-            "constant" => {
-                // Check if this is a reference to a constant (not part of an assignment)
-                let parent = node.parent();
-                let is_reference = parent.map_or(true, |p| {
-                    // If parent is an assignment and this is the left side, it's a definition not a reference
-                    !(p.kind() == "assignment"
-                        && p.child_by_field_name("left")
-                            .map_or(false, |left| left == node))
-                });
-
-                if is_reference {
-                    // Process constant reference
-                    if let Err(e) = constant_node::process_constant_reference(
-                        self,
-                        node,
-                        uri,
-                        source_code,
-                        context,
-                    ) {
-                        // Log the error and continue
-                        if self.debug_mode {
-                            println!("Error processing constant reference: {}", e);
-                        }
-                    }
-                } else {
-                    // Try to process constant definition, but don't fail if we can't
-                    if let Err(e) = constant_node::process(self, node, uri, source_code, context) {
-                        // Log the error and continue
-                        if self.debug_mode {
-                            println!("Error processing constant: {}", e);
-                        }
-                    }
-                }
-
-                // Continue traversing the children
-                let child_count = node.child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-            }
-            "identifier" => {
-                // Check if this is a method call without a receiver
-                // This handles cases like 'bar' in 'def another_method; bar; end'
-                let text = get_indexer_node_text(self, node, source_code);
-
-                // Skip if it's a keyword or empty
-                if text.trim().is_empty()
-                    || ["self", "super", "nil", "true", "false"].contains(&text.as_str())
-                {
-                    return Ok(());
-                }
-
-                // Check if it's a standalone identifier that could be a method call
-                let parent = node.parent();
-                if parent.map_or(false, |p| {
-                    // If parent is a method body or a block, this could be a method call
-                    p.kind() == "body_statement"
-                }) {
-                    // Skip if this is part of a method definition or parameter
-                    let grandparent = parent.and_then(|p| p.parent());
-                    if grandparent.map_or(false, |gp| {
-                        gp.kind() == "method"
-                            && gp
-                                .child_by_field_name("name")
-                                .map_or(false, |name| name == node)
-                    }) {
-                        return Ok(());
-                    }
-
-                    // Create a range for the reference
-                    let range = node_to_range(node);
-
-                    // Create a location for this reference
-                    let location = Location {
-                        uri: uri.clone(),
-                        range,
-                    };
-
-                    // Add reference with just the method name
-                    self.index.add_reference(&text, location.clone());
-
-                    // Also add reference with class context if available
-                    let current_namespace = context.current_namespace();
-                    if !current_namespace.is_empty() {
-                        let fqn = format!("{}#{}", current_namespace, text);
-                        self.index.add_reference(&fqn, location);
-                    }
-
-                    if self.debug_mode {
-                        info!(
-                            "Processing standalone identifier as method call: {} at line {}:{}",
-                            text,
-                            node.start_position().row + 1,
-                            node.start_position().column + 1
-                        );
-                        info!(
-                            "Method call range: {}:{} to {}:{}",
-                            range.start.line,
-                            range.start.character,
-                            range.end.line,
-                            range.end.character
-                        );
-                    }
-                }
-            }
-            "block" => block_node::process(self, node, uri, source_code, context)?,
-            "block_parameters" => {
-                parameter_node::process_block_parameters(self, node, uri, source_code, context)?
-            }
-            "parameters" => parameter_node::process(self, node, uri, source_code, context)?,
-            "call" => call_node::process(self, node, uri, source_code, context)?,
-            "assignment" => {
-                let left = node.child_by_field_name("left");
-                if let Some(left_node) = left {
-                    let left_kind = left_node.kind();
-
-                    if left_kind == "constant" {
-                        // Process constant assignment
-                        constant_node::process(self, node, uri, source_code, context)?;
-                    } else if left_kind == "identifier" {
-                        // Process local variable assignment
-                        let name = get_indexer_node_text(self, left_node, source_code);
-
-                        // Only process variables that start with lowercase or underscore
-                        if name
-                            .chars()
-                            .next()
-                            .map_or(false, |c| c.is_lowercase() || c == '_')
-                        {
-                            variable_node::process_local_variable(
-                                self,
-                                node,
-                                uri,
-                                source_code,
-                                context,
-                            )?;
-                        }
-                    } else if left_kind == "instance_variable" {
-                        // Process instance variable assignment
-                        variable_node::process_instance_variable(
-                            self,
-                            node,
-                            uri,
-                            source_code,
-                            context,
-                        )?;
-                    } else if left_kind == "class_variable" {
-                        // Process class variable assignment
-                        variable_node::process_class_variable(
-                            self,
-                            node,
-                            uri,
-                            source_code,
-                            context,
-                        )?;
-                    }
-                }
-            }
-            "instance_variable" => {
-                // Process instance variable reference
-                if let Err(e) = variable_node::process_instance_variable_reference(
-                    self,
-                    node,
-                    uri,
-                    source_code,
-                    context,
-                ) {
-                    // Log the error and continue
-                    if self.debug_mode {
-                        println!("Error processing instance variable: {}", e);
-                    }
-                }
-            }
-            "class_variable" => {
-                // Process class variable reference
-                if let Err(e) = variable_node::process_class_variable_reference(
-                    self,
-                    node,
-                    uri,
-                    source_code,
-                    context,
-                ) {
-                    // Log the error and continue
-                    if self.debug_mode {
-                        println!("Error processing class variable: {}", e);
-                    }
-                }
-            }
-            _ => {
-                // For other node types, just visit the children
-                let child_count = node.child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.child(i) {
-                        self.traverse_node(child, uri, source_code, context)?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn get_node_text(&self, node: Node, source_code: &str) -> String {
-        utils::get_node_text(node, source_code)
-    }
-
-    // Helper method to print the AST structure for debugging
-    fn print_ast_structure(&self, node: &Node, source_code: &str, indent: usize) {
-        let indent_str = " ".repeat(indent * 2);
-        let node_text = if node.child_count() == 0 {
-            format!(" \"{}\"", self.get_node_text(*node, source_code))
         } else {
-            String::new()
+            // Default parent is Object unless this is already Object
+            if name != "Object" {
+                Some("Object".to_string())
+            } else {
+                None
+            }
         };
 
-        info!("{}{}{}", indent_str, node.kind(), node_text);
+        info!("Class name: {}", name);
+        info!("Class full location: {:?}", full_loc);
+        info!("Class name location: {:?}", name_loc);
+        info!("Class FQN: {}", fqn);
+        if let Some(parent) = &parent_class {
+            info!("Parent class: {}", parent);
+        }
 
-        // Print field names and their values
-        for field_name in [
-            "name",
-            "method",
-            "receiver",
-            "left",
-            "right",
-            "body",
-            "parameters",
-        ] {
-            if let Some(field_node) = node.child_by_field_name(field_name) {
-                let field_text = if field_node.child_count() == 0 {
-                    format!(" \"{}\"", self.get_node_text(field_node, source_code))
+        let entry = EntryBuilder::new(ShortName::from(name.clone()))
+            .fully_qualified_name(&fqn)
+            .location(self.prism_loc_to_lsp_loc(full_loc))
+            .entry_type(EntryType::Class)
+            .build()
+            .unwrap();
+
+        self.push_namespace(ShortName::from(name), entry);
+
+        visit_class_node(self, node);
+
+        self.pop_namespace();
+    }
+
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
+        info!("Visiting singleton class node");
+
+        // Get the current namespace
+        let current_owner = self.owner_stack.last();
+
+        if let Some(_owner) = current_owner {
+            // Create a singleton class name for the current namespace
+            let expression = node.expression();
+            let is_self_node = expression.as_self_node().is_some();
+
+            let current_name = if let Some(last_name) = self.namespace_stack.last() {
+                last_name.to_string()
+            } else {
+                "Anonymous".to_string()
+            };
+
+            let singleton_name = if is_self_node {
+                format!("<Class:{}>", current_name)
+            } else {
+                let expr_name = if let Some(cread) = expression.as_constant_read_node() {
+                    String::from_utf8_lossy(cread.name().as_slice()).to_string()
+                } else if let Some(_) = expression.as_constant_path_node() {
+                    // For constant path nodes, we can't easily access the name
+                    "Class".to_string()
                 } else {
-                    String::new()
+                    "Unknown".to_string()
                 };
-                info!(
-                    "{}  {}:{}{}",
-                    indent_str,
-                    field_name,
-                    field_node.kind(),
-                    field_text
-                );
+                format!("<Class:{}>", expr_name)
+            };
+
+            let fqn = self.build_fully_qualified_name(&singleton_name);
+            let location = self.prism_loc_to_lsp_loc(node.location());
+
+            // Create a singleton class entry
+            let entry = EntryBuilder::new(ShortName::from(singleton_name.clone()))
+                .fully_qualified_name(&fqn)
+                .location(location)
+                .entry_type(EntryType::SingletonClass)
+                .build()
+                .unwrap();
+
+            self.push_namespace(ShortName::from(singleton_name), entry);
+
+            visit_singleton_class_node(self, node);
+
+            self.pop_namespace();
+        } else {
+            visit_singleton_class_node(self, node);
+        }
+    }
+
+    fn visit_def_node(&mut self, node: &DefNode) {
+        info!(
+            "Visiting def node: {}",
+            String::from_utf8_lossy(node.name().as_slice())
+        );
+
+        // Get the current owner namespace
+        let owner = self.owner_stack.last();
+        if owner.is_none() {
+            visit_def_node(self, node);
+            return;
+        }
+
+        // Extract the method name
+        let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+
+        // Store the current method name for param processing
+        self.current_method = Some(method_name.clone());
+
+        // Determine method visibility
+        let visibility = self
+            .visibility_stack
+            .last()
+            .cloned()
+            .unwrap_or(Visibility::Public);
+
+        // Get receiver information to determine if it's a singleton method
+        let is_singleton_method = node.receiver().is_some();
+
+        if is_singleton_method {
+            // Handle singleton methods (class methods)
+            if let Some(receiver) = node.receiver() {
+                if receiver.as_self_node().is_some() {
+                    // This is a class method (defined with self.)
+                    if let Some(owner) = owner.cloned() {
+                        // Create singleton class entry to use as the owner
+                        let owner_name = owner.short_name.to_string();
+                        let singleton_name = format!("<Class:{}>", owner_name);
+                        let singleton_fqn = self.build_fully_qualified_name(&singleton_name);
+
+                        // Create method entry and add to index
+                        let fqn = format!("{}#{}", singleton_fqn, method_name);
+                        let method_location = self.prism_loc_to_lsp_loc(node.location());
+                        let _method_name_location = self.prism_loc_to_lsp_loc(node.name_loc());
+
+                        let method_entry = EntryBuilder::new(ShortName::from(method_name))
+                            .fully_qualified_name(&fqn)
+                            .location(method_location)
+                            .entry_type(EntryType::Method)
+                            .visibility(visibility)
+                            .build()
+                            .unwrap();
+
+                        self.index.lock().unwrap().add_entry(method_entry);
+                    }
+                }
+            }
+        } else {
+            // Regular instance method
+            if let Some(owner) = owner.cloned() {
+                let fqn = format!("{}#{}", owner.fully_qualified_name, method_name);
+                let method_location = self.prism_loc_to_lsp_loc(node.location());
+                let _method_name_location = self.prism_loc_to_lsp_loc(node.name_loc());
+
+                let method_entry = EntryBuilder::new(ShortName::from(method_name))
+                    .fully_qualified_name(&fqn)
+                    .location(method_location)
+                    .entry_type(EntryType::Method)
+                    .visibility(visibility)
+                    .build()
+                    .unwrap();
+
+                self.index.lock().unwrap().add_entry(method_entry);
             }
         }
 
-        // Recursively print children
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                self.print_ast_structure(&child, source_code, indent + 1);
+        visit_def_node(self, node);
+
+        // Clear the current method
+        self.current_method = None;
+    }
+
+    fn visit_call_node(&mut self, node: &CallNode) {
+        info!(
+            "Visiting call node: {}",
+            String::from_utf8_lossy(node.name().as_slice())
+        );
+
+        let message = String::from_utf8_lossy(node.name().as_slice()).to_string();
+
+        // Handle special method calls
+        match message.as_str() {
+            "private" => {
+                self.visibility_stack.push(Visibility::Private);
+            }
+            "protected" => {
+                self.visibility_stack.push(Visibility::Protected);
+            }
+            "public" => {
+                self.visibility_stack.push(Visibility::Public);
+            }
+            "attr_reader" | "attr_writer" | "attr_accessor" => {
+                // Handle attribute methods
+                if let Some(_owner) = self.owner_stack.last().cloned() {
+                    // Process attribute declarations
+                    if let Some(_args) = node.arguments() {
+                        // Implement attr_* handling
+                        // This is simplified; a complete implementation would traverse all arguments
+                        // and handle string/symbol arguments correctly
+                    }
+                }
+            }
+            "include" | "prepend" | "extend" => {
+                // Handle module operations
+                // Simplified implementation; would need to extract included module names
+            }
+            _ => {
+                // Regular method call
             }
         }
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
+        visit_call_node(self, node);
 
-    // Helper function to create a temporary Ruby file with given content
-    fn create_temp_ruby_file(content: &str) -> (NamedTempFile, Url) {
-        let mut file = NamedTempFile::new().expect("Failed to create temp file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write to temp file");
-        let path = file.path().to_path_buf();
-        let uri = Url::from_file_path(path).unwrap();
-        (file, uri)
-    }
-
-    #[test]
-    fn test_new_indexer() {
-        let indexer = RubyIndexer::new();
-        assert!(
-            indexer.is_ok(),
-            "Should be able to create a new RubyIndexer"
-        );
-    }
-
-    #[test]
-    fn test_index_empty_file() {
-        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
-        let (file, uri) = create_temp_ruby_file("");
-
-        let result = indexer.index_file_with_uri(uri, "");
-        assert!(result.is_ok(), "Should be able to index an empty file");
-
-        // Index should be empty
-        let index = indexer.index();
-        // No entries should have been added
-        assert_eq!(0, index.entries.len());
-
-        // Keep file in scope until end of test
-        drop(file);
-    }
-
-    #[test]
-    fn test_remove_entries_for_uri() {
-        let mut indexer = RubyIndexer::new().expect("Failed to create indexer");
-        let ruby_code = r#"
-        class RemovalTest
-          def method1
-            "method1"
-          end
-
-          def method2
-            "method2"
-          end
-        end
-        "#;
-
-        let (file, uri) = create_temp_ruby_file(ruby_code);
-
-        // First, index the file
-        let result = indexer.index_file_with_uri(uri.clone(), ruby_code);
-        assert!(result.is_ok(), "Should be able to index the file");
-
-        // Verify class and methods were indexed
-        let index = indexer.index();
-        assert!(
-            index.entries.get("RemovalTest").is_some(),
-            "RemovalTest class should be indexed"
-        );
-        assert!(
-            index.methods_by_name.get("method1").is_some(),
-            "method1 should be indexed"
-        );
-        assert!(
-            index.methods_by_name.get("method2").is_some(),
-            "method2 should be indexed"
-        );
-
-        // Get mutable reference to index and remove entries
-        indexer.index_mut().remove_entries_for_uri(&uri);
-
-        // Verify entries were removed
-        let index = indexer.index();
-        assert!(
-            index.entries.get("RemovalTest").is_none(),
-            "RemovalTest class should be removed"
-        );
-        assert!(
-            index.methods_by_name.get("method1").is_none(),
-            "method1 should be removed"
-        );
-        assert!(
-            index.methods_by_name.get("method2").is_none(),
-            "method2 should be removed"
-        );
-
-        // Keep file in scope until end of test
-        drop(file);
+        // Clean up visibility stack on leaving the special method call
+        match message.as_str() {
+            "private" | "protected" | "public" => {
+                // Only pop if we're not leaving a method def with this visibility
+                if !node.arguments().map_or(false, |args| {
+                    args.arguments()
+                        .iter()
+                        .any(|arg| arg.as_def_node().is_some())
+                }) {
+                    self.visibility_stack.pop();
+                }
+            }
+            _ => {}
+        }
     }
 }

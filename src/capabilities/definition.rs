@@ -24,7 +24,9 @@ pub async fn find_definition_at_position(
     info!("Looking for definition of: {}", fully_qualified_name);
 
     // Use the indexer to find the definition
-    let entry = match indexer.index().find_definition(&fully_qualified_name) {
+    let i = indexer.index();
+    let index = i.lock().unwrap();
+    let entry = match index.find_definition(fully_qualified_name.as_str()) {
         Some(entry) => entry,
         None => {
             info!("No definition found for {}", fully_qualified_name);
@@ -33,7 +35,6 @@ pub async fn find_definition_at_position(
     };
 
     info!("Found definition at {:?}", entry.location);
-
     // Return the location of the definition
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: entry.location.uri.clone(),
