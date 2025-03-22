@@ -79,11 +79,6 @@ impl EntryBuilder {
         self
     }
 
-    pub fn metadata(mut self, key: &str, value: &str) -> Self {
-        self.metadata.insert(key.to_string(), value.to_string());
-        self
-    }
-
     pub fn build(self) -> Result<Entry, &'static str> {
         let fully_qualified_name = self
             .fully_qualified_name
@@ -360,7 +355,6 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
 
         // Try to build without setting fully_qualified_name
         let _ = EntryBuilder::new("MyClass".into())

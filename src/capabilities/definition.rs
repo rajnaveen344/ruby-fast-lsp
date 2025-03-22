@@ -13,7 +13,7 @@ pub async fn find_definition_at_position(
 ) -> Option<GotoDefinitionResponse> {
     // Use the analyzer to find the identifier at the position and get its fully qualified name
     let mut analyzer = RubyAnalyzer::new();
-    let fully_qualified_name = match analyzer.find_identifier_at_position(content, position) {
+    let identifier = match analyzer.find_identifier_at_position(content, position) {
         Some(name) => name,
         None => {
             info!("No identifier found at position {:?}", position);
@@ -21,15 +21,25 @@ pub async fn find_definition_at_position(
         }
     };
 
-    info!("Looking for definition of: {}", fully_qualified_name);
+    info!("Looking for definition of: {}", identifier);
 
     // Use the indexer to find the definition
     let i = indexer.index();
     let index = i.lock().unwrap();
-    let entry = match index.find_definition(fully_qualified_name.as_str()) {
+
+    // Search for entries with the same string representation
+    let mut found_entry = None;
+    for (fqn, entries) in &index.definitions {
+        if fqn.to_string() == identifier && !entries.is_empty() {
+            found_entry = Some(entries[0].clone());
+            break;
+        }
+    }
+
+    let entry = match found_entry {
         Some(entry) => entry,
         None => {
-            info!("No definition found for {}", fully_qualified_name);
+            info!("No definition found for {}", identifier);
             return None;
         }
     };

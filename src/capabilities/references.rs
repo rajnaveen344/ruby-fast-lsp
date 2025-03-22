@@ -18,31 +18,52 @@ pub async fn find_references_at_position(
 
     info!("Looking for references to: {}", fully_qualified_name);
 
-    // Use the indexer to find all references
-    let mut locations = indexer
-        .index()
-        .lock()
-        .unwrap()
-        .find_references(&fully_qualified_name);
+    // Use the indexer to find the matching fully qualified name
+    let index_arc = indexer.index();
+    let index = index_arc.lock().unwrap();
+
+    // Search for the corresponding fully qualified name in the index
+    let mut references_key = None;
+    for (fqn, _) in &index.references {
+        if fqn.to_string() == fully_qualified_name {
+            references_key = Some(fqn.clone());
+            break;
+        }
+    }
+
+    // Use the key we found to get the references
+    let mut locations = match references_key {
+        Some(key) => index.find_references(&key),
+        None => Vec::new(),
+    };
 
     // Optionally include the declaration
     if include_declaration {
-        if let Some(entry) = indexer
-            .index()
-            .lock()
-            .unwrap()
-            .find_definition(&fully_qualified_name)
-        {
-            let declaration_location = Location {
-                uri: entry.location.uri.clone(),
-                range: entry.location.range,
-            };
+        // Find the matching definition
+        let mut definition_key = None;
+        for (fqn, entries) in &index.definitions {
+            if fqn.to_string() == fully_qualified_name && !entries.is_empty() {
+                definition_key = Some(fqn.clone());
+                break;
+            }
+        }
 
-            // Avoid duplicates if the declaration is already in the references
-            if !locations.iter().any(|loc| {
-                loc.uri == declaration_location.uri && loc.range == declaration_location.range
-            }) {
-                locations.push(declaration_location);
+        if let Some(key) = definition_key {
+            if let Some(entries) = index.definitions.get(&key) {
+                if let Some(entry) = entries.first() {
+                    let declaration_location = Location {
+                        uri: entry.location.uri.clone(),
+                        range: entry.location.range,
+                    };
+
+                    // Avoid duplicates if the declaration is already in the references
+                    if !locations.iter().any(|loc| {
+                        loc.uri == declaration_location.uri
+                            && loc.range == declaration_location.range
+                    }) {
+                        locations.push(declaration_location);
+                    }
+                }
             }
         }
     }

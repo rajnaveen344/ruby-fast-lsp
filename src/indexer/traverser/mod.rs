@@ -93,15 +93,11 @@ impl Visitor {
         method: Option<Method>,
     ) -> FullyQualifiedName {
         if self.namespace_stack.is_empty() {
-            FullyQualifiedName::new(vec![], method)
+            FullyQualifiedName::new(vec![name], method)
         } else {
-            let namespace = self
-                .namespace_stack
-                .iter()
-                .map(|sn| sn.to_string())
-                .collect::<Vec<_>>()
-                .join("::");
-            FullyQualifiedName::new(vec![], method)
+            let mut namespace = self.namespace_stack.clone();
+            namespace.push(name);
+            FullyQualifiedName::new(namespace, method)
         }
     }
 }

@@ -9,6 +9,12 @@ class Foo
   end
 end
 
+class Foo
+    def abcd
+      puts "Hello!"
+    end
+end
+
 # Create an instance and call methods to test references
 foo_instance = Foo.new
 foo_instance.bar
