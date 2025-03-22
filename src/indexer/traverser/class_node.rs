@@ -21,19 +21,28 @@ impl Visitor {
         let fqn = self.build_fully_qualified_name(Constant::from(name.clone()), None);
 
         // Extract parent class information if available
-        if let Some(superclass) = node.superclass() {
+        let parent_class_name = if let Some(superclass) = node.superclass() {
             if let Some(cread) = superclass.as_constant_read_node() {
-                Some(String::from_utf8_lossy(cread.name().as_slice()).to_string())
-            } else if let Some(_) = superclass.as_constant_path_node() {
-                // For constant path nodes, we can't easily access the name
-                // Just record a marker for now
-                Some("ParentClass".to_string())
+                let parent_name = String::from_utf8_lossy(cread.name().as_slice()).to_string();
+                info!("Class {} inherits from {}", name, parent_name);
+                Some(parent_name)
+            } else if let Some(cpath) = superclass.as_constant_path_node() {
+                // For constant path nodes, we need to access the final part
+                if let Some(final_name) = self.extract_constant_path_name(&cpath) {
+                    info!("Class {} inherits from {} via path", name, final_name);
+                    Some(final_name)
+                } else {
+                    info!("Class {} has a complex parent class path", name);
+                    None
+                }
             } else {
+                info!("Class {} has an unknown parent class type", name);
                 None
             }
         } else {
             // Default parent is Object unless this is already Object
             if name != "Object" {
+                info!("Class {} implicitly inherits from Object", name);
                 Some("Object".to_string())
             } else {
                 None
@@ -46,6 +55,12 @@ impl Visitor {
             .entry_type(EntryType::Class)
             .build()
             .unwrap();
+
+        // Record the parent class in the namespace_ancestors map
+        if let Some(parent_name) = parent_class_name {
+            let mut index = self.index.lock().unwrap();
+            index.add_namespace_ancestor(Constant::from(name.clone()), Constant::from(parent_name));
+        }
 
         self.push_namespace(Constant::from(name), entry);
 

@@ -3,15 +3,24 @@ use std::collections::HashMap;
 use lsp_types::{Location, Url};
 
 use super::{
-    entry::Entry,
-    types::{constant::Constant, fully_qualified_constant::FullyQualifiedName},
+    entry::{Entry, EntryType},
+    types::{constant::Constant, fully_qualified_constant::FullyQualifiedName, method::Method},
 };
 
 #[derive(Debug)]
 pub struct RubyIndex {
     pub file_entries: HashMap<Url, Vec<Entry>>,
+
+    // Namespace ancestors are the ancestors of a namespace.
+    // For example, if we have a namespace Foo::Bar, its ancestors are [Foo].
+    // Eg. Foo::Bar.ancestors = [Foo], Foo.ancestors = [], Foo::Bar::Baz.ancestors = [Foo::Bar, Foo]
     pub namespace_ancestors: HashMap<Constant, Vec<Constant>>,
+
+    // Definitions are the definitions of a fully qualified name.
+    // For example, if we have a method Foo#bar, its definition is the method definition.
     pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
+
+    // References are the references to a fully qualified name.
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
 }
 
@@ -99,6 +108,96 @@ impl RubyIndex {
         }
 
         None
+    }
+
+    // Add a namespace ancestor relationship
+    pub fn add_namespace_ancestor(&mut self, namespace: Constant, ancestor: Constant) {
+        let ancestors = self
+            .namespace_ancestors
+            .entry(namespace.clone())
+            .or_insert_with(Vec::new);
+        if !ancestors.contains(&ancestor) {
+            ancestors.push(ancestor);
+        }
+    }
+
+    // Get the ancestor chain for a namespace
+    pub fn get_namespace_ancestors(&self, namespace: &Constant) -> Vec<Constant> {
+        if let Some(direct_ancestors) = self.namespace_ancestors.get(namespace) {
+            let mut all_ancestors = direct_ancestors.clone();
+
+            // Recursively gather ancestors of ancestors
+            for ancestor in direct_ancestors {
+                let ancestor_ancestors = self.get_namespace_ancestors(ancestor);
+                for aa in ancestor_ancestors {
+                    if !all_ancestors.contains(&aa) {
+                        all_ancestors.push(aa);
+                    }
+                }
+            }
+
+            all_ancestors
+        } else {
+            Vec::new()
+        }
+    }
+
+    // Find definition by name in a namespace and its ancestors
+    pub fn find_definition_in_namespace(
+        &self,
+        method_name: &Method,
+        namespace: Option<&Constant>,
+    ) -> Option<&Entry> {
+        // First, try to find in exact namespace
+        if let Some(ns) = namespace {
+            let fqn = FullyQualifiedName::new(vec![ns.clone()], Some(method_name.clone()));
+            if let Some(entries) = self.definitions.get(&fqn) {
+                if !entries.is_empty() {
+                    return Some(&entries[0]);
+                }
+            }
+
+            // Then, try to find in ancestor namespaces
+            for ancestor in self.get_namespace_ancestors(ns) {
+                let ancestor_fqn =
+                    FullyQualifiedName::new(vec![ancestor], Some(method_name.clone()));
+                if let Some(entries) = self.definitions.get(&ancestor_fqn) {
+                    if !entries.is_empty() {
+                        return Some(&entries[0]);
+                    }
+                }
+            }
+        }
+
+        // Finally, look for top-level methods as fallback
+        let top_level_fqn = FullyQualifiedName::new(vec![], Some(method_name.clone()));
+        if let Some(entries) = self.definitions.get(&top_level_fqn) {
+            if !entries.is_empty() {
+                return Some(&entries[0]);
+            }
+        }
+
+        None
+    }
+
+    // Find all definitions of a method by name in all namespaces
+    pub fn find_all_definitions_by_method(&self, method_name: &Method) -> Vec<&Entry> {
+        let mut results = Vec::new();
+
+        for (fqn, entries) in &self.definitions {
+            // Check if this FQN's string representation ends with the method name
+            let fqn_str = fqn.to_string();
+            if fqn_str.ends_with(&format!("#{}", method_name)) {
+                // Add all matching entries
+                for entry in entries {
+                    if entry.entry_type == EntryType::Method {
+                        results.push(entry);
+                    }
+                }
+            }
+        }
+
+        results
     }
 }
 

@@ -1,8 +1,7 @@
 use log::info;
-use lsp_types::Location;
 use ruby_prism::CallNode;
 
-use crate::indexer::entry::{Entry, EntryType, Visibility};
+use crate::indexer::entry::{EntryType, Visibility};
 use crate::indexer::types::constant::Constant;
 use crate::indexer::types::fully_qualified_constant::FullyQualifiedName;
 use crate::indexer::types::method::Method;

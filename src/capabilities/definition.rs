@@ -27,65 +27,94 @@ pub async fn find_definition_at_position(
     let index_arc = indexer.index();
     let index = index_arc.lock().unwrap();
 
-    // Debug print the contents of the definitions index
-    for (fqn, entries) in &index.definitions {
-        info!("  FQN: {}, Entries: {}", fqn, entries.len());
-        for (i, entry) in entries.iter().enumerate() {
-            info!(
-                "    Entry {}: {} at {:?}",
-                i, entry.entry_type, entry.location
-            );
-        }
-    }
+    // Check if this is a method call with a class prefix (either Class.method or instance.method)
+    if identifier.contains('#') || identifier.contains('.') {
+        // Parse the class and method parts
+        let (class_part, method_part) = if let Some(pos) = identifier.rfind('#') {
+            (&identifier[0..pos], &identifier[pos + 1..])
+        } else if let Some(pos) = identifier.rfind('.') {
+            (&identifier[0..pos], &identifier[pos + 1..])
+        } else {
+            ("", identifier.as_str()) // Should not happen given the if condition
+        };
 
-    // Try to find an exact match first
-    for (fqn, entries) in &index.definitions {
-        let fqn_str = fqn.to_string();
-        info!("Comparing {} with {}", fqn_str, identifier);
+        info!("Class part: {}, Method part: {}", class_part, method_part);
 
-        // Direct match for class/module/constant
-        if fqn_str == identifier {
-            info!("Found match: {} for {}", fqn_str, identifier);
-            if !entries.is_empty() {
-                // Return the first matching definition
-                let location = Location {
-                    uri: entries[0].location.uri.clone(),
-                    range: entries[0].location.range,
-                };
-                info!("Found definition at {:?}", location);
-                return Some(location);
+        // If we have a class name, try to find the method in that class through the index
+        if !class_part.is_empty() {
+            // Use string-based lookups to avoid using the private types directly
+            for (fqn, entries) in &index.definitions {
+                let fqn_str = fqn.to_string();
+
+                // Check if this is the method we're looking for in the right class
+                if fqn_str == format!("{}#{}", class_part, method_part) {
+                    if !entries.is_empty() {
+                        let location = Location {
+                            uri: entries[0].location.uri.clone(),
+                            range: entries[0].location.range,
+                        };
+                        info!(
+                            "Found method definition at {:?} in class namespace",
+                            location
+                        );
+                        return Some(location);
+                    }
+                }
             }
-        }
 
-        // Check for method identifier (with or without class prefix)
-        let is_method_call = identifier.contains('#') || identifier.contains('.');
-        if is_method_call {
-            // Extract method name for comparison
-            let method_name = if let Some(pos) = identifier.rfind('#') {
-                &identifier[pos + 1..]
-            } else if let Some(pos) = identifier.rfind('.') {
-                &identifier[pos + 1..]
-            } else {
-                continue;
-            };
+            // If we didn't find the exact FQN match, try to match method entries by name
+            // This is needed because methods might be indexed with just #method_name
+            for (fqn, entries) in &index.definitions {
+                let fqn_str = fqn.to_string();
 
-            // Check if the FQN ends with the method name
-            if fqn_str.ends_with(&format!("#{}", method_name)) {
-                info!("Found match for method: {} -> {}", identifier, fqn_str);
-                if !entries.is_empty() {
-                    let location = Location {
-                        uri: entries[0].location.uri.clone(),
-                        range: entries[0].location.range,
-                    };
-                    info!("Found method definition at {:?}", location);
-                    return Some(location);
+                // Check for a method with this name (prefixed with # for instance methods)
+                if fqn_str == format!("#{}", method_part) {
+                    for entry in entries {
+                        // Check if the entry is for a method and add it (we'll handle class-specific matching later)
+                        if entry.entry_type == crate::indexer::entry::EntryType::Method {
+                            let location = Location {
+                                uri: entry.location.uri.clone(),
+                                range: entry.location.range,
+                            };
+                            info!(
+                                "Found method definition at {:?} via general matching",
+                                location
+                            );
+                            return Some(location);
+                        }
+                    }
                 }
             }
         } else {
-            // For non-method identifiers, also try with '#' if we didn't find direct matches
-            if fqn_str == format!("#{}", identifier) {
+            // Handle unqualified method names (e.g., #method)
+            for (fqn, entries) in &index.definitions {
+                let fqn_str = fqn.to_string();
+
+                // Check if this is the method we're looking for
+                if fqn_str.ends_with(&format!("#{}", method_part)) {
+                    if !entries.is_empty() {
+                        let location = Location {
+                            uri: entries[0].location.uri.clone(),
+                            range: entries[0].location.range,
+                        };
+                        info!("Found method definition at {:?} from all methods", location);
+                        return Some(location);
+                    }
+                }
+            }
+        }
+    } else {
+        // For non-method identifiers (classes, constants, etc.)
+        // Try to find an exact match by name
+        for (fqn, entries) in &index.definitions {
+            let fqn_str = fqn.to_string();
+            info!("Comparing {} with {}", fqn_str, identifier);
+
+            // Direct match for class/module/constant
+            if fqn_str == identifier {
                 info!("Found match: {} for {}", fqn_str, identifier);
                 if !entries.is_empty() {
+                    // Return the first matching definition
                     let location = Location {
                         uri: entries[0].location.uri.clone(),
                         range: entries[0].location.range,
@@ -95,42 +124,21 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-    }
 
-    // If we haven't found anything by exact match, try partial matching for methods
-    if identifier.contains('#') || !identifier.contains(':') {
-        let method_name = if let Some(pos) = identifier.rfind('#') {
-            &identifier[pos + 1..]
-        } else {
-            identifier.as_str()
-        };
-
-        // Look for any definition with this method name
+        // For simple identifiers that might be methods without a class prefix
+        // Try to find any method with this name
         for (fqn, entries) in &index.definitions {
             let fqn_str = fqn.to_string();
-            if fqn_str.ends_with(&format!("#{}", method_name)) {
-                if !entries.is_empty() {
-                    let location = Location {
-                        uri: entries[0].location.uri.clone(),
-                        range: entries[0].location.range,
-                    };
-                    info!("Found definition at {:?} via method name match", location);
-                    return Some(location);
-                }
-            }
-        }
 
-        // Special case: also check for unqualified method names in the index
-        let unqualified_key = format!("#{}", method_name);
-        for (fqn, entries) in &index.definitions {
-            if fqn.to_string() == unqualified_key {
+            // Check if this is a method definition with the name we're looking for
+            if fqn_str.ends_with(&format!("#{}", identifier)) {
                 if !entries.is_empty() {
                     let location = Location {
                         uri: entries[0].location.uri.clone(),
                         range: entries[0].location.range,
                     };
                     info!(
-                        "Found definition at {:?} via unqualified method name",
+                        "Found method definition at {:?} for simple identifier",
                         location
                     );
                     return Some(location);

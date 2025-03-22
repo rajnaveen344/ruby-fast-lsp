@@ -104,6 +104,22 @@ impl Visitor {
             FullyQualifiedName::new(namespace, method)
         }
     }
+
+    // Add this method to extract the name from a ConstantPathNode
+    pub fn extract_constant_path_name(
+        &self,
+        cpath: &ruby_prism::ConstantPathNode,
+    ) -> Option<String> {
+        // Try to access the parent and name components of the path
+        if let Some(const_node) = cpath.name() {
+            // For simple constant nodes like Foo in Foo::Bar
+            return Some(String::from_utf8_lossy(const_node.as_slice()).to_string());
+        }
+
+        // Fallback - get the string representation and extract the last part
+        let path_str = format!("{:?}", cpath);
+        path_str.split("::").last().map(|s| s.trim().to_string())
+    }
 }
 
 impl Visit<'_> for Visitor {

@@ -209,12 +209,16 @@ mod tests {
     #[test]
     fn test_add_entries_same_name_different_files() {
         let mut index = RubyIndex::new();
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("process"))));
+        let fqn1 = FullyQualifiedName::new(vec![], Some(Method::from(String::from("process"))));
+        let fqn2 = FullyQualifiedName::new(
+            vec![Constant::from("AnotherClass")],
+            Some(Method::from(String::from("process"))),
+        );
 
         // Create two method entries with the same name but in different files
         let method_entry1 = create_test_entry(
             "process",
-            &fqn,
+            &fqn1,
             "file:///test1.rb",
             EntryType::Method,
             Visibility::Public,
@@ -222,7 +226,7 @@ mod tests {
 
         let method_entry2 = create_test_entry(
             "process",
-            &fqn,
+            &fqn2,
             "file:///test2.rb",
             EntryType::Method,
             Visibility::Public,
@@ -234,8 +238,8 @@ mod tests {
 
         // Verify entries were added correctly
         assert_eq!(index.definitions.len(), 2);
-        assert!(index.definitions.contains_key(&fqn.clone().into()));
-        assert!(index.definitions.contains_key(&fqn.clone().into()));
+        assert!(index.definitions.contains_key(&fqn1.clone().into()));
+        assert!(index.definitions.contains_key(&fqn2.clone().into()));
 
         // Both URIs should be in the uri_to_entries map
         assert_eq!(index.file_entries.len(), 2);
@@ -256,21 +260,31 @@ mod tests {
             1
         );
 
-        // The "process" method should have 2 entries in methods_by_name
-        assert_eq!(index.definitions.len(), 2);
-        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 2);
+        // Both method entries should be present
+        assert_eq!(
+            index.definitions.get(&fqn1.clone().into()).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            index.definitions.get(&fqn2.clone().into()).unwrap().len(),
+            1
+        );
     }
 
     #[test]
     fn test_remove_entries_for_uri() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file:///test.rb").unwrap();
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("User"))));
+        let user_fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("User"))));
+        let save_fqn = FullyQualifiedName::new(
+            vec![Constant::from("User")],
+            Some(Method::from(String::from("save"))),
+        );
 
         // Add two entries for the same URI
         let class_entry = create_test_entry(
             "User",
-            &fqn,
+            &user_fqn,
             "file:///test.rb",
             EntryType::Class,
             Visibility::Public,
@@ -278,7 +292,7 @@ mod tests {
 
         let method_entry = create_test_entry(
             "save",
-            &fqn,
+            &save_fqn,
             "file:///test.rb",
             EntryType::Method,
             Visibility::Public,
@@ -290,8 +304,22 @@ mod tests {
         // Verify entries were added
         assert_eq!(index.definitions.len(), 2);
         assert_eq!(index.file_entries.len(), 1);
-        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
-        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
+        assert_eq!(
+            index
+                .definitions
+                .get(&user_fqn.clone().into())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            index
+                .definitions
+                .get(&save_fqn.clone().into())
+                .unwrap()
+                .len(),
+            1
+        );
 
         // Remove entries for the URI
         index.remove_entries_for_uri(&uri);
