@@ -11,8 +11,9 @@ use ruby_prism::{
 use crate::indexer::entry::{EntryBuilder, EntryType};
 
 use super::{
-    entry::{Entry, ShortName, Visibility},
+    entry::{Entry, Visibility},
     index::RubyIndex,
+    types::{constant::Constant, fully_qualified_constant::FullyQualifiedName, method::Method},
 };
 
 pub struct Visitor {
@@ -21,7 +22,7 @@ pub struct Visitor {
     pub content: String,
     pub visibility_stack: Vec<Visibility>,
     pub current_method: Option<String>,
-    pub namespace_stack: Vec<ShortName>,
+    pub namespace_stack: Vec<Constant>,
     pub owner_stack: Vec<Entry>,
 }
 
@@ -73,8 +74,8 @@ impl Visitor {
         (line, character)
     }
 
-    fn push_namespace(&mut self, short_name: ShortName, entry: Entry) {
-        self.namespace_stack.push(short_name);
+    fn push_namespace(&mut self, constant_name: Constant, entry: Entry) {
+        self.namespace_stack.push(constant_name);
         self.visibility_stack.push(entry.visibility);
         self.owner_stack.push(entry.clone());
         self.index.lock().unwrap().add_entry(entry.clone());
@@ -86,9 +87,13 @@ impl Visitor {
         self.owner_stack.pop();
     }
 
-    fn build_fully_qualified_name(&self, name: &str) -> String {
+    fn build_fully_qualified_name(
+        &self,
+        name: Constant,
+        method: Option<Method>,
+    ) -> FullyQualifiedName {
         if self.namespace_stack.is_empty() {
-            name.to_string()
+            FullyQualifiedName::new(vec![], method)
         } else {
             let namespace = self
                 .namespace_stack
@@ -96,7 +101,7 @@ impl Visitor {
                 .map(|sn| sn.to_string())
                 .collect::<Vec<_>>()
                 .join("::");
-            format!("{}::{}", namespace, name)
+            FullyQualifiedName::new(vec![], method)
         }
     }
 }
@@ -111,21 +116,16 @@ impl Visit<'_> for Visitor {
         let const_path = node.constant_path();
         let full_loc = node.location();
         let name_loc = const_path.location();
-        let fqn = self.build_fully_qualified_name(&name);
+        let fqn = self.build_fully_qualified_name(Constant::from(name.clone()), None);
 
-        info!("Module name: {}", name);
-        info!("Module full location: {:?}", full_loc);
-        info!("Module name location: {:?}", name_loc);
-        info!("Module FQN: {}", fqn);
-
-        let entry = EntryBuilder::new(ShortName::from(name.clone()))
-            .fully_qualified_name(&fqn)
+        let entry = EntryBuilder::new(Constant::from(name.clone()))
+            .fully_qualified_name(fqn.into())
             .location(self.prism_loc_to_lsp_loc(full_loc))
             .entry_type(EntryType::Module)
             .build()
             .unwrap();
 
-        self.push_namespace(ShortName::from(name), entry);
+        self.push_namespace(Constant::from(name), entry);
 
         visit_module_node(self, node);
 
@@ -142,7 +142,7 @@ impl Visit<'_> for Visitor {
         let const_path = node.constant_path();
         let full_loc = node.location();
         let name_loc = const_path.location();
-        let fqn = self.build_fully_qualified_name(&name);
+        let fqn = self.build_fully_qualified_name(Constant::from(name.clone()), None);
 
         // Extract parent class information if available
         let parent_class = if let Some(superclass) = node.superclass() {
@@ -164,22 +164,14 @@ impl Visit<'_> for Visitor {
             }
         };
 
-        info!("Class name: {}", name);
-        info!("Class full location: {:?}", full_loc);
-        info!("Class name location: {:?}", name_loc);
-        info!("Class FQN: {}", fqn);
-        if let Some(parent) = &parent_class {
-            info!("Parent class: {}", parent);
-        }
-
-        let entry = EntryBuilder::new(ShortName::from(name.clone()))
-            .fully_qualified_name(&fqn)
+        let entry = EntryBuilder::new(Constant::from(name.clone()))
+            .fully_qualified_name(fqn.into())
             .location(self.prism_loc_to_lsp_loc(full_loc))
             .entry_type(EntryType::Class)
             .build()
             .unwrap();
 
-        self.push_namespace(ShortName::from(name), entry);
+        self.push_namespace(Constant::from(name), entry);
 
         visit_class_node(self, node);
 
@@ -217,18 +209,18 @@ impl Visit<'_> for Visitor {
                 format!("<Class:{}>", expr_name)
             };
 
-            let fqn = self.build_fully_qualified_name(&singleton_name);
+            let fqn = self.build_fully_qualified_name(Constant::from(singleton_name.clone()), None);
             let location = self.prism_loc_to_lsp_loc(node.location());
 
             // Create a singleton class entry
-            let entry = EntryBuilder::new(ShortName::from(singleton_name.clone()))
-                .fully_qualified_name(&fqn)
+            let entry = EntryBuilder::new(Constant::from(singleton_name.clone()))
+                .fully_qualified_name(fqn.into())
                 .location(location)
                 .entry_type(EntryType::SingletonClass)
                 .build()
                 .unwrap();
 
-            self.push_namespace(ShortName::from(singleton_name), entry);
+            self.push_namespace(Constant::from(singleton_name), entry);
 
             visit_singleton_class_node(self, node);
 
@@ -274,17 +266,23 @@ impl Visit<'_> for Visitor {
                     // This is a class method (defined with self.)
                     if let Some(owner) = owner.cloned() {
                         // Create singleton class entry to use as the owner
-                        let owner_name = owner.short_name.to_string();
+                        let owner_name = owner.constant_name.to_string();
                         let singleton_name = format!("<Class:{}>", owner_name);
-                        let singleton_fqn = self.build_fully_qualified_name(&singleton_name);
+                        let singleton_fqn = self.build_fully_qualified_name(
+                            Constant::from(singleton_name.clone()),
+                            None,
+                        );
 
                         // Create method entry and add to index
-                        let fqn = format!("{}#{}", singleton_fqn, method_name);
+                        let fqn = FullyQualifiedName::new(
+                            vec![],
+                            Some(Method::from(method_name.clone())),
+                        );
                         let method_location = self.prism_loc_to_lsp_loc(node.location());
                         let _method_name_location = self.prism_loc_to_lsp_loc(node.name_loc());
 
-                        let method_entry = EntryBuilder::new(ShortName::from(method_name))
-                            .fully_qualified_name(&fqn)
+                        let method_entry = EntryBuilder::new(Constant::from(method_name))
+                            .fully_qualified_name(fqn)
                             .location(method_location)
                             .entry_type(EntryType::Method)
                             .visibility(visibility)
@@ -298,12 +296,12 @@ impl Visit<'_> for Visitor {
         } else {
             // Regular instance method
             if let Some(owner) = owner.cloned() {
-                let fqn = format!("{}#{}", owner.fully_qualified_name, method_name);
                 let method_location = self.prism_loc_to_lsp_loc(node.location());
                 let _method_name_location = self.prism_loc_to_lsp_loc(node.name_loc());
+                let fqn = FullyQualifiedName::new(vec![], Some(Method::from(method_name.clone())));
 
-                let method_entry = EntryBuilder::new(ShortName::from(method_name))
-                    .fully_qualified_name(&fqn)
+                let method_entry = EntryBuilder::new(Constant::from(method_name))
+                    .fully_qualified_name(fqn)
                     .location(method_location)
                     .entry_type(EntryType::Method)
                     .visibility(visibility)

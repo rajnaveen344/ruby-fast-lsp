@@ -20,7 +20,6 @@ env_logger = "0.10.0"
 anyhow = "1.0.75"
 thiserror = "1.0.48"
 
-
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"
 tree-sitter = "0.25.3"
@@ -29,6 +28,9 @@ tree-sitter-highlight = "0.25.3"
 
 # File system operations
 walkdir = "2.4.0"
+
+# Utils
+regex = "1.11.1"
 
 [dev-dependencies]
 tokio-test = "0.4.3"

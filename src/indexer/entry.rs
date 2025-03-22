@@ -1,9 +1,10 @@
-use std::cmp::{Eq, PartialEq};
+use std::cmp::PartialEq;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::hash::Hash;
 
 use lsp_types::Location;
+
+use super::types::constant::Constant;
+use super::types::fully_qualified_constant::FullyQualifiedName;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryType {
@@ -26,53 +27,9 @@ pub enum Visibility {
     Private,
 }
 
-/// A short name for an entry
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct ShortName(String);
-
-impl From<String> for ShortName {
-    fn from(value: String) -> Self {
-        ShortName(value)
-    }
-}
-
-impl From<&str> for ShortName {
-    fn from(value: &str) -> Self {
-        ShortName(value.to_string())
-    }
-}
-
-impl Display for ShortName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// A fully qualified name for an entry
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct FullyQualifiedName(String);
-
-impl From<String> for FullyQualifiedName {
-    fn from(value: String) -> Self {
-        FullyQualifiedName(value)
-    }
-}
-
-impl From<&str> for FullyQualifiedName {
-    fn from(value: &str) -> Self {
-        FullyQualifiedName(value.to_string())
-    }
-}
-
-impl Display for FullyQualifiedName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.0)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Entry {
-    pub short_name: ShortName,                    // The name of the entity
+    pub constant_name: Constant,                  // The name of the entity
     pub fully_qualified_name: FullyQualifiedName, // Complete namespace path
     pub location: Location,                       // Where this entry is defined
     pub entry_type: EntryType,                    // Type of entry
@@ -82,7 +39,7 @@ pub struct Entry {
 
 // Helper struct for building a new entry
 pub struct EntryBuilder {
-    short_name: ShortName,
+    constant_name: Constant,
     fully_qualified_name: Option<FullyQualifiedName>,
     location: Option<Location>,
     entry_type: Option<EntryType>,
@@ -91,9 +48,9 @@ pub struct EntryBuilder {
 }
 
 impl EntryBuilder {
-    pub fn new(short_name: ShortName) -> Self {
+    pub fn new(constant_name: Constant) -> Self {
         EntryBuilder {
-            short_name,
+            constant_name,
             fully_qualified_name: None,
             location: None,
             entry_type: None,
@@ -102,8 +59,8 @@ impl EntryBuilder {
         }
     }
 
-    pub fn fully_qualified_name(mut self, fqn: &str) -> Self {
-        self.fully_qualified_name = Some(FullyQualifiedName(fqn.to_string()));
+    pub fn fully_qualified_name(mut self, fqn: FullyQualifiedName) -> Self {
+        self.fully_qualified_name = Some(fqn);
         self
     }
 
@@ -136,7 +93,7 @@ impl EntryBuilder {
         let visibility = self.visibility.unwrap_or(Visibility::Public);
 
         Ok(Entry {
-            short_name: self.short_name,
+            constant_name: self.constant_name,
             fully_qualified_name,
             location,
             entry_type,
@@ -148,7 +105,7 @@ impl EntryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::indexer::index::RubyIndex;
+    use crate::indexer::{index::RubyIndex, types::method::Method};
 
     use super::*;
     use tower_lsp::lsp_types::{Position, Range, Url};
@@ -156,7 +113,7 @@ mod tests {
     // Create a helper function to build a test entry
     fn create_test_entry(
         name: &str,
-        fqn: &str,
+        fqn: &FullyQualifiedName,
         uri_str: &str,
         entry_type: EntryType,
         visibility: Visibility,
@@ -174,7 +131,7 @@ mod tests {
         };
 
         EntryBuilder::new(name.to_string().into())
-            .fully_qualified_name(fqn)
+            .fully_qualified_name(fqn.clone())
             .location(Location { uri, range })
             .entry_type(entry_type)
             .visibility(visibility)
@@ -186,10 +143,12 @@ mod tests {
     fn test_add_entry() {
         let mut index = RubyIndex::new();
 
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("User")));
+
         // Create a class entry
         let class_entry = create_test_entry(
             "User",
-            "User",
+            &fqn,
             "file:///test.rb",
             EntryType::Class,
             Visibility::Public,
@@ -199,22 +158,28 @@ mod tests {
         index.add_entry(class_entry.clone());
 
         // Verify it was added correctly
-        assert_eq!(index.entries.len(), 1);
-        assert!(index.entries.contains_key("User"));
-        assert_eq!(index.uri_to_entries.len(), 1);
-        assert!(index.uri_to_entries.contains_key("file:///test.rb"));
+        assert_eq!(index.definitions.len(), 1);
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
+        assert_eq!(index.file_entries.len(), 1);
+        assert!(index
+            .file_entries
+            .contains_key(&Url::parse("file:///test.rb").unwrap()));
         assert_eq!(
-            index.uri_to_entries.get("file:///test.rb").unwrap().len(),
+            index
+                .file_entries
+                .get(&Url::parse("file:///test.rb").unwrap())
+                .unwrap()
+                .len(),
             1
         );
-        assert_eq!(index.constants_by_name.len(), 1);
-        assert!(index.constants_by_name.contains_key("User"));
-        assert_eq!(index.constants_by_name.get("User").unwrap().len(), 1);
+        assert_eq!(index.definitions.len(), 1);
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
+        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
 
         // Create a method entry
         let method_entry = create_test_entry(
             "save",
-            "User#save",
+            &FullyQualifiedName::new(vec![], Some(Method::from("save"))),
             "file:///test.rb",
             EntryType::Method,
             Visibility::Public,
@@ -224,25 +189,30 @@ mod tests {
         index.add_entry(method_entry.clone());
 
         // Verify it was added correctly
-        assert_eq!(index.entries.len(), 2);
-        assert!(index.entries.contains_key("User#save"));
+        assert_eq!(index.definitions.len(), 2);
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
         assert_eq!(
-            index.uri_to_entries.get("file:///test.rb").unwrap().len(),
+            index
+                .file_entries
+                .get(&Url::parse("file:///test.rb").unwrap())
+                .unwrap()
+                .len(),
             2
         );
-        assert_eq!(index.methods_by_name.len(), 1);
-        assert!(index.methods_by_name.contains_key("save"));
-        assert_eq!(index.methods_by_name.get("save").unwrap().len(), 1);
+        assert_eq!(index.definitions.len(), 2);
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
+        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
     }
 
     #[test]
     fn test_add_entries_same_name_different_files() {
         let mut index = RubyIndex::new();
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("process")));
 
         // Create two method entries with the same name but in different files
         let method_entry1 = create_test_entry(
             "process",
-            "MyClass#process",
+            &fqn,
             "file:///test1.rb",
             EntryType::Method,
             Visibility::Public,
@@ -250,7 +220,7 @@ mod tests {
 
         let method_entry2 = create_test_entry(
             "process",
-            "OtherClass#process",
+            &fqn,
             "file:///test2.rb",
             EntryType::Method,
             Visibility::Public,
@@ -261,35 +231,44 @@ mod tests {
         index.add_entry(method_entry2.clone());
 
         // Verify entries were added correctly
-        assert_eq!(index.entries.len(), 2);
-        assert!(index.entries.contains_key("MyClass#process"));
-        assert!(index.entries.contains_key("OtherClass#process"));
+        assert_eq!(index.definitions.len(), 2);
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
+        assert!(index.definitions.contains_key(&fqn.clone().into()));
 
         // Both URIs should be in the uri_to_entries map
-        assert_eq!(index.uri_to_entries.len(), 2);
+        assert_eq!(index.file_entries.len(), 2);
         assert_eq!(
-            index.uri_to_entries.get("file:///test1.rb").unwrap().len(),
+            index
+                .file_entries
+                .get(&Url::parse("file:///test1.rb").unwrap())
+                .unwrap()
+                .len(),
             1
         );
         assert_eq!(
-            index.uri_to_entries.get("file:///test2.rb").unwrap().len(),
+            index
+                .file_entries
+                .get(&Url::parse("file:///test2.rb").unwrap())
+                .unwrap()
+                .len(),
             1
         );
 
         // The "process" method should have 2 entries in methods_by_name
-        assert_eq!(index.methods_by_name.len(), 1);
-        assert_eq!(index.methods_by_name.get("process").unwrap().len(), 2);
+        assert_eq!(index.definitions.len(), 2);
+        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 2);
     }
 
     #[test]
     fn test_remove_entries_for_uri() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file:///test.rb").unwrap();
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("User")));
 
         // Add two entries for the same URI
         let class_entry = create_test_entry(
             "User",
-            "User",
+            &fqn,
             "file:///test.rb",
             EntryType::Class,
             Visibility::Public,
@@ -297,7 +276,7 @@ mod tests {
 
         let method_entry = create_test_entry(
             "save",
-            "User#save",
+            &fqn,
             "file:///test.rb",
             EntryType::Method,
             Visibility::Public,
@@ -307,19 +286,17 @@ mod tests {
         index.add_entry(method_entry);
 
         // Verify entries were added
-        assert_eq!(index.entries.len(), 2);
-        assert_eq!(index.uri_to_entries.len(), 1);
-        assert_eq!(index.methods_by_name.len(), 1);
-        assert_eq!(index.constants_by_name.len(), 1);
+        assert_eq!(index.definitions.len(), 2);
+        assert_eq!(index.file_entries.len(), 1);
+        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
+        assert_eq!(index.definitions.get(&fqn.clone().into()).unwrap().len(), 1);
 
         // Remove entries for the URI
         index.remove_entries_for_uri(&uri);
 
         // Verify all entries were removed
-        assert!(index.entries.is_empty());
-        assert!(index.uri_to_entries.is_empty());
-        assert!(index.methods_by_name.is_empty());
-        assert!(index.constants_by_name.is_empty());
+        assert!(index.definitions.is_empty());
+        assert!(index.file_entries.is_empty());
     }
 
     #[test]
@@ -329,10 +306,11 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
 
         // Create an entry using the builder
         let entry = EntryBuilder::new("MyClass".into())
-            .fully_qualified_name("MyClass".into())
+            .fully_qualified_name(fqn.clone())
             .location(Location {
                 uri: uri.clone(),
                 range,
@@ -343,8 +321,8 @@ mod tests {
             .unwrap(); // Unwrap the Result
 
         // Verify the entry was built correctly
-        assert_eq!(entry.short_name, "MyClass".into());
-        assert_eq!(entry.fully_qualified_name, "MyClass".into());
+        assert_eq!(entry.constant_name, "MyClass".into());
+        assert_eq!(entry.fully_qualified_name, fqn);
         assert_eq!(entry.location.uri, uri);
         assert_eq!(entry.location.range, range);
         assert_eq!(entry.entry_type, EntryType::Class);
@@ -359,10 +337,11 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("my_method")));
 
         // Create an entry with only the required fields
         let entry = EntryBuilder::new("my_method".into())
-            .fully_qualified_name("MyClass#my_method".into())
+            .fully_qualified_name(fqn.clone())
             .location(Location { uri, range })
             .entry_type(EntryType::Method)
             .build()
@@ -381,6 +360,7 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
 
         // Try to build without setting fully_qualified_name
         let _ = EntryBuilder::new("MyClass".into())
@@ -394,8 +374,9 @@ mod tests {
     #[should_panic]
     fn test_entry_builder_missing_location() {
         // Try to build without setting location
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
         let _ = EntryBuilder::new("MyClass".into())
-            .fully_qualified_name("MyClass".into())
+            .fully_qualified_name(fqn.clone())
             .entry_type(EntryType::Class)
             .build()
             .unwrap(); // This should fail
@@ -409,10 +390,11 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
 
         // Try to build without setting entry_type
         let _ = EntryBuilder::new("MyClass".into())
-            .fully_qualified_name("MyClass")
+            .fully_qualified_name(fqn.clone())
             .location(Location { uri, range })
             .build()
             .unwrap(); // This should fail

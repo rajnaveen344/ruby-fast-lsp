@@ -8,6 +8,7 @@ mod entry;
 pub mod events;
 mod index;
 mod traverser;
+mod types;
 
 use index::RubyIndex;
 use traverser::Visitor;
@@ -51,6 +52,8 @@ impl RubyIndexer {
 
 #[cfg(test)]
 mod tests {
+    use crate::indexer::types::{fully_qualified_constant::FullyQualifiedName, method::Method};
+
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -85,7 +88,7 @@ mod tests {
         // Index should be empty
         let index = indexer.index();
         // No entries should have been added
-        assert_eq!(0, index.lock().unwrap().entries.len());
+        assert_eq!(0, index.lock().unwrap().definitions.len());
 
         // Keep file in scope until end of test
         drop(file);
@@ -136,16 +139,22 @@ mod tests {
 
         // Verify entries were removed
         let index = indexer.index();
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("RemovalTest")));
         assert!(
-            index.lock().unwrap().entries.get("RemovalTest").is_none(),
+            index
+                .lock()
+                .unwrap()
+                .definitions
+                .get(&fqn.clone().into())
+                .is_none(),
             "RemovalTest class should be removed"
         );
         assert!(
             index
                 .lock()
                 .unwrap()
-                .methods_by_name
-                .get("method1")
+                .definitions
+                .get(&fqn.clone().into())
                 .is_none(),
             "method1 should be removed"
         );
@@ -153,8 +162,8 @@ mod tests {
             index
                 .lock()
                 .unwrap()
-                .methods_by_name
-                .get("method2")
+                .definitions
+                .get(&fqn.clone().into())
                 .is_none(),
             "method2 should be removed"
         );

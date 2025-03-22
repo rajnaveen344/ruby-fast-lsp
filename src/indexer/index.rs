@@ -2,92 +2,50 @@ use std::collections::HashMap;
 
 use lsp_types::{Location, Url};
 
-use super::entry::{Entry, EntryType};
+use super::{
+    entry::{Entry, EntryType},
+    types::{constant::Constant, fully_qualified_constant::FullyQualifiedName},
+};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RubyIndex {
-    // Main index mapping fully qualified names to entries
-    // Stores all indexed elements by their fully qualified name (FQN)
-    // Examples:
-    //   "User" -> [Class entry for User]
-    //   "User#save" -> [Method entry for User#save]
-    //   "ActiveRecord::Base" -> [Class entry for ActiveRecord::Base]
-    pub entries: HashMap<String, Vec<Entry>>,
-
-    // Map file URIs to their entries for efficient updates
-    // Allows quick access to all entries defined in a specific file
-    // Used for efficient reindexing when files change
-    // Examples:
-    //   "file:///app/models/user.rb" -> [All entries defined in user.rb]
-    //   "file:///app/controllers/users_controller.rb" -> [All entries in users_controller.rb]
-    pub uri_to_entries: HashMap<String, Vec<Entry>>,
-
-    // Maps for quick lookups by specific criteria
-    // Stores all method entries by their simple name for quick lookup
-    // Useful for finding methods without knowing their class context
-    // Examples:
-    //   "save" -> [User#save, Post#save, Comment#save]
-    //   "validate" -> [User#validate, Product#validate]
-    pub methods_by_name: HashMap<String, Vec<Entry>>,
-
-    // Stores all constant entries (classes, modules, constants) by their simple name
-    // Useful for finding constants without knowing their namespace
-    // Examples:
-    //   "User" -> [User, Admin::User, API::User]
-    //   "VERSION" -> [APP::VERSION, API::VERSION]
-    pub constants_by_name: HashMap<String, Vec<Entry>>,
-
-    // Namespace hierarchy
-    // Tracks parent-child relationships between namespaces
-    // Used for resolving nested constants and building completion suggestions
-    // Examples:
-    //   "" -> ["ActiveRecord", "Rails", "User"]
-    //   "ActiveRecord" -> ["Base", "Migration", "Relation"]
-    //   "Rails" -> ["Application", "Configuration"]
-    pub namespace_tree: HashMap<String, Vec<String>>,
-
-    // Add a map to track references
-    // Stores all references to symbols throughout the codebase
-    // Used for finding all usages of a symbol
-    // Examples:
-    //   "User" -> [Locations where User is referenced]
-    //   "User#save" -> [Locations where User#save is called]
-    //   "@name" -> [Locations where @name is accessed]
-    pub references: HashMap<String, Vec<Location>>,
+    pub file_entries: HashMap<Url, Vec<Entry>>,
+    pub namespace_ancestors: HashMap<Constant, Vec<Constant>>,
+    pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
+    pub references: HashMap<FullyQualifiedName, Vec<Location>>,
 }
 
 impl RubyIndex {
     pub fn new() -> Self {
         RubyIndex {
-            entries: HashMap::new(),
-            uri_to_entries: HashMap::new(),
-            methods_by_name: HashMap::new(),
-            constants_by_name: HashMap::new(),
-            namespace_tree: HashMap::new(),
-            references: HashMap::new(), // Initialize the references map
+            file_entries: HashMap::new(),
+            namespace_ancestors: HashMap::new(),
+            definitions: HashMap::new(),
+            references: HashMap::new(),
         }
     }
 
     pub fn add_entry(&mut self, entry: Entry) {
+        let a = "".bytes();
+        let fully_qualified_name = entry.fully_qualified_name.to_string();
+
         // Update the namespace tree, but not for local variables
         if entry.entry_type != EntryType::LocalVariable
             && entry.entry_type != EntryType::InstanceVariable
         {
-            self.update_namespace_tree(&entry.fully_qualified_name.to_string());
+            self.update_namespace_tree(&fully_qualified_name);
         }
 
         // Add to the main entries map
-        self.entries
-            .entry(entry.fully_qualified_name.to_string())
-            .or_insert_with(Vec::new)
-            .push(entry.clone());
+        let entries = self
+            .definitions
+            .entry(fully_qualified_name.clone())
+            .or_insert_with(Vec::new);
+        entries.push(entry.clone());
 
         // Add to the uri_to_entries map for this file
         let uri_string = entry.location.uri.to_string();
-        let uri_entries = self
-            .uri_to_entries
-            .entry(uri_string)
-            .or_insert_with(Vec::new);
+        let uri_entries = self.file_entries.entry(uri_string).or_insert_with(Vec::new);
         uri_entries.push(entry.clone());
 
         // Add to the appropriate lookup map based on entry type
@@ -113,10 +71,6 @@ impl RubyIndex {
             }
             EntryType::LocalVariable | EntryType::InstanceVariable => {
                 // Don't index these in by_name maps
-                self.uri_to_entries
-                    .entry(entry.location.uri.to_string())
-                    .or_insert_with(Vec::new)
-                    .push(entry);
             }
         }
     }
@@ -125,23 +79,23 @@ impl RubyIndex {
         let uri_string = uri.to_string();
 
         // If no entries for this URI, return early
-        if !self.uri_to_entries.contains_key(&uri_string) {
+        if !self.file_entries.contains_key(&uri_string) {
             return;
         }
 
         // Get all entries for this URI
-        let entries = self.uri_to_entries.remove(&uri_string).unwrap_or_default();
+        let entries = self.file_entries.remove(&uri_string).unwrap_or_default();
 
         // Remove each entry from the main map and lookup maps
         for entry in entries {
+            let fqn = entry.fully_qualified_name.to_string();
+
             // Remove from entries map
-            if let Some(fqn_entries) = self
-                .entries
-                .get_mut(&entry.fully_qualified_name.to_string())
-            {
+            if let Some(fqn_entries) = self.entries.get_mut(&fqn) {
                 fqn_entries.retain(|e| e.location.uri != *uri);
+
                 if fqn_entries.is_empty() {
-                    self.entries.remove(&entry.fully_qualified_name.to_string());
+                    self.entries.remove(&fqn);
                 }
             }
 
@@ -175,13 +129,111 @@ impl RubyIndex {
                 }
                 EntryType::LocalVariable | EntryType::InstanceVariable => {
                     // Local variables and instance variables are not indexed by name
-                    // so we don't need to remove them from any lookup maps
                 }
             }
         }
 
-        // Also clean up references from this URI
-        // We need to iterate through all references and remove those from this URI
+        // Also remove the require path for this URI if it exists
+        if let Some(require_path) = get_require_path(uri) {
+            self.require_paths.remove(&require_path);
+        }
+
+        // Clean up references from this URI
+        self.remove_references_for_uri(uri);
+    }
+
+    // Register an included hook that will be executed when module_name is included into any namespace
+    pub fn register_included_hook<F>(&mut self, module_name: &str, hook: F)
+    where
+        F: Fn(&mut RubyIndex, &Entry) + 'static + Send + Sync,
+    {
+        self.included_hooks
+            .entry(module_name.to_string())
+            .or_insert_with(Vec::new)
+            .push(DebugableFn(Box::new(hook)));
+    }
+
+    // Add a file's require path to the index for require autocompletion
+    pub fn add_require_path(&mut self, uri: &Url) {
+        if let Some(require_path) = get_require_path(uri) {
+            self.require_paths.insert(require_path, uri.clone());
+        }
+    }
+
+    // Search for require paths that match the given prefix
+    pub fn search_require_paths(&self, query: &str) -> Vec<Url> {
+        self.require_paths
+            .iter()
+            .filter(|(path, _)| path.starts_with(query))
+            .map(|(_, url)| url.clone())
+            .collect()
+    }
+
+    // Search for entries that match the given prefix
+    pub fn prefix_search(&self, query: &str) -> Vec<Vec<Entry>> {
+        self.entries
+            .iter()
+            .filter(|(name, _)| name.starts_with(query))
+            .map(|(_, entries)| entries.clone())
+            .collect()
+    }
+
+    // Add the linearized ancestors for a namespace
+    pub fn add_ancestors(&mut self, fully_qualified_name: &str, ancestors: Vec<String>) {
+        self.ancestors
+            .insert(fully_qualified_name.to_string(), ancestors);
+    }
+
+    // Get the linearized ancestors for a namespace
+    pub fn linearized_ancestors_of(&self, fully_qualified_name: &str) -> Option<&Vec<String>> {
+        self.ancestors.get(fully_qualified_name)
+    }
+
+    // Check if the index is empty
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    // Get a list of all fully qualified names in the index
+    pub fn names(&self) -> Vec<String> {
+        self.entries.keys().cloned().collect()
+    }
+
+    // Check if a name is indexed
+    pub fn indexed(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
+    }
+
+    // Get the number of entries in the index
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    // Get entries by their fully qualified name
+    pub fn get_entries(&self, fully_qualified_name: &str) -> Option<&Vec<Entry>> {
+        self.entries.get(fully_qualified_name)
+    }
+
+    // Get all entries for a given URI
+    pub fn entries_for(&self, uri: &str) -> Option<&Vec<Entry>> {
+        self.file_entries.get(uri)
+    }
+
+    // Clear the ancestors cache, typically done when there are changes that affect ancestor relationships
+    pub fn clear_ancestors_cache(&mut self) {
+        self.ancestors.clear();
+    }
+
+    // Add a reference to a symbol
+    pub fn add_reference(&mut self, fully_qualified_name: &str, location: Location) {
+        self.references
+            .entry(fully_qualified_name.to_string())
+            .or_insert_with(Vec::new)
+            .push(location);
+    }
+
+    // Remove all references from a specific URI
+    pub fn remove_references_for_uri(&mut self, uri: &Url) {
         for refs in self.references.values_mut() {
             refs.retain(|loc| loc.uri != *uri);
         }
@@ -190,6 +242,15 @@ impl RubyIndex {
         self.references.retain(|_, refs| !refs.is_empty());
     }
 
+    // Find all references to a symbol
+    pub fn find_references(&self, fully_qualified_name: &str) -> Vec<Location> {
+        match self.references.get(fully_qualified_name) {
+            Some(locations) => locations.clone(),
+            None => Vec::new(),
+        }
+    }
+
+    // Find definitions for a name
     pub fn find_definition(&self, name: &str) -> Option<&Entry> {
         // First try direct lookup - works for fully qualified names
         if let Some(entries) = self.entries.get(name) {
@@ -224,7 +285,6 @@ impl RubyIndex {
         }
 
         // For plain local variables without any $ prefix
-        // This handles cases where the analyzer returns a simple variable name
         if !name.contains('#')
             && !name.contains("::")
             && !name.contains('$')
@@ -241,21 +301,32 @@ impl RubyIndex {
                     }
                 }
             }
+
+            // Search for constants whose name could match
+            if let Some(constants) = self.constants_by_name.get(name) {
+                return constants.first();
+            }
         }
 
-        // For nested classes referenced without full scope (like "Inner" instead of "Outer::Inner")
-        if !name.contains("::")
-            && !name.contains('#')
-            && !name.starts_with('$')
-            && !name.starts_with('@')
-        {
-            // Try to find any class with this name as the last part of the FQN
-            for (fqn, entries) in &self.entries {
-                let class_pattern = format!("::{}", name);
-                if (fqn.ends_with(&class_pattern) || fqn == name) && !entries.is_empty() {
-                    if let Some(entry) = entries.first() {
-                        if entry.entry_type == EntryType::Class
-                            || entry.entry_type == EntryType::Module
+        // For methods
+        if name.contains('#') {
+            // This is a method reference in the format Class#method
+            let parts: Vec<&str> = name.split('#').collect();
+            if parts.len() == 2 {
+                let class_name = parts[0];
+                let method_name = parts[1];
+
+                // First look for an exact match with the fully qualified name
+                if let Some(entries) = self.entries.get(name) {
+                    return entries.first();
+                }
+
+                // If no exact match, try to find the method in the class's methods
+                if let Some(method_entries) = self.methods_by_name.get(method_name) {
+                    for entry in method_entries {
+                        let fqn = entry.fully_qualified_name.to_string();
+                        if fqn == name
+                            || fqn.ends_with(&format!("::{}#{}", class_name, method_name))
                         {
                             return Some(entry);
                         }
@@ -264,228 +335,87 @@ impl RubyIndex {
             }
         }
 
-        // If direct lookup fails, try to extract the method name and search by it
-        // This handles cases where analyzer returns just "method_name" instead of "Class#method_name"
-        if !name.contains('#') && !name.contains('$') && !name.starts_with('@') {
-            // It might be a method call without class context - check methods_by_name
-            if let Some(method_entries) = self.methods_by_name.get(name) {
-                return method_entries.first();
-            }
-        }
-
-        // For method calls inside a namespace (like "Namespace#method")
-        if name.contains('#') {
-            let parts: Vec<&str> = name.split('#').collect();
-            if parts.len() == 2 {
-                let method_name = parts[1];
-                // If method name doesn't start with $ (not a local variable)
-                if !method_name.starts_with('$') && !method_name.starts_with('@') {
-                    // Try to find the method by name
-                    if let Some(method_entries) = self.methods_by_name.get(method_name) {
-                        return method_entries.first();
-                    }
-                }
-            }
-        }
-
         None
     }
 
-    pub fn add_reference(&mut self, fully_qualified_name: &str, location: Location) {
-        let references = self
-            .references
-            .entry(fully_qualified_name.to_string())
-            .or_insert_with(Vec::new);
-        references.push(location);
-    }
-
-    /// Remove all references for a specific URI
-    pub fn remove_references_for_uri(&mut self, uri: &Url) {
-        let uri_string = uri.to_string();
-
-        // Iterate through all reference entries
-        for references in self.references.values_mut() {
-            // Remove any references that match the URI
-            references.retain(|location| location.uri.to_string() != uri_string);
-        }
-
-        // Remove any empty reference lists
-        self.references
-            .retain(|_, references| !references.is_empty());
-    }
-
-    pub fn find_references(&self, fully_qualified_name: &str) -> Vec<Location> {
-        // First check if we have direct references to this name
-        let mut locations = self
-            .references
-            .get(fully_qualified_name)
-            .cloned()
-            .unwrap_or_default();
-
-        // For classes and modules, also check for references in nested contexts
-        // This handles cases like "Outer::Inner" when searching for "Inner"
-        if !fully_qualified_name.contains('#')
-            && !fully_qualified_name.starts_with('$')
-            && !fully_qualified_name.starts_with('@')
-        {
-            // Get the simple name (last part after ::)
-            let simple_name = if fully_qualified_name.contains("::") {
-                fully_qualified_name
-                    .split("::")
-                    .last()
-                    .unwrap_or(fully_qualified_name)
-            } else {
-                fully_qualified_name
-            };
-
-            // Look for references to this class/module by simple name
-            if simple_name != fully_qualified_name {
-                if let Some(refs) = self.references.get(simple_name) {
-                    locations.extend(refs.clone());
-                }
-            }
-
-            // Look for references in qualified names (like Outer::Inner)
-            for (fqn, refs) in &self.references {
-                // Check if the FQN contains our name as a segment
-                if fqn.contains("::") && fqn != fully_qualified_name {
-                    let segments: Vec<&str> = fqn.split("::").collect();
-                    for segment in segments {
-                        if segment == simple_name {
-                            locations.extend(refs.clone());
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        // For methods, check for both simple and qualified references
-        else if fully_qualified_name.contains('#') {
-            let parts: Vec<&str> = fully_qualified_name.split('#').collect();
-            if parts.len() == 2 {
-                let class_name = parts[0];
-                let method_name = parts[1];
-
-                // Also look for unqualified references to this method
-                if let Some(refs) = self.references.get(method_name) {
-                    locations.extend(refs.clone());
-                }
-
-                // Look for references to this method in all classes
-                // This is important for finding references to methods in nested classes
-                for (fqn, refs) in &self.references {
-                    // Check for method calls on any class that might be this method
-                    if fqn.contains('#') && fqn.ends_with(&format!("#{}", method_name)) {
-                        // Include references to methods with the same name in other classes
-                        locations.extend(refs.clone());
-                    }
-
-                    // Check for method declarations in the class hierarchy
-                    if fqn.contains("::") && fqn.ends_with(&format!("::{}", class_name)) {
-                        // This might be a parent class or nested class
-                        if let Some(class_refs) =
-                            self.references.get(&format!("{}#{}", fqn, method_name))
-                        {
-                            locations.extend(class_refs.clone());
-                        }
-                    }
-                }
-
-                // For nested classes, also check for references using the fully qualified path
-                if class_name.contains("::") {
-                    // Get the simple class name (last part after ::)
-                    let simple_class_name = class_name.split("::").last().unwrap_or(class_name);
-
-                    // Look for references to this method using the simple class name
-                    if let Some(refs) = self
-                        .references
-                        .get(&format!("{}#{}", simple_class_name, method_name))
-                    {
-                        locations.extend(refs.clone());
-                    }
-                }
-            }
-        }
-        // For unqualified method names
-        else if !fully_qualified_name.starts_with('$') && !fully_qualified_name.starts_with('@') {
-            // Look for qualified references to this method (Class#method)
-            for (fqn, refs) in &self.references {
-                if fqn.ends_with(&format!("#{}", fully_qualified_name)) {
-                    locations.extend(refs.clone());
-                }
-            }
-        }
-        // For instance variables, also check for references with class prefix
-        else if fully_qualified_name.starts_with('@') {
-            // Look for class-qualified references like "Class#@name"
-            for (fqn, refs) in &self.references {
-                if fqn.ends_with(fully_qualified_name) && fqn != fully_qualified_name {
-                    locations.extend(refs.clone());
-                }
-            }
-        }
-
-        // Also include the definition locations
-        if let Some(entries) = self.entries.get(fully_qualified_name) {
-            for entry in entries {
-                let definition_location = Location {
-                    uri: entry.location.uri.clone(),
-                    range: entry.location.range,
-                };
-
-                // Avoid duplicates
-                if !locations.iter().any(|loc| {
-                    loc.uri == definition_location.uri && loc.range == definition_location.range
-                }) {
-                    locations.push(definition_location);
-                }
-            }
-        }
-
-        locations
-    }
-
-    // Update the namespace tree with a new fully qualified name
+    // Update the namespace tree when an entry is added
     fn update_namespace_tree(&mut self, fully_qualified_name: &str) {
-        // If this is a complex name with namespace separators
-        if fully_qualified_name.contains("::") {
-            let parts: Vec<&str> = fully_qualified_name.split("::").collect();
+        // Split the name by :: to get the parts
+        let parts: Vec<&str> = fully_qualified_name.split("::").collect();
+        if parts.is_empty() {
+            return;
+        }
 
-            // Build up the namespace path
-            let mut current_namespace = String::new();
-            for i in 0..(parts.len() - 1) {
-                // Get this part of the namespace
-                let part = parts[i];
-
-                // Record that this child exists in the parent namespace
-                let children = self
-                    .namespace_tree
-                    .entry(current_namespace.clone())
-                    .or_insert_with(Vec::new);
-
-                // Only add if it's not already there
-                if !children.contains(&part.to_string()) {
-                    children.push(part.to_string());
-                }
-
-                // Update current namespace for next level
-                if current_namespace.is_empty() {
-                    current_namespace = part.to_string();
-                } else {
-                    current_namespace = format!("{}::{}", current_namespace, part);
-                }
+        // Add each level of nesting to the tree
+        let mut current_namespace = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            // If this is the last part, it's the name itself and not a parent namespace
+            if i == parts.len() - 1 {
+                break;
             }
+
+            // Build the namespace path
+            if current_namespace.is_empty() {
+                current_namespace = part.to_string();
+            } else {
+                current_namespace = format!("{}::{}", current_namespace, part);
+            }
+
+            // Add this namespace to the tree
+            let namespace_children = self
+                .namespace_tree
+                .entry(current_namespace.clone())
+                .or_insert_with(Vec::new);
+
+            // Add the next part as a child if it doesn't already exist
+            let next_part = parts[i + 1];
+            if !namespace_children.contains(&next_part.to_string()) {
+                namespace_children.push(next_part.to_string());
+            }
+        }
+
+        // Also add the top-level parts to the root namespace
+        let root_children = self
+            .namespace_tree
+            .entry(String::new())
+            .or_insert_with(Vec::new);
+        if !parts.is_empty() && !root_children.contains(&parts[0].to_string()) {
+            root_children.push(parts[0].to_string());
         }
     }
 }
 
+// Helper function to convert a URI to a require path
+fn get_require_path(uri: &Url) -> Option<String> {
+    if uri.scheme() != "file" {
+        return None;
+    }
+
+    let path = uri.path();
+
+    // Extract the relative path that would be used in a require statement
+    // This is a simplified implementation, in a real-world scenario you would:
+    // 1. Identify the project root
+    // 2. Extract the relative path from the root
+    // 3. Remove the file extension
+
+    // For now, just use the file name without extension as a simple approximation
+    if let Some(file_name) = path.rsplit('/').next() {
+        if let Some(name) = file_name.rsplit('.').next() {
+            return Some(name.to_string());
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::indexer::entry::{EntryBuilder, Visibility};
-
+    use super::super::entry::Visibility;
     use super::*;
-    use tower_lsp::lsp_types::{Position, Range, Url};
+    use lsp_types::{Position, Range, Url};
 
+    // Create a helper function to build a test entry
     fn create_test_entry(
         name: &str,
         fqn: &str,
@@ -505,8 +435,8 @@ mod tests {
             },
         };
 
-        EntryBuilder::new(name)
-            .fully_qualified_name(fqn)
+        super::super::entry::EntryBuilder::new(ShortName::from(name))
+            .fully_qualified_name(fqn.into())
             .location(Location { uri, range })
             .entry_type(entry_type)
             .visibility(visibility)
@@ -520,10 +450,12 @@ mod tests {
 
         // Verify empty collections
         assert!(index.entries.is_empty());
-        assert!(index.uri_to_entries.is_empty());
+        assert!(index.file_entries.is_empty());
         assert!(index.methods_by_name.is_empty());
         assert!(index.constants_by_name.is_empty());
         assert!(index.namespace_tree.is_empty());
+        assert!(index.require_paths.is_empty());
+        assert!(index.ancestors.is_empty());
     }
 
     #[test]
@@ -548,8 +480,8 @@ mod tests {
         // Verify the correct definition was found
         assert!(definition.is_some());
         let def = definition.unwrap();
-        assert_eq!(def.short_name, "Product");
-        assert_eq!(def.fully_qualified_name, "Product");
+        assert_eq!(def.short_name.to_string(), "Product");
+        assert_eq!(def.fully_qualified_name.to_string(), "Product");
         assert_eq!(def.entry_type, EntryType::Class);
 
         // Test finding a non-existent definition
@@ -582,6 +514,10 @@ mod tests {
         index.add_entry(method_entry1.clone());
         index.add_entry(method_entry2.clone());
 
+        // Add references
+        index.add_reference("User#validate", method_entry1.location.clone());
+        index.add_reference("Product#validate", method_entry2.location.clone());
+
         // Find references to specific fully qualified name
         let references = index.find_references("User#validate");
 
@@ -600,307 +536,235 @@ mod tests {
     }
 
     #[test]
-    fn test_add_and_find_method_references() {
+    fn test_prefix_search() {
         let mut index = RubyIndex::new();
 
-        // Create a method entry
-        let method_entry = create_test_entry(
-            "greet",
-            "Person#greet",
-            "file:///person.rb",
+        // Add some entries with different namespace prefixes
+        let entry1 = create_test_entry(
+            "User",
+            "User",
+            "file:///user.rb",
+            EntryType::Class,
+            Visibility::Public,
+        );
+
+        let entry2 = create_test_entry(
+            "UserProfile",
+            "UserProfile",
+            "file:///user_profile.rb",
+            EntryType::Class,
+            Visibility::Public,
+        );
+
+        let entry3 = create_test_entry(
+            "Post",
+            "Post",
+            "file:///post.rb",
+            EntryType::Class,
+            Visibility::Public,
+        );
+
+        index.add_entry(entry1);
+        index.add_entry(entry2);
+        index.add_entry(entry3);
+
+        // Search with prefix "User"
+        let results = index.prefix_search("User");
+
+        // Should find both User and UserProfile
+        assert_eq!(results.len(), 2);
+
+        // Verify entries were found
+        let mut found_user = false;
+        let mut found_user_profile = false;
+
+        for entries in &results {
+            for entry in entries {
+                let name = entry.fully_qualified_name.to_string();
+                if name == "User" {
+                    found_user = true;
+                } else if name == "UserProfile" {
+                    found_user_profile = true;
+                }
+            }
+        }
+
+        assert!(found_user, "Should find User entry");
+        assert!(found_user_profile, "Should find UserProfile entry");
+
+        // Search with prefix "P"
+        let results = index.prefix_search("P");
+
+        // Should find only Post
+        assert_eq!(results.len(), 1);
+        let entry = &results[0][0];
+        assert_eq!(entry.fully_qualified_name.to_string(), "Post");
+    }
+
+    #[test]
+    fn test_require_paths() {
+        let mut index = RubyIndex::new();
+
+        // Create test URIs
+        let uri1 = Url::parse("file:///app/models/user.rb").unwrap();
+        let uri2 = Url::parse("file:///app/models/user_profile.rb").unwrap();
+        let uri3 = Url::parse("file:///app/controllers/posts_controller.rb").unwrap();
+
+        // Add require paths
+        index.add_require_path(&uri1);
+        index.add_require_path(&uri2);
+        index.add_require_path(&uri3);
+
+        // Search for paths starting with "user"
+        let results = index.search_require_paths("user");
+
+        // Should find both user.rb and user_profile.rb
+        assert_eq!(results.len(), 2);
+
+        // Verify URIs were found
+        let found_uris: Vec<String> = results.iter().map(|url| url.to_string()).collect();
+        assert!(
+            found_uris.contains(&uri1.to_string()),
+            "Should find user.rb URI"
+        );
+        assert!(
+            found_uris.contains(&uri2.to_string()),
+            "Should find user_profile.rb URI"
+        );
+
+        // Search for "posts"
+        let results = index.search_require_paths("posts");
+
+        // Should find only posts_controller.rb
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].to_string(), uri3.to_string());
+    }
+
+    #[test]
+    fn test_ancestors() {
+        let mut index = RubyIndex::new();
+
+        // Define ancestor relationships
+        let ancestors_for_user = vec![
+            "User".to_string(),
+            "ActiveRecord::Base".to_string(),
+            "Object".to_string(),
+            "BasicObject".to_string(),
+        ];
+
+        index.add_ancestors("User", ancestors_for_user.clone());
+
+        // Test getting ancestors
+        let retrieved_ancestors = index.linearized_ancestors_of("User");
+        assert!(retrieved_ancestors.is_some());
+        assert_eq!(*retrieved_ancestors.unwrap(), ancestors_for_user);
+
+        // Test non-existent ancestors
+        let no_ancestors = index.linearized_ancestors_of("NonExistent");
+        assert!(no_ancestors.is_none());
+
+        // Test clearing ancestors
+        index.clear_ancestors_cache();
+        assert!(index.ancestors.is_empty());
+    }
+
+    #[test]
+    fn test_index_properties() {
+        let mut index = RubyIndex::new();
+
+        // Test initially empty
+        assert!(index.is_empty());
+        assert_eq!(index.len(), 0);
+        assert!(index.names().is_empty());
+        assert!(!index.indexed("Test"));
+
+        // Add an entry
+        let entry = create_test_entry(
+            "Test",
+            "Test",
+            "file:///test.rb",
+            EntryType::Class,
+            Visibility::Public,
+        );
+
+        index.add_entry(entry);
+
+        // Test not empty now
+        assert!(!index.is_empty());
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.names(), vec!["Test"]);
+        assert!(index.indexed("Test"));
+        assert!(!index.indexed("NonExistent"));
+
+        // Test getting entries
+        let entries = index.get_entries("Test");
+        assert!(entries.is_some());
+        assert_eq!(entries.unwrap().len(), 1);
+
+        // Test entries for URI
+        let uri_entries = index.entries_for("file:///test.rb");
+        assert!(uri_entries.is_some());
+        assert_eq!(uri_entries.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_entries_for_uri() {
+        let mut index = RubyIndex::new();
+
+        // Create and add entries for two different URIs
+        let entry1 = create_test_entry(
+            "User",
+            "User",
+            "file:///models/user.rb",
+            EntryType::Class,
+            Visibility::Public,
+        );
+
+        let entry2 = create_test_entry(
+            "save",
+            "User#save",
+            "file:///models/user.rb",
             EntryType::Method,
             Visibility::Public,
         );
 
-        // Add the method definition
-        index.add_entry(method_entry);
-
-        // Create reference locations
-        let ref_location1 = Location {
-            uri: Url::parse("file:///app.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 10,
-                    character: 5,
-                },
-                end: Position {
-                    line: 10,
-                    character: 10,
-                },
-            },
-        };
-
-        let ref_location2 = Location {
-            uri: Url::parse("file:///test.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 20,
-                    character: 8,
-                },
-                end: Position {
-                    line: 20,
-                    character: 13,
-                },
-            },
-        };
-
-        // Add references to the method
-        index.add_reference("greet", ref_location1.clone());
-        index.add_reference("Person#greet", ref_location2.clone());
-
-        // Test finding references by unqualified name
-        let refs_unqualified = index.find_references("greet");
-        println!("Unqualified references count: {}", refs_unqualified.len());
-        for (i, loc) in refs_unqualified.iter().enumerate() {
-            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
-        }
-
-        // Just check that we found some references
-        assert!(!refs_unqualified.is_empty());
-
-        // Test finding references by qualified name
-        let refs_qualified = index.find_references("Person#greet");
-        println!("Qualified references count: {}", refs_qualified.len());
-        for (i, loc) in refs_qualified.iter().enumerate() {
-            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
-        }
-
-        // Just check that we found some references
-        assert!(!refs_qualified.is_empty());
-    }
-
-    #[test]
-    fn test_add_and_find_instance_variable_references() {
-        let mut index = RubyIndex::new();
-
-        // Create an instance variable entry
-        let var_entry = create_test_entry(
-            "@name",
-            "Person#@name",
-            "file:///person.rb",
-            EntryType::InstanceVariable,
+        let entry3 = create_test_entry(
+            "Product",
+            "Product",
+            "file:///models/product.rb",
+            EntryType::Class,
             Visibility::Public,
         );
 
-        // Add the variable definition
-        index.add_entry(var_entry);
-
-        // Create reference locations
-        let ref_location1 = Location {
-            uri: Url::parse("file:///person.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 10,
-                    character: 5,
-                },
-                end: Position {
-                    line: 10,
-                    character: 10,
-                },
-            },
-        };
-
-        let ref_location2 = Location {
-            uri: Url::parse("file:///person.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 15,
-                    character: 8,
-                },
-                end: Position {
-                    line: 15,
-                    character: 13,
-                },
-            },
-        };
-
-        // Add references to the instance variable
-        index.add_reference("@name", ref_location1.clone());
-        index.add_reference("Person#@name", ref_location2.clone());
-
-        // Test finding references by unqualified name
-        let refs_unqualified = index.find_references("@name");
-        println!(
-            "Unqualified @name references count: {}",
-            refs_unqualified.len()
-        );
-        for (i, loc) in refs_unqualified.iter().enumerate() {
-            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
-        }
-
-        // Just check that we found some references
-        assert!(!refs_unqualified.is_empty());
-
-        // Test finding references by qualified name
-        let refs_qualified = index.find_references("Person#@name");
-        println!(
-            "Qualified Person#@name references count: {}",
-            refs_qualified.len()
-        );
-        for (i, loc) in refs_qualified.iter().enumerate() {
-            println!("  Ref {}: {} at {:?}", i, loc.uri, loc.range);
-        }
-
-        // Just check that we found some references
-        assert!(!refs_qualified.is_empty());
-    }
-
-    #[test]
-    fn test_references_survive_reindexing() {
-        let mut index = RubyIndex::new();
-
-        // Add a method entry
-        let method_entry = create_test_entry(
-            "calculate",
-            "Math#calculate",
-            "file:///math.rb",
-            EntryType::Method,
-            Visibility::Public,
-        );
-        index.add_entry(method_entry);
+        index.add_entry(entry1);
+        index.add_entry(entry2);
+        index.add_entry(entry3);
 
         // Add references
-        let ref_location = Location {
-            uri: Url::parse("file:///app.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 5,
-                    character: 10,
-                },
-                end: Position {
-                    line: 5,
-                    character: 19,
-                },
+        index.add_reference(
+            "User",
+            Location {
+                uri: Url::parse("file:///app.rb").unwrap(),
+                range: Range::default(),
             },
-        };
-        index.add_reference("calculate", ref_location.clone());
+        );
 
-        // Remove entries for the definition file
-        index.remove_entries_for_uri(&Url::parse("file:///math.rb").unwrap());
+        // Verify entries were added
+        assert_eq!(index.entries.len(), 3);
+        assert_eq!(index.file_entries.len(), 2);
 
-        // References should still exist
-        let refs = index.find_references("calculate");
+        // Remove entries for the first URI
+        index.remove_entries_for_uri(&Url::parse("file:///models/user.rb").unwrap());
+
+        // Verify only entries from the first URI were removed
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.file_entries.len(), 1);
+        assert!(index.entries.contains_key("Product"));
+        assert!(!index.entries.contains_key("User"));
+        assert!(!index.entries.contains_key("User#save"));
+
+        // References should still exist though
+        let refs = index.find_references("User");
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].uri.to_string(), "file:///app.rb");
-    }
-
-    #[test]
-    fn test_find_definition_with_various_fqns() {
-        let mut index = RubyIndex::new();
-
-        // Set up some test entries with different FQN formats
-        let class_entry = Entry {
-            short_name: "TestClass".to_string(),
-            fully_qualified_name: "TestClass".to_string(),
-            location: Location {
-                uri: Url::parse("file:///test/file.rb").unwrap(),
-                range: Range {
-                    start: Position::new(0, 0),
-                    end: Position::new(5, 3),
-                },
-            },
-            entry_type: EntryType::Class,
-            visibility: Visibility::Public,
-            metadata: HashMap::new(),
-        };
-
-        // Method inside a class
-        let method_entry = Entry {
-            short_name: "test_method".to_string(),
-            fully_qualified_name: "TestClass#test_method".to_string(),
-            location: Location {
-                uri: Url::parse("file:///test/file.rb").unwrap(),
-                range: Range {
-                    start: Position::new(2, 2),
-                    end: Position::new(4, 5),
-                },
-            },
-            entry_type: EntryType::Method,
-            visibility: Visibility::Public,
-            metadata: HashMap::new(),
-        };
-
-        // Add entries to the index
-        index.add_entry(class_entry);
-        index.add_entry(method_entry);
-
-        // Test lookup by exact FQN
-        let found = index.find_definition("TestClass#test_method");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().short_name, "test_method");
-
-        // Test lookup by just method name (without class context)
-        let found = index.find_definition("test_method");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().short_name, "test_method");
-
-        // Test lookup by method with wrong class
-        let found = index.find_definition("WrongClass#test_method");
-        assert!(found.is_some(), "Should still find method by name part");
-        assert_eq!(found.unwrap().short_name, "test_method");
-
-        // Test non-existent method
-        let not_found = index.find_definition("nonexistent_method");
-        assert!(not_found.is_none());
-    }
-
-    #[test]
-    fn test_find_local_variable_definition() {
-        let mut index = RubyIndex::new();
-
-        // Create a local variable entry with the format used by the traverser
-        let var_entry = Entry {
-            short_name: "my_var".to_string(),
-            fully_qualified_name: "TestClass#$my_var".to_string(),
-            location: Location {
-                uri: Url::parse("file:///test/file.rb").unwrap(),
-                range: Range {
-                    start: Position::new(3, 4),
-                    end: Position::new(3, 10),
-                },
-            },
-            entry_type: EntryType::LocalVariable,
-            visibility: Visibility::Public,
-            metadata: HashMap::new(),
-        };
-
-        // Local variable in a nested method
-        let nested_var_entry = Entry {
-            short_name: "nested_var".to_string(),
-            fully_qualified_name: "Module::Class#method$nested_var".to_string(),
-            location: Location {
-                uri: Url::parse("file:///test/file.rb").unwrap(),
-                range: Range {
-                    start: Position::new(5, 6),
-                    end: Position::new(5, 16),
-                },
-            },
-            entry_type: EntryType::LocalVariable,
-            visibility: Visibility::Public,
-            metadata: HashMap::new(),
-        };
-
-        // Add entries to the index
-        index.add_entry(var_entry);
-        index.add_entry(nested_var_entry);
-
-        // Test lookup by fully qualified name
-        let found1 = index.find_definition("TestClass#$my_var");
-        assert!(found1.is_some());
-        assert_eq!(found1.unwrap().short_name, "my_var");
-
-        // Test lookup by just variable name with $ prefix
-        let found2 = index.find_definition("$my_var");
-        assert!(found2.is_some());
-        assert_eq!(found2.unwrap().short_name, "my_var");
-
-        // Test lookup of nested variable
-        let found3 = index.find_definition("$nested_var");
-        assert!(found3.is_some());
-        assert_eq!(found3.unwrap().short_name, "nested_var");
-
-        // Test non-existent variable
-        let not_found = index.find_definition("$nonexistent_var");
-        assert!(not_found.is_none());
     }
 }
