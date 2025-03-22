@@ -1,17 +1,17 @@
 use log::info;
-use lsp_types::{GotoDefinitionResponse, Location, Position, Url};
+use lsp_types::{Location, Position, Url};
 
 use crate::analyzer::RubyAnalyzer;
-use crate::indexer::{entry::EntryType, RubyIndexer};
+use crate::indexer::RubyIndexer;
 
-/// Find definition of a symbol at the given position in a file.
+/// Find the definition of a symbol at the given position
 pub async fn find_definition_at_position(
     indexer: &RubyIndexer,
     uri: &Url,
     position: Position,
     content: &str,
-) -> Option<GotoDefinitionResponse> {
-    // Use the analyzer to find the identifier at the position and get its fully qualified name
+) -> Option<Location> {
+    // Use the analyzer to find the identifier at the position
     let mut analyzer = RubyAnalyzer::new();
     let identifier = match analyzer.find_identifier_at_position(content, position) {
         Some(name) => name,
@@ -23,67 +23,122 @@ pub async fn find_definition_at_position(
 
     info!("Looking for definition of: {}", identifier);
 
-    // Use the indexer to find the definition
-    let i = indexer.index();
-    let index = i.lock().unwrap();
+    // Use the indexer to find entries matching the identifier
+    let index_arc = indexer.index();
+    let index = index_arc.lock().unwrap();
 
+    // Debug print the contents of the definitions index
     for (fqn, entries) in &index.definitions {
         info!("  FQN: {}, Entries: {}", fqn, entries.len());
-        for (idx, entry) in entries.iter().enumerate() {
+        for (i, entry) in entries.iter().enumerate() {
             info!(
-                "    Entry {}: {:?} at {:?}",
-                idx, entry.entry_type, entry.location
+                "    Entry {}: {} at {:?}",
+                i, entry.entry_type, entry.location
             );
         }
     }
 
-    // Search for entries with the same string representation
-    let mut found_entries = Vec::new();
+    // Try to find an exact match first
     for (fqn, entries) in &index.definitions {
-        info!("Comparing {} with {}", fqn.to_string(), identifier);
-        if fqn.to_string() == identifier && !entries.is_empty() {
-            info!("Found match: {} == {}", fqn.to_string(), identifier);
-            // For classes and modules, collect all definitions
-            // For other entry types, just use the first one
-            let first_entry_type = &entries[0].entry_type;
+        let fqn_str = fqn.to_string();
+        info!("Comparing {} with {}", fqn_str, identifier);
 
-            if *first_entry_type == EntryType::Class || *first_entry_type == EntryType::Module {
-                // Class or module may be defined in multiple files or reopened
-                info!("Adding all {} entries for class/module", entries.len());
-                found_entries.extend(entries.iter().cloned());
+        // Direct match for class/module/constant
+        if fqn_str == identifier {
+            info!("Found match: {} for {}", fqn_str, identifier);
+            if !entries.is_empty() {
+                // Return the first matching definition
+                let location = Location {
+                    uri: entries[0].location.uri.clone(),
+                    range: entries[0].location.range,
+                };
+                info!("Found definition at {:?}", location);
+                return Some(location);
+            }
+        }
+
+        // Check for method identifier (with or without class prefix)
+        let is_method_call = identifier.contains('#') || identifier.contains('.');
+        if is_method_call {
+            // Extract method name for comparison
+            let method_name = if let Some(pos) = identifier.rfind('#') {
+                &identifier[pos + 1..]
+            } else if let Some(pos) = identifier.rfind('.') {
+                &identifier[pos + 1..]
             } else {
-                // For methods and other types, just take the first definition
-                info!("Adding first entry for method/other");
-                found_entries.push(entries[0].clone());
-                break;
+                continue;
+            };
+
+            // Check if the FQN ends with the method name
+            if fqn_str.ends_with(&format!("#{}", method_name)) {
+                info!("Found match for method: {} -> {}", identifier, fqn_str);
+                if !entries.is_empty() {
+                    let location = Location {
+                        uri: entries[0].location.uri.clone(),
+                        range: entries[0].location.range,
+                    };
+                    info!("Found method definition at {:?}", location);
+                    return Some(location);
+                }
+            }
+        } else {
+            // For non-method identifiers, also try with '#' if we didn't find direct matches
+            if fqn_str == format!("#{}", identifier) {
+                info!("Found match: {} for {}", fqn_str, identifier);
+                if !entries.is_empty() {
+                    let location = Location {
+                        uri: entries[0].location.uri.clone(),
+                        range: entries[0].location.range,
+                    };
+                    info!("Found definition at {:?}", location);
+                    return Some(location);
+                }
             }
         }
     }
 
-    if found_entries.is_empty() {
-        info!("No definition found for {}", identifier);
-        return None;
+    // If we haven't found anything by exact match, try partial matching for methods
+    if identifier.contains('#') || !identifier.contains(':') {
+        let method_name = if let Some(pos) = identifier.rfind('#') {
+            &identifier[pos + 1..]
+        } else {
+            identifier.as_str()
+        };
+
+        // Look for any definition with this method name
+        for (fqn, entries) in &index.definitions {
+            let fqn_str = fqn.to_string();
+            if fqn_str.ends_with(&format!("#{}", method_name)) {
+                if !entries.is_empty() {
+                    let location = Location {
+                        uri: entries[0].location.uri.clone(),
+                        range: entries[0].location.range,
+                    };
+                    info!("Found definition at {:?} via method name match", location);
+                    return Some(location);
+                }
+            }
+        }
+
+        // Special case: also check for unqualified method names in the index
+        let unqualified_key = format!("#{}", method_name);
+        for (fqn, entries) in &index.definitions {
+            if fqn.to_string() == unqualified_key {
+                if !entries.is_empty() {
+                    let location = Location {
+                        uri: entries[0].location.uri.clone(),
+                        range: entries[0].location.range,
+                    };
+                    info!(
+                        "Found definition at {:?} via unqualified method name",
+                        location
+                    );
+                    return Some(location);
+                }
+            }
+        }
     }
 
-    // If we found only one entry, return it as a scalar response
-    if found_entries.len() == 1 {
-        let entry = &found_entries[0];
-        info!("Found single definition at {:?}", entry.location);
-        return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: entry.location.uri.clone(),
-            range: entry.location.range,
-        }));
-    }
-
-    // Multiple entries found, return them as an array
-    let locations: Vec<Location> = found_entries
-        .iter()
-        .map(|entry| Location {
-            uri: entry.location.uri.clone(),
-            range: entry.location.range,
-        })
-        .collect();
-
-    info!("Found {} definitions for {}", locations.len(), identifier);
-    Some(GotoDefinitionResponse::Array(locations))
+    info!("No definition found for {}", identifier);
+    None
 }

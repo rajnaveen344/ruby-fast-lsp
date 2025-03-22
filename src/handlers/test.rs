@@ -242,6 +242,141 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_method_definitions_handler() {
+        // Create a test server
+        let server = create_test_server();
+
+        // Create file URIs for multiple method definitions
+        let file1_uri = fixture_uri("method_file1.rb");
+        let file2_uri = fixture_uri("method_file2.rb");
+
+        // Create file content for both files with methods of the same name in different classes
+        let file1_content = "class ClassA\n  def process\n    puts 'ClassA process'\n  end\nend";
+        let file2_content = "class ClassB\n  def process\n    puts 'ClassB process'\n  end\nend";
+
+        // Get file paths
+        let file1_path = file1_uri.to_file_path().unwrap();
+        let file2_path = file2_uri.to_file_path().unwrap();
+
+        // Ensure fixture files exist with correct content
+        ensure_fixture_file_exists(&file1_path, file1_content);
+        ensure_fixture_file_exists(&file2_path, file2_content);
+
+        // Setup params for goto definition at the method name "process" in ClassA
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file1_uri.clone(),
+                },
+                position: Position {
+                    line: 1,
+                    character: 6, // Position at "process" in file1
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        // Index both files
+        {
+            let mut indexer = server.indexer.lock().await;
+            indexer
+                .process_file(file1_uri.clone(), file1_content)
+                .unwrap();
+            indexer
+                .process_file(file2_uri.clone(), file2_content)
+                .unwrap();
+        }
+
+        // Call goto definition handler for "process" method
+        let result = request::handle_goto_definition(&server, params).await;
+
+        // Verify result - for methods, we should find the definition(s)
+        match result {
+            Ok(Some(GotoDefinitionResponse::Scalar(location))) => {
+                // For methods, we expect the one in the current class
+                assert_eq!(
+                    location.uri, file1_uri,
+                    "Method definition should be found in the first file"
+                );
+            }
+            Ok(Some(GotoDefinitionResponse::Array(locations))) => {
+                // If we get multiple definitions, one should be in file1
+                let uris: Vec<&Url> = locations.iter().map(|loc| &loc.uri).collect();
+                assert!(
+                    uris.contains(&&file1_uri),
+                    "Results should include the current file URI"
+                );
+
+                // We might get both method definitions since they have the same name
+                // This is acceptable behavior, so we check that at least one is from file1
+            }
+            Ok(None) => {
+                panic!("Expected at least one definition to be found, but none were returned");
+            }
+            _ => {
+                panic!("Unexpected result from definition handler");
+            }
+        }
+
+        // Now test references for the same method
+        let refs_params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file1_uri.clone(),
+                },
+                position: Position {
+                    line: 1,
+                    character: 6, // Position at "process" in file1
+                },
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        // Call references handler
+        let refs_result = request::handle_references(&server, refs_params).await;
+
+        // Verify references result
+        match refs_result {
+            Ok(Some(locations)) => {
+                // We should at least find the declaration
+                assert!(!locations.is_empty(), "Expected at least one reference");
+
+                // Check if declaration is included
+                let has_declaration = locations.iter().any(
+                    |loc| {
+                        loc.uri == file1_uri
+                            && loc.range.start.line == 1
+                            && loc.range.start.character == 2
+                    }, // The actual line is starting at character 2, not 6
+                );
+                assert!(
+                    has_declaration,
+                    "Expected method declaration to be included in references"
+                );
+            }
+            Ok(None) => {
+                panic!("Expected at least one reference to be found, but none were returned");
+            }
+            Err(err) => {
+                panic!("References handler returned an error: {:?}", err);
+            }
+        }
+    }
+
     /// Helper function to ensure a fixture file exists with the correct content
     fn ensure_fixture_file_exists(file_path: &std::path::Path, content: &str) {
         if !file_path.exists() {

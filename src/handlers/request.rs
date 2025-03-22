@@ -66,7 +66,12 @@ pub async fn handle_goto_definition(
     let indexer = lang_server.indexer.lock().await;
     let definition =
         definition::find_definition_at_position(&indexer, &uri, position, &content).await;
-    Ok(definition)
+
+    // Convert Location to GotoDefinitionResponse
+    match definition {
+        Some(location) => Ok(Some(GotoDefinitionResponse::Scalar(location))),
+        None => Ok(None),
+    }
 }
 
 pub async fn handle_references(

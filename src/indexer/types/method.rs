@@ -13,7 +13,7 @@ impl From<String> for Method {
 
 impl From<&str> for Method {
     fn from(value: &str) -> Self {
-        // validate if the identifier is valid
+        // Original implementation - panics on invalid method names
         if value.is_empty() {
             panic!("Identifier cannot be empty");
         }
@@ -21,10 +21,28 @@ impl From<&str> for Method {
         // regex to validate if the identifier is valid
         let regex = Regex::new(r"^[a-z_][a-z0-9_]*[!?]?$").unwrap();
         if !regex.is_match(value) {
-            panic!("Identifier contains invalid characters");
+            panic!("Identifier contains invalid characters: {}", value);
         }
 
         Method(value.to_string())
+    }
+}
+
+impl Method {
+    // A safe alternative to From<&str> that returns a Result instead of panicking
+    pub fn safe_from(value: &str) -> Result<Self, String> {
+        // validate if the identifier is valid
+        if value.is_empty() {
+            return Err("Identifier cannot be empty".to_string());
+        }
+
+        // regex to validate if the identifier is valid
+        let regex = Regex::new(r"^[a-z_][a-z0-9_]*[!?]?$").unwrap();
+        if !regex.is_match(value) {
+            return Err(format!("Identifier contains invalid characters: {}", value));
+        }
+
+        Ok(Method(value.to_string()))
     }
 }
 

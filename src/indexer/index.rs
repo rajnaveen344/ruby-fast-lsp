@@ -189,11 +189,11 @@ mod tests {
         let mut index = RubyIndex::new();
 
         // Create method entries
-        let method_name1 = Method::from("validate");
+        let method_name1 = Method::from(String::from("validate"));
         let class_name1 = Constant::from("User");
         let fqn1 = FullyQualifiedName::new(vec![class_name1], Some(method_name1));
 
-        let method_name2 = Method::from("validate");
+        let method_name2 = Method::from(String::from("validate"));
         let class_name2 = Constant::from("Product");
         let fqn2 = FullyQualifiedName::new(vec![class_name2], Some(method_name2));
 
@@ -248,7 +248,7 @@ mod tests {
         let user_fqn = FullyQualifiedName::new(vec![user_name.clone()], None);
 
         let save_name = Constant::from("save");
-        let save_method = Method::from("save");
+        let save_method = Method::from(String::from("save"));
         let save_fqn = FullyQualifiedName::new(vec![user_name.clone()], Some(save_method));
 
         let product_name = Constant::from("Product");

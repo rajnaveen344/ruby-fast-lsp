@@ -1,5 +1,6 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use lsp_types::Location;
 
@@ -17,6 +18,12 @@ pub enum EntryType {
     UnresolvedAlias,
     LocalVariable,
     InstanceVariable,
+}
+
+impl Display for EntryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 /// Method visibility in Ruby
@@ -138,7 +145,7 @@ mod tests {
     fn test_add_entry() {
         let mut index = RubyIndex::new();
 
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("User")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("User"))));
 
         // Create a class entry
         let class_entry = create_test_entry(
@@ -174,7 +181,7 @@ mod tests {
         // Create a method entry
         let method_entry = create_test_entry(
             "save",
-            &FullyQualifiedName::new(vec![], Some(Method::from("save"))),
+            &FullyQualifiedName::new(vec![], Some(Method::from(String::from("save")))),
             "file:///test.rb",
             EntryType::Method,
             Visibility::Public,
@@ -202,7 +209,7 @@ mod tests {
     #[test]
     fn test_add_entries_same_name_different_files() {
         let mut index = RubyIndex::new();
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("process")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("process"))));
 
         // Create two method entries with the same name but in different files
         let method_entry1 = create_test_entry(
@@ -258,7 +265,7 @@ mod tests {
     fn test_remove_entries_for_uri() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file:///test.rb").unwrap();
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("User")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("User"))));
 
         // Add two entries for the same URI
         let class_entry = create_test_entry(
@@ -301,7 +308,7 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("MyClass"))));
 
         // Create an entry using the builder
         let entry = EntryBuilder::new("MyClass".into())
@@ -332,7 +339,7 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("my_method")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("my_method"))));
 
         // Create an entry with only the required fields
         let entry = EntryBuilder::new("my_method".into())
@@ -368,7 +375,7 @@ mod tests {
     #[should_panic]
     fn test_entry_builder_missing_location() {
         // Try to build without setting location
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("MyClass"))));
         let _ = EntryBuilder::new("MyClass".into())
             .fully_qualified_name(fqn.clone())
             .entry_type(EntryType::Class)
@@ -384,7 +391,7 @@ mod tests {
             start: Position::new(1, 0),
             end: Position::new(3, 2),
         };
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("MyClass")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("MyClass"))));
 
         // Try to build without setting entry_type
         let _ = EntryBuilder::new("MyClass".into())

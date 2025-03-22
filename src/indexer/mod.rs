@@ -139,7 +139,7 @@ mod tests {
 
         // Verify entries were removed
         let index = indexer.index();
-        let fqn = FullyQualifiedName::new(vec![], Some(Method::from("RemovalTest")));
+        let fqn = FullyQualifiedName::new(vec![], Some(Method::from(String::from("RemovalTest"))));
         assert!(
             index
                 .lock()
