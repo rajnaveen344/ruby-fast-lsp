@@ -1,11 +1,11 @@
 use std::{
     fmt::{self, Display, Formatter},
-    hash::Hash,
+    hash::{Hash, Hasher},
 };
 
 use super::{constant::Constant, method::Method};
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FullyQualifiedName {
     namespace: Vec<Constant>,
     method: Option<Method>,
@@ -35,5 +35,11 @@ impl Display for FullyQualifiedName {
             Some(method) => write!(f, "{namespace}#{method}"),
             None => write!(f, "{namespace}"),
         }
+    }
+}
+
+impl Hash for FullyQualifiedName {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state);
     }
 }
