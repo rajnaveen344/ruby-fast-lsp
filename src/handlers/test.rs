@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use lsp_types::{
-        GotoDefinitionParams, GotoDefinitionResponse, Location, Position, ReferenceContext,
-        ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Url,
+        GotoDefinitionParams, GotoDefinitionResponse, Location, PartialResultParams, Position,
+        ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Url,
         WorkDoneProgressParams,
     };
     use std::path::PathBuf;
@@ -152,6 +152,105 @@ mod tests {
             }
             Err(e) => {
                 panic!("Handler returned error: {:?}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_definitions_handler() {
+        // Create a test server
+        let server = create_test_server();
+
+        // Create file URIs for multiple class definitions
+        let file1_uri = fixture_uri("class_file1.rb");
+        let file2_uri = fixture_uri("class_file2.rb");
+
+        // Create file content for both files
+        let file1_content = "class MultiClassTest\n  def method1\n    puts 'method1'\n  end\nend";
+        let file2_content = "class MultiClassTest\n  def method2\n    puts 'method2'\n  end\nend";
+
+        // Get file paths
+        let file1_path = file1_uri.to_file_path().unwrap();
+        let file2_path = file2_uri.to_file_path().unwrap();
+
+        // Ensure fixture files exist with correct content
+        ensure_fixture_file_exists(&file1_path, file1_content);
+        ensure_fixture_file_exists(&file2_path, file2_content);
+
+        // Setup params for goto definition at the class name
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file1_uri.clone(),
+                },
+                position: Position {
+                    line: 0,
+                    character: 8, // Position at "MultiClassTest" in file1
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        };
+
+        // Index both files
+        {
+            let mut indexer = server.indexer.lock().await;
+            indexer
+                .process_file(file1_uri.clone(), file1_content)
+                .unwrap();
+            indexer
+                .process_file(file2_uri.clone(), file2_content)
+                .unwrap();
+        }
+
+        // Call handler
+        let result = request::handle_goto_definition(&server, params).await;
+
+        // Verify result
+        match result {
+            Ok(Some(GotoDefinitionResponse::Array(locations))) => {
+                // Should find exactly 2 definitions
+                assert_eq!(
+                    locations.len(),
+                    2,
+                    "Expected 2 locations for class defined in multiple files"
+                );
+
+                // Make sure both files are included
+                let uris: Vec<&Url> = locations.iter().map(|loc| &loc.uri).collect();
+                assert!(
+                    uris.contains(&&file1_uri) && uris.contains(&&file2_uri),
+                    "Results should include both file URIs"
+                );
+            }
+            Ok(Some(GotoDefinitionResponse::Scalar(_))) => {
+                panic!("Expected multiple definitions, but got a single location");
+            }
+            Ok(Some(GotoDefinitionResponse::Link(_))) => {
+                panic!("Expected multiple definitions, but got a Link response");
+            }
+            Ok(None) => {
+                panic!("Expected definitions to be found, but none were returned");
+            }
+            Err(err) => {
+                panic!("Definition handler returned an error: {:?}", err);
+            }
+        }
+    }
+
+    /// Helper function to ensure a fixture file exists with the correct content
+    fn ensure_fixture_file_exists(file_path: &std::path::Path, content: &str) {
+        if !file_path.exists() {
+            std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+            std::fs::write(file_path, content).unwrap();
+        } else {
+            let existing_content = std::fs::read_to_string(file_path).unwrap_or_default();
+            if existing_content != content {
+                std::fs::write(file_path, content).unwrap();
             }
         }
     }

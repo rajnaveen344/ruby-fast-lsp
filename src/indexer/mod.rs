@@ -4,7 +4,7 @@ use log::info;
 use lsp_types::Url;
 use ruby_prism::{parse, Visit};
 
-mod entry;
+pub mod entry;
 pub mod events;
 mod index;
 mod traverser;
@@ -116,7 +116,7 @@ mod tests {
         assert!(result.is_ok(), "Should be able to index the file");
 
         // Verify class and methods were indexed
-        let index = indexer.index();
+        let _index = indexer.index();
         // Note: The assertions are commented out since we haven't implemented
         // the actual indexing logic yet
         /*

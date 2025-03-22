@@ -5,7 +5,6 @@ use tower_lsp::LanguageServer;
 
 use crate::analyzer::RubyAnalyzer;
 use crate::handlers::request;
-use crate::indexer::RubyIndexer;
 use crate::server::RubyLanguageServer;
 use tower_lsp::lsp_types::Position;
 
