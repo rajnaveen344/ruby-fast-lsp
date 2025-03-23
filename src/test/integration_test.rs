@@ -1,9 +1,8 @@
-use log::{debug, info};
+use log::info;
 use lsp_types::{
     DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    Location, PartialResultParams, Position, ReferenceContext, ReferenceParams,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    WorkDoneProgressParams,
+    PartialResultParams, Position, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
 };
 use std::path::PathBuf;
 use tower_lsp::LanguageServer;

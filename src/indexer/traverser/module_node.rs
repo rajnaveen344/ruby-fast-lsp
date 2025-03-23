@@ -1,48 +1,46 @@
-use log::info;
+use log::{error, info};
 use ruby_prism::ModuleNode;
 
 use crate::indexer::{
-    entry::{EntryBuilder, EntryType},
-    types::constant::Constant,
+    entry::{entry_builder::EntryBuilder, entry_kind::EntryKind},
+    types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyNamespace},
 };
 
 use super::Visitor;
 
 impl Visitor {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
-        info!(
-            "Visiting module node: {}",
-            String::from_utf8_lossy(node.name().as_slice())
-        );
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let full_loc = node.location();
+        let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        info!("Visiting module node: {}", name_str);
 
-        let fqn = self.build_fully_qualified_name(Constant::from(name.clone()), None);
+        let namespace = RubyNamespace::new(&name_str);
 
-        let entry = EntryBuilder::new(Constant::from(name.clone()))
-            .fully_qualified_name(fqn.clone().into())
-            .location(self.prism_loc_to_lsp_loc(full_loc))
-            .entry_type(EntryType::Module)
-            .build()
-            .unwrap();
-
-        // Add namespace ancestor relationships similar to how it's done with classes
-        // If we're in a namespace, register the ancestor relationship
-        if !self.namespace_stack.is_empty() {
-            // Get the current namespace (parent) from the stack
-            let parent_constant = self.namespace_stack.last().unwrap().clone();
-            let mut index = self.index.lock().unwrap();
-            index.add_namespace_ancestor(Constant::from(name.clone()), parent_constant.clone());
-            info!("Added namespace ancestor: {} -> {}", name, parent_constant);
+        if let Err(e) = namespace {
+            error!("Error creating namespace: {}", e);
+            return;
         }
 
-        self.push_namespace(Constant::from(name), entry);
+        self.namespace_stack.push(namespace.unwrap());
 
-        // Process children - this will be called externally in mod.rs
-        // visit_module_node(self, node);
+        let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
+
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(self.prism_loc_to_lsp_loc(node.location()))
+            .kind(EntryKind::Module)
+            .build();
+
+        if let Err(e) = entry {
+            error!("Error creating entry: {}", e);
+            return;
+        }
+
+        info!("Adding module entry: {}", entry.clone().unwrap().fqn);
+
+        self.index.lock().unwrap().add_entry(entry.unwrap());
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {
-        self.pop_namespace();
+        self.namespace_stack.pop();
     }
 }

@@ -293,7 +293,7 @@ mod tests {
                 for entry in entries {
                     println!(
                         "  Entry: {}, Type: {:?}, URI: {}",
-                        entry.constant_name, entry.entry_type, entry.location.uri
+                        entry.fqn, entry.kind, entry.location.uri
                     );
                 }
             }

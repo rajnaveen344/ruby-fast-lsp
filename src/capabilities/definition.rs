@@ -7,7 +7,7 @@ use crate::indexer::RubyIndexer;
 /// Find the definition of a symbol at the given position
 pub async fn find_definition_at_position(
     indexer: &RubyIndexer,
-    uri: &Url,
+    _uri: &Url,
     position: Position,
     content: &str,
 ) -> Option<Location> {
@@ -64,27 +64,27 @@ pub async fn find_definition_at_position(
 
             // If we didn't find the exact FQN match, try to match method entries by name
             // This is needed because methods might be indexed with just #method_name
-            for (fqn, entries) in &index.definitions {
-                let fqn_str = fqn.to_string();
+            // for (fqn, entries) in &index.definitions {
+            //     let fqn_str = fqn.to_string();
 
-                // Check for a method with this name (prefixed with # for instance methods)
-                if fqn_str == format!("#{}", method_part) {
-                    for entry in entries {
-                        // Check if the entry is for a method and add it (we'll handle class-specific matching later)
-                        if entry.entry_type == crate::indexer::entry::EntryType::Method {
-                            let location = Location {
-                                uri: entry.location.uri.clone(),
-                                range: entry.location.range,
-                            };
-                            info!(
-                                "Found method definition at {:?} via general matching",
-                                location
-                            );
-                            return Some(location);
-                        }
-                    }
-                }
-            }
+            //     // Check for a method with this name (prefixed with # for instance methods)
+            //     if fqn_str == format!("#{}", method_part) {
+            //         for entry in entries {
+            //             // Check if the entry is for a method and add it (we'll handle class-specific matching later)
+            //             if entry.kind == EntryKind::Method {
+            //                 let location = Location {
+            //                     uri: entry.location.uri.clone(),
+            //                     range: entry.location.range,
+            //                 };
+            //                 info!(
+            //                     "Found method definition at {:?} via general matching",
+            //                     location
+            //                 );
+            //                 return Some(location);
+            //             }
+            //         }
+            //     }
+            // }
         } else {
             // Handle unqualified method names (e.g., #method)
             for (fqn, entries) in &index.definitions {

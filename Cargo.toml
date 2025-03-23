@@ -30,7 +30,7 @@ tree-sitter-highlight = "0.25.3"
 walkdir = "2.4.0"
 
 # Utils
-regex = "1.11.1"
+unicode-ident = "1.0.18"
 
 [dev-dependencies]
 tokio-test = "0.4.3"

@@ -7,7 +7,7 @@ use crate::indexer::RubyIndexer;
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(
     indexer: &RubyIndexer,
-    uri: &Url,
+    _uri: &Url,
     position: Position,
     content: &str,
     include_declaration: bool,

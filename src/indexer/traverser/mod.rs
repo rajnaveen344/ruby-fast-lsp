@@ -1,16 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use lsp_types::{Location as LspLocation, Position, Range, Url};
-use ruby_prism::{
-    visit_call_node, visit_class_node, visit_def_node, visit_module_node,
-    visit_singleton_class_node, CallNode, ClassNode, DefNode, ModuleNode, SingletonClassNode,
-    Visit,
-};
+use ruby_prism::{visit_class_node, visit_module_node, ClassNode, ModuleNode, Visit};
 
 use super::{
-    entry::{Entry, Visibility},
+    entry::{Entry, MethodVisibility},
     index::RubyIndex,
-    types::{constant::Constant, fully_qualified_constant::FullyQualifiedName, method::Method},
+    types::ruby_namespace::RubyNamespace,
 };
 
 mod call_node;
@@ -24,10 +20,10 @@ pub struct Visitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub content: String,
-    pub visibility_stack: Vec<Visibility>,
-    pub current_method: Option<String>,
-    pub namespace_stack: Vec<Constant>,
-    pub owner_stack: Vec<Entry>,
+    pub namespace_stack: Vec<RubyNamespace>,
+    pub _visibility_stack: Vec<MethodVisibility>,
+    pub _current_method: Option<String>,
+    pub _owner_stack: Vec<Entry>,
 }
 
 impl Visitor {
@@ -36,10 +32,10 @@ impl Visitor {
             index,
             uri,
             content,
-            visibility_stack: vec![Visibility::Public],
-            current_method: None,
             namespace_stack: vec![],
-            owner_stack: vec![],
+            _visibility_stack: vec![MethodVisibility::Public],
+            _current_method: None,
+            _owner_stack: vec![],
         }
     }
 
@@ -60,7 +56,7 @@ impl Visitor {
     }
 
     // Helper function to convert byte offset to (line, character) position
-    pub fn offset_to_position(&self, content: &str, offset: usize) -> (u32, u32) {
+    fn offset_to_position(&self, content: &str, offset: usize) -> (u32, u32) {
         let mut line = 0;
         let mut line_start_offset = 0;
 
@@ -77,49 +73,6 @@ impl Visitor {
 
         (line, character)
     }
-
-    pub fn push_namespace(&mut self, constant_name: Constant, entry: Entry) {
-        self.namespace_stack.push(constant_name);
-        self.visibility_stack.push(entry.visibility);
-        self.owner_stack.push(entry.clone());
-        self.index.lock().unwrap().add_entry(entry.clone());
-    }
-
-    pub fn pop_namespace(&mut self) {
-        self.namespace_stack.pop();
-        self.visibility_stack.pop();
-        self.owner_stack.pop();
-    }
-
-    pub fn build_fully_qualified_name(
-        &self,
-        name: Constant,
-        method: Option<Method>,
-    ) -> FullyQualifiedName {
-        if self.namespace_stack.is_empty() {
-            FullyQualifiedName::new(vec![name], method)
-        } else {
-            let mut namespace = self.namespace_stack.clone();
-            namespace.push(name);
-            FullyQualifiedName::new(namespace, method)
-        }
-    }
-
-    // Add this method to extract the name from a ConstantPathNode
-    pub fn extract_constant_path_name(
-        &self,
-        cpath: &ruby_prism::ConstantPathNode,
-    ) -> Option<String> {
-        // Try to access the parent and name components of the path
-        if let Some(const_node) = cpath.name() {
-            // For simple constant nodes like Foo in Foo::Bar
-            return Some(String::from_utf8_lossy(const_node.as_slice()).to_string());
-        }
-
-        // Fallback - get the string representation and extract the last part
-        let path_str = format!("{:?}", cpath);
-        path_str.split("::").last().map(|s| s.trim().to_string())
-    }
 }
 
 impl Visit<'_> for Visitor {
@@ -135,21 +88,21 @@ impl Visit<'_> for Visitor {
         self.process_class_node_exit(node);
     }
 
-    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
-        self.process_singleton_class_node_entry(node);
-        visit_singleton_class_node(self, node);
-        self.process_singleton_class_node_exit(node);
-    }
+    // fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
+    //     self.process_singleton_class_node_entry(node);
+    //     visit_singleton_class_node(self, node);
+    //     self.process_singleton_class_node_exit(node);
+    // }
 
-    fn visit_def_node(&mut self, node: &DefNode) {
-        self.process_def_node_entry(node);
-        visit_def_node(self, node);
-        self.process_def_node_exit(node);
-    }
+    // fn visit_def_node(&mut self, node: &DefNode) {
+    //     self.process_def_node_entry(node);
+    //     visit_def_node(self, node);
+    //     self.process_def_node_exit(node);
+    // }
 
-    fn visit_call_node(&mut self, node: &CallNode) {
-        self.process_call_node_entry(node);
-        visit_call_node(self, node);
-        self.process_call_node_exit(node);
-    }
+    // fn visit_call_node(&mut self, node: &CallNode) {
+    //     self.process_call_node_entry(node);
+    //     visit_call_node(self, node);
+    //     self.process_call_node_exit(node);
+    // }
 }
