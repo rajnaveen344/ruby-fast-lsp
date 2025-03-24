@@ -1,4 +1,5 @@
 pub mod analyzer;
+pub mod analyzer_prism;
 pub mod capabilities;
 pub mod handlers;
 pub mod indexer;

@@ -8,7 +8,7 @@ pub mod entry;
 pub mod events;
 mod index;
 mod traverser;
-mod types;
+pub mod types;
 
 use index::RubyIndex;
 use traverser::Visitor;
