@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -32,9 +33,11 @@ impl From<String> for RubyConstant {
     }
 }
 
-impl From<&str> for RubyConstant {
-    fn from(value: &str) -> Self {
-        RubyConstant(value.to_string())
+impl TryFrom<&str> for RubyConstant {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        RubyConstant::new(value)
     }
 }
 
@@ -47,6 +50,7 @@ impl fmt::Display for RubyConstant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_new() {
@@ -56,19 +60,24 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let constant = RubyConstant::from("Foo");
+        let constant = RubyConstant::from(String::from("Foo"));
         assert_eq!(constant.to_string(), "Foo");
     }
 
     #[test]
     fn test_from_str() {
-        let constant = RubyConstant::from("Foo");
-        assert_eq!(constant.to_string(), "Foo");
+        // Test the TryFrom implementation indirectly via String conversion first
+        let constant_from_string = RubyConstant::from(String::from("Foo"));
+        assert_eq!(constant_from_string.to_string(), "Foo");
+
+        // Test TryFrom directly
+        let constant_try_from = RubyConstant::try_from("Foo").unwrap();
+        assert_eq!(constant_try_from.to_string(), "Foo");
     }
 
     #[test]
     fn test_display() {
-        let constant = RubyConstant::new("Foo").unwrap();
+        let constant = RubyConstant::try_from("Foo").unwrap();
         assert_eq!(constant.to_string(), "Foo");
     }
 

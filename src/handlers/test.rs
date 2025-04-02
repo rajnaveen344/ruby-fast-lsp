@@ -426,7 +426,7 @@ mod tests {
                 let has_declaration = locations.iter().any(|loc| {
                     loc.uri == file1_uri
                         && loc.range.start.line == 1
-                        && loc.range.start.character == 2
+                        && loc.range.start.character == 6 // Identifier `process` starts at char 6
                 });
                 assert!(
                     has_declaration,

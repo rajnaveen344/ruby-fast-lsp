@@ -1,7 +1,7 @@
 ---
-description: This rule is to specify how to implement the test cases to test the goto, references, completion, etc. tools for an lsp server
+description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Determining line and character position in test ruby file

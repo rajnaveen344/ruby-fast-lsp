@@ -1,7 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use lsp_types::{Location as LspLocation, Position, Range, Url};
-use ruby_prism::{visit_class_node, visit_module_node, ClassNode, ModuleNode, Visit};
+use ruby_prism::{
+    visit_call_node, visit_class_node, visit_def_node, visit_module_node, CallNode, ClassNode,
+    DefNode, ModuleNode, Visit,
+};
 
 use super::{
     entry::{Entry, MethodVisibility},
@@ -94,15 +97,15 @@ impl Visit<'_> for Visitor {
     //     self.process_singleton_class_node_exit(node);
     // }
 
-    // fn visit_def_node(&mut self, node: &DefNode) {
-    //     self.process_def_node_entry(node);
-    //     visit_def_node(self, node);
-    //     self.process_def_node_exit(node);
-    // }
+    fn visit_def_node(&mut self, node: &DefNode) {
+        self.process_def_node_entry(node);
+        visit_def_node(self, node);
+        self.process_def_node_exit(node);
+    }
 
-    // fn visit_call_node(&mut self, node: &CallNode) {
-    //     self.process_call_node_entry(node);
-    //     visit_call_node(self, node);
-    //     self.process_call_node_exit(node);
-    // }
+    fn visit_call_node(&mut self, node: &CallNode) {
+        self.process_call_node_entry(node);
+        visit_call_node(self, node);
+        self.process_call_node_exit(node);
+    }
 }

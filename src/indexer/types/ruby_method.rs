@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -32,9 +33,11 @@ impl From<String> for RubyMethod {
     }
 }
 
-impl From<&str> for RubyMethod {
-    fn from(value: &str) -> Self {
-        RubyMethod::new(value).unwrap()
+impl TryFrom<&str> for RubyMethod {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        RubyMethod::new(value)
     }
 }
 
@@ -47,6 +50,7 @@ impl fmt::Display for RubyMethod {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_new() {
@@ -56,19 +60,19 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let method = RubyMethod::from("foo");
+        let method = RubyMethod::from(String::from("foo"));
         assert_eq!(method.to_string(), "foo");
     }
 
     #[test]
     fn test_from_str() {
-        let method = RubyMethod::from("foo");
-        assert_eq!(method.to_string(), "foo");
+        let method_try_from = RubyMethod::try_from("foo").unwrap();
+        assert_eq!(method_try_from.to_string(), "foo");
     }
 
     #[test]
     fn test_display() {
-        let method = RubyMethod::new("foo").unwrap();
+        let method = RubyMethod::try_from("foo").unwrap();
         assert_eq!(method.to_string(), "foo");
     }
 

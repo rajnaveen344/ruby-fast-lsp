@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "LSP Tools": {
+            "command": "node",
+            "args": [
+                "/Users/naveenraj/sources/lsp-tools-mcp/dist/index.js",
+                "/Users/naveenraj/sources"
+            ]
+        }
+    }
+}
