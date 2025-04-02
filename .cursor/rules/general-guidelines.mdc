@@ -4,6 +4,7 @@ globs:
 alwaysApply: true
 ---
 ## How to work with this project
+Main architecture is defined in ARCHITECTURE.md file.
 This project has readme files in almost every module. Always read it to understand the context.
 Capture ANY important information or significant decisions we discuss and update the corresponding README file. 
 
