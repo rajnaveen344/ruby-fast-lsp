@@ -1,8 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-
-# Determining line and character position in test ruby file
-When trying to find the position of a specific content in the test ruby file, use the "LSP Tools" mcp tool to find the correct position in the test ruby files
