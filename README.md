@@ -84,7 +84,11 @@ The AST Visualizer helps you understand how Ruby code is parsed into an Abstract
 1. Run the visualizer script from the project root:
 
 ```bash
+# Default port (8080)
 ./run_ast_visualizer.sh
+
+# Or specify a custom port
+./run_ast_visualizer.sh 3000
 ```
 
 2. This will start the server and open the visualizer in your browser
@@ -94,12 +98,17 @@ The AST Visualizer helps you understand how Ruby code is parsed into an Abstract
 You can also start the server manually and access it in your browser:
 
 ```bash
-# Start the server
+# Start the server with default port (8080)
 cargo run -p ast-visualizer
 
-# Then open in your browser
-open "http://localhost:3000"
+# Or specify a custom port
+PORT=3000 cargo run -p ast-visualizer
+
+# Then open in your browser (use the port shown in the server output)
+open "http://localhost:8080"
 ```
+
+The server will automatically find an available port if the specified port is already in use.
 
 ## License
 

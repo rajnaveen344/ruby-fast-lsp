@@ -3,7 +3,9 @@ use actix_web::http::header::ContentType;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
 use ruby_prism::{parse, Node};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -367,18 +369,65 @@ async fn index() -> Result<HttpResponse> {
     }
 }
 
+// Function to find an available port starting from the given port
+fn find_available_port(start_port: u16) -> std::io::Result<u16> {
+    let mut port = start_port;
+    let max_attempts = 10; // Try up to 10 ports
+
+    for _ in 0..max_attempts {
+        match TcpListener::bind(format!("127.0.0.1:{}", port)) {
+            Ok(_) => return Ok(port),
+            Err(_) => {
+                // Port is not available, try the next one
+                port += 1;
+            }
+        }
+    }
+
+    // If we've tried all ports and none are available, return an error
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        format!(
+            "Could not find an available port after trying {} ports",
+            max_attempts
+        ),
+    ))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Initialize logger
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+    // Get port from environment variable or use default (8080)
+    let default_port = 8080;
+    let port = match env::var("PORT") {
+        Ok(port_str) => match port_str.parse::<u16>() {
+            Ok(port) => port,
+            Err(_) => {
+                eprintln!(
+                    "Invalid PORT value: {}, using default: {}",
+                    port_str, default_port
+                );
+                default_port
+            }
+        },
+        Err(_) => default_port,
+    };
+
+    // Find an available port starting from the specified port
+    let available_port = find_available_port(port)?;
 
     // Create app state
     let app_state = web::Data::new(AppState {
         request_count: Mutex::new(0),
     });
 
-    println!("Starting AST server at http://127.0.0.1:3000");
-    println!("Open your browser and navigate to http://127.0.0.1:3000 to use the AST visualizer");
+    println!("Starting AST server at http://127.0.0.1:{}", available_port);
+    println!(
+        "Open your browser and navigate to http://127.0.0.1:{} to use the AST visualizer",
+        available_port
+    );
 
     // Start HTTP server
     HttpServer::new(move || {
@@ -396,7 +445,7 @@ async fn main() -> std::io::Result<()> {
             .route("/health", web::get().to(health_check))
             .route("/parse", web::post().to(parse_ruby))
     })
-    .bind("127.0.0.1:3000")?
+    .bind(format!("127.0.0.1:{}", available_port))?
     .run()
     .await
 }
