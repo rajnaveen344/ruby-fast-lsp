@@ -166,9 +166,8 @@
 <body>
     <header>
         <h1>Ruby AST Visualizer</h1>
-        <p style="color: white; margin-top: 0.5rem;">Make sure the server is running with <code
-                style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">cargo run -p ast-visualizer</code>
-            before using this tool.</p>
+        <p style="color: white; margin-top: 0.5rem;">Visualize Ruby code as an Abstract Syntax Tree using the Prism
+            parser</p>
     </header>
 
     <div class="container">
@@ -400,7 +399,7 @@ person.greet</textarea>
                 loading.style.display = 'block';
 
                 // Send the code to the server for parsing
-                fetch('http://localhost:3000/parse', {
+                fetch('/parse', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -431,7 +430,7 @@ person.greet</textarea>
 
                         // Show error message
                         if (error.message.includes('Failed to fetch')) {
-                            errorMessage.textContent = `Error: Could not connect to the server. Make sure the server is running with 'cargo run -p ast-visualizer' and try again.`;
+                            errorMessage.textContent = `Error: Could not connect to the server. Please refresh the page or try again later.`;
                         } else {
                             errorMessage.textContent = `Error: ${error.message}`;
                         }

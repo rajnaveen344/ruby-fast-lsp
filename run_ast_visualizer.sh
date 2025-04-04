@@ -9,19 +9,19 @@ SERVER_PID=$!
 echo "Waiting for server to start..."
 sleep 2
 
-# Open the HTML page in the default browser
+# Open the server URL in the default browser
 echo "Opening AST visualizer in browser..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
-    open "file://$(pwd)/crates/ast-visualizer/static/index.html"
+    open "http://localhost:3000"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     # Linux
-    xdg-open "file://$(pwd)/crates/ast-visualizer/static/index.html"
+    xdg-open "http://localhost:3000"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     # Windows
-    start "file://$(pwd)/crates/ast-visualizer/static/index.html"
+    start "http://localhost:3000"
 else
-    echo "Please open crates/ast-visualizer/static/index.html in your browser manually"
+    echo "Please open http://localhost:3000 in your browser manually"
 fi
 
 # Wait for user to press Ctrl+C

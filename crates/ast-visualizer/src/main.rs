@@ -1,7 +1,10 @@
 use actix_cors::Cors;
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::http::header::ContentType;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder, Result};
 use ruby_prism::{parse, Node};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use std::sync::Mutex;
 
 // Request structure for parsing Ruby code
@@ -326,6 +329,44 @@ async fn health_check(state: web::Data<AppState>) -> impl Responder {
     }))
 }
 
+// Serve the HTML page
+async fn index() -> Result<HttpResponse> {
+    // Path to the HTML file
+    let html_path = Path::new("static/index.html");
+
+    // Check if the file exists in the current directory
+    if html_path.exists() {
+        let html_content = fs::read_to_string(html_path).map_err(|e| {
+            eprintln!("Error reading HTML file: {}", e);
+            actix_web::error::ErrorInternalServerError("Error reading HTML file")
+        })?;
+
+        Ok(HttpResponse::Ok()
+            .content_type(ContentType::html())
+            .body(html_content))
+    } else {
+        // Try to find the file relative to the crate directory
+        let crate_html_path = Path::new("crates/ast-visualizer/static/index.html");
+
+        if crate_html_path.exists() {
+            let html_content = fs::read_to_string(crate_html_path).map_err(|e| {
+                eprintln!("Error reading HTML file: {}", e);
+                actix_web::error::ErrorInternalServerError("Error reading HTML file")
+            })?;
+
+            Ok(HttpResponse::Ok()
+                .content_type(ContentType::html())
+                .body(html_content))
+        } else {
+            eprintln!(
+                "HTML file not found at {:?} or {:?}",
+                html_path, crate_html_path
+            );
+            Ok(HttpResponse::NotFound().body("HTML file not found"))
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Initialize logger
@@ -337,6 +378,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     println!("Starting AST server at http://127.0.0.1:3000");
+    println!("Open your browser and navigate to http://127.0.0.1:3000 to use the AST visualizer");
 
     // Start HTTP server
     HttpServer::new(move || {
@@ -350,6 +392,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(app_state.clone())
+            .route("/", web::get().to(index))
             .route("/health", web::get().to(health_check))
             .route("/parse", web::post().to(parse_ruby))
     })

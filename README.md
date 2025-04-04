@@ -91,14 +91,14 @@ The AST Visualizer helps you understand how Ruby code is parsed into an Abstract
 3. Enter Ruby code in the left panel and click "Parse AST"
 4. Explore the AST in the right panel by expanding/collapsing nodes
 
-You can also start the components manually:
+You can also start the server manually and access it in your browser:
 
 ```bash
 # Start the server
 cargo run -p ast-visualizer
 
 # Then open in your browser
-open "file://$(pwd)/crates/ast-visualizer/static/index.html"
+open "http://localhost:3000"
 ```
 
 ## License
