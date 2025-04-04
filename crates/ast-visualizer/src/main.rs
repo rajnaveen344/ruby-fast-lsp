@@ -39,6 +39,25 @@ struct AppState {
     request_count: Mutex<usize>,
 }
 
+// Helper function to convert byte offset to (line, column) position
+fn offset_to_position(content: &str, offset: usize) -> (u32, u32) {
+    let mut line = 0;
+    let mut line_start_offset = 0;
+
+    // Find the line containing the offset by counting newlines
+    for (i, c) in content.chars().take(offset).enumerate() {
+        if c == '\n' {
+            line += 1;
+            line_start_offset = i + 1; // +1 to skip the newline character
+        }
+    }
+
+    // Character offset within the line
+    let character = (offset - line_start_offset) as u32;
+
+    (line, character)
+}
+
 // Parse Ruby code and return AST as JSON
 async fn parse_ruby(data: web::Json<ParseRequest>, state: web::Data<AppState>) -> impl Responder {
     // Increment request count - handle poisoned mutex gracefully
@@ -113,13 +132,36 @@ async fn parse_ruby(data: web::Json<ParseRequest>, state: web::Data<AppState>) -
         }));
     }
 
-    // If there are some errors, return them
+    // If there are some errors, return them in a structured format
     if errors_count > 0 {
-        let errors: Vec<String> = parse_result.errors().map(|e| format!("{:?}", e)).collect();
+        // Create a structured error response that can be visualized
+        let error_nodes: Vec<serde_json::Value> = parse_result
+            .errors()
+            .map(|e| {
+                let location = e.location();
+                let message = format!("{:?}", e);
 
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Syntax error",
-            "details": errors
+                // Get location information
+                let start_offset = location.start_offset();
+                let _end_offset = location.end_offset(); // We could use this for error highlighting
+
+                // Calculate line and column from the code string
+                let (start_line, start_column) = offset_to_position(&code, start_offset);
+
+                serde_json::json!({
+                    "type": "SyntaxErrorNode",
+                    "message": message,
+                    "line": start_line,
+                    "column": start_column
+                })
+            })
+            .collect();
+
+        // Return a special AST structure for errors
+        return HttpResponse::Ok().json(serde_json::json!({
+            "type": "ErrorTreeNode",
+            "name": "Syntax Errors",
+            "children": error_nodes
         }));
     }
 

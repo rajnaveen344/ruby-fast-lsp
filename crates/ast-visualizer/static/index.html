@@ -251,6 +251,36 @@
             font-style: italic;
         }
 
+        /* Error tree styling */
+        .error-tree {
+            padding: 15px;
+            background-color: #fff2f0;
+            border: 1px solid #ffccc7;
+            border-radius: 4px;
+            color: #cf1322;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="ErrorTreeNode"] {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+            color: #cf1322;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="SyntaxErrorNode"] {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+            color: #cf1322;
+        }
+
+        .error-message {
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
         /* Hide/show children */
         .tree .collapsed>ul {
             display: none;
@@ -420,6 +450,10 @@ person.greet</textarea>
                             <span class="legend-color" style="background-color: #f9f9f9; border-color: #d9d9d9;"></span>
                             <span class="legend-label">STATEMENTS</span>
                         </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #fff2f0; border-color: #ffccc7;"></span>
+                            <span class="legend-label">ERRORS</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -546,6 +580,14 @@ person.greet</textarea>
                         nameSpan.className = 'node-value';
                         nameSpan.textContent = ` ${node.name}`;
                         nodeSpan.appendChild(nameSpan);
+                    }
+
+                    // Special handling for error nodes
+                    if (node.type === 'SyntaxErrorNode') {
+                        const errorSpan = document.createElement('span');
+                        errorSpan.className = 'error-message';
+                        errorSpan.textContent = ` at line ${node.line}, column ${node.column}: ${node.message}`;
+                        nodeSpan.appendChild(errorSpan);
                     }
 
                     if (node.value && typeof node.value === 'string' || typeof node.value === 'number') {
@@ -686,9 +728,9 @@ person.greet</textarea>
                         }
                         errorMessage.style.display = 'block';
 
-                        // Show the example AST
+                        // Show an empty tree
                         astTree.style.display = 'block';
-                        renderAst(exampleAst, astTree);
+                        astTree.innerHTML = '<div class="error-tree">Failed to parse code. See error message above.</div>';
                     });
             }
 
