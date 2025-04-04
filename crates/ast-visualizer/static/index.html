@@ -205,7 +205,8 @@
             font-weight: bold;
         }
 
-        .tree .node[data-type="CLASS"] {
+        .tree .node[data-type="CLASS"],
+        .tree .node[data-type="MODULE"] {
             background-color: #e6f7ff;
             border-color: #91d5ff;
         }
@@ -247,6 +248,12 @@
         .tree .node[data-type="DSTR"] {
             background-color: #e6fffb;
             border-color: #87e8de;
+        }
+
+        .tree .node[data-type="STATEMENTS"] {
+            background-color: #f9f9f9;
+            border-color: #d9d9d9;
+            font-style: italic;
         }
 
         /* Hide/show children */
@@ -384,7 +391,7 @@ person.greet</textarea>
                         </div>
                         <div class="legend-item">
                             <span class="legend-color" style="background-color: #e6f7ff; border-color: #91d5ff;"></span>
-                            <span class="legend-label">CLASS</span>
+                            <span class="legend-label">CLASS/MODULE</span>
                         </div>
                         <div class="legend-item">
                             <span class="legend-color" style="background-color: #f6ffed; border-color: #b7eb8f;"></span>
@@ -413,6 +420,10 @@ person.greet</textarea>
                         <div class="legend-item">
                             <span class="legend-color" style="background-color: #e6fffb; border-color: #87e8de;"></span>
                             <span class="legend-label">DSTR</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f9f9f9; border-color: #d9d9d9;"></span>
+                            <span class="legend-label">STATEMENTS</span>
                         </div>
                     </div>
                 </div>
