@@ -271,6 +271,9 @@ impl AstVisitor {
                 let name = self.get_name_string(class_node.name().as_slice());
                 self.push_node("ClassNode".to_string(), Some(name), None);
 
+                // Process constant path
+                self.visit_node(&class_node.constant_path());
+
                 // Process class body
                 if let Some(body) = class_node.body() {
                     if let Some(statements_node) = body.as_statements_node() {
@@ -287,7 +290,10 @@ impl AstVisitor {
             Node::ModuleNode { .. } => {
                 let module_node = node.as_module_node().unwrap();
                 let name = self.get_name_string(module_node.name().as_slice());
-                self.push_node("ModuleNode".to_string(), Some(name), None);
+                self.push_node("ModuleNode".to_string(), Some(name.clone()), None);
+
+                // Proce constant path
+                self.visit_node(&module_node.constant_path());
 
                 // Process module body
                 if let Some(body) = module_node.body() {
