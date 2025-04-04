@@ -59,6 +59,22 @@
             margin-top: 1rem;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        .checkbox-container label {
+            cursor: pointer;
+            user-select: none;
         }
 
         button {
@@ -187,8 +203,14 @@ end
 person = Person.new("John", 30)
 person.greet</textarea>
             <div class="controls">
-                <button id="parse-btn">Parse AST</button>
-                <button id="clear-btn">Clear</button>
+                <div class="checkbox-container">
+                    <input type="checkbox" id="realtime-parsing" checked>
+                    <label for="realtime-parsing">Real-time parsing</label>
+                </div>
+                <div>
+                    <button id="parse-btn">Parse AST</button>
+                    <button id="clear-btn">Clear</button>
+                </div>
             </div>
         </div>
 
@@ -383,8 +405,8 @@ person.greet</textarea>
             // Initial render with example AST
             renderAst(exampleAst, astTree);
 
-            // Parse button click handler
-            parseBtn.addEventListener('click', function () {
+            // Function to parse Ruby code
+            function parseRubyCode() {
                 const rubyCode = rubyCodeTextarea.value;
 
                 if (!rubyCode.trim()) {
@@ -440,13 +462,37 @@ person.greet</textarea>
                         astTree.style.display = 'block';
                         renderAst(exampleAst, astTree);
                     });
-            });
+            }
+
+            // Variables for real-time parsing
+            let typingTimer;
+            const doneTypingInterval = 100; // Time in ms (0.1 seconds)
+            const realtimeParsingCheckbox = document.getElementById('realtime-parsing');
+
+            // Function to handle typing events
+            function handleTyping() {
+                clearTimeout(typingTimer);
+                if (realtimeParsingCheckbox.checked) {
+                    typingTimer = setTimeout(parseRubyCode, doneTypingInterval);
+                }
+            }
+
+            // Add input event listener for real-time parsing
+            rubyCodeTextarea.addEventListener('input', handleTyping);
+
+            // Parse button click handler
+            parseBtn.addEventListener('click', parseRubyCode);
 
             // Clear button click handler
             clearBtn.addEventListener('click', function () {
                 rubyCodeTextarea.value = '';
                 errorMessage.style.display = 'none';
+                // Reset to example AST
+                renderAst(exampleAst, astTree);
             });
+
+            // Parse the initial code
+            parseRubyCode();
         });
     </script>
 </body>

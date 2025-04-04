@@ -92,8 +92,9 @@ The AST Visualizer helps you understand how Ruby code is parsed into an Abstract
 ```
 
 2. This will start the server and open the visualizer in your browser
-3. Enter Ruby code in the left panel and click "Parse AST"
+3. Enter Ruby code in the left panel and the AST will update in real-time
 4. Explore the AST in the right panel by expanding/collapsing nodes
+5. You can toggle real-time parsing on/off with the checkbox
 
 You can also start the server manually and access it in your browser:
 
