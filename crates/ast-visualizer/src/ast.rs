@@ -279,6 +279,23 @@ impl AstVisitor {
 
                 self.pop_node();
             }
+            Node::LocalVariableReadNode { .. } => {
+                let lvar_node = node.as_local_variable_read_node().unwrap();
+                let name = self.get_name_string(lvar_node.name().as_slice());
+                self.push_node("LocalVariableReadNode".to_string(), Some(name), None);
+                self.pop_node();
+            }
+            Node::LocalVariableWriteNode { .. } => {
+                let lvasgn_node = node.as_local_variable_write_node().unwrap();
+                let name = self.get_name_string(lvasgn_node.name().as_slice());
+                self.push_node("LocalVariableWriteNode".to_string(), Some(name), None);
+
+                // Process value
+                let value_node = lvasgn_node.value();
+                self.visit_node(&value_node);
+
+                self.pop_node();
+            }
             Node::StringNode { .. } => {
                 let string_node = node.as_string_node().unwrap();
                 let value = String::from_utf8_lossy(string_node.unescaped()).to_string();
@@ -322,6 +339,96 @@ impl AstVisitor {
                 if let Some(body) = block_node.body() {
                     self.visit_node(&body);
                 }
+
+                self.pop_node();
+            }
+            Node::IfNode { .. } => {
+                let if_node = node.as_if_node().unwrap();
+                self.push_node("IfNode".to_string(), None, None);
+
+                // Process predicate (condition)
+                self.push_node("PredicateNode".to_string(), None, None);
+                self.visit_node(&if_node.predicate());
+                self.pop_node();
+
+                // Process statements (then branch)
+                if let Some(statements) = if_node.statements() {
+                    self.push_node("StatementsNode".to_string(), None, None);
+
+                    // Process all statements
+                    for stmt in statements.body().iter() {
+                        self.visit_node(&stmt);
+                    }
+
+                    self.pop_node();
+                }
+
+                // Process subsequent (else branch)
+                if let Some(subsequent) = if_node.subsequent() {
+                    self.push_node("SubsequentNode".to_string(), None, None);
+                    self.visit_node(&subsequent);
+                    self.pop_node();
+                }
+
+                self.pop_node();
+            }
+            Node::ForNode { .. } => {
+                let for_node = node.as_for_node().unwrap();
+                self.push_node("ForNode".to_string(), None, None);
+
+                // Process index (iterator)
+                self.push_node("IndexNode".to_string(), None, None);
+                self.visit_node(&for_node.index());
+                self.pop_node();
+
+                // Process collection
+                self.push_node("CollectionNode".to_string(), None, None);
+                self.visit_node(&for_node.collection());
+                self.pop_node();
+
+                // Process statements (body)
+                if let Some(statements) = for_node.statements() {
+                    self.push_node("StatementsNode".to_string(), None, None);
+
+                    // Process all statements
+                    for stmt in statements.body().iter() {
+                        self.visit_node(&stmt);
+                    }
+
+                    self.pop_node();
+                }
+
+                self.pop_node();
+            }
+            Node::OrNode { .. } => {
+                let or_node = node.as_or_node().unwrap();
+                self.push_node("OrNode".to_string(), None, None);
+
+                // Process left operand
+                self.push_node("LeftNode".to_string(), None, None);
+                self.visit_node(&or_node.left());
+                self.pop_node();
+
+                // Process right operand
+                self.push_node("RightNode".to_string(), None, None);
+                self.visit_node(&or_node.right());
+                self.pop_node();
+
+                self.pop_node();
+            }
+            Node::AndNode { .. } => {
+                let and_node = node.as_and_node().unwrap();
+                self.push_node("AndNode".to_string(), None, None);
+
+                // Process left operand
+                self.push_node("LeftNode".to_string(), None, None);
+                self.visit_node(&and_node.left());
+                self.pop_node();
+
+                // Process right operand
+                self.push_node("RightNode".to_string(), None, None);
+                self.visit_node(&and_node.right());
+                self.pop_node();
 
                 self.pop_node();
             }
