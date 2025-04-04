@@ -5,6 +5,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ruby AST Visualizer</title>
+    <!-- Ace Editor CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/mode-ruby.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/theme-monokai.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/ext-language_tools.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -31,10 +36,24 @@
 
         .editor-section {
             flex: 1;
-            padding: 1rem;
+            position: relative;
+            border-right: 1px solid #ccc;
+            overflow: scroll;
+            min-width: 40%;
+            min-height: 100%;
             display: flex;
             flex-direction: column;
-            border-right: 1px solid #ccc;
+        }
+
+        #ruby-code-editor {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            font-size: 14px;
+            min-height: 100%;
+            height: 100%;
         }
 
         .ast-section {
@@ -368,30 +387,7 @@
 
     <div class="container">
         <div class="editor-section">
-            <h2>Ruby Code</h2>
-            <textarea id="ruby-code" placeholder="Enter your Ruby code here...">class Person
-  def initialize(name, age)
-    @name = name
-    @age = age
-  end
-
-  def greet
-    puts "Hello, my name is #{@name} and I am #{@age} years old."
-  end
-end
-
-person = Person.new("John", 30)
-person.greet</textarea>
-            <div class="controls">
-                <div class="checkbox-container">
-                    <input type="checkbox" id="realtime-parsing" checked>
-                    <label for="realtime-parsing">Real-time parsing</label>
-                </div>
-                <div>
-                    <button id="parse-btn">Parse AST</button>
-                    <button id="clear-btn">Clear</button>
-                </div>
-            </div>
+            <div id="ruby-code-editor"></div>
         </div>
 
         <div class="ast-section">
@@ -462,9 +458,53 @@ person.greet</textarea>
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const rubyCodeTextarea = document.getElementById('ruby-code');
-            const parseBtn = document.getElementById('parse-btn');
-            const clearBtn = document.getElementById('clear-btn');
+            // Initialize Ace Editor
+            const editor = ace.edit("ruby-code-editor");
+
+            // Configure editor with minimal settings
+            editor.setOptions({
+                // Theme and mode
+                theme: "ace/theme/monokai",
+                mode: "ace/mode/ruby",
+
+                // Essential settings
+                showPrintMargin: false,
+                autoScrollEditorIntoView: true,
+
+                // Sizing
+                maxLines: Infinity
+            });
+
+            // Ensure editor is properly sized
+            window.addEventListener('resize', function () {
+                editor.resize();
+            });
+
+            // Force resize after initialization
+            setTimeout(function () {
+                editor.resize();
+            }, 100);
+
+            // Set editor height to fill container
+            editor.container.style.height = '100%';
+
+            // Set initial content
+            const initialCode = `class Person
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+
+  def greet
+    puts "Hello, my name is #{@name} and I am #{@age} years old."
+  end
+end
+
+person = Person.new("John", 30)
+person.greet`;
+
+            editor.setValue(initialCode, -1); // -1 moves cursor to the start
+
             const astTree = document.getElementById('ast-tree');
             const loading = document.getElementById('loading');
             const errorMessage = document.getElementById('error-message');
@@ -677,7 +717,7 @@ person.greet</textarea>
 
             // Function to parse Ruby code
             function parseRubyCode() {
-                const rubyCode = rubyCodeTextarea.value;
+                const rubyCode = editor.getValue();
 
                 if (!rubyCode.trim()) {
                     errorMessage.textContent = 'Please enter some Ruby code.';
@@ -736,30 +776,22 @@ person.greet</textarea>
 
             // Variables for real-time parsing
             let typingTimer;
-            const doneTypingInterval = 100; // Time in ms (0.1 seconds)
-            const realtimeParsingCheckbox = document.getElementById('realtime-parsing');
+            const doneTypingInterval = 300; // Time in ms (0.3 seconds)
 
             // Function to handle typing events
             function handleTyping() {
                 clearTimeout(typingTimer);
-                if (realtimeParsingCheckbox.checked) {
-                    typingTimer = setTimeout(parseRubyCode, doneTypingInterval);
-                }
+                typingTimer = setTimeout(parseRubyCode, doneTypingInterval);
             }
 
-            // Add input event listener for real-time parsing
-            rubyCodeTextarea.addEventListener('input', handleTyping);
-
-            // Parse button click handler
-            parseBtn.addEventListener('click', parseRubyCode);
-
-            // Clear button click handler
-            clearBtn.addEventListener('click', function () {
-                rubyCodeTextarea.value = '';
-                errorMessage.style.display = 'none';
-                // Reset to example AST
-                renderAst(exampleAst, astTree);
+            // Handle paste events
+            editor.container.addEventListener('paste', function () {
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(parseRubyCode, 300);
             });
+
+            // Add change event listener for real-time parsing
+            editor.session.on('change', handleTyping);
 
             // Parse the initial code
             parseRubyCode();
