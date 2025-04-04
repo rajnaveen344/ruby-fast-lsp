@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Start the AST server in the background
-echo "Starting AST server..."
-cargo run --bin ast_server &
+# Start the AST visualizer server
+echo "Starting Ruby AST Visualizer server..."
+cargo run -p ast-visualizer &
 SERVER_PID=$!
 
 # Wait for the server to start
@@ -13,15 +13,15 @@ sleep 2
 echo "Opening AST visualizer in browser..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
-    open ast_visualizer.html
+    open "file://$(pwd)/crates/ast-visualizer/static/index.html"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     # Linux
-    xdg-open ast_visualizer.html
+    xdg-open "file://$(pwd)/crates/ast-visualizer/static/index.html"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     # Windows
-    start ast_visualizer.html
+    start "file://$(pwd)/crates/ast-visualizer/static/index.html"
 else
-    echo "Please open ast_visualizer.html in your browser manually"
+    echo "Please open crates/ast-visualizer/static/index.html in your browser manually"
 fi
 
 # Wait for user to press Ctrl+C

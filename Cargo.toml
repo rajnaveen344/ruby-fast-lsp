@@ -1,3 +1,10 @@
+[workspace]
+members = [
+    ".",
+    "crates/ast-visualizer",
+]
+resolver = "2"
+
 [package]
 name = "ruby-fast-lsp"
 version = "0.1.0"
@@ -5,7 +12,6 @@ edition = "2021"
 authors = ["Ruby Fast LSP Team"]
 description = "A fast Language Server Protocol implementation for Ruby"
 license = "MIT"
-resolver = "2"
 
 [dependencies]
 # LSP related dependencies

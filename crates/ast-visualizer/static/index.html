@@ -167,7 +167,7 @@
     <header>
         <h1>Ruby AST Visualizer</h1>
         <p style="color: white; margin-top: 0.5rem;">Make sure the server is running with <code
-                style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">cargo run --bin ast_server</code>
+                style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">cargo run -p ast-visualizer</code>
             before using this tool.</p>
     </header>
 
@@ -431,7 +431,7 @@ person.greet</textarea>
 
                         // Show error message
                         if (error.message.includes('Failed to fetch')) {
-                            errorMessage.textContent = `Error: Could not connect to the server. Make sure the server is running with 'cargo run --bin ast_server' and try again.`;
+                            errorMessage.textContent = `Error: Could not connect to the server. Make sure the server is running with 'cargo run -p ast-visualizer' and try again.`;
                         } else {
                             errorMessage.textContent = `Error: ${error.message}`;
                         }
