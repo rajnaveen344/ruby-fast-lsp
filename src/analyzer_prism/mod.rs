@@ -1,18 +1,32 @@
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
 use lsp_types::Position;
+use ruby_prism::{parse, ParseResult};
+
+// Export the visitors module
+pub mod position;
+pub mod visitors;
+
+// Import the IdentifierVisitor
+use visitors::identifier_visitor::IdentifierVisitor;
 
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {
     #[allow(dead_code)]
     code: String,
+    parse_result: Option<ParseResult<'static>>,
     namespace_stack: Vec<RubyNamespace>,
 }
 
 impl RubyPrismAnalyzer {
     pub fn new(code: String) -> Self {
+        // We need to leak the string to make it 'static to satisfy the lifetime requirements
+        // This is a trade-off for simplicity in this implementation
+        let code_static = Box::leak(code.clone().into_boxed_str());
+        let parse_result = parse(code_static.as_bytes());
         Self {
             code,
+            parse_result: Some(parse_result),
             namespace_stack: Vec::new(),
         }
     }
@@ -40,13 +54,13 @@ impl RubyPrismAnalyzer {
     /// end
 
     /// CONST_B = Inner::CONST_A
-    ///                  ^ Go to definition here should return (Inner::CONST_A, [Outer])
-    ///           ^ Go to definition here should return (Inner, [Outer])
+    ///                  ^ get_identifier at this position should return (Inner::CONST_A, [Outer])
+    ///           ^ get_identifier at this position should return (Inner, [Outer])
     /// ^ References - TODO
     /// CONST_C = ::Outer::Inner::CONST_A
-    ///                           ^ Go to definition here should return (Outer::Inner::CONST_A, [])
-    ///                    ^ Go to definition here should return (Outer::Inner, [])
-    ///             ^ Go to definition here should return (Outer, [])
+    ///                           ^ get_identifier at this position should return (Outer::Inner::CONST_A, [])
+    ///                    ^ get_identifier at this position should return (Outer::Inner, [])
+    ///             ^ get_identifier at this position should return (Outer, [])
     /// end
     ///
     /// TopLevelConst = 10
@@ -57,8 +71,15 @@ impl RubyPrismAnalyzer {
     /// Returns the identifier and the namespace stack at the time of the lookup.
     pub fn get_identifier(
         &self,
-        _position: Position,
+        position: Position,
     ) -> (Option<FullyQualifiedName>, Vec<RubyNamespace>) {
+        if let Some(_parse_result) = &self.parse_result {
+            let visitor = IdentifierVisitor::new(position);
+            // TODO: Implement proper AST traversal
+            // For now, we'll just return None
+            // visitor.visit(&Node::Program(parse_result.value));
+            return (visitor.found_identifier, visitor.namespace_stack);
+        }
         (None, vec![])
     }
 }
