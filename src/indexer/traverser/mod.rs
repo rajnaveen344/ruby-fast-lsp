@@ -91,12 +91,6 @@ impl Visit<'_> for Visitor {
         self.process_class_node_exit(node);
     }
 
-    // fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
-    //     self.process_singleton_class_node_entry(node);
-    //     visit_singleton_class_node(self, node);
-    //     self.process_singleton_class_node_exit(node);
-    // }
-
     fn visit_def_node(&mut self, node: &DefNode) {
         self.process_def_node_entry(node);
         visit_def_node(self, node);
