@@ -32,6 +32,10 @@ walkdir = "2.4.0"
 # Utils
 unicode-ident = "1.0.18"
 
+# Web server for AST visualization
+actix-web = "4.3.1"
+actix-cors = "0.6.4"
+
 [dev-dependencies]
 tokio-test = "0.4.3"
 pretty_assertions = "1.4.0"

@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruby AST Visualizer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: #9b111e;
+            /* Ruby red */
+            color: white;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .editor-section {
+            flex: 1;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #ccc;
+        }
+
+        .ast-section {
+            flex: 1;
+            padding: 1rem;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        textarea {
+            flex: 1;
+            resize: none;
+            padding: 0.5rem;
+            font-family: monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .controls {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        button {
+            background-color: #9b111e;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #7d0e18;
+        }
+
+        .ast-container {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 1rem;
+        }
+
+        /* Tree visualization styles */
+        .tree ul {
+            padding-left: 20px;
+        }
+
+        .tree li {
+            list-style-type: none;
+            margin: 10px 0;
+            position: relative;
+        }
+
+        .tree li::before {
+            content: "";
+            position: absolute;
+            top: -5px;
+            left: -15px;
+            border-left: 1px solid #ccc;
+            border-bottom: 1px solid #ccc;
+            width: 10px;
+            height: 15px;
+        }
+
+        .tree li:first-child::before {
+            border-top: 1px solid #ccc;
+            top: 10px;
+            height: 0;
+        }
+
+        .tree ul li:last-child::before {
+            height: 15px;
+        }
+
+        .tree ul li:only-child::before {
+            height: 10px;
+        }
+
+        .tree .node {
+            cursor: pointer;
+            display: inline-block;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .tree .node:hover {
+            background-color: #f0f0f0;
+        }
+
+        .tree .node-type {
+            color: #9b111e;
+            font-weight: bold;
+        }
+
+        .tree .node-value {
+            color: #333;
+        }
+
+        .tree .collapsed>ul {
+            display: none;
+        }
+
+        .tree .expanded>ul {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .error {
+            color: #9b111e;
+            padding: 1rem;
+            border: 1px solid #9b111e;
+            border-radius: 4px;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Ruby AST Visualizer</h1>
+        <p style="color: white; margin-top: 0.5rem;">Make sure the server is running with <code
+                style="background: rgba(255,255,255,0.2); padding: 2px 4px; border-radius: 3px;">cargo run --bin ast_server</code>
+            before using this tool.</p>
+    </header>
+
+    <div class="container">
+        <div class="editor-section">
+            <h2>Ruby Code</h2>
+            <textarea id="ruby-code" placeholder="Enter your Ruby code here...">class Person
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+
+  def greet
+    puts "Hello, my name is #{@name} and I am #{@age} years old."
+  end
+end
+
+person = Person.new("John", 30)
+person.greet</textarea>
+            <div class="controls">
+                <button id="parse-btn">Parse AST</button>
+                <button id="clear-btn">Clear</button>
+            </div>
+        </div>
+
+        <div class="ast-section">
+            <h2>Abstract Syntax Tree</h2>
+            <div id="ast-container" class="ast-container">
+                <div class="loading" id="loading" style="display: none;">
+                    Parsing code...
+                </div>
+                <div id="ast-tree" class="tree"></div>
+                <div id="error-message" class="error" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const rubyCodeTextarea = document.getElementById('ruby-code');
+            const parseBtn = document.getElementById('parse-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const astTree = document.getElementById('ast-tree');
+            const loading = document.getElementById('loading');
+            const errorMessage = document.getElementById('error-message');
+
+            // Example AST structure for initial display
+            const exampleAst = {
+                type: "PROGRAM",
+                children: [
+                    {
+                        type: "CLASS",
+                        name: "Person",
+                        children: [
+                            {
+                                type: "DEF",
+                                name: "initialize",
+                                parameters: ["name", "age"],
+                                children: [
+                                    {
+                                        type: "IVASGN",
+                                        name: "@name",
+                                        value: { type: "LVAR", name: "name" }
+                                    },
+                                    {
+                                        type: "IVASGN",
+                                        name: "@age",
+                                        value: { type: "LVAR", name: "age" }
+                                    }
+                                ]
+                            },
+                            {
+                                type: "DEF",
+                                name: "greet",
+                                parameters: [],
+                                children: [
+                                    {
+                                        type: "SEND",
+                                        receiver: null,
+                                        name: "puts",
+                                        arguments: [
+                                            {
+                                                type: "DSTR",
+                                                children: [
+                                                    { type: "STR", value: "Hello, my name is " },
+                                                    { type: "IVAR", name: "@name" },
+                                                    { type: "STR", value: " and I am " },
+                                                    { type: "IVAR", name: "@age" },
+                                                    { type: "STR", value: " years old." }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        type: "LASGN",
+                        name: "person",
+                        value: {
+                            type: "SEND",
+                            receiver: { type: "CONST", name: "Person" },
+                            name: "new",
+                            arguments: [
+                                { type: "STR", value: "John" },
+                                { type: "INT", value: 30 }
+                            ]
+                        }
+                    },
+                    {
+                        type: "SEND",
+                        receiver: { type: "LVAR", name: "person" },
+                        name: "greet",
+                        arguments: []
+                    }
+                ]
+            };
+
+            // Function to render the AST tree
+            function renderAst(ast, parentElement) {
+                const ul = document.createElement('ul');
+
+                function renderNode(node, parentUl) {
+                    const li = document.createElement('li');
+                    const nodeSpan = document.createElement('span');
+                    nodeSpan.className = 'node';
+
+                    // Create node type span
+                    const typeSpan = document.createElement('span');
+                    typeSpan.className = 'node-type';
+                    typeSpan.textContent = node.type;
+                    nodeSpan.appendChild(typeSpan);
+
+                    // Add node properties
+                    if (node.name) {
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'node-value';
+                        nameSpan.textContent = ` ${node.name}`;
+                        nodeSpan.appendChild(nameSpan);
+                    }
+
+                    if (node.value && typeof node.value === 'string' || typeof node.value === 'number') {
+                        const valueSpan = document.createElement('span');
+                        valueSpan.className = 'node-value';
+                        valueSpan.textContent = ` = ${node.value}`;
+                        nodeSpan.appendChild(valueSpan);
+                    }
+
+                    if (node.parameters && node.parameters.length > 0) {
+                        const paramsSpan = document.createElement('span');
+                        paramsSpan.className = 'node-value';
+                        paramsSpan.textContent = ` (${node.parameters.join(', ')})`;
+                        nodeSpan.appendChild(paramsSpan);
+                    }
+
+                    li.appendChild(nodeSpan);
+
+                    // Add children recursively
+                    if (node.children && node.children.length > 0) {
+                        const childUl = document.createElement('ul');
+                        node.children.forEach(child => {
+                            renderNode(child, childUl);
+                        });
+                        li.appendChild(childUl);
+
+                        // Add expand/collapse functionality
+                        nodeSpan.addEventListener('click', function () {
+                            li.classList.toggle('collapsed');
+                            li.classList.toggle('expanded');
+                        });
+                    }
+
+                    // Add value as a child if it's an object
+                    if (node.value && typeof node.value === 'object') {
+                        const childUl = document.createElement('ul');
+                        renderNode(node.value, childUl);
+                        li.appendChild(childUl);
+                    }
+
+                    // Add arguments as children
+                    if (node.arguments && node.arguments.length > 0) {
+                        const childUl = document.createElement('ul');
+                        node.arguments.forEach(arg => {
+                            renderNode(arg, childUl);
+                        });
+                        li.appendChild(childUl);
+                    }
+
+                    // Add receiver as a child
+                    if (node.receiver) {
+                        const childUl = document.createElement('ul');
+                        const receiverLi = document.createElement('li');
+                        const receiverSpan = document.createElement('span');
+                        receiverSpan.className = 'node-type';
+                        receiverSpan.textContent = 'RECEIVER';
+                        receiverLi.appendChild(receiverSpan);
+                        childUl.appendChild(receiverLi);
+
+                        const receiverChildUl = document.createElement('ul');
+                        renderNode(node.receiver, receiverChildUl);
+                        receiverLi.appendChild(receiverChildUl);
+                        li.appendChild(childUl);
+                    }
+
+                    parentUl.appendChild(li);
+                }
+
+                renderNode(ast, ul);
+                parentElement.innerHTML = '';
+                parentElement.appendChild(ul);
+            }
+
+            // Initial render with example AST
+            renderAst(exampleAst, astTree);
+
+            // Parse button click handler
+            parseBtn.addEventListener('click', function () {
+                const rubyCode = rubyCodeTextarea.value;
+
+                if (!rubyCode.trim()) {
+                    errorMessage.textContent = 'Please enter some Ruby code.';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                // Show loading indicator
+                astTree.style.display = 'none';
+                errorMessage.style.display = 'none';
+                loading.style.display = 'block';
+
+                // Send the code to the server for parsing
+                fetch('http://localhost:3000/parse', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ code: rubyCode }),
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(errorData => {
+                                throw new Error(errorData.error + ': ' + errorData.details.join(', '));
+                            }).catch(e => {
+                                throw new Error('Failed to parse code: ' + response.statusText);
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Hide loading indicator
+                        loading.style.display = 'none';
+                        astTree.style.display = 'block';
+
+                        // Render the AST
+                        renderAst(data, astTree);
+                    })
+                    .catch(error => {
+                        // Hide loading indicator
+                        loading.style.display = 'none';
+
+                        // Show error message
+                        if (error.message.includes('Failed to fetch')) {
+                            errorMessage.textContent = `Error: Could not connect to the server. Make sure the server is running with 'cargo run --bin ast_server' and try again.`;
+                        } else {
+                            errorMessage.textContent = `Error: ${error.message}`;
+                        }
+                        errorMessage.style.display = 'block';
+
+                        // Show the example AST
+                        astTree.style.display = 'block';
+                        renderAst(exampleAst, astTree);
+                    });
+            });
+
+            // Clear button click handler
+            clearBtn.addEventListener('click', function () {
+                rubyCodeTextarea.value = '';
+                errorMessage.style.display = 'none';
+            });
+        });
+    </script>
+</body>
+
+</html>
