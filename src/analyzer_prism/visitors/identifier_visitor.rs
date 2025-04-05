@@ -37,6 +37,40 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
+    /// Extract namespace parts from a ConstantPathNode
+    /// This method extracts all namespace parts from a constant path node, excluding the rightmost part
+    /// For example, for Foo::Bar::Baz, it will return [Foo, Bar]
+    pub fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
+        let mut namespace_parts = Vec::new();
+
+        // Start with the parent node if it exists
+        if let Some(parent) = node.parent() {
+            // Handle different parent node types
+            if let Some(parent_path) = parent.as_constant_path_node() {
+                // For nested paths like Foo::Bar::Baz, recursively extract parts
+                let mut parent_parts = self.extract_namespace_parts(&parent_path);
+
+                // Add the parent's name
+                if let Some(name) = parent_path.name() {
+                    let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
+                    if let Ok(namespace) = RubyNamespace::new(&name_str) {
+                        parent_parts.push(namespace);
+                    }
+                }
+
+                namespace_parts.extend(parent_parts);
+            } else if let Some(constant_read) = parent.as_constant_read_node() {
+                // For simple paths like Foo::Bar, add the parent directly
+                let name_str = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                if let Ok(namespace) = RubyNamespace::new(&name_str) {
+                    namespace_parts.push(namespace);
+                }
+            }
+        }
+
+        namespace_parts
+    }
+
     /// Based on a constant node target, a constant path node parent and a position, this method will find the exact
     /// portion of the constant path that matches the requested position, for higher precision in hover and
     /// definition. For example:

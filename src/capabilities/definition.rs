@@ -64,7 +64,7 @@ pub async fn find_definition_at_position(
                 let mut combined_ns = search_namespaces.clone();
                 combined_ns.extend(ns.iter().cloned());
 
-                let search_fqn = FullyQualifiedName::Namespace(combined_ns);
+                let search_fqn = FullyQualifiedName::Constant(combined_ns, constant.clone());
 
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
