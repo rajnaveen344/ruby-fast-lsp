@@ -37,40 +37,6 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
-    /// Extract namespace parts from a ConstantPathNode
-    /// This method extracts all namespace parts from a constant path node, excluding the rightmost part
-    /// For example, for Foo::Bar::Baz, it will return [Foo, Bar]
-    pub fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
-        let mut namespace_parts = Vec::new();
-
-        // Start with the parent node if it exists
-        if let Some(parent) = node.parent() {
-            // Handle different parent node types
-            if let Some(parent_path) = parent.as_constant_path_node() {
-                // For nested paths like Foo::Bar::Baz, recursively extract parts
-                let mut parent_parts = self.extract_namespace_parts(&parent_path);
-
-                // Add the parent's name
-                if let Some(name) = parent_path.name() {
-                    let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
-                    if let Ok(namespace) = RubyNamespace::new(&name_str) {
-                        parent_parts.push(namespace);
-                    }
-                }
-
-                namespace_parts.extend(parent_parts);
-            } else if let Some(constant_read) = parent.as_constant_read_node() {
-                // For simple paths like Foo::Bar, add the parent directly
-                let name_str = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-                if let Ok(namespace) = RubyNamespace::new(&name_str) {
-                    namespace_parts.push(namespace);
-                }
-            }
-        }
-
-        namespace_parts
-    }
-
     /// Based on a constant node target, a constant path node parent and a position, this method will find the exact
     /// portion of the constant path that matches the requested position, for higher precision in hover and
     /// definition. For example:
@@ -81,7 +47,10 @@ impl IdentifierVisitor {
     ///      ^ Going to definition here should go to Foo::Bar - Parent of ConstantPathNode BAZ
     /// ^ Going to definition here should go to Foo - Parent of ConstantPathNode Bar
     /// ```
-    pub fn determine_const_path_target(&self, target: &ConstantPathNode) -> Vec<RubyNamespace> {
+    pub fn determine_const_path_target(
+        &self,
+        target: &ConstantPathNode,
+    ) -> (Vec<RubyNamespace>, bool) {
         // Extract the full constant path text and cursor position
         let position_offset = lsp_pos_to_prism_loc(self.position, &self.code);
         let code = self.code.as_bytes();
@@ -89,8 +58,12 @@ impl IdentifierVisitor {
         let end = target.location().end_offset();
         let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
 
-        // Handle constant paths with multiple parts (e.g., Foo::Bar::Baz)
+        // Check if this is a root constant path (starts with ::)
+        let is_root_constant = target_str.starts_with("::");
+
+        // Handle constant paths with multiple parts (e.g., Foo::Bar::Baz or ::GLOBAL_CONSTANT)
         if target_str.contains("::") {
+            // Split the path into parts
             let parts: Vec<&str> = target_str.split("::").collect();
 
             // Find which part the cursor is on
@@ -124,19 +97,38 @@ impl IdentifierVisitor {
 
             // If cursor is on scope resolution operator, return empty vector
             if on_scope_resolution {
-                return Vec::new();
+                return (Vec::new(), false);
             }
 
-            // Return namespaces up to and including the cursor part
-            return parts[0..=cursor_part_index]
+            // Handle root constants (starting with ::)
+            if is_root_constant {
+                // If we're on the constant part (after ::), we need special handling
+                if parts[0].is_empty() {
+                    // For root constants, we need to skip the empty first segment
+                    // and return the remaining parts
+                    let result = parts[1..=cursor_part_index]
+                        .iter()
+                        .filter(|part| !part.is_empty()) // Skip empty parts
+                        .map(|part| RubyNamespace::new(part).unwrap())
+                        .collect::<Vec<RubyNamespace>>();
+
+                    return (result, true);
+                }
+            }
+
+            // For regular constants (not root), or if we're on a part before the constant
+            let result = parts[0..=cursor_part_index]
                 .iter()
+                .filter(|part| !part.is_empty()) // Skip empty parts
                 .map(|part| RubyNamespace::new(part).unwrap())
-                .collect();
+                .collect::<Vec<RubyNamespace>>();
+
+            return (result, is_root_constant);
         }
 
         // Handle simple constant (not a path)
         let name = String::from_utf8_lossy(target.name().unwrap().as_slice()).to_string();
-        vec![RubyNamespace::new(&name).unwrap()]
+        (vec![RubyNamespace::new(&name).unwrap()], is_root_constant)
     }
 }
 
@@ -170,7 +162,7 @@ impl Visit<'_> for IdentifierVisitor {
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
         if self.is_position_in_location(&node.location()) && self.identifier.is_none() {
             // Get all namespace parts
-            let mut namespaces = self.determine_const_path_target(node);
+            let (mut namespaces, is_root_constant) = self.determine_const_path_target(node);
 
             // Handle the case when cursor is on scope resolution operator
             if namespaces.is_empty() {
@@ -192,7 +184,11 @@ impl Visit<'_> for IdentifierVisitor {
                     }
                 }
 
-                self.ancestors = self.namespace_stack.clone();
+                if is_root_constant {
+                    self.ancestors = vec![];
+                } else {
+                    self.ancestors = self.namespace_stack.clone();
+                }
             }
         }
     }
@@ -247,8 +243,59 @@ mod tests {
             position
         );
 
+        // Get the identifier for further processing
+        let identifier = visitor.identifier.as_ref().unwrap();
+
+        // Special case for root constants
+        if code.starts_with("::") {
+            match identifier {
+                FullyQualifiedName::Constant(parts, constant) => {
+                    // For root constants, we expect an empty namespace vector
+                    if expected_parts.len() == 1 {
+                        // For direct root constants like ::GLOBAL_CONSTANT
+                        assert_eq!(
+                            parts.len(),
+                            0,
+                            "Expected empty namespace vector for root constant"
+                        );
+                        assert_eq!(
+                            constant.to_string(),
+                            expected_parts[0],
+                            "Expected constant name to match"
+                        );
+                    } else {
+                        // For nested root constants like ::Foo::Bar::CONSTANT
+                        assert_eq!(
+                            parts.len(),
+                            expected_parts.len() - 1,
+                            "Namespace parts count mismatch for root constant path"
+                        );
+                        for (i, expected_part) in expected_parts
+                            .iter()
+                            .take(expected_parts.len() - 1)
+                            .enumerate()
+                        {
+                            assert_eq!(
+                                parts[i].to_string(),
+                                *expected_part,
+                                "Namespace part at index {} mismatch",
+                                i
+                            );
+                        }
+                        assert_eq!(
+                            constant.to_string(),
+                            expected_parts[expected_parts.len() - 1],
+                            "Expected constant name to match"
+                        );
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Get the parts from the identifier - could be either a namespace or a constant
-        let parts = match &visitor.identifier.unwrap() {
+        let parts = match identifier {
             FullyQualifiedName::Namespace(parts) => parts.clone(),
             FullyQualifiedName::Constant(parts, _) => parts.clone(),
             _ => panic!("Expected a Namespace or Constant FQN"),
@@ -310,5 +357,23 @@ mod tests {
         // Test case: Foo::Bar::Baz with cursor at second "::"
         // Empty vector indicates we expect identifier to be None
         test_visitor("Foo::Bar::Baz", Position::new(0, 8), vec![]);
+    }
+
+    #[test]
+    fn test_root_constant_read_node() {
+        test_visitor(
+            "::GLOBAL_CONSTANT",
+            Position::new(0, 2),
+            vec!["GLOBAL_CONSTANT"],
+        );
+    }
+
+    #[test]
+    fn test_root_constant_path_node() {
+        test_visitor(
+            "::Foo::Bar::GLOBAL_CONSTANT",
+            Position::new(0, 12),
+            vec!["Foo", "Bar", "GLOBAL_CONSTANT"],
+        );
     }
 }

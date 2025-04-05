@@ -13,6 +13,9 @@ module Outer
         puts INNER_CONSTANT
         puts CLASS_CONSTANT
         puts ::GLOBAL_CONSTANT
+        puts ::Outer::OUTER_CONSTANT
+        puts ::Outer::Inner::INNER_CONSTANT
+        puts ::Outer::Inner::Klass::CLASS_CONSTANT
       end
     end
 
