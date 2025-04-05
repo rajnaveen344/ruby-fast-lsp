@@ -5,28 +5,55 @@ use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::RubyIndexer;
 
-/// Find the definition of a symbol at the given position
+/// Find the definition(s) of a symbol at the given position
+///
+/// Returns a vector of locations if definitions are found, or None if no definitions are found.
+/// Multiple definitions can be returned when a symbol is defined in multiple places.
 pub async fn find_definition_at_position(
     indexer: &RubyIndexer,
     position: Position,
     content: &str,
-) -> Option<Location> {
+) -> Option<Vec<Location>> {
     // Use the analyzer to find the identifier at the position
     let analyzer = RubyPrismAnalyzer::new(content.to_string());
     let (identifier, ancestors) = analyzer.get_identifier(position);
 
-    if let None = identifier {
-        info!("No identifier found at position {:?}", position);
-        return None;
-    }
+    // Extract the fully qualified name if available
+    let fqn = match identifier {
+        Some(fqn) => {
+            info!("Looking for definition of: {}", fqn);
+            fqn
+        }
+        None => {
+            info!("No identifier found at position {:?}", position);
+            return None;
+        }
+    };
 
-    let fqn = identifier.unwrap();
-
-    info!("Looking for definition of: {}", fqn);
-
+    // Get the index and search for the definition
     let index = indexer.index();
     let index_guard = index.lock().unwrap();
 
+    // Store all found locations
+    let mut found_locations = Vec::new();
+
+    // First try to find the definition directly
+    if let Some(entries) = index_guard.definitions.get(&fqn) {
+        if !entries.is_empty() {
+            info!("Found {} direct definition(s) for: {}", entries.len(), fqn);
+            // Add all locations to our result
+            for entry in entries {
+                found_locations.push(entry.location.clone());
+            }
+        }
+    }
+
+    // If we found direct definitions, return them
+    if !found_locations.is_empty() {
+        return Some(found_locations);
+    }
+
+    // If not found directly, try based on the FQN type
     match fqn.clone() {
         FullyQualifiedName::Constant(ns, constant) => {
             // Start with the current namespace and ancestors
@@ -42,10 +69,15 @@ pub async fn find_definition_at_position(
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
                         info!(
-                            "Found constant definition in ancestor namespace for: {}",
+                            "Found {} constant definition(s) in ancestor namespace for: {}",
+                            entries.len(),
                             search_fqn
                         );
-                        return Some(entries[0].location.clone());
+                        // Add all locations to our result
+                        for entry in entries {
+                            found_locations.push(entry.location.clone());
+                        }
+                        return Some(found_locations);
                     }
                 }
 
@@ -58,10 +90,15 @@ pub async fn find_definition_at_position(
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
                     info!(
-                        "Found constant definition at top level for: {}",
+                        "Found {} constant definition(s) at top level for: {}",
+                        entries.len(),
                         top_level_fqn
                     );
-                    return Some(entries[0].location.clone());
+                    // Add all locations to our result
+                    for entry in entries {
+                        found_locations.push(entry.location.clone());
+                    }
+                    return Some(found_locations);
                 }
             }
         }
@@ -80,10 +117,15 @@ pub async fn find_definition_at_position(
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
                         info!(
-                            "Found namespace definition in ancestor namespace for: {}",
+                            "Found {} namespace definition(s) in ancestor namespace for: {}",
+                            entries.len(),
                             search_fqn
                         );
-                        return Some(entries[0].location.clone());
+                        // Add all locations to our result
+                        for entry in entries {
+                            found_locations.push(entry.location.clone());
+                        }
+                        return Some(found_locations);
                     }
                 }
 
@@ -96,10 +138,15 @@ pub async fn find_definition_at_position(
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
                     info!(
-                        "Found namespace definition at top level for: {}",
+                        "Found {} namespace definition(s) at top level for: {}",
+                        entries.len(),
                         top_level_fqn
                     );
-                    return Some(entries[0].location.clone());
+                    // Add all locations to our result
+                    for entry in entries {
+                        found_locations.push(entry.location.clone());
+                    }
+                    return Some(found_locations);
                 }
             }
         }
@@ -111,5 +158,11 @@ pub async fn find_definition_at_position(
     }
 
     info!("No definition found for {}", fqn);
-    None
+
+    // If we found any locations during the search, return them
+    if !found_locations.is_empty() {
+        Some(found_locations)
+    } else {
+        None
+    }
 }

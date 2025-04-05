@@ -9,7 +9,7 @@ module Foo
     end
   end
 
-  Foo::Bar::Baz
+  puts Foo::Bar::Baz
 end
 
 puts Foo::Bar::Baz.foo

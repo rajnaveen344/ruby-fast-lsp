@@ -66,9 +66,17 @@ pub async fn handle_goto_definition(
     let indexer = lang_server.indexer.lock().await;
     let definition = definition::find_definition_at_position(&indexer, position, &content).await;
 
-    // Convert Location to GotoDefinitionResponse
+    // Convert Vec<Location> to GotoDefinitionResponse
     match definition {
-        Some(location) => Ok(Some(GotoDefinitionResponse::Scalar(location))),
+        Some(locations) => {
+            if locations.len() == 1 {
+                // If there's only one location, return a scalar response
+                Ok(Some(GotoDefinitionResponse::Scalar(locations[0].clone())))
+            } else {
+                // If there are multiple locations, return an array response
+                Ok(Some(GotoDefinitionResponse::Array(locations)))
+            }
+        }
         None => Ok(None),
     }
 }
