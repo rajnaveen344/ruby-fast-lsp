@@ -48,82 +48,42 @@ impl IdentifierVisitor {
     /// ^ Going to definition here should go to Foo - Parent of ConstantPathNode Bar
     /// ```
     pub fn determine_const_path_target(&self, target: &ConstantPathNode) -> Vec<RubyNamespace> {
-        // Get the position offset
+        // Extract the full constant path text and cursor position
         let position_offset = lsp_pos_to_prism_loc(self.position, &self.code);
-
-        // Get the code being parsed
         let code = self.code.as_bytes();
-
-        // For "Foo::Bar::Baz", we need to determine which part the cursor is on
         let start = target.location().start_offset();
         let end = target.location().end_offset();
-        let target_text = &code[start..end];
-        let target_str = String::from_utf8_lossy(target_text).to_string();
-
-        // Check if we're dealing with a constant path with multiple parts
+        let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
+        
+        // Handle constant paths with multiple parts (e.g., Foo::Bar::Baz)
         if target_str.contains("::") {
-            // Split the path by "::"
             let parts: Vec<&str> = target_str.split("::").collect();
-
+            
             // Find which part the cursor is on
-            let mut current_offset = target.location().start_offset();
-            let mut cursor_part_index = 0;
-
+            let mut current_offset = start;
+            let mut cursor_part_index = parts.len() - 1; // Default to last part
+            
             for (i, part) in parts.iter().enumerate() {
                 let part_end = current_offset + part.len();
-
-                // Check if cursor is within this part
+                
                 if position_offset >= current_offset && position_offset < part_end {
                     cursor_part_index = i;
                     break;
                 }
-
-                // Move past this part and the "::" separator
+                
                 current_offset = part_end + 2; // +2 for "::"
             }
-
-            // Create namespaces for parts up to and including the cursor part
-            let mut namespaces = Vec::new();
-            for i in 0..=cursor_part_index {
-                namespaces.push(RubyNamespace::new(parts[i]).unwrap());
-            }
-
-            return namespaces;
+            
+            // Return namespaces up to and including the cursor part
+            return parts[0..=cursor_part_index]
+                .iter()
+                .map(|part| RubyNamespace::new(part).unwrap())
+                .collect();
         }
-
-        // For simple cases or when we can't determine the parts, fall back to the original behavior
-        let mut namespaces = Vec::new();
-
-        // Get the name of the target node
+        
+        // Handle simple constant (not a path)
         let name = String::from_utf8_lossy(target.name().unwrap().as_slice()).to_string();
-
-        // If this is a simple constant (not a path), just return it
-        if !target_str.contains("::") {
-            namespaces.push(RubyNamespace::new(&name).unwrap());
-            return namespaces;
-        }
-
-        // For other cases, try to build the path
-        let mut parts = Vec::new();
-        parts.push(name);
-
-        // Check for parent nodes
-        if let Some(parent) = target.parent() {
-            if let Some(cr) = parent.as_constant_read_node() {
-                let parent_name = String::from_utf8_lossy(cr.name().as_slice()).to_string();
-                parts.push(parent_name);
-            }
-        }
-
-        // Reverse to get the correct order
-        parts.reverse();
-
-        // Convert to namespaces
-        for part in parts {
-            namespaces.push(RubyNamespace::new(&part).unwrap());
-        }
-
-        namespaces
+        vec![RubyNamespace::new(&name).unwrap()]
     }
 }
 
