@@ -15,46 +15,36 @@ pub async fn find_definition_at_position(
     let analyzer = RubyPrismAnalyzer::new(content.to_string());
     let (identifier, ancestors) = analyzer.get_identifier(position);
 
-    let fqn = match identifier {
-        Some(fqn) => {
-            info!("Looking for definition of: {}", fqn);
-            fqn
-        }
-        None => {
-            info!("No identifier found at position {:?}", position);
-            return None;
-        }
-    };
+    if let None = identifier {
+        info!("No identifier found at position {:?}", position);
+        return None;
+    }
 
-    // Get the index
+    let fqn = identifier.unwrap();
+
+    info!("Looking for definition of: {}", fqn);
+
     let index = indexer.index();
     let index_guard = index.lock().unwrap();
 
-    // First, try to find the definition directly
-    // if let Some(entries) = index_guard.definitions.get(&fqn) {
-    //     if !entries.is_empty() {
-    //         info!("Found definition directly for: {}", fqn);
-    //         return Some(entries[0].location.clone());
-    //     }
-    // }
-
-    // If not found directly, try to find it in the ancestor namespaces
-    // This is primarily for constants where we need to check parent namespaces
-    match fqn {
-        FullyQualifiedName::Constant(_ns, constant) => {
+    match fqn.clone() {
+        FullyQualifiedName::Constant(ns, constant) => {
             // Start with the current namespace and ancestors
             let mut search_namespaces = ancestors.clone();
 
-            // Keep searching up the namespace hierarchy
+            // Search through ancestor namespaces
             while !search_namespaces.is_empty() {
-                // Create a new FQN with the current search namespace
-                let search_fqn =
-                    FullyQualifiedName::Constant(search_namespaces.clone(), constant.clone());
+                let mut combined_ns = search_namespaces.clone();
+                combined_ns.extend(ns.iter().cloned());
 
-                // Look for the definition
+                let search_fqn = FullyQualifiedName::Namespace(combined_ns);
+
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
-                        info!("Found definition in ancestor namespace for: {}", search_fqn);
+                        info!(
+                            "Found constant definition in ancestor namespace for: {}",
+                            search_fqn
+                        );
                         return Some(entries[0].location.clone());
                     }
                 }
@@ -64,22 +54,26 @@ pub async fn find_definition_at_position(
             }
 
             // Try at the top level (empty namespace)
-            let top_level_fqn = FullyQualifiedName::Constant(Vec::new(), constant.clone());
+            let top_level_fqn = FullyQualifiedName::Constant(ns, constant.clone());
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
-                    info!("Found definition at top level for: {}", top_level_fqn);
+                    info!(
+                        "Found constant definition at top level for: {}",
+                        top_level_fqn
+                    );
                     return Some(entries[0].location.clone());
                 }
             }
         }
         FullyQualifiedName::Namespace(ref ns) => {
-            // Similar approach for namespaces
+            // Start with the current namespace and ancestors
             let mut search_namespaces = ancestors.clone();
 
+            // Search through ancestor namespaces
             while !search_namespaces.is_empty() {
                 // For each ancestor, try to find the namespace
                 let mut combined_ns = search_namespaces.clone();
-                combined_ns.extend(ns.clone());
+                combined_ns.extend(ns.iter().cloned());
 
                 let search_fqn = FullyQualifiedName::Namespace(combined_ns);
 
@@ -110,9 +104,12 @@ pub async fn find_definition_at_position(
             }
         }
         // For now, we're only handling constants and namespaces as specified
-        _ => {}
+        _ => {
+            info!("Unsupported identifier type: {:?}", fqn);
+            return None;
+        }
     }
 
-    info!("No definition found");
+    info!("No definition found for {}", fqn);
     None
 }
