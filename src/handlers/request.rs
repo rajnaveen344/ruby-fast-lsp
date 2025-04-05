@@ -64,8 +64,7 @@ pub async fn handle_goto_definition(
     let position = params.text_document_position_params.position;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
     let indexer = lang_server.indexer.lock().await;
-    let definition =
-        definition::find_definition_at_position(&indexer, &uri, position, &content).await;
+    let definition = definition::find_definition_at_position(&indexer, position, &content).await;
 
     // Convert Location to GotoDefinitionResponse
     match definition {
