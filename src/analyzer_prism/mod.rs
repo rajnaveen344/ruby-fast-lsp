@@ -26,40 +26,7 @@ impl RubyPrismAnalyzer {
         self.namespace_stack.clone()
     }
 
-    /// Based on a constant node target, a constant path node parent and a position, this method will find the exact
-    /// portion of the constant path that matches the requested position, for higher precision in hover and
-    /// definition. For example:
-    ///
-    /// ```ruby
-    /// Foo::Bar::Baz
-    ///           ^ Going to definition here should go to Foo::Bar::Baz
-    ///      ^ Going to definition here should go to Foo::Bar
-    ///  ^ Going to definition here should go to Foo
-    /// ```
-    ///
-    /// ```ruby
-    /// module Outer
-    ///   module Inner
-    ///     CONST_A = 1
-    ///   end
-    /// end
-
-    /// CONST_B = Inner::CONST_A
-    ///                  ^ get_identifier at this position should return (Inner::CONST_A, [Outer])
-    ///           ^ get_identifier at this position should return (Inner, [Outer])
-    /// ^ References - TODO
-    /// CONST_C = ::Outer::Inner::CONST_A
-    ///                           ^ get_identifier at this position should return (Outer::Inner::CONST_A, [])
-    ///                    ^ get_identifier at this position should return (Outer::Inner, [])
-    ///             ^ get_identifier at this position should return (Outer, [])
-    /// end
-    ///
-    /// TopLevelConst = 10
-    /// val = TopLevelConst
-    /// val2 = Outer::Inner
-    /// ```
-    ///
-    /// Returns the identifier and the namespace stack at the time of the lookup.
+    /// Returns the identifier and the ancestors stack at the time of the lookup.
     pub fn get_identifier(
         &self,
         position: Position,
@@ -68,7 +35,7 @@ impl RubyPrismAnalyzer {
         let mut visitor = IdentifierVisitor::new(self.code.clone(), position);
         let root_node = parse_result.node();
         visitor.visit(&root_node);
-        (visitor.identifier, visitor.namespace_stack)
+        (visitor.identifier, visitor.ancestors)
     }
 }
 
@@ -83,12 +50,12 @@ mod tests {
 
     #[test]
     fn test_get_identifier_simple_constant() {
-        let content = "CONST_A = 1";
+        let content = "CONST_A";
         let analyzer = create_analyzer(content);
 
         // Position cursor at "CONST_A"
         let position = Position::new(0, 2);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -105,7 +72,7 @@ mod tests {
         }
 
         assert!(
-            namespaces.is_empty(),
+            ancestors.is_empty(),
             "Namespace stack should be empty for top-level constant"
         );
     }
@@ -125,7 +92,7 @@ CONST_B = Outer::Inner::CONST_A
 
         // Test position at "CONST_A" in the "Outer::Inner::CONST_A" reference
         let position = Position::new(7, 24);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -141,13 +108,13 @@ CONST_B = Outer::Inner::CONST_A
         }
 
         assert!(
-            namespaces.is_empty(),
+            ancestors.is_empty(),
             "Namespace stack should be empty as lookup is absolute"
         );
 
         // Test position at "Inner" in the "Outer::Inner::CONST_A" reference
         let position = Position::new(7, 17);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -162,7 +129,7 @@ CONST_B = Outer::Inner::CONST_A
         }
 
         assert!(
-            namespaces.is_empty(),
+            ancestors.is_empty(),
             "Namespace stack should be empty for absolute reference"
         );
     }
@@ -182,7 +149,7 @@ end
 
         // Test position at "CONST_A" in the "Inner::CONST_A" reference (relative reference)
         let position = Position::new(6, 19);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -197,8 +164,8 @@ end
         }
 
         // There should be one namespace in the stack (Outer) as we're inside it
-        assert_eq!(namespaces.len(), 1);
-        assert_eq!(namespaces[0].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 1);
+        assert_eq!(ancestors[0].to_string(), "Outer");
     }
 
     #[test]
@@ -216,7 +183,7 @@ CONST_C = ::Outer::Inner::CONST_A
 
         // Test position at "CONST_A" in the "::Outer::Inner::CONST_A" reference (absolute reference)
         let position = Position::new(7, 27);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -232,13 +199,13 @@ CONST_C = ::Outer::Inner::CONST_A
         }
 
         assert!(
-            namespaces.is_empty(),
+            ancestors.is_empty(),
             "Namespace stack should be empty for absolute reference"
         );
 
         // Test position at "Outer" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 12);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -252,7 +219,7 @@ CONST_C = ::Outer::Inner::CONST_A
         }
 
         assert!(
-            namespaces.is_empty(),
+            ancestors.is_empty(),
             "Namespace stack should be empty for absolute reference"
         );
     }
@@ -269,7 +236,7 @@ end
 
         // Test position at "TopLevelConst" in the "val = TopLevelConst" reference
         let position = Position::new(3, 10);
-        let (fqn_opt, namespaces) = analyzer.get_identifier(position);
+        let (fqn_opt, ancestors) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let fqn = fqn_opt.expect("Expected to find an identifier at this position");
@@ -286,7 +253,7 @@ end
         }
 
         // There should be one namespace in the stack (Outer) as we're inside it
-        assert_eq!(namespaces.len(), 1);
-        assert_eq!(namespaces[0].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 1);
+        assert_eq!(ancestors[0].to_string(), "Outer");
     }
 }
