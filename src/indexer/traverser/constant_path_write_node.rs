@@ -66,7 +66,7 @@ impl Visitor {
     }
 
     // Helper method to extract namespace parts from a ConstantPathNode
-    fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
+    pub fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
         let mut namespace_parts = Vec::new();
 
         // Start with the parent node if it exists

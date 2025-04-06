@@ -20,9 +20,23 @@ impl Visitor {
             return;
         }
 
-        self.namespace_stack.push(namespace.unwrap());
+        let namespace = namespace.unwrap();
 
-        let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
+        // Check if this is a constant path (e.g., A::B::C)
+        let const_path = node.constant_path();
+        let fqn = if let Some(path_node) = const_path.as_constant_path_node() {
+            // Extract namespace parts from the constant path
+            let mut namespace_parts = self.extract_namespace_parts(&path_node);
+            // Add the current module name to the namespace parts
+            namespace_parts.push(namespace.clone());
+            // Push the namespace to the stack for proper scoping during traversal
+            self.namespace_stack.extend(namespace_parts.clone());
+            FullyQualifiedName::namespace(self.namespace_stack.clone())
+        } else {
+            // Regular module definition (not a constant path)
+            self.namespace_stack.push(namespace);
+            FullyQualifiedName::namespace(self.namespace_stack.clone())
+        };
 
         let entry = EntryBuilder::new()
             .fqn(fqn)
