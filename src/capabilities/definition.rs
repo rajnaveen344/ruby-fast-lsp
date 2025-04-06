@@ -1,5 +1,6 @@
 use log::{debug, info};
 use lsp_types::{Location, Position};
+use std::time::Instant;
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::indexer::entry::{entry_kind::EntryKind, MethodKind, MethodOrigin};
@@ -17,7 +18,11 @@ pub async fn find_definition_at_position(
 ) -> Option<Vec<Location>> {
     // Use the analyzer to find the identifier at the position
     let analyzer = RubyPrismAnalyzer::new(content.to_string());
+
+    let start_time = Instant::now();
     let (identifier, ancestors) = analyzer.get_identifier(position);
+    let identifier_time = start_time.elapsed();
+    info!("Performance: get_identifier took {:?}", identifier_time);
 
     // Extract the fully qualified name if available
     if let None = identifier {
