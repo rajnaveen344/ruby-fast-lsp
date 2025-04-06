@@ -4,6 +4,18 @@ module Outer
   module Inner
     INNER_CONSTANT = "Inner constant"
 
+    module Outer::Mod2
+      MOD2_CONSTANT = "Mod2 constant"
+    end
+
+    class Outer::Klass2
+      K2_CONSTANT = "Klass2 constant"
+    end
+
+    class Outer2::Inner::Klass3
+      K3_CONSTANT = "Klass3 constant"
+    end
+
     class Klass
       CLASS_CONSTANT = "Class constant"
 
@@ -35,3 +47,5 @@ puts Outer::OUTER_CONSTANT
 puts Outer::Inner::INNER_CONSTANT
 puts Outer::Inner::Klass::CLASS_CONSTANT
 puts GLOBAL_CONSTANT
+puts Outer::Mod2::MOD2_CONSTANT
+puts Outer::Klass2::KLASS2_CONSTANT

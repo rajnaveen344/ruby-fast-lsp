@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, info};
 use lsp_types::{Location, Position};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
@@ -19,39 +19,18 @@ pub async fn find_definition_at_position(
     let (identifier, ancestors) = analyzer.get_identifier(position);
 
     // Extract the fully qualified name if available
-    let fqn = match identifier {
-        Some(fqn) => {
-            debug!("Looking for definition of: {}", fqn);
-            fqn
-        }
-        None => {
-            debug!("No identifier found at position {:?}", position);
-            return None;
-        }
-    };
+    if let None = identifier {
+        info!("No identifier found at position {:?}", position);
+        return None;
+    }
+
+    info!("Looking for definition of: {}", identifier.clone().unwrap());
 
     // Get the index and search for the definition
     let index = indexer.index();
     let index_guard = index.lock().unwrap();
-
-    // Store all found locations
+    let fqn = identifier.unwrap();
     let mut found_locations = Vec::new();
-
-    // First try to find the definition directly
-    if let Some(entries) = index_guard.definitions.get(&fqn) {
-        if !entries.is_empty() {
-            debug!("Found {} direct definition(s) for: {}", entries.len(), fqn);
-            // Add all locations to our result
-            for entry in entries {
-                found_locations.push(entry.location.clone());
-            }
-        }
-    }
-
-    // If we found direct definitions, return them
-    if !found_locations.is_empty() {
-        return Some(found_locations);
-    }
 
     // If not found directly, try based on the FQN type
     match fqn.clone() {
@@ -68,7 +47,7 @@ pub async fn find_definition_at_position(
 
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
-                        debug!(
+                        info!(
                             "Found {} constant definition(s) in ancestor namespace for: {}",
                             entries.len(),
                             search_fqn
@@ -89,7 +68,7 @@ pub async fn find_definition_at_position(
             let top_level_fqn = FullyQualifiedName::Constant(ns, constant.clone());
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
-                    debug!(
+                    info!(
                         "Found {} constant definition(s) at top level for: {}",
                         entries.len(),
                         top_level_fqn
