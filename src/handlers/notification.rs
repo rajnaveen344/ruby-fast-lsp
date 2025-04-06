@@ -2,13 +2,16 @@ use crate::indexer::events;
 use crate::server::RubyLanguageServer;
 use log::{debug, error, info};
 use lsp_types::*;
+use std::time::Instant;
 
 pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {
     info!("Server initialized");
 }
 
 pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
-    debug!("Did open: {:?}", params.text_document.uri.as_str());
+    let start_time = Instant::now();
+    // Did open handler started
+
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
     let mut indexer = lang_server.indexer.lock().await;
@@ -17,6 +20,8 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     if let Err(e) = res {
         error!("Error indexing document: {}", e);
     }
+
+    debug!("[PERF] File indexed in {:?}", start_time.elapsed());
 }
 
 pub async fn handle_did_change(

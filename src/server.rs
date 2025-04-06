@@ -1,7 +1,9 @@
 use crate::handlers::{notification, request};
 use crate::indexer::RubyIndexer;
 use anyhow::Result;
+use log::debug;
 use lsp_types::*;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
@@ -61,24 +63,20 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
-        request::handle_goto_definition(self, params).await
+        let start_time = Instant::now();
+        let result = request::handle_goto_definition(self, params).await;
+
+        debug!(
+            "[PERF] Goto definition completed in {:?}",
+            start_time.elapsed()
+        );
+
+        result
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         request::handle_references(self, params).await
     }
 
-    async fn semantic_tokens_full(
-        &self,
-        params: SemanticTokensParams,
-    ) -> LspResult<Option<SemanticTokensResult>> {
-        request::handle_semantic_tokens_full(self, params).await
-    }
-
-    async fn semantic_tokens_range(
-        &self,
-        params: SemanticTokensRangeParams,
-    ) -> LspResult<Option<SemanticTokensRangeResult>> {
-        request::handle_semantic_tokens_range(self, params).await
-    }
+    // Semantic tokens handlers removed
 }
