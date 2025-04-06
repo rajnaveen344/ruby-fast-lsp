@@ -1,11 +1,12 @@
 use crate::analyzer_prism::position::lsp_pos_to_prism_loc;
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::types::ruby_constant::RubyConstant;
+use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
 use lsp_types::Position;
 use ruby_prism::{
-    visit_class_node, visit_module_node, ClassNode, ConstantPathNode, ConstantReadNode, Location,
-    ModuleNode, Visit,
+    visit_class_node, visit_module_node, CallNode, ClassNode, ConstantPathNode, ConstantReadNode,
+    Location, ModuleNode, Visit,
 };
 
 /// Visitor for finding identifiers at a specific position
@@ -210,6 +211,126 @@ impl Visit<'_> for IdentifierVisitor {
             self.ancestors = self.namespace_stack.clone();
         }
     }
+
+    fn visit_call_node(&mut self, node: &CallNode) {
+        // First, check if the cursor is on the receiver (if any)
+        if let Some(receiver) = node.receiver() {
+            // Check if the receiver is a constant or constant path
+            if let Some(constant_node) = receiver.as_constant_read_node() {
+                if self.is_position_in_location(&constant_node.location())
+                    && self.identifier.is_none()
+                {
+                    // Cursor is on the constant part of a method call (e.g., Foo.bar)
+                    let constant_name =
+                        String::from_utf8_lossy(constant_node.name().as_slice()).to_string();
+
+                    match RubyConstant::new(&constant_name) {
+                        Ok(constant) => {
+                            self.identifier =
+                                Some(FullyQualifiedName::constant(Vec::new(), constant));
+                        }
+                        Err(_) => {
+                            let namespace = RubyNamespace::new(constant_name.as_str()).unwrap();
+                            self.identifier = Some(FullyQualifiedName::namespace(vec![namespace]));
+                        }
+                    }
+
+                    self.ancestors = self.namespace_stack.clone();
+                    return;
+                }
+            } else if let Some(constant_path) = receiver.as_constant_path_node() {
+                if self.is_position_in_location(&constant_path.location())
+                    && self.identifier.is_none()
+                {
+                    // Cursor is on the constant path part of a method call (e.g., Foo::Bar.baz)
+                    // Use the existing constant path handling logic
+                    let (mut namespaces, is_root_constant) =
+                        self.determine_const_path_target(&constant_path);
+
+                    if !namespaces.is_empty() {
+                        if let Some(last_part) = namespaces.last() {
+                            let last_part_str = last_part.to_string();
+
+                            match RubyConstant::new(&last_part_str) {
+                                Ok(constant) => {
+                                    namespaces.pop(); // Remove the last part (constant name)
+                                    self.identifier =
+                                        Some(FullyQualifiedName::constant(namespaces, constant));
+                                }
+                                Err(_) => {
+                                    self.identifier =
+                                        Some(FullyQualifiedName::namespace(namespaces));
+                                }
+                            }
+
+                            if is_root_constant {
+                                self.ancestors = vec![];
+                            } else {
+                                self.ancestors = self.namespace_stack.clone();
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // If we're not on the receiver, check if the cursor is on the method name
+        if let Some(message_loc) = node.message_loc() {
+            if self.is_position_in_location(&message_loc) && self.identifier.is_none() {
+                // Extract the method name
+                let method_name_id = node.name();
+                let method_name_bytes = method_name_id.as_slice();
+                let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
+
+                // Try to create a RubyMethod from the name
+                if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
+                    // Determine if it's an instance method or class method based on the receiver
+                    if let Some(receiver) = node.receiver() {
+                        // Check if the receiver is a constant (class/module)
+                        if let Some(constant_node) = receiver.as_constant_read_node() {
+                            // It's a class method call on a constant
+                            let constant_name =
+                                String::from_utf8_lossy(constant_node.name().as_slice())
+                                    .to_string();
+                            let namespace = RubyNamespace::new(&constant_name).unwrap();
+                            self.identifier = Some(FullyQualifiedName::class_method(
+                                vec![namespace],
+                                method_name,
+                            ));
+                            self.ancestors = vec![]; // Class methods are absolute references
+                        } else if let Some(constant_path) = receiver.as_constant_path_node() {
+                            // It's a class method call on a namespaced constant
+                            let (namespaces, is_root_constant) =
+                                self.determine_const_path_target(&constant_path);
+                            self.identifier =
+                                Some(FullyQualifiedName::class_method(namespaces, method_name));
+                            if is_root_constant {
+                                self.ancestors = vec![];
+                            } else {
+                                self.ancestors = self.namespace_stack.clone();
+                            }
+                        } else {
+                            // It's an instance method call on some other expression
+                            // For now, we'll use the current namespace
+                            self.identifier = Some(FullyQualifiedName::instance_method(
+                                self.namespace_stack.clone(),
+                                method_name,
+                            ));
+                            self.ancestors = self.namespace_stack.clone();
+                        }
+                    } else {
+                        // No receiver, it's a local method call in the current context
+                        self.identifier = Some(FullyQualifiedName::instance_method(
+                            self.namespace_stack.clone(),
+                            method_name,
+                        ));
+                        self.ancestors = self.namespace_stack.clone();
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -375,5 +496,44 @@ mod tests {
             Position::new(0, 12),
             vec!["Foo", "Bar", "GLOBAL_CONSTANT"],
         );
+    }
+
+    #[test]
+    fn test_constant_in_method_call() {
+        // Test case: Foo.bar with cursor at Foo
+        let mut visitor = IdentifierVisitor::new("Foo.bar".to_string(), Position::new(0, 1));
+        let parse_result = ruby_prism::parse("Foo.bar".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Namespace(parts) => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].to_string(), "Foo");
+            }
+            _ => panic!("Expected Namespace FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_constant_path_in_method_call() {
+        // Test case: Foo::Bar.baz with cursor at Bar
+        let mut visitor = IdentifierVisitor::new("Foo::Bar.baz".to_string(), Position::new(0, 6));
+        let parse_result = ruby_prism::parse("Foo::Bar.baz".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Namespace(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Foo");
+                assert_eq!(parts[1].to_string(), "Bar");
+            }
+            _ => panic!("Expected Namespace FQN, got {:?}", identifier),
+        }
     }
 }

@@ -2,6 +2,7 @@ use log::{debug, info};
 use lsp_types::{Location, Position};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
+use crate::indexer::entry::{entry_kind::EntryKind, MethodKind, MethodOrigin};
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::RubyIndexer;
 
@@ -129,11 +130,65 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-        // For now, we're only handling constants and namespaces as specified
-        _ => {
-            debug!("Unsupported identifier type: {:?}", fqn);
-            return None;
+        FullyQualifiedName::InstanceMethod(ns, method) => {
+            // Start with the exact FQN
+            let search_fqn = FullyQualifiedName::InstanceMethod(ns.clone(), method.clone());
+
+            if let Some(entries) = index_guard.definitions.get(&search_fqn) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} instance method definition(s) for: {}",
+                        entries.len(),
+                        search_fqn
+                    );
+
+                    // For now, only include ModuleFunc methods with Direct origin
+                    for entry in entries {
+                        if let EntryKind::Method { kind, origin, .. } = &entry.kind {
+                            if *kind == MethodKind::ModuleFunc
+                                && matches!(origin, MethodOrigin::Direct)
+                            {
+                                found_locations.push(entry.location.clone());
+                            }
+                        }
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
         }
+        FullyQualifiedName::ClassMethod(ns, method) => {
+            // Start with the exact FQN
+            let search_fqn = FullyQualifiedName::ClassMethod(ns.clone(), method.clone());
+
+            if let Some(entries) = index_guard.definitions.get(&search_fqn) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} class method definition(s) for: {}",
+                        entries.len(),
+                        search_fqn
+                    );
+
+                    // For now, only include ModuleFunc methods with Direct origin
+                    for entry in entries {
+                        if let EntryKind::Method { kind, origin, .. } = &entry.kind {
+                            if *kind == MethodKind::ModuleFunc
+                                && matches!(origin, MethodOrigin::Direct)
+                            {
+                                found_locations.push(entry.location.clone());
+                            }
+                        }
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
+        } // All enum variants are now handled
+          // This should never be reached with the current FullyQualifiedName enum
     }
 
     debug!("No definition found for {}", fqn);
