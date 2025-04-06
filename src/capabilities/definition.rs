@@ -133,6 +133,7 @@ pub async fn find_definition_at_position(
         FullyQualifiedName::InstanceMethod(ns, method) => {
             // Start with the exact FQN
             let search_fqn = FullyQualifiedName::InstanceMethod(ns.clone(), method.clone());
+            info!("Searching for instance method with FQN: {}", search_fqn);
 
             if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                 if !entries.is_empty() {
@@ -142,12 +143,18 @@ pub async fn find_definition_at_position(
                         search_fqn
                     );
 
-                    // For now, only include ModuleFunc methods with Direct origin
+                    // Include all instance methods with Direct origin
                     for entry in entries {
                         if let EntryKind::Method { kind, origin, .. } = &entry.kind {
-                            if *kind == MethodKind::ModuleFunc
+                            info!(
+                                "Checking method entry: kind={:?}, origin={:?}",
+                                kind, origin
+                            );
+                            // Accept both Instance and ModuleFunc methods
+                            if (*kind == MethodKind::Instance || *kind == MethodKind::ModuleFunc)
                                 && matches!(origin, MethodOrigin::Direct)
                             {
+                                info!("Adding location: {:?}", entry.location);
                                 found_locations.push(entry.location.clone());
                             }
                         }
