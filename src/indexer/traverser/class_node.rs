@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{debug, error};
 use ruby_prism::ClassNode;
 
 use crate::indexer::{
@@ -11,7 +11,7 @@ use super::Visitor;
 impl Visitor {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) {
         let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        info!("Visiting class node: {}", name_str);
+        debug!("Visiting class node: {}", name_str);
 
         let namespace = RubyNamespace::new(&name_str);
 
@@ -37,7 +37,7 @@ impl Visitor {
             error!("Error adding entry: {}", e);
         }
 
-        info!("Adding class entry: {}", entry.clone().unwrap().fqn);
+        debug!("Adding class entry: {}", entry.clone().unwrap().fqn);
 
         self.index.lock().unwrap().add_entry(entry.unwrap());
     }

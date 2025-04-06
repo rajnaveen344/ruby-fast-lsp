@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{error, info};
+use log::{debug, error, info};
 use lsp_types::Url;
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
@@ -62,7 +62,7 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
     let max_concurrent = std::cmp::max(1, num_cores * 3 / 4);
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-    info!(
+    debug!(
         "Parallelizing indexing with {} concurrent workers for {} files",
         max_concurrent,
         files.len()
@@ -71,7 +71,7 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
     // Create a shared indexer reference
     let index_ref = indexer.index();
     let setup_duration = setup_start.elapsed();
-    info!("Parallel indexing setup completed in {:?}", setup_duration);
+    debug!("Parallel indexing setup completed in {:?}", setup_duration);
 
     // Create a set to track all spawned tasks
     let mut tasks = JoinSet::new();
@@ -117,7 +117,7 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
         });
     }
     let spawn_duration = spawn_start.elapsed();
-    info!(
+    debug!(
         "Spawned {} indexing tasks in {:?}",
         files_count, spawn_duration
     );
@@ -139,7 +139,7 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
 
         // Log progress periodically
         if completed_tasks % 100 == 0 || completed_tasks == files_count {
-            info!(
+            debug!(
                 "Indexed {}/{} files ({} failed)",
                 completed_tasks, files_count, failed_tasks
             );
@@ -149,7 +149,7 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
     let wait_duration = wait_start.elapsed();
     let total_duration = setup_start.elapsed();
 
-    info!(
+    debug!(
         "Parallel indexing completed in {:?} (setup: {:?}, spawn: {:?}, processing: {:?})",
         total_duration, setup_duration, spawn_duration, wait_duration
     );
@@ -179,7 +179,7 @@ fn process_single_file(
     let mut visitor = Visitor::new(index, uri.clone(), content.clone());
     visitor.visit(&node);
 
-    info!("Processed file: {}", uri);
+    debug!("Processed file: {}", uri);
     Ok(())
 }
 
@@ -226,7 +226,7 @@ async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut entries = match fs::read_dir(&current_dir).await {
             Ok(entries) => entries,
             Err(e) => {
-                info!("Error reading directory {}: {}", current_dir.display(), e);
+                debug!("Error reading directory {}: {}", current_dir.display(), e);
                 continue;
             }
         };

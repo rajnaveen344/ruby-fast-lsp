@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use log::info;
+use log::debug;
 use ruby_prism::DefNode;
 
 use crate::indexer::{
@@ -23,7 +23,7 @@ impl Visitor {
             let fqn =
                 FullyQualifiedName::instance_method(current_namespace_path.clone(), method_name);
 
-            info!("Visiting method definition: {}", fqn);
+            debug!("Visiting method definition: {}", fqn);
 
             let owner_fqn = if current_namespace_path.is_empty() {
                 FullyQualifiedName::Namespace(vec![])
@@ -47,11 +47,11 @@ impl Visitor {
 
             let mut index = self.index.lock().unwrap();
             index.add_entry(entry);
-            info!("Added method entry: {}", fqn);
+            debug!("Added method entry: {}", fqn);
 
             self._current_method = Some(fqn.to_string());
         } else {
-            info!("Skipping invalid method name: {}", method_name_str);
+            debug!("Skipping invalid method name: {}", method_name_str);
         }
     }
 

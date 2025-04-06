@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{debug, error};
 use ruby_prism::ModuleNode;
 
 use crate::indexer::{
@@ -11,7 +11,7 @@ use super::Visitor;
 impl Visitor {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
         let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        info!("Visiting module node: {}", name_str);
+        debug!("Visiting module node: {}", name_str);
 
         let namespace = RubyNamespace::new(&name_str);
 
@@ -35,7 +35,7 @@ impl Visitor {
             return;
         }
 
-        info!("Adding module entry: {}", entry.clone().unwrap().fqn);
+        debug!("Adding module entry: {}", entry.clone().unwrap().fqn);
 
         self.index.lock().unwrap().add_entry(entry.unwrap());
     }

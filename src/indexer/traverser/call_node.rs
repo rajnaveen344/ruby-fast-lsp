@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use ruby_prism::CallNode;
 
 use crate::indexer::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
@@ -30,7 +30,7 @@ impl Visitor {
                         method_name,
                     );
 
-                    info!(
+                    debug!(
                         "Found potential method reference: {} at {:?}",
                         fqn, location.range.start
                     );
@@ -40,14 +40,14 @@ impl Visitor {
                     index.add_reference(fqn, location);
                 } else {
                     // Fallback or log if message location is not available
-                    info!(
+                    debug!(
                         "Could not get message location for call: {}",
                         method_name_str
                     );
                 }
             } else {
                 // Might be a non-standard method name or something else
-                info!("Skipping call with non-method name: {}", method_name_str);
+                debug!("Skipping call with non-method name: {}", method_name_str);
             }
         }
         // TODO: Handle attribute assignments (e.g., obj.attr = value) which are also CallNodes

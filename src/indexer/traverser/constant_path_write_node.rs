@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{debug, error};
 use ruby_prism::{ConstantPathNode, ConstantPathWriteNode};
 
 use crate::indexer::{
@@ -15,7 +15,7 @@ impl Visitor {
     pub fn process_constant_path_write_node_entry(&mut self, node: &ConstantPathWriteNode) {
         // Extract the constant path
         let constant_path = node.target();
-        
+
         // Extract the constant name (the rightmost part of the path)
         let constant_name = match constant_path.name() {
             Some(name) => String::from_utf8_lossy(name.as_slice()).to_string(),
@@ -24,8 +24,8 @@ impl Visitor {
                 return;
             }
         };
-        
-        info!("Visiting constant path write node: {}", constant_name);
+
+        debug!("Visiting constant path write node: {}", constant_name);
 
         // Create a RubyConstant from the name
         let constant = match RubyConstant::new(&constant_name) {
@@ -38,7 +38,7 @@ impl Visitor {
 
         // Extract the namespace path
         let namespace_parts = self.extract_namespace_parts(&constant_path);
-        
+
         // Create a FullyQualifiedName using the extracted namespace and the constant
         let fqn = FullyQualifiedName::constant(namespace_parts, constant);
 
@@ -47,7 +47,7 @@ impl Visitor {
             .fqn(fqn)
             .location(self.prism_loc_to_lsp_loc(node.location()))
             .kind(EntryKind::Constant {
-                value: None, // We could extract the value here if needed
+                value: None,      // We could extract the value here if needed
                 visibility: None, // Default to public
             })
             .build();
@@ -68,7 +68,7 @@ impl Visitor {
     // Helper method to extract namespace parts from a ConstantPathNode
     fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
         let mut namespace_parts = Vec::new();
-        
+
         // Start with the parent node if it exists
         if let Some(parent) = node.parent() {
             // Recursively extract namespace parts from the parent
@@ -76,7 +76,7 @@ impl Visitor {
                 Some(parent_path) => {
                     // Add parts from the parent path first (left-to-right order)
                     namespace_parts.extend(self.extract_namespace_parts(&parent_path));
-                    
+
                     // Add the parent's name
                     if let Some(name) = parent_path.name() {
                         let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
@@ -88,7 +88,8 @@ impl Visitor {
                 None => {
                     // Handle the case where the parent is a ConstantReadNode
                     if let Some(constant_read) = parent.as_constant_read_node() {
-                        let name_str = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                        let name_str =
+                            String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
                         if let Ok(namespace) = RubyNamespace::new(&name_str) {
                             namespace_parts.push(namespace);
                         }
@@ -96,7 +97,7 @@ impl Visitor {
                 }
             }
         }
-        
+
         namespace_parts
     }
 }

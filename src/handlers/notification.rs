@@ -1,6 +1,6 @@
 use crate::indexer::events;
 use crate::server::RubyLanguageServer;
-use log::{error, info};
+use log::{debug, error, info};
 use lsp_types::*;
 
 pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {
@@ -8,7 +8,7 @@ pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {
 }
 
 pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
-    info!("Did open: {:?}", params.text_document.uri.as_str());
+    debug!("Did open: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
     let mut indexer = lang_server.indexer.lock().await;
@@ -23,7 +23,7 @@ pub async fn handle_did_change(
     lang_server: &RubyLanguageServer,
     params: DidChangeTextDocumentParams,
 ) {
-    info!("Did change: {:?}", params.text_document.uri.as_str());
+    debug!("Did change: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
 
     for change in params.content_changes {
@@ -41,7 +41,7 @@ pub async fn handle_did_close(
     lang_server: &RubyLanguageServer,
     params: DidCloseTextDocumentParams,
 ) {
-    info!("Did close: {:?}", params.text_document.uri.as_str());
+    debug!("Did close: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
     let mut indexer = lang_server.indexer.lock().await;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();

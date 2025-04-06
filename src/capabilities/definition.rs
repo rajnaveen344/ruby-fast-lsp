@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use lsp_types::{Location, Position};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
@@ -21,11 +21,11 @@ pub async fn find_definition_at_position(
     // Extract the fully qualified name if available
     let fqn = match identifier {
         Some(fqn) => {
-            info!("Looking for definition of: {}", fqn);
+            debug!("Looking for definition of: {}", fqn);
             fqn
         }
         None => {
-            info!("No identifier found at position {:?}", position);
+            debug!("No identifier found at position {:?}", position);
             return None;
         }
     };
@@ -40,7 +40,7 @@ pub async fn find_definition_at_position(
     // First try to find the definition directly
     if let Some(entries) = index_guard.definitions.get(&fqn) {
         if !entries.is_empty() {
-            info!("Found {} direct definition(s) for: {}", entries.len(), fqn);
+            debug!("Found {} direct definition(s) for: {}", entries.len(), fqn);
             // Add all locations to our result
             for entry in entries {
                 found_locations.push(entry.location.clone());
@@ -68,7 +68,7 @@ pub async fn find_definition_at_position(
 
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
-                        info!(
+                        debug!(
                             "Found {} constant definition(s) in ancestor namespace for: {}",
                             entries.len(),
                             search_fqn
@@ -89,7 +89,7 @@ pub async fn find_definition_at_position(
             let top_level_fqn = FullyQualifiedName::Constant(ns, constant.clone());
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
-                    info!(
+                    debug!(
                         "Found {} constant definition(s) at top level for: {}",
                         entries.len(),
                         top_level_fqn
@@ -116,7 +116,7 @@ pub async fn find_definition_at_position(
 
                 if let Some(entries) = index_guard.definitions.get(&search_fqn) {
                     if !entries.is_empty() {
-                        info!(
+                        debug!(
                             "Found {} namespace definition(s) in ancestor namespace for: {}",
                             entries.len(),
                             search_fqn
@@ -137,7 +137,7 @@ pub async fn find_definition_at_position(
             let top_level_fqn = FullyQualifiedName::Namespace(ns.clone());
             if let Some(entries) = index_guard.definitions.get(&top_level_fqn) {
                 if !entries.is_empty() {
-                    info!(
+                    debug!(
                         "Found {} namespace definition(s) at top level for: {}",
                         entries.len(),
                         top_level_fqn
@@ -152,12 +152,12 @@ pub async fn find_definition_at_position(
         }
         // For now, we're only handling constants and namespaces as specified
         _ => {
-            info!("Unsupported identifier type: {:?}", fqn);
+            debug!("Unsupported identifier type: {:?}", fqn);
             return None;
         }
     }
 
-    info!("No definition found for {}", fqn);
+    debug!("No definition found for {}", fqn);
 
     // If we found any locations during the search, return them
     if !found_locations.is_empty() {

@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer::RubyAnalyzer;
@@ -17,12 +17,12 @@ pub async fn find_references_at_position(
     let identifier = match analyzer.find_identifier_at_position(content, position) {
         Some(name) => name,
         None => {
-            info!("No identifier found at position {:?}", position);
+            debug!("No identifier found at position {:?}", position);
             return None;
         }
     };
 
-    info!("Looking for references to: {}", identifier);
+    debug!("Looking for references to: {}", identifier);
 
     // Use the indexer to find the matching fully qualified name
     let index_arc = indexer.index();
@@ -60,7 +60,7 @@ pub async fn find_references_at_position(
         };
 
         if exact_match || method_name_match {
-            info!("Found reference match: {} for {}", fqn_str, identifier);
+            debug!("Found reference match: {} for {}", fqn_str, identifier);
             all_locations.extend(locations.iter().cloned());
         }
     }
@@ -81,7 +81,7 @@ pub async fn find_references_at_position(
             };
 
             if (exact_match || method_name_match) && !entries.is_empty() {
-                info!("Including declarations for: {}", fqn_str);
+                debug!("Including declarations for: {}", fqn_str);
 
                 for entry in entries {
                     let declaration_location = Location {
@@ -102,11 +102,11 @@ pub async fn find_references_at_position(
     }
 
     if all_locations.is_empty() {
-        info!("No references found for {}", identifier);
+        debug!("No references found for {}", identifier);
         return None;
     }
 
-    info!(
+    debug!(
         "Found {} total references for {}",
         all_locations.len(),
         identifier

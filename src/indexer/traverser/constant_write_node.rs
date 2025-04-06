@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{debug, error};
 use ruby_prism::ConstantWriteNode;
 
 use crate::indexer::{
@@ -11,7 +11,7 @@ use super::Visitor;
 impl Visitor {
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        info!("Visiting constant write node: {}", constant_name);
+        debug!("Visiting constant write node: {}", constant_name);
 
         // Create a RubyConstant from the name
         let constant = match RubyConstant::new(&constant_name) {

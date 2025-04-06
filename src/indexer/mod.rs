@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use log::info;
+use log::debug;
 use lsp_types::Url;
 use ruby_prism::{parse, Visit};
 
@@ -43,7 +43,7 @@ impl RubyIndexer {
 
         visitor.visit(&node);
 
-        info!("Processed file: {}", uri);
+        debug!("Processed file: {}", uri);
         Ok(())
     }
 }
