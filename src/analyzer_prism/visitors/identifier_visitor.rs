@@ -5,8 +5,8 @@ use crate::indexer::types::ruby_constant::RubyConstant;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
 use lsp_types::Position;
 use ruby_prism::{
-    visit_call_node, visit_class_node, visit_module_node, ArgumentsNode, CallNode, ClassNode,
-    ConstantPathNode, ConstantReadNode, Location, ModuleNode, Visit,
+    visit_call_node, visit_class_node, visit_constant_path_node, visit_module_node, ArgumentsNode,
+    CallNode, ClassNode, ConstantPathNode, ConstantReadNode, Location, ModuleNode, Visit,
 };
 
 /// Visitor for finding identifiers at a specific position
@@ -131,6 +131,24 @@ impl IdentifierVisitor {
         let name = String::from_utf8_lossy(target.name().unwrap().as_slice()).to_string();
         (vec![RubyNamespace::new(&name).unwrap()], is_root_constant)
     }
+
+    fn collect_namespaces_recursive(&self, node: &ConstantPathNode, acc: &mut Vec<RubyNamespace>) {
+        let name = String::from_utf8_lossy(node.name().unwrap().as_slice());
+
+        if let Some(parent) = node.parent() {
+            if let Some(parent_const) = parent.as_constant_path_node() {
+                self.collect_namespaces_recursive(&parent_const, acc);
+            }
+
+            if let Some(parent_const_read) = parent.as_constant_read_node() {
+                let parent_name =
+                    String::from_utf8_lossy(parent_const_read.name().as_slice()).to_string();
+                acc.push(RubyNamespace::new(&parent_name).unwrap());
+            }
+        }
+
+        acc.push(RubyNamespace::new(&name.to_string()).unwrap());
+    }
 }
 
 impl Visit<'_> for IdentifierVisitor {
@@ -161,34 +179,47 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
-        if self.is_position_in_location(&node.location()) && self.identifier.is_none() {
-            // Get all namespace parts
-            let (mut namespaces, is_root_constant) = self.determine_const_path_target(node);
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
 
-            // Handle the case when cursor is on scope resolution operator
-            if namespaces.is_empty() {
-                self.identifier = None;
+        if let Some(parent_node) = node.parent() {
+            if self.is_position_in_location(&parent_node.location()) {
+                visit_constant_path_node(self, node);
+                return;
+            }
+        }
+
+        let mut namespaces = vec![];
+        self.collect_namespaces_recursive(node, &mut namespaces);
+
+        // Check if first two char are ::
+        let code = self.code.as_bytes();
+        let start = node.location().start_offset();
+        let end = start + 2;
+        let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
+        let is_root_constant = target_str.starts_with("::");
+
+        // Process the last part of the namespace
+        if let Some(last_part) = namespaces.last() {
+            let last_part_str = last_part.to_string();
+
+            // Determine if it's a constant or namespace
+            match RubyConstant::new(&last_part_str) {
+                Ok(constant) => {
+                    namespaces.pop(); // Remove the last part (constant name)
+                    self.identifier = Some(FullyQualifiedName::constant(namespaces, constant));
+                }
+                Err(_) => {
+                    self.identifier = Some(FullyQualifiedName::namespace(namespaces));
+                }
+            }
+
+            // Set ancestors based on whether it's a root constant
+            if is_root_constant {
                 self.ancestors = vec![];
-                // Even if we don't set an identifier, we still need to visit child nodes
-                // to ensure proper traversal of the AST
-            } else if let Some(last_part) = namespaces.last() {
-                let last_part_str = last_part.to_string();
-
-                match RubyConstant::new(&last_part_str) {
-                    Ok(constant) => {
-                        namespaces.pop(); // Remove the last part (constant name)
-                        self.identifier = Some(FullyQualifiedName::constant(namespaces, constant));
-                    }
-                    Err(_) => {
-                        self.identifier = Some(FullyQualifiedName::namespace(namespaces));
-                    }
-                }
-
-                if is_root_constant {
-                    self.ancestors = vec![];
-                } else {
-                    self.ancestors = self.namespace_stack.clone();
-                }
+            } else {
+                self.ancestors = self.namespace_stack.clone();
             }
         }
     }
@@ -215,20 +246,22 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
-        // First, check if the cursor is in the receiver
-        if call_node::handle_receiver(self, node) {
-            return;
+        if self.is_position_in_location(&node.location()) && self.identifier.is_none() {
+            // First, check if the cursor is in the receiver
+            if call_node::handle_receiver(self, node) {
+                return;
+            }
+
+            // Then, check if the cursor is in the arguments
+            if call_node::handle_arguments(self, node) {
+                return;
+            }
+
+            // Finally, check if the cursor is on the method name
+            call_node::handle_method_name(self, node);
+
+            visit_call_node(self, node);
         }
-
-        // Then, check if the cursor is in the arguments
-        if call_node::handle_arguments(self, node) {
-            return;
-        }
-
-        // Finally, check if the cursor is on the method name
-        call_node::handle_method_name(self, node);
-
-        visit_call_node(self, node);
     }
 
     fn visit_arguments_node(&mut self, node: &ArgumentsNode) {
@@ -450,14 +483,18 @@ mod tests {
     fn test_nested_constant_path_at_scope_resolution() {
         // Test case: Foo::Bar::Baz with cursor at first "::"
         // Empty vector indicates we expect identifier to be None
-        test_visitor("Foo::Bar::Baz", Position::new(0, 3), vec![]);
+        test_visitor("Foo::Bar::Baz", Position::new(0, 3), vec!["Foo", "Bar"]);
     }
 
     #[test]
     fn test_nested_constant_path_at_scope_resolution_2() {
         // Test case: Foo::Bar::Baz with cursor at second "::"
         // Empty vector indicates we expect identifier to be None
-        test_visitor("Foo::Bar::Baz", Position::new(0, 8), vec![]);
+        test_visitor(
+            "Foo::Bar::Baz",
+            Position::new(0, 8),
+            vec!["Foo", "Bar", "Baz"],
+        );
     }
 
     #[test]
