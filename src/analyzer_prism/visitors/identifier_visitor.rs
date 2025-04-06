@@ -239,14 +239,17 @@ impl Visit<'_> for IdentifierVisitor {
                     return;
                 }
             } else if let Some(constant_path) = receiver.as_constant_path_node() {
+                // Check if the cursor is anywhere within the constant path
                 if self.is_position_in_location(&constant_path.location())
                     && self.identifier.is_none()
                 {
                     // Cursor is on the constant path part of a method call (e.g., Foo::Bar.baz)
-                    // Use the existing constant path handling logic
+                    // Use the existing constant path handling logic to determine which part of the path the cursor is on
                     let (mut namespaces, is_root_constant) =
                         self.determine_const_path_target(&constant_path);
 
+                    // If namespaces is empty, the cursor is on a scope resolution operator (::)
+                    // In that case, we don't want to set an identifier
                     if !namespaces.is_empty() {
                         if let Some(last_part) = namespaces.last() {
                             let last_part_str = last_part.to_string();
@@ -285,7 +288,7 @@ impl Visit<'_> for IdentifierVisitor {
 
                 // Try to create a RubyMethod from the name
                 if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
-                    // Determine if it's an instance method or class method based on the receiver
+                    // Determine the method type based on the receiver and context
                     if let Some(receiver) = node.receiver() {
                         // Check if the receiver is a constant (class/module)
                         if let Some(constant_node) = receiver.as_constant_read_node() {
@@ -294,17 +297,29 @@ impl Visit<'_> for IdentifierVisitor {
                                 String::from_utf8_lossy(constant_node.name().as_slice())
                                     .to_string();
                             let namespace = RubyNamespace::new(&constant_name).unwrap();
-                            self.identifier = Some(FullyQualifiedName::class_method(
-                                vec![namespace],
-                                method_name,
+
+                            // Check if this might be a module function
+                            // For now, we'll use class_method as the default for constant receivers
+                            // The actual determination of ModuleFunc will happen in the indexer
+                            self.identifier = Some(FullyQualifiedName::module_method(
+                                vec![namespace.clone()],
+                                method_name.clone(),
                             ));
-                            self.ancestors = vec![]; // Class methods are absolute references
+
+                            self.ancestors = vec![]; // Class/module methods are absolute references
                         } else if let Some(constant_path) = receiver.as_constant_path_node() {
                             // It's a class method call on a namespaced constant
                             let (namespaces, is_root_constant) =
                                 self.determine_const_path_target(&constant_path);
-                            self.identifier =
-                                Some(FullyQualifiedName::class_method(namespaces, method_name));
+
+                            // Check if this might be a module function
+                            // For now, we'll use module_method as the default for constant path receivers
+                            // The actual determination of ModuleFunc will happen in the indexer
+                            self.identifier = Some(FullyQualifiedName::module_method(
+                                namespaces.clone(),
+                                method_name.clone(),
+                            ));
+
                             if is_root_constant {
                                 self.ancestors = vec![];
                             } else {
@@ -321,10 +336,21 @@ impl Visit<'_> for IdentifierVisitor {
                         }
                     } else {
                         // No receiver, it's a local method call in the current context
+                        // This could be either an instance method or a module function
+                        // For now, we'll use instance_method as the default
                         self.identifier = Some(FullyQualifiedName::instance_method(
                             self.namespace_stack.clone(),
-                            method_name,
+                            method_name.clone(),
                         ));
+
+                        // Also check if it might be a module function in the current namespace
+                        if !self.namespace_stack.is_empty() {
+                            self.identifier = Some(FullyQualifiedName::module_method(
+                                self.namespace_stack.clone(),
+                                method_name,
+                            ));
+                        }
+
                         self.ancestors = self.namespace_stack.clone();
                     }
                 }
@@ -534,6 +560,71 @@ mod tests {
                 assert_eq!(parts[1].to_string(), "Bar");
             }
             _ => panic!("Expected Namespace FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_module_method_call() {
+        // Test case: Foo::Bar.baz with cursor at baz (module method call)
+        let mut visitor = IdentifierVisitor::new("Foo::Bar.baz".to_string(), Position::new(0, 10));
+        let parse_result = ruby_prism::parse("Foo::Bar.baz".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::ModuleMethod(parts, method) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Foo");
+                assert_eq!(parts[1].to_string(), "Bar");
+                assert_eq!(method.to_string(), "baz");
+            }
+            _ => panic!("Expected ModuleMethod FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_namespace_in_method_call() {
+        // Test case: Foo::Bar::Baz.foo with cursor at Bar
+        let mut visitor =
+            IdentifierVisitor::new("Foo::Bar::Baz.foo".to_string(), Position::new(0, 6));
+        let parse_result = ruby_prism::parse("Foo::Bar::Baz.foo".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Namespace(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Foo");
+                assert_eq!(parts[1].to_string(), "Bar");
+            }
+            _ => panic!("Expected Namespace FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_constant_in_nested_expression() {
+        // Test case: Foo::Bar::Baz::ABC with cursor at ABC
+        let mut visitor =
+            IdentifierVisitor::new("Foo::Bar::Baz::ABC".to_string(), Position::new(0, 15));
+        let parse_result = ruby_prism::parse("Foo::Bar::Baz::ABC".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 3);
+                assert_eq!(parts[0].to_string(), "Foo");
+                assert_eq!(parts[1].to_string(), "Bar");
+                assert_eq!(parts[2].to_string(), "Baz");
+                assert_eq!(constant.to_string(), "ABC");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
     }
 }

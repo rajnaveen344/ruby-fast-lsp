@@ -14,6 +14,12 @@ pub enum FullyQualifiedName {
     /// Class/singleton method, e.g., `Foo.bar` → `ClassMethod(vec!["Foo"], RubyMethod::new("bar"))`
     ClassMethod(Vec<RubyNamespace>, RubyMethod),
 
+    /// Module function, e.g., `Foo::bar` → `ModuleMethod(vec!["Foo"], RubyMethod::new("bar"))`
+    /// These are methods created with `module_function` and have a dual nature:
+    /// - Public class method on the module
+    /// - Private instance method when included in other classes
+    ModuleMethod(Vec<RubyNamespace>, RubyMethod),
+
     /// Constant, e.g., `Foo::CONST` → `Constant(vec!["Foo"], RubyConstant::new("CONST"))`
     Constant(Vec<RubyNamespace>, RubyConstant),
 }
@@ -42,8 +48,14 @@ impl FullyQualifiedName {
             FullyQualifiedName::Namespace(ns) => ns,
             FullyQualifiedName::InstanceMethod(ns, _) => ns,
             FullyQualifiedName::ClassMethod(ns, _) => ns,
+            FullyQualifiedName::ModuleMethod(ns, _) => ns,
             FullyQualifiedName::Constant(ns, _) => ns,
         }
+    }
+
+    // Constructor helper for module methods
+    pub fn module_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
+        FullyQualifiedName::ModuleMethod(namespace, method)
     }
 }
 
@@ -66,6 +78,7 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::Namespace(_) => write!(f, "{namespace}"),
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
+            FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
             FullyQualifiedName::Constant(_, constant) => write!(f, "{namespace}::{constant}"),
         }
     }
@@ -135,5 +148,17 @@ mod tests {
         ]);
 
         assert_eq!(fqn.to_string(), "Foo::Bar");
+    }
+
+    #[test]
+    fn test_module_method() {
+        let fqn = FullyQualifiedName::module_method(
+            vec![
+                RubyNamespace::new("Foo").unwrap(),
+                RubyNamespace::new("Bar").unwrap(),
+            ],
+            RubyMethod::new("baz").unwrap(),
+        );
+        assert_eq!(fqn.to_string(), "Foo::Bar::baz");
     }
 }

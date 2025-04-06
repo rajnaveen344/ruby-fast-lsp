@@ -187,8 +187,94 @@ pub async fn find_definition_at_position(
                     }
                 }
             }
+        }
+        FullyQualifiedName::ModuleMethod(ns, method) => {
+            // Start with the exact FQN
+            let search_fqn = FullyQualifiedName::ModuleMethod(ns.clone(), method.clone());
+
+            if let Some(entries) = index_guard.definitions.get(&search_fqn) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} module method definition(s) for: {}",
+                        entries.len(),
+                        search_fqn
+                    );
+
+                    // Include all module methods with Direct origin
+                    for entry in entries {
+                        if let EntryKind::Method {
+                            kind: _, origin, ..
+                        } = &entry.kind
+                        {
+                            if matches!(origin, MethodOrigin::Direct) {
+                                found_locations.push(entry.location.clone());
+                            }
+                        }
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
+
+            // Also check for class methods with ModuleFunc kind
+            let class_method_fqn = FullyQualifiedName::ClassMethod(ns.clone(), method.clone());
+
+            if let Some(entries) = index_guard.definitions.get(&class_method_fqn) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} class method definition(s) for module method: {}",
+                        entries.len(),
+                        class_method_fqn
+                    );
+
+                    // Include ModuleFunc methods with Direct origin
+                    for entry in entries {
+                        if let EntryKind::Method { kind, origin, .. } = &entry.kind {
+                            if *kind == MethodKind::ModuleFunc
+                                && matches!(origin, MethodOrigin::Direct)
+                            {
+                                found_locations.push(entry.location.clone());
+                            }
+                        }
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
+
+            // Also check for instance methods with ModuleFunc kind
+            let instance_method_fqn =
+                FullyQualifiedName::InstanceMethod(ns.clone(), method.clone());
+
+            if let Some(entries) = index_guard.definitions.get(&instance_method_fqn) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} instance method definition(s) for module method: {}",
+                        entries.len(),
+                        instance_method_fqn
+                    );
+
+                    // Include ModuleFunc methods with Direct origin
+                    for entry in entries {
+                        if let EntryKind::Method { kind, origin, .. } = &entry.kind {
+                            if *kind == MethodKind::ModuleFunc
+                                && matches!(origin, MethodOrigin::Direct)
+                            {
+                                found_locations.push(entry.location.clone());
+                            }
+                        }
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
         } // All enum variants are now handled
-          // This should never be reached with the current FullyQualifiedName enum
     }
 
     debug!("No definition found for {}", fqn);
