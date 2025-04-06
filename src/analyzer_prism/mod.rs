@@ -10,8 +10,8 @@ pub mod visitors;
 
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {
-    code: String,
-    namespace_stack: Vec<RubyNamespace>,
+    pub code: String,
+    pub namespace_stack: Vec<RubyNamespace>,
 }
 
 impl RubyPrismAnalyzer {

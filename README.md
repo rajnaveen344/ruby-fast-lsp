@@ -16,7 +16,7 @@ A fast Language Server Protocol implementation for Ruby written in Rust.
 The LSP is built with the following components:
 
 - **Server**: Implements the LSP protocol and handles client communication
-- **Parser**: Uses tree-sitter and Ruby Prism to parse Ruby code
+- **Parser**: Uses Ruby Prism to parse Ruby code
 - **Analyzer**: Analyzes the parsed code to provide language features
 - **Indexer**: Indexes Ruby symbols for fast lookup and navigation
 - **AST Visualizer**: Provides a visual representation of the Ruby Abstract Syntax Tree

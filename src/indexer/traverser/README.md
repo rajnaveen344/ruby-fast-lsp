@@ -4,7 +4,7 @@ This module contains the core traversal and indexing logic for the Ruby Fast LSP
 
 ## Overview
 
-The traverser is responsible for parsing Ruby code using tree-sitter and building an index of all Ruby language elements: classes, modules, methods, constants, variables, and other symbols. This index is then used to power various Language Server Protocol (LSP) features like:
+The traverser is responsible for parsing Ruby code using Ruby Prism and building an index of all Ruby language elements: classes, modules, methods, constants, variables, and other symbols. This index is then used to power various Language Server Protocol (LSP) features like:
 
 - Go to Definition
 - Find References
@@ -33,7 +33,7 @@ The traverser is organized into a modular system where specific node types are p
 
 The indexing process involves:
 
-1. Parsing Ruby code using tree-sitter to create an AST (Abstract Syntax Tree)
+1. Parsing Ruby code using Ruby Prism to create an AST (Abstract Syntax Tree)
 2. Traversing the AST recursively, identifying Ruby language constructs
 3. Creating entries in the index for each definition (class, method, variable, etc.)
 4. Recording references to these definitions throughout the code
@@ -339,7 +339,7 @@ All forms are correctly indexed as references to the appropriate method.
 
 The `utils.rs` module provides common functions used across different node processors:
 
-- `node_to_range`: Converts tree-sitter node positions to LSP ranges
+- `node_to_range`: Converts Prism node positions to LSP ranges
 - `get_node_text`: Extracts text from a node based on source code
 - `get_fqn`: Builds fully qualified names based on namespace and name
 

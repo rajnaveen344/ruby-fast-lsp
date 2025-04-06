@@ -330,14 +330,12 @@ mod tests {
         // Test the identifier finding first
         {
             let content = std::fs::read_to_string(file1_path.clone()).unwrap();
-            let mut analyzer = crate::analyzer::RubyAnalyzer::new();
-            let identifier = analyzer.find_identifier_at_position(
-                &content,
-                Position {
-                    line: 1,
-                    character: 6,
-                },
-            );
+            let analyzer = crate::analyzer_prism::RubyPrismAnalyzer::new(content.to_string());
+            let position = Position {
+                line: 1,
+                character: 6,
+            };
+            let (identifier, _) = analyzer.get_identifier(position);
             println!("Identifier found: {:?}", identifier);
         }
 

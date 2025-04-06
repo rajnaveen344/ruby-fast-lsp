@@ -332,7 +332,7 @@ This comprehensive approach allows us to handle the complex relationships in Rub
    - Initialize the index during server startup
 
 3. **Setup Document Parsing**
-   - Use tree-sitter to parse Ruby files
+   - Use Ruby Prism to parse Ruby files
    - Extract AST (Abstract Syntax Tree) for analysis
 
 ### Phase 2: Indexing Implementation

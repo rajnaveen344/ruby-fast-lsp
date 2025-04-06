@@ -1,7 +1,7 @@
 use log::debug;
 use lsp_types::{Location, Position, Url};
 
-use crate::analyzer::RubyAnalyzer;
+use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::indexer::RubyIndexer;
 
 /// Find all references to a symbol at the given position.
@@ -13,9 +13,11 @@ pub async fn find_references_at_position(
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
     // Use the analyzer to find the identifier at the position and get its fully qualified name
-    let mut analyzer = RubyAnalyzer::new();
-    let identifier = match analyzer.find_identifier_at_position(content, position) {
-        Some(name) => name,
+    let analyzer = RubyPrismAnalyzer::new(content.to_string());
+    let (identifier_opt, _) = analyzer.get_identifier(position);
+
+    let identifier = match identifier_opt {
+        Some(fqn) => fqn.to_string(),
         None => {
             debug!("No identifier found at position {:?}", position);
             return None;

@@ -28,9 +28,6 @@ thiserror = "1.0.48"
 
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"
-tree-sitter = "0.25.3"
-tree-sitter-ruby = "0.23.1"
-tree-sitter-highlight = "0.25.3"
 
 # File system operations
 walkdir = "2.4.0"
