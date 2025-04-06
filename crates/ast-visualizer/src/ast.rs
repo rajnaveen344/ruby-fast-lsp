@@ -238,6 +238,11 @@ impl AstVisitor {
                     }
                 }
 
+                if let Some(block) = call_node.block() {
+                    self.push_node("BlockNode".to_string(), None, None);
+                    self.visit_node(&block);
+                }
+
                 self.pop_node();
             }
             Node::ConstantReadNode { .. } => {
