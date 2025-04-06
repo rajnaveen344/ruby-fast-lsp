@@ -104,7 +104,7 @@ The Server coordinates between LSP clients and the internal components.
 
 The Parser provides utilities for parsing Ruby code.
 
-- **Primary Responsibility**: Interface with tree-sitter for Ruby parsing
+- **Primary Responsibility**: Interface with Ruby Prism for Ruby parsing
 
 ## Key Workflows
 
@@ -114,7 +114,7 @@ The Parser provides utilities for parsing Ruby code.
 2. Server initializes and receives workspace information
 3. Server asks the indexer to index all Ruby files in the workspace
 4. Indexer finds all Ruby files and processes each one:
-   - Parse the file using tree-sitter
+   - Parse the file using Ruby Prism
    - Traverse the AST to find symbols
    - Add symbols to the index
 

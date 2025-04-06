@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## How to work with this project
+Main architecture is defined in ARCHITECTURE.md file.
+This project has readme files in almost every module. Always read it to understand the context.
+Capture ANY important information or significant decisions we discuss and update the corresponding README file. 
+
+
+## Determining line and character position in test ruby file
+When trying to find the position of a specific content in the test ruby file, use the "LSP Tools" mcp tool to find the correct position in the test ruby files

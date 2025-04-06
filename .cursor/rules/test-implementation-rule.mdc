@@ -1,8 +1,0 @@
----
-description: This rule is to specify how to implement the test cases to test the goto, references, completion, etc. tools for an lsp server
-globs: 
-alwaysApply: false
----
-
-# Determining line and character position in test ruby file
-When trying to find the position of a specific content in the test ruby file, use the "LSP Tools" mcp tool to find the correct position in the test ruby files

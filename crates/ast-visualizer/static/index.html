@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruby AST Visualizer</title>
+    <!-- Ace Editor CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/mode-ruby.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/theme-monokai.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.4/ext-language_tools.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: #9b111e;
+            /* Ruby red */
+            color: white;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .editor-section {
+            flex: 1;
+            position: relative;
+            border-right: 1px solid #ccc;
+            overflow: scroll;
+            min-width: 40%;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #ruby-code-editor {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            font-size: 14px;
+            min-height: 100%;
+            height: 100%;
+        }
+
+        .ast-section {
+            flex: 1;
+            padding: 1rem;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        textarea {
+            flex: 1;
+            resize: none;
+            padding: 0.5rem;
+            font-family: monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .controls {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        .checkbox-container label {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        button {
+            background-color: #9b111e;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #7d0e18;
+        }
+
+        .ast-container {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 1rem;
+            background-color: #fafafa;
+        }
+
+        /* Label styling for sections */
+        .tree li.section-label {
+            font-weight: bold;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        /* Add some animation for expand/collapse */
+        .tree ul {
+            transition: all 0.2s ease-in-out;
+        }
+
+        /* Tree visualization styles */
+        .tree ul {
+            padding-left: 25px;
+            margin: 0;
+        }
+
+        .tree li {
+            list-style-type: none;
+            margin: 8px 0;
+            position: relative;
+            padding-left: 15px;
+        }
+
+        /* Vertical lines */
+        .tree li::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            border-left: 2px solid #ccc;
+            height: 100%;
+        }
+
+        /* Horizontal lines */
+        .tree li::after {
+            content: "";
+            position: absolute;
+            top: 12px;
+            left: 0;
+            border-top: 2px solid #ccc;
+            width: 15px;
+        }
+
+        /* Remove vertical line from the last child */
+        .tree li:last-child::before {
+            height: 12px;
+        }
+
+        /* Node styling */
+        .tree .node {
+            cursor: pointer;
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            background-color: #f8f8f8;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s ease;
+            margin-left: 5px;
+        }
+
+        .tree .node:hover {
+            background-color: #f0f0f0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Expand/collapse indicators */
+        .tree li.has-children>.node::before {
+            content: "▶";
+            display: inline-block;
+            margin-right: 5px;
+            font-size: 10px;
+            transition: transform 0.2s ease;
+        }
+
+        .tree li.expanded>.node::before {
+            transform: rotate(90deg);
+        }
+
+        /* Node type and value styling */
+        .tree .node-type {
+            color: #9b111e;
+            font-weight: bold;
+        }
+
+        .tree .node-value {
+            color: #333;
+        }
+
+        /* Special node types with color coding */
+        .tree .node[data-type="PROGRAM"] {
+            background-color: #f0f2f5;
+            border-color: #d9d9d9;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="CLASS"],
+        .tree .node[data-type="MODULE"] {
+            background-color: #e6f7ff;
+            border-color: #91d5ff;
+        }
+
+        .tree .node[data-type="DEF"] {
+            background-color: #f6ffed;
+            border-color: #b7eb8f;
+        }
+
+        .tree .node[data-type="SEND"] {
+            background-color: #fff7e6;
+            border-color: #ffd591;
+        }
+
+        .tree .node[data-type="STR"],
+        .tree .node[data-type="INT"] {
+            background-color: #f9f0ff;
+            border-color: #d3adf7;
+        }
+
+        .tree .node[data-type="IVAR"],
+        .tree .node[data-type="IVASGN"] {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+        }
+
+        .tree .node[data-type="LVAR"],
+        .tree .node[data-type="LASGN"] {
+            background-color: #f4ffb8;
+            border-color: #d8e68c;
+        }
+
+        .tree .node[data-type="CONST"] {
+            background-color: #e8e8e8;
+            border-color: #bfbfbf;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="DSTR"] {
+            background-color: #e6fffb;
+            border-color: #87e8de;
+        }
+
+        .tree .node[data-type="STATEMENTS"] {
+            background-color: #f9f9f9;
+            border-color: #d9d9d9;
+            font-style: italic;
+        }
+
+        /* Error tree styling */
+        .error-tree {
+            padding: 15px;
+            background-color: #fff2f0;
+            border: 1px solid #ffccc7;
+            border-radius: 4px;
+            color: #cf1322;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="ErrorTreeNode"] {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+            color: #cf1322;
+            font-weight: bold;
+        }
+
+        .tree .node[data-type="SyntaxErrorNode"] {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+            color: #cf1322;
+        }
+
+        .error-message {
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* Hide/show children */
+        .tree .collapsed>ul {
+            display: none;
+        }
+
+        .tree .expanded>ul {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .error {
+            color: #9b111e;
+            padding: 1rem;
+            border: 1px solid #9b111e;
+            border-radius: 4px;
+            margin-top: 1rem;
+        }
+
+        /* AST controls styling */
+        .ast-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .ast-controls button {
+            font-size: 0.8rem;
+            padding: 0.3rem 0.6rem;
+        }
+
+        /* Legend styling */
+        .legend {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f8f8;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+
+        .legend h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1rem;
+            color: #333;
+        }
+
+        .legend-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            border: 1px solid;
+            display: inline-block;
+        }
+
+        .legend-label {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Ruby AST Visualizer</h1>
+        <p style="color: white; margin-top: 0.5rem;">Visualize Ruby code as an Abstract Syntax Tree using the Prism
+            parser</p>
+    </header>
+
+    <div class="container">
+        <div class="editor-section">
+            <div id="ruby-code-editor"></div>
+        </div>
+
+        <div class="ast-section">
+            <h2>Abstract Syntax Tree</h2>
+            <div class="ast-controls">
+                <button id="expand-all-btn" title="Expand all nodes">Expand All</button>
+                <button id="collapse-all-btn" title="Collapse all nodes">Collapse All</button>
+                <button id="toggle-legend-btn" title="Show/hide color legend">Show Legend</button>
+            </div>
+            <div id="ast-container" class="ast-container">
+                <div class="loading" id="loading" style="display: none;">
+                    Parsing code...
+                </div>
+                <div id="ast-tree" class="tree"></div>
+                <div id="error-message" class="error" style="display: none;"></div>
+                <div id="legend" class="legend" style="display: none;">
+                    <h3>Node Type Legend</h3>
+                    <div class="legend-grid">
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f0f2f5; border-color: #d9d9d9;"></span>
+                            <span class="legend-label">PROGRAM</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #e6f7ff; border-color: #91d5ff;"></span>
+                            <span class="legend-label">CLASS/MODULE</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f6ffed; border-color: #b7eb8f;"></span>
+                            <span class="legend-label">DEF</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #fff7e6; border-color: #ffd591;"></span>
+                            <span class="legend-label">SEND</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f9f0ff; border-color: #d3adf7;"></span>
+                            <span class="legend-label">STR/INT</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #fff2f0; border-color: #ffccc7;"></span>
+                            <span class="legend-label">IVAR/IVASGN</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f4ffb8; border-color: #d8e68c;"></span>
+                            <span class="legend-label">LVAR/LASGN</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #e8e8e8; border-color: #bfbfbf;"></span>
+                            <span class="legend-label">CONST</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #e6fffb; border-color: #87e8de;"></span>
+                            <span class="legend-label">DSTR</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #f9f9f9; border-color: #d9d9d9;"></span>
+                            <span class="legend-label">STATEMENTS</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background-color: #fff2f0; border-color: #ffccc7;"></span>
+                            <span class="legend-label">ERRORS</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Initialize Ace Editor
+            const editor = ace.edit("ruby-code-editor");
+
+            // Configure editor with minimal settings
+            editor.setOptions({
+                // Theme and mode
+                theme: "ace/theme/monokai",
+                mode: "ace/mode/ruby",
+
+                // Essential settings
+                showPrintMargin: false,
+                autoScrollEditorIntoView: true,
+
+                // Sizing
+                maxLines: Infinity
+            });
+
+            // Ensure editor is properly sized
+            window.addEventListener('resize', function () {
+                editor.resize();
+            });
+
+            // Force resize after initialization
+            setTimeout(function () {
+                editor.resize();
+            }, 100);
+
+            // Set editor height to fill container
+            editor.container.style.height = '100%';
+
+            // Set initial content
+            const initialCode = `class Person
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+
+  def greet
+    puts "Hello, my name is #{@name} and I am #{@age} years old."
+  end
+end
+
+person = Person.new("John", 30)
+person.greet`;
+
+            editor.setValue(initialCode, -1); // -1 moves cursor to the start
+
+            const astTree = document.getElementById('ast-tree');
+            const loading = document.getElementById('loading');
+            const errorMessage = document.getElementById('error-message');
+            const expandAllBtn = document.getElementById('expand-all-btn');
+            const collapseAllBtn = document.getElementById('collapse-all-btn');
+            const toggleLegendBtn = document.getElementById('toggle-legend-btn');
+            const legend = document.getElementById('legend');
+
+            // Example AST structure for initial display
+            const exampleAst = {
+                type: "PROGRAM",
+                children: [
+                    {
+                        type: "CLASS",
+                        name: "Person",
+                        children: [
+                            {
+                                type: "DEF",
+                                name: "initialize",
+                                parameters: ["name", "age"],
+                                children: [
+                                    {
+                                        type: "IVASGN",
+                                        name: "@name",
+                                        value: { type: "LVAR", name: "name" }
+                                    },
+                                    {
+                                        type: "IVASGN",
+                                        name: "@age",
+                                        value: { type: "LVAR", name: "age" }
+                                    }
+                                ]
+                            },
+                            {
+                                type: "DEF",
+                                name: "greet",
+                                parameters: [],
+                                children: [
+                                    {
+                                        type: "SEND",
+                                        receiver: null,
+                                        name: "puts",
+                                        arguments: [
+                                            {
+                                                type: "DSTR",
+                                                children: [
+                                                    { type: "STR", value: "Hello, my name is " },
+                                                    { type: "IVAR", name: "@name" },
+                                                    { type: "STR", value: " and I am " },
+                                                    { type: "IVAR", name: "@age" },
+                                                    { type: "STR", value: " years old." }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        type: "LASGN",
+                        name: "person",
+                        value: {
+                            type: "SEND",
+                            receiver: { type: "CONST", name: "Person" },
+                            name: "new",
+                            arguments: [
+                                { type: "STR", value: "John" },
+                                { type: "INT", value: 30 }
+                            ]
+                        }
+                    },
+                    {
+                        type: "SEND",
+                        receiver: { type: "LVAR", name: "person" },
+                        name: "greet",
+                        arguments: []
+                    }
+                ]
+            };
+
+            // Function to render the AST tree
+            function renderAst(ast, parentElement) {
+                const ul = document.createElement('ul');
+
+                function renderNode(node, parentUl) {
+                    const li = document.createElement('li');
+                    const nodeSpan = document.createElement('span');
+                    nodeSpan.className = 'node';
+                    nodeSpan.setAttribute('data-type', node.type);
+
+                    // Check if node has children to add appropriate classes
+                    const hasChildren =
+                        (node.children && node.children.length > 0) ||
+                        (node.value && typeof node.value === 'object') ||
+                        (node.arguments && node.arguments.length > 0) ||
+                        node.receiver;
+
+                    if (hasChildren) {
+                        li.classList.add('has-children');
+                        li.classList.add('expanded'); // Start expanded by default
+                    }
+
+                    // Create node type span
+                    const typeSpan = document.createElement('span');
+                    typeSpan.className = 'node-type';
+                    typeSpan.textContent = node.type;
+                    nodeSpan.appendChild(typeSpan);
+
+                    // Add node properties
+                    if (node.name) {
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'node-value';
+                        nameSpan.textContent = ` ${node.name}`;
+                        nodeSpan.appendChild(nameSpan);
+                    }
+
+                    // Special handling for error nodes
+                    if (node.type === 'SyntaxErrorNode') {
+                        const errorSpan = document.createElement('span');
+                        errorSpan.className = 'error-message';
+                        errorSpan.textContent = ` at line ${node.line}, column ${node.column}: ${node.message}`;
+                        nodeSpan.appendChild(errorSpan);
+                    }
+
+                    if (node.value && typeof node.value === 'string' || typeof node.value === 'number') {
+                        const valueSpan = document.createElement('span');
+                        valueSpan.className = 'node-value';
+                        valueSpan.textContent = ` = ${node.value}`;
+                        nodeSpan.appendChild(valueSpan);
+                    }
+
+                    if (node.parameters && node.parameters.length > 0) {
+                        const paramsSpan = document.createElement('span');
+                        paramsSpan.className = 'node-value';
+                        paramsSpan.textContent = ` (${node.parameters.join(', ')})`;
+                        nodeSpan.appendChild(paramsSpan);
+                    }
+
+                    li.appendChild(nodeSpan);
+
+                    // Create a container for all child elements
+                    let childContainer = null;
+
+                    if (hasChildren) {
+                        childContainer = document.createElement('ul');
+                    }
+
+                    // Add children recursively
+                    if (node.children && node.children.length > 0) {
+                        node.children.forEach(child => {
+                            renderNode(child, childContainer);
+                        });
+                    }
+
+                    // Add value as a child if it's an object
+                    if (node.value && typeof node.value === 'object') {
+                        const valueLi = document.createElement('li');
+                        valueLi.className = 'section-label';
+                        valueLi.textContent = 'Value:';
+                        childContainer.appendChild(valueLi);
+                        renderNode(node.value, childContainer);
+                    }
+
+                    // Add arguments as children
+                    if (node.arguments && node.arguments.length > 0) {
+                        const argsLi = document.createElement('li');
+                        argsLi.className = 'section-label';
+                        argsLi.textContent = 'Arguments:';
+                        childContainer.appendChild(argsLi);
+
+                        node.arguments.forEach(arg => {
+                            renderNode(arg, childContainer);
+                        });
+                    }
+
+                    // Add receiver as a child
+                    if (node.receiver) {
+                        const receiverLi = document.createElement('li');
+                        receiverLi.className = 'section-label';
+                        receiverLi.textContent = 'Receiver:';
+                        childContainer.appendChild(receiverLi);
+                        renderNode(node.receiver, childContainer);
+                    }
+
+                    // Add the child container to the li element
+                    if (childContainer) {
+                        li.appendChild(childContainer);
+                    }
+
+                    // Add expand/collapse functionality
+                    if (hasChildren) {
+                        nodeSpan.addEventListener('click', function (e) {
+                            e.stopPropagation();
+                            li.classList.toggle('collapsed');
+                            li.classList.toggle('expanded');
+                        });
+                    }
+
+                    parentUl.appendChild(li);
+                }
+
+                renderNode(ast, ul);
+                parentElement.innerHTML = '';
+                parentElement.appendChild(ul);
+            }
+
+            // Initial render with example AST
+            renderAst(exampleAst, astTree);
+
+            // Function to parse Ruby code
+            function parseRubyCode() {
+                const rubyCode = editor.getValue();
+
+                if (!rubyCode.trim()) {
+                    errorMessage.textContent = 'Please enter some Ruby code.';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                // Show loading indicator
+                astTree.style.display = 'none';
+                errorMessage.style.display = 'none';
+                loading.style.display = 'block';
+
+                // Send the code to the server for parsing
+                fetch('/parse', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ code: rubyCode }),
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(errorData => {
+                                throw new Error(errorData.error + ': ' + errorData.details.join(', '));
+                            }).catch(e => {
+                                throw new Error('Failed to parse code: ' + response.statusText);
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Hide loading indicator
+                        loading.style.display = 'none';
+                        astTree.style.display = 'block';
+
+                        // Render the AST
+                        renderAst(data, astTree);
+                    })
+                    .catch(error => {
+                        // Hide loading indicator
+                        loading.style.display = 'none';
+
+                        // Show error message
+                        if (error.message.includes('Failed to fetch')) {
+                            errorMessage.textContent = `Error: Could not connect to the server. Please refresh the page or try again later.`;
+                        } else {
+                            errorMessage.textContent = `Error: ${error.message}`;
+                        }
+                        errorMessage.style.display = 'block';
+
+                        // Show an empty tree
+                        astTree.style.display = 'block';
+                        astTree.innerHTML = '<div class="error-tree">Failed to parse code. See error message above.</div>';
+                    });
+            }
+
+            // Variables for real-time parsing
+            let typingTimer;
+            const doneTypingInterval = 300; // Time in ms (0.3 seconds)
+
+            // Function to handle typing events
+            function handleTyping() {
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(parseRubyCode, doneTypingInterval);
+            }
+
+            // Handle paste events
+            editor.container.addEventListener('paste', function () {
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(parseRubyCode, 300);
+            });
+
+            // Add change event listener for real-time parsing
+            editor.session.on('change', handleTyping);
+
+            // Parse the initial code
+            parseRubyCode();
+
+            // Expand all nodes
+            expandAllBtn.addEventListener('click', function () {
+                const allNodes = astTree.querySelectorAll('li.has-children');
+                allNodes.forEach(node => {
+                    node.classList.remove('collapsed');
+                    node.classList.add('expanded');
+                });
+            });
+
+            // Collapse all nodes
+            collapseAllBtn.addEventListener('click', function () {
+                const allNodes = astTree.querySelectorAll('li.has-children');
+                allNodes.forEach(node => {
+                    node.classList.add('collapsed');
+                    node.classList.remove('expanded');
+                });
+            });
+
+            // Toggle legend
+            toggleLegendBtn.addEventListener('click', function () {
+                if (legend.style.display === 'none') {
+                    legend.style.display = 'block';
+                    toggleLegendBtn.textContent = 'Hide Legend';
+                } else {
+                    legend.style.display = 'none';
+                    toggleLegendBtn.textContent = 'Show Legend';
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -1,3 +1,10 @@
+[workspace]
+members = [
+    ".",
+    "crates/ast-visualizer",
+]
+resolver = "2"
+
 [package]
 name = "ruby-fast-lsp"
 version = "0.1.0"
@@ -5,7 +12,6 @@ edition = "2021"
 authors = ["Ruby Fast LSP Team"]
 description = "A fast Language Server Protocol implementation for Ruby"
 license = "MIT"
-resolver = "2"
 
 [dependencies]
 # LSP related dependencies
@@ -21,12 +27,17 @@ anyhow = "1.0.75"
 thiserror = "1.0.48"
 
 # Ruby parsing and analysis
-tree-sitter = "0.25.3"
-tree-sitter-ruby = "0.23.1"
-tree-sitter-highlight = "0.25.3"
+ruby-prism = "1.4.0"
 
 # File system operations
 walkdir = "2.4.0"
+
+# Utils
+unicode-ident = "1.0.18"
+
+# Web server for AST visualization
+actix-web = "4.3.1"
+actix-cors = "0.6.4"
 
 [dev-dependencies]
 tokio-test = "0.4.3"

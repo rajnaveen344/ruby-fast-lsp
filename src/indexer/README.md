@@ -1,257 +1,339 @@
-# Ruby Indexer
+# Ruby Language Server (RLS) - Index Design Specification
 
-The indexer component is responsible for parsing Ruby source code and building a searchable index of all Ruby entities (classes, modules, methods, constants, etc.) found in the codebase. This index is a critical part of the Ruby Fast LSP, enabling features like code navigation, autocompletion, and symbol search.
+## Core Data Structures
 
-## Key Components
-
-### RubyIndex
-
-The `RubyIndex` struct is the core data structure that stores all indexed entities. It maintains several maps for efficient lookups:
-
-- `entries`: Maps fully qualified names to entry objects
-- `uri_to_entries`: Maps file URIs to their entries for efficient updates
-- `methods_by_name`: Maps method names to their entries for quick method lookup
-- `constants_by_name`: Maps constant names to their entries
-- `namespace_tree`: Maintains the hierarchy of namespaces
-
-### Entry
-
-Each indexed entity is represented by an `Entry` struct with the following properties:
-
-- `name`: The name of the entity
-- `fully_qualified_name`: Complete namespace path (e.g., `Module::Class#method`)
-- `location`: Where this entry is defined (file URI and range)
-- `entry_type`: Type of entry (Class, Module, Method, Constant, etc.)
-- `visibility`: Public, Protected, or Private (for methods)
-- `metadata`: Additional information about the entry
-
-### RubyIndexer
-
-The `RubyIndexer` struct is responsible for traversing the Ruby AST and populating the index. It uses Tree-sitter to parse Ruby code and extract relevant information. Key methods include:
-
-- `index_file`: Indexes a single Ruby file
-- `process_file`: Processes a parsed AST to extract entities
-- `traverse_node`: Recursively traverses the AST
-- `process_class`, `process_module`, `process_method`: Process specific node types
-- `process_attribute_methods`: Handles Ruby's `attr_accessor`, `attr_reader`, and `attr_writer` methods
-
-## Tree-sitter Node Structure
-
-The indexer relies heavily on the Tree-sitter AST structure for Ruby. Understanding this structure is crucial for working with the codebase:
-
-### Common Node Types
-
-- `class`: Represents a Ruby class definition
-- `module`: Represents a Ruby module definition
-- `method`: Represents a method definition
-- `singleton_method`: Represents a class method definition
-- `call`: Represents a method call (including `attr_*` calls)
-- `identifier`: Represents variable or method names
-- `constant`: Represents constant names
-- `simple_symbol`: Represents symbol literals (e.g., `:name` in `attr_accessor :name`)
-- `argument_list`: Represents method arguments
-
-### Node Field Access
-
-Tree-sitter nodes can be accessed in two primary ways:
-
-1. By index: `node.child(i)` - Get the i-th child node
-2. By field name: `node.child_by_field_name("field")` - Get a child by its field name
-
-Common field names in Ruby nodes:
-- `name`: The name of a class, module, or method
-- `method`: The method name in a method call
-- `arguments`: The arguments to a method call
-- `body`: The body of a class, module, or method
-
-Example of node structure for `attr_accessor :name, :age`:
-```
-call
-├── method: identifier("attr_accessor")
-└── arguments: argument_list
-    ├── simple_symbol(":name")
-    ├── ,
-    └── simple_symbol(":age")
-```
-
-## Implementation Details
-
-### AST Traversal
-
-The indexer traverses the AST recursively using the `traverse_node` method. For each node, it:
-
-1. Checks the node kind
-2. Dispatches to an appropriate handler method based on the kind
-3. Recursively processes child nodes
-
+### 1. Validated Primitive Types
 ```rust
-fn traverse_node(&mut self, node: Node, uri: &Url, source_code: &str, context: &mut TraversalContext) -> Result<(), String> {
-    match node.kind() {
-        "class" => self.process_class(node, uri, source_code, context)?,
-        "module" => self.process_module(node, uri, source_code, context)?,
-        "method" | "singleton_method" => self.process_method(node, uri, source_code, context)?,
-        "call" => {
-            self.process_attribute_methods(node, uri, source_code, context)?;
-            // Process children...
-        },
-        // Other cases...
-    }
-    // ...
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct RubyNamespace(String);  // Valid class/module name
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct RubyMethod(String);     // Valid snake_case method name
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct RubyConstant(String);  // Valid uppercase-first constant
+```
+
+## Validation Rules:
+
+### RubyNamespace:
+
+- Starts with uppercase letter (Unicode-aware)
+- Contains only [A-Za-z0-9_] with Unicode XID support
+- No :: separators allowed
+
+### RubyMethod:
+
+- Snake_case format
+- Starts with lowercase/underscore
+
+### RubyConstant:
+
+- PascalCase format
+- Starts with uppercase letter
+
+### 2. Fully Qualified Name (FQN)
+```rust
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum FullyQualifiedName {
+    Namespace(Vec<RubyNamespace>),
+    InstanceMethod(Vec<RubyNamespace>, RubyMethod),
+    ClassMethod(Vec<RubyNamespace>, RubyMethod),
+    Constant(Vec<RubyNamespace>, RubyConstant),
 }
 ```
 
-### Handling Ruby's Attribute Methods
+#### Semantics:
 
-The `process_attribute_methods` function handles Ruby's `attr_accessor`, `attr_reader`, and `attr_writer` methods. These methods dynamically generate getter and setter methods based on symbol arguments.
+- Namespace: Represents class/module hierarchy (e.g., ["Foo", "Bar"] = Foo::Bar)
+- InstanceMethod: Foo#bar with owner context
+- ClassMethod: Foo.bar with owner context
+- Constant: Foo::CONST with namespace
 
-Here's how it works:
-
-1. Check if the method name is one of the attribute methods
-2. Extract symbol arguments from the call
-3. For each symbol:
-   - Create a getter method for `attr_accessor` and `attr_reader`
-   - Create a setter method for `attr_accessor` and `attr_writer`
-   - Add entries to the index
-
+### 3. Entry - Fundamental Index Unit
 ```rust
-fn process_attribute_methods(&mut self, node: Node, uri: &Url, source_code: &str, context: &mut TraversalContext) -> Result<(), String> {
-    if let Some(method_node) = node.child_by_field_name("method") {
-        let method_name = self.get_node_text(method_node, source_code);
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub fqn: FullyQualifiedName,
+    pub location: Location,  // LSP Location (uri + range)
+    pub kind: EntryKind,
+    pub metadata: HashMap<String, String>,
+}
 
-        // Only process attribute methods
-        if method_name != "attr_accessor" && method_name != "attr_reader" && method_name != "attr_writer" {
-            return Ok(());
-        }
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntryKind {
+    Class {
+        superclass: Option<FullyQualifiedName>,
+        is_singleton: bool,
+    },
+    Module,
+    Method {
+        kind: MethodKind,
+        parameters: Vec<String>,
+        owner: FullyQualifiedName,
+        origin: MethodOrigin,
+        visibility: Visibility,
+    },
+    Constant {
+        value: Option<String>,
+        visibility: Option<Visibility>,
+    },
+}
 
-        if let Some(args_node) = node.child_by_field_name("arguments") {
-            for i in 0..args_node.child_count() {
-                if let Some(arg_node) = args_node.child(i) {
-                    // Important: Symbol arguments are "simple_symbol", not "symbol"
-                    if arg_node.kind() != "simple_symbol" {
-                        continue;
-                    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Visibility { Public, Protected, Private }
 
-                    // Process the symbol and create appropriate methods...
-                }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MethodKind { Instance, Class, Singleton, ModuleFunction }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MethodOrigin {
+    Direct,
+    Inherited(FullyQualifiedName),
+    Included(FullyQualifiedName),
+    Extended(FullyQualifiedName),
+    Prepended(FullyQualifiedName),
+}
+```
+
+## Index Architecture
+
+### 4. RubyIndex - Central Data Store
+```rust
+#[derive(Debug)]
+pub struct RubyIndex {
+    // Core mappings
+    pub file_entries: HashMap<Url, Vec<Entry>>,
+    pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
+    pub references: HashMap<FullyQualifiedName, Vec<Location>>,
+
+    // Inheritance/Mixins
+    pub inheritance: HashMap<FullyQualifiedName, InheritanceInfo>, // TODO
+    pub mixin_relationships: HashMap<FullyQualifiedName, Vec<Mixin>>,
+
+    // Reverse lookups
+    pub method_origins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>, // TODO
+    pub singleton_classes: HashMap<FullyQualifiedName, FullyQualifiedName>, // TODO
+}
+
+#[derive(Debug)]
+pub struct InheritanceInfo {
+    pub superclasses: Vec<FullyQualifiedName>,
+    pub included: Vec<FullyQualifiedName>,
+    pub prepended: Vec<FullyQualifiedName>,
+}
+
+#[derive(Debug)]
+pub enum Mixin {
+    Include(FullyQualifiedName),
+    Extend(FullyQualifiedName),
+    Prepend(FullyQualifiedName),
+}
+```
+
+## Data Flow Pipeline
+
+### 5. Index Construction Phases
+
+#### 1. AST Parsing:
+
+- Extract raw entities from source files
+- Create preliminary entries with direct relationships
+
+#### 2. Primary Indexing:
+
+```mermaid
+graph TD
+  A[Parse File] --> B[Create Base Entries]
+  B --> C{Is Mixin?}
+  C -->|Yes| D[Add to mixin_chains]
+  C -->|No| E[Add to definitions]
+  E --> F[Build namespace_ancestors]
+  E --> G[Record references]
+```
+
+#### 3. Mixin Resolution:
+
+- Process include/extend/prepend statements
+- Generate derivative entries for mixed-in methods
+- Update method origins and visibility
+
+#### 4. Ancestry Resolution:
+
+- Build complete inheritance chains
+- Resolve method overrides
+- Validate superclass relationships
+
+### 6. Mixin Handling Algorithm
+```rust
+fn process_mixin(index: &mut RubyIndex, target: &FullyQualifiedName, mixin: Mixin) {
+    let source = match mixin {
+        Mixin::Include(fqn) | Mixin::Extend(fqn) | Mixin::Prepend(fqn) => fqn,
+    };
+
+    if let Some(source_entries) = index.definitions.get(&source) {
+        for entry in source_entries {
+            if let EntryKind::Method { .. } = &entry.kind {
+                let mut derived = create_derived_entry(entry, target, &mixin);
+                index.add_entry(derived);
+                index.link_method_origin(&entry.fqn, &derived.fqn);
             }
         }
     }
-    Ok(())
 }
 ```
 
-### Key Index Updates
+## Key Relationships
 
-When an entry is added to the index, multiple maps are updated:
+### 7. Method Origin Tracking
 
-1. `entries` is updated with the fully qualified name
-2. `uri_to_entries` is updated for the file
-3. `methods_by_name` or `constants_by_name` is updated based on the entry type
+| Origin Type | Example | Visibility Handling |
+|-------------|---------|---------------------|
+| Direct      | def Foo#bar | Original visibility |
+| Included    | include M | Module functions -> Private |
+| Extended    | extend M | Preserves visibility |
+| Prepended   | prepend M | Priority resolution |
 
-This ensures efficient lookups by different criteria.
+### 8. Namespace Ancestry
 
-## Debugging Strategies
-
-### Debugging AST Traversal
-
-When debugging issues with the indexer, consider these techniques:
-
-1. **Print Node Structure**: Add debug prints to understand the structure of nodes:
-   ```rust
-   println!("Node kind: {}, text: {}", node.kind(), self.get_node_text(node, source_code));
-   for i in 0..node.child_count() {
-       if let Some(child) = node.child(i) {
-           println!("  Child {}: kind={}, text={}", i, child.kind(), self.get_node_text(child, source_code));
-       }
-   }
-   ```
-
-2. **Trace Field Access**: Check if fields are being found correctly:
-   ```rust
-   if let Some(field_node) = node.child_by_field_name("field_name") {
-       println!("Found field: {}", self.get_node_text(field_node, source_code));
-   } else {
-       println!("Field not found");
-   }
-   ```
-
-3. **Verify Index Updates**: Check if entries are actually added to the index:
-   ```rust
-   if let Some(entries) = self.index.methods_by_name.get(&method_name) {
-       println!("Method {} has {} entries in the index", method_name, entries.len());
-   } else {
-       println!("Method {} not found in the index", method_name);
-   }
-   ```
-
-## Common Pitfalls
-
-1. **Incorrect Node Types**: Always verify the actual node types in the AST. For example, Ruby symbols in `attr_accessor` calls are represented as `simple_symbol` nodes, not `symbol` nodes.
-
-2. **Missing Field Names**: Ensure you're using the correct field names when accessing nodes with `child_by_field_name`.
-
-3. **Namespace Context**: Ruby entities need to be indexed with their correct namespace. Always check that the context's namespace stack is being properly maintained.
-
-4. **Index Map Updates**: When adding entries to the index, ensure they're being added to all the relevant maps, especially the type-specific ones like `methods_by_name`.
-
-5. **Handling of Commas and Whitespace**: When processing lists of items (like arguments), remember to skip non-relevant nodes like commas and whitespace.
-
-## Before/After Fix Examples
-
-### Example: Fixing Attribute Methods Indexing
-
-Before:
-```rust
-// Incorrect: Checks for "symbol" nodes
-if arg_node.kind() != "symbol" {
-    continue;
-}
+```mermaid
+graph BT
+    Foo::Bar::Baz --> Foo::Bar
+    Foo::Bar --> Foo
+    Foo --> Object
 ```
 
-After:
-```rust
-// Correct: Checks for "simple_symbol" nodes
-if arg_node.kind() != "simple_symbol" {
-    continue;
-}
-```
-
-## Recent Updates
-
-- Fixed indexing of Ruby's attribute methods (`attr_accessor`, `attr_reader`, `attr_writer`)
-- The indexer now correctly identifies and indexes both getter and setter methods created by these attribute methods
-- Fixed node type detection for symbol arguments in attribute method calls (using `simple_symbol` instead of `symbol`)
-
-## Usage
-
-The indexer is used by the LSP server to build and maintain an index of the Ruby codebase. It's typically initialized when the server starts and updated incrementally as files change.
+#### Storage:
 
 ```rust
-// Example usage
-let mut indexer = RubyIndexer::new()?;
-indexer.index_file(file_path, source_code)?;
-
-// Get the index
-let index = indexer.index();
-
-// Find a definition
-if let Some(entry) = index.find_definition("Module::Class#method") {
-    // Use the entry location
+namespace_ancestors: {
+    "Foo::Bar::Baz": ["Foo::Bar", "Foo"],
+    "Foo::Bar": ["Foo"],
+    "Foo": []
 }
 ```
 
-## Testing
+## Example Scenarios
 
-The indexer includes comprehensive tests that verify its functionality, including:
+### 9. Module Function Inclusion
 
-- Indexing of classes, modules, methods, and constants
-- Handling of nested namespaces
-- Processing of attribute methods
-- Removal of entries when files are deleted
-- Finding definitions by fully qualified name
+```ruby
+module Logging
+  module_function
+  def log(msg) = puts(msg)
+end
 
-Run the tests with:
-
+class Application
+  include Logging
+end
 ```
-cargo test indexer
+#### Index Entries:
+
+- Original Method:
+  - FQN: Logging#log
+  - Kind: Method { kind: ModuleFunction, ... }
+
+- Generated Class Method:
+  - FQN: Logging.log
+
+- Included Instance Method:
+  - FQN: Application#log
+  - Visibility: Private
+  - Origin: Included(Logging#log)
+
+### 10. Class Inheritance
+
+```ruby
+class Animal
+  def speak = puts("...")
+end
+
+class Dog < Animal
+  def speak = puts("Woof!")
+end
+```
+#### Index State:
+
+```rust
+inheritance: {
+    "Dog": InheritanceInfo {
+        superclasses: ["Animal"],
+        included: [],
+        prepended: []
+    }
+}
+
+definitions: {
+    "Animal#speak": Entry { /* base implementation */ },
+    "Dog#speak": Entry { /* override */ }
+}
+```
+
+## Edge Case Handling
+
+### 11. Singleton Classes
+
+```rust
+FullyQualifiedName::Namespace(vec![
+    RubyNamespace::new("Foo"),
+    RubyNamespace::new("singleton_class")
+])
+```
+
+#### Handling:
+
+- Special namespace segment `singleton_class`
+- Separate storage in `singleton_classes` map
+
+### 12. Dynamic Metaprogramming
+
+```ruby
+class Dynamic
+  [:method1, :method2].each do |m|
+    define_method(m) { puts m }
+  end
+end
+```
+#### Indexing:
+
+- Store method names in metadata
+- Flag with `is_dynamic: true`
+- Special handling in reference resolution
+
+## Performance Considerations
+
+### Batch Processing
+
+- Process mixins after full AST parse
+- Bulk updates to index maps
+
+### Caching Strategies
+
+```rust
+struct QueryCache {
+    method_visibility: LruCache<FullyQualifiedName, Visibility>,
+    ancestor_chains: LruCache<FullyQualifiedName, Vec<FullyQualifiedName>>,
+}
+```
+
+#### Incremental Updates:
+
+- Track changed files with MD5 hashes
+- Partial reindexing using dependency graph
+
+## Future Extensions
+Type Inference Layer:
+
+```rust
+type_registry: HashMap<FullyQualifiedName, TypeSignature>,
+```
+
+### Document Symbol Support:
+
+```rust
+document_symbols: HashMap<Url, Vec<SymbolInformation>>,
+```
+
+### Code Lens Integration:
+
+```rust
+code_lenses: HashMap<Url, Vec<CodeLens>>,
 ```

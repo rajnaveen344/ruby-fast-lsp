@@ -24,3 +24,4 @@ inner.inner_method
 
 very_inner = Outer::Inner::VeryInner.new
 very_inner.very_inner_method
+asd

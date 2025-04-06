@@ -1,4 +1,3 @@
-use crate::capabilities::semantic_tokens;
 use crate::capabilities::{definition, references};
 use crate::indexer::events;
 use crate::server::RubyLanguageServer;
@@ -35,9 +34,6 @@ pub async fn handle_initialize(
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
-        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-            semantic_tokens::semantic_tokens_options(),
-        )),
         ..ServerCapabilities::default()
     };
 
@@ -64,9 +60,21 @@ pub async fn handle_goto_definition(
     let position = params.text_document_position_params.position;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
     let indexer = lang_server.indexer.lock().await;
-    let definition =
-        definition::find_definition_at_position(&indexer, &uri, position, &content).await;
-    Ok(definition)
+    let definition = definition::find_definition_at_position(&indexer, position, &content).await;
+
+    // Convert Vec<Location> to GotoDefinitionResponse
+    match definition {
+        Some(locations) => {
+            if locations.len() == 1 {
+                // If there's only one location, return a scalar response
+                Ok(Some(GotoDefinitionResponse::Scalar(locations[0].clone())))
+            } else {
+                // If there are multiple locations, return an array response
+                Ok(Some(GotoDefinitionResponse::Array(locations)))
+            }
+        }
+        None => Ok(None),
+    }
 }
 
 pub async fn handle_references(
@@ -88,59 +96,4 @@ pub async fn handle_references(
     .await;
 
     Ok(references)
-}
-
-pub async fn handle_semantic_tokens_full(
-    lang_server: &RubyLanguageServer,
-    params: SemanticTokensParams,
-) -> LspResult<Option<SemanticTokensResult>> {
-    let uri = params.text_document.uri;
-    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let tokens = semantic_tokens::generate_semantic_tokens(&content);
-
-    match tokens {
-        Ok(tokens) => Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: None,
-            data: tokens,
-        }))),
-        Err(e) => {
-            if let Some(client) = lang_server.client.clone() {
-                client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("Error generating semantic tokens: {}", e),
-                    )
-                    .await;
-            }
-            Ok(None)
-        }
-    }
-}
-
-pub async fn handle_semantic_tokens_range(
-    lang_server: &RubyLanguageServer,
-    params: SemanticTokensRangeParams,
-) -> LspResult<Option<SemanticTokensRangeResult>> {
-    let uri = params.text_document.uri;
-    let range = params.range;
-    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-
-    let tokens = semantic_tokens::generate_semantic_tokens_for_range(&content, &range);
-    match tokens {
-        Ok(tokens) => Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-            result_id: None,
-            data: tokens,
-        }))),
-        Err(e) => {
-            if let Some(client) = lang_server.client.clone() {
-                client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("Error generating semantic tokens for range: {}", e),
-                    )
-                    .await;
-            }
-            Ok(None)
-        }
-    }
 }
