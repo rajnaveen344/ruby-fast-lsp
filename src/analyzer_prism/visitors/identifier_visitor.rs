@@ -5,8 +5,8 @@ use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
 use lsp_types::Position;
 use ruby_prism::{
-    visit_class_node, visit_module_node, CallNode, ClassNode, ConstantPathNode, ConstantReadNode,
-    Location, ModuleNode, Visit,
+    visit_arguments_node, visit_class_node, visit_module_node, ArgumentsNode, CallNode, ClassNode,
+    ConstantPathNode, ConstantReadNode, Location, ModuleNode, Visit,
 };
 
 /// Visitor for finding identifiers at a specific position
@@ -278,7 +278,20 @@ impl Visit<'_> for IdentifierVisitor {
             }
         }
 
-        // If we're not on the receiver, check if the cursor is on the method name
+        // Check if the cursor is in the arguments
+        if let Some(arguments) = node.arguments() {
+            if self.is_position_in_location(&arguments.location()) && self.identifier.is_none() {
+                // Visit the arguments node to check if the cursor is on a constant within the arguments
+                visit_arguments_node(self, &arguments);
+
+                // If we found an identifier in the arguments, return early
+                if self.identifier.is_some() {
+                    return;
+                }
+            }
+        }
+
+        // If we're not on the receiver or arguments, check if the cursor is on the method name
         if let Some(message_loc) = node.message_loc() {
             if self.is_position_in_location(&message_loc) && self.identifier.is_none() {
                 // Extract the method name
@@ -353,6 +366,28 @@ impl Visit<'_> for IdentifierVisitor {
 
                         self.ancestors = self.namespace_stack.clone();
                     }
+                }
+            }
+        }
+    }
+
+    fn visit_arguments_node(&mut self, node: &ArgumentsNode) {
+        // Visit each argument to check if the cursor is on a constant within the arguments
+        for arg in node.arguments().iter() {
+            // Check if the cursor is on this argument
+            if self.is_position_in_location(&arg.location()) {
+                // Visit the argument node to handle constants within it
+                // We need to check what type of node it is and call the appropriate visitor method
+                if let Some(constant_node) = arg.as_constant_read_node() {
+                    self.visit_constant_read_node(&constant_node);
+                } else if let Some(constant_path_node) = arg.as_constant_path_node() {
+                    self.visit_constant_path_node(&constant_path_node);
+                }
+                // Add more node types as needed
+
+                // If we found an identifier, we can stop processing
+                if self.identifier.is_some() {
+                    break;
                 }
             }
         }
@@ -625,6 +660,27 @@ mod tests {
                 assert_eq!(constant.to_string(), "ABC");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_constant_in_method_arguments() {
+        // Test case: method(Foo::Bar) with cursor at Bar
+        let mut visitor =
+            IdentifierVisitor::new("method(Foo::Bar)".to_string(), Position::new(0, 12));
+        let parse_result = ruby_prism::parse("method(Foo::Bar)".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Namespace(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Foo");
+                assert_eq!(parts[1].to_string(), "Bar");
+            }
+            _ => panic!("Expected Namespace FQN, got {:?}", identifier),
         }
     }
 }
