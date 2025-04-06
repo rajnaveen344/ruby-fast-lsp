@@ -319,3 +319,61 @@ async fn test_find_references_class() {
         "Expected at least 2 references to 'Foo'"
     );
 }
+
+/// Test goto definition functionality for module methods
+#[tokio::test]
+async fn test_goto_definition_module_method() {
+    let fixture_file = "module_method.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    // Try to go to definition of 'log_level' method call inside the log method
+    let res = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 2,      // Line with the 'log_level' method call
+                    character: 4, // Position within 'log_level'
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res.is_ok());
+    let definition = res.unwrap();
+    assert!(
+        definition.is_some(),
+        "Expected to find definition for log_level"
+    );
+
+    // Verify the location points to the log_level method definition
+    match definition {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(location.uri, fixture_uri(fixture_file));
+            assert_eq!(
+                location.range.start.line, 8,
+                "Expected 'log_level' method definition at line 8"
+            ); // 'def log_level' starts at line 8
+        }
+        Some(GotoDefinitionResponse::Array(locations)) => {
+            // Should only find one 'log_level' method definition
+            assert_eq!(
+                locations.len(),
+                1,
+                "Expected only 1 'log_level' method definition"
+            );
+            assert_eq!(locations[0].uri, fixture_uri(fixture_file));
+            assert_eq!(
+                locations[0].range.start.line, 8,
+                "Expected 'log_level' method definition at line 8"
+            );
+        }
+        _ => panic!("Expected scalar or array response for goto definition"),
+    }
+}

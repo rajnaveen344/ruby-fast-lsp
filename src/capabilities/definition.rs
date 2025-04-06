@@ -258,10 +258,11 @@ pub async fn find_definition_at_position(
                         instance_method_fqn
                     );
 
-                    // Include ModuleFunc methods with Direct origin
+                    // Include both ModuleFunc methods and regular Instance methods with Direct origin
+                    // This allows goto definition to work for module methods that are defined as instance methods
                     for entry in entries {
                         if let EntryKind::Method { kind, origin, .. } = &entry.kind {
-                            if *kind == MethodKind::ModuleFunc
+                            if (*kind == MethodKind::ModuleFunc || *kind == MethodKind::Instance)
                                 && matches!(origin, MethodOrigin::Direct)
                             {
                                 found_locations.push(entry.location.clone());

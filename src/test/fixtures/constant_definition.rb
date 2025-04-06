@@ -49,3 +49,5 @@ puts Outer::Inner::Klass::CLASS_CONSTANT
 puts GLOBAL_CONSTANT
 puts Outer::Mod2::MOD2_CONSTANT
 puts Outer::Klass2::KLASS2_CONSTANT
+
+A.new(Outer::Klass2::KLASS2_CONSTANT)

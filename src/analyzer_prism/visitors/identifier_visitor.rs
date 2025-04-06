@@ -1,11 +1,11 @@
 use crate::analyzer_prism::position::lsp_pos_to_prism_loc;
+use crate::analyzer_prism::visitors::call_node;
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::types::ruby_constant::RubyConstant;
-use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
 use lsp_types::Position;
 use ruby_prism::{
-    visit_arguments_node, visit_class_node, visit_module_node, ArgumentsNode, CallNode, ClassNode,
+    visit_call_node, visit_class_node, visit_module_node, ArgumentsNode, CallNode, ClassNode,
     ConstantPathNode, ConstantReadNode, Location, ModuleNode, Visit,
 };
 
@@ -169,10 +169,9 @@ impl Visit<'_> for IdentifierVisitor {
             if namespaces.is_empty() {
                 self.identifier = None;
                 self.ancestors = vec![];
-                return;
-            }
-
-            if let Some(last_part) = namespaces.last() {
+                // Even if we don't set an identifier, we still need to visit child nodes
+                // to ensure proper traversal of the AST
+            } else if let Some(last_part) = namespaces.last() {
                 let last_part_str = last_part.to_string();
 
                 match RubyConstant::new(&last_part_str) {
@@ -210,184 +209,104 @@ impl Visit<'_> for IdentifierVisitor {
 
             self.ancestors = self.namespace_stack.clone();
         }
+
+        // No need to call a default visit method here as ConstantReadNode is a leaf node
+        // and doesn't have any children to visit
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
-        // First, check if the cursor is on the receiver (if any)
-        if let Some(receiver) = node.receiver() {
-            // Check if the receiver is a constant or constant path
-            if let Some(constant_node) = receiver.as_constant_read_node() {
-                if self.is_position_in_location(&constant_node.location())
-                    && self.identifier.is_none()
-                {
-                    // Cursor is on the constant part of a method call (e.g., Foo.bar)
-                    let constant_name =
-                        String::from_utf8_lossy(constant_node.name().as_slice()).to_string();
-
-                    match RubyConstant::new(&constant_name) {
-                        Ok(constant) => {
-                            self.identifier =
-                                Some(FullyQualifiedName::constant(Vec::new(), constant));
-                        }
-                        Err(_) => {
-                            let namespace = RubyNamespace::new(constant_name.as_str()).unwrap();
-                            self.identifier = Some(FullyQualifiedName::namespace(vec![namespace]));
-                        }
-                    }
-
-                    self.ancestors = self.namespace_stack.clone();
-                    return;
-                }
-            } else if let Some(constant_path) = receiver.as_constant_path_node() {
-                // Check if the cursor is anywhere within the constant path
-                if self.is_position_in_location(&constant_path.location())
-                    && self.identifier.is_none()
-                {
-                    // Cursor is on the constant path part of a method call (e.g., Foo::Bar.baz)
-                    // Use the existing constant path handling logic to determine which part of the path the cursor is on
-                    let (mut namespaces, is_root_constant) =
-                        self.determine_const_path_target(&constant_path);
-
-                    // If namespaces is empty, the cursor is on a scope resolution operator (::)
-                    // In that case, we don't want to set an identifier
-                    if !namespaces.is_empty() {
-                        if let Some(last_part) = namespaces.last() {
-                            let last_part_str = last_part.to_string();
-
-                            match RubyConstant::new(&last_part_str) {
-                                Ok(constant) => {
-                                    namespaces.pop(); // Remove the last part (constant name)
-                                    self.identifier =
-                                        Some(FullyQualifiedName::constant(namespaces, constant));
-                                }
-                                Err(_) => {
-                                    self.identifier =
-                                        Some(FullyQualifiedName::namespace(namespaces));
-                                }
-                            }
-
-                            if is_root_constant {
-                                self.ancestors = vec![];
-                            } else {
-                                self.ancestors = self.namespace_stack.clone();
-                            }
-                        }
-                    }
-                    return;
-                }
-            }
+        // First, check if the cursor is in the receiver
+        if call_node::handle_receiver(self, node) {
+            return;
         }
 
-        // Check if the cursor is in the arguments
-        if let Some(arguments) = node.arguments() {
-            if self.is_position_in_location(&arguments.location()) && self.identifier.is_none() {
-                // Visit the arguments node to check if the cursor is on a constant within the arguments
-                visit_arguments_node(self, &arguments);
-
-                // If we found an identifier in the arguments, return early
-                if self.identifier.is_some() {
-                    return;
-                }
-            }
+        // Then, check if the cursor is in the arguments
+        if call_node::handle_arguments(self, node) {
+            return;
         }
 
-        // If we're not on the receiver or arguments, check if the cursor is on the method name
-        if let Some(message_loc) = node.message_loc() {
-            if self.is_position_in_location(&message_loc) && self.identifier.is_none() {
-                // Extract the method name
-                let method_name_id = node.name();
-                let method_name_bytes = method_name_id.as_slice();
-                let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
+        // Finally, check if the cursor is on the method name
+        call_node::handle_method_name(self, node);
 
-                // Try to create a RubyMethod from the name
-                if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
-                    // Determine the method type based on the receiver and context
-                    if let Some(receiver) = node.receiver() {
-                        // Check if the receiver is a constant (class/module)
-                        if let Some(constant_node) = receiver.as_constant_read_node() {
-                            // It's a class method call on a constant
-                            let constant_name =
-                                String::from_utf8_lossy(constant_node.name().as_slice())
-                                    .to_string();
-                            let namespace = RubyNamespace::new(&constant_name).unwrap();
-
-                            // Check if this might be a module function
-                            // For now, we'll use class_method as the default for constant receivers
-                            // The actual determination of ModuleFunc will happen in the indexer
-                            self.identifier = Some(FullyQualifiedName::module_method(
-                                vec![namespace.clone()],
-                                method_name.clone(),
-                            ));
-
-                            self.ancestors = vec![]; // Class/module methods are absolute references
-                        } else if let Some(constant_path) = receiver.as_constant_path_node() {
-                            // It's a class method call on a namespaced constant
-                            let (namespaces, is_root_constant) =
-                                self.determine_const_path_target(&constant_path);
-
-                            // Check if this might be a module function
-                            // For now, we'll use module_method as the default for constant path receivers
-                            // The actual determination of ModuleFunc will happen in the indexer
-                            self.identifier = Some(FullyQualifiedName::module_method(
-                                namespaces.clone(),
-                                method_name.clone(),
-                            ));
-
-                            if is_root_constant {
-                                self.ancestors = vec![];
-                            } else {
-                                self.ancestors = self.namespace_stack.clone();
-                            }
-                        } else {
-                            // It's an instance method call on some other expression
-                            // For now, we'll use the current namespace
-                            self.identifier = Some(FullyQualifiedName::instance_method(
-                                self.namespace_stack.clone(),
-                                method_name,
-                            ));
-                            self.ancestors = self.namespace_stack.clone();
-                        }
-                    } else {
-                        // No receiver, it's a local method call in the current context
-                        // This could be either an instance method or a module function
-                        // For now, we'll use instance_method as the default
-                        self.identifier = Some(FullyQualifiedName::instance_method(
-                            self.namespace_stack.clone(),
-                            method_name.clone(),
-                        ));
-
-                        // Also check if it might be a module function in the current namespace
-                        if !self.namespace_stack.is_empty() {
-                            self.identifier = Some(FullyQualifiedName::module_method(
-                                self.namespace_stack.clone(),
-                                method_name,
-                            ));
-                        }
-
-                        self.ancestors = self.namespace_stack.clone();
-                    }
-                }
-            }
-        }
+        visit_call_node(self, node);
     }
 
     fn visit_arguments_node(&mut self, node: &ArgumentsNode) {
         // Visit each argument to check if the cursor is on a constant within the arguments
         for arg in node.arguments().iter() {
-            // Check if the cursor is on this argument
+            // First, check if the cursor is directly on this argument
             if self.is_position_in_location(&arg.location()) {
                 // Visit the argument node to handle constants within it
                 // We need to check what type of node it is and call the appropriate visitor method
                 if let Some(constant_node) = arg.as_constant_read_node() {
                     self.visit_constant_read_node(&constant_node);
                 } else if let Some(constant_path_node) = arg.as_constant_path_node() {
-                    self.visit_constant_path_node(&constant_path_node);
+                    // Use our specialized handler for constant paths in arguments
+                    call_node::handle_constant_path_in_argument(self, &constant_path_node);
+                } else if let Some(call_node) = arg.as_call_node() {
+                    // Handle call nodes in arguments (like Error::Type.new(...))
+                    // First check if the cursor is on the receiver
+                    if let Some(receiver) = call_node.receiver() {
+                        if let Some(constant_path) = receiver.as_constant_path_node() {
+                            if self.is_position_in_location(&constant_path.location()) {
+                                call_node::handle_constant_path_receiver(self, &constant_path);
+                                if self.identifier.is_some() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Then check if the cursor is in the arguments of this call node
+                    if let Some(nested_args) = call_node.arguments() {
+                        if self.is_position_in_location(&nested_args.location()) {
+                            self.visit_arguments_node(&nested_args);
+                            if self.identifier.is_some() {
+                                break;
+                            }
+                        }
+                    }
                 }
                 // Add more node types as needed
 
                 // If we found an identifier, we can stop processing
                 if self.identifier.is_some() {
                     break;
+                }
+            } else {
+                // If the cursor is not directly on this argument, check if it's on a nested constant path
+                // This is important for complex constant paths like GoshPosh::Platform::Shows::ShowActions::SEND_AUCTION_REQUEST
+                if let Some(constant_path_node) = arg.as_constant_path_node() {
+                    // Check if the cursor is within this constant path
+                    if self.is_position_in_location(&constant_path_node.location()) {
+                        // Use our specialized handler for constant paths in arguments
+                        if call_node::handle_constant_path_in_argument(self, &constant_path_node) {
+                            break;
+                        }
+                    }
+                }
+                // Also check for nested call nodes with constant paths in arguments
+                else if let Some(call_node) = arg.as_call_node() {
+                    // Check if the cursor is in the arguments of this call node
+                    if let Some(nested_args) = call_node.arguments() {
+                        for nested_arg in nested_args.arguments().iter() {
+                            if let Some(constant_path) = nested_arg.as_constant_path_node() {
+                                if self.is_position_in_location(&constant_path.location()) {
+                                    if call_node::handle_constant_path_in_argument(
+                                        self,
+                                        &constant_path,
+                                    ) {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // If we found an identifier, we can stop processing
+                        if self.identifier.is_some() {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -681,6 +600,197 @@ mod tests {
                 assert_eq!(parts[1].to_string(), "Bar");
             }
             _ => panic!("Expected Namespace FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_nested_constant_in_method_arguments() {
+        // Test case: method(A::B::C::D::CONST) with cursor at CONST
+        let mut visitor = IdentifierVisitor::new(
+            "method(A::B::C::D::CONST)".to_string(),
+            Position::new(0, 19),
+        );
+        let parse_result = ruby_prism::parse("method(A::B::C::D::CONST)".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 4);
+                assert_eq!(parts[0].to_string(), "A");
+                assert_eq!(parts[1].to_string(), "B");
+                assert_eq!(parts[2].to_string(), "C");
+                assert_eq!(parts[3].to_string(), "D");
+                assert_eq!(constant.to_string(), "CONST");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_nested_call_node() {
+        // Test case: a.b.c with cursor at b
+        let mut visitor = IdentifierVisitor::new("a.b.c".to_string(), Position::new(0, 2));
+        let parse_result = ruby_prism::parse("a.b.c".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::InstanceMethod(_, method) => {
+                assert_eq!(method.to_string(), "b");
+            }
+            _ => panic!("Expected InstanceMethod FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_deeply_nested_call_node() {
+        // Test case: a.b.c.d.e with cursor at d
+        let mut visitor = IdentifierVisitor::new("a.b.c.d.e".to_string(), Position::new(0, 6));
+        let parse_result = ruby_prism::parse("a.b.c.d.e".as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::InstanceMethod(_, method) => {
+                assert_eq!(method.to_string(), "d");
+            }
+            _ => panic!("Expected InstanceMethod FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_constant_in_error_raising() {
+        // Test case: raise Error::Type.new(Error::Messages::CONSTANT, Error::Codes::CODE)
+        // with cursor at CONSTANT
+        let code = "raise Error::Type.new(Error::Messages::CONSTANT, Error::Codes::CODE)";
+        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(0, 40));
+        let parse_result = ruby_prism::parse(code.as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Error");
+                assert_eq!(parts[1].to_string(), "Messages");
+                assert_eq!(constant.to_string(), "CONSTANT");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_complex_error_raising() {
+        // Test case with complex nested constant paths in error raising:
+        // raise RubyLSP::Core::Errors::ValidationError.new(
+        //       RubyLSP::Core::Constants::ErrorMessages::INVALID_SYNTAX,
+        //       RubyLSP::Core::Constants::ErrorCodes::PARSE_ERROR
+        //     )
+        let code = String::from("raise RubyLSP::Core::Errors::ValidationError.new(\n")
+            + "          RubyLSP::Core::Constants::ErrorMessages::INVALID_SYNTAX,\n"
+            + "          RubyLSP::Core::Constants::ErrorCodes::PARSE_ERROR\n"
+            + "        )";
+
+        // Test with cursor on INVALID_SYNTAX
+        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(1, 60));
+        let parse_result = ruby_prism::parse(code.as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 4);
+                assert_eq!(parts[0].to_string(), "RubyLSP");
+                assert_eq!(parts[1].to_string(), "Core");
+                assert_eq!(parts[2].to_string(), "Constants");
+                assert_eq!(parts[3].to_string(), "ErrorMessages");
+                assert_eq!(constant.to_string(), "INVALID_SYNTAX");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+
+        // Test with cursor on PARSE_ERROR
+        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(2, 55));
+        let parse_result = ruby_prism::parse(code.as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 4);
+                assert_eq!(parts[0].to_string(), "RubyLSP");
+                assert_eq!(parts[1].to_string(), "Core");
+                assert_eq!(parts[2].to_string(), "Constants");
+                assert_eq!(parts[3].to_string(), "ErrorCodes");
+                assert_eq!(constant.to_string(), "PARSE_ERROR");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+    }
+
+    #[test]
+    fn test_constant_in_block() {
+        // Test case with constant paths in a block:
+        // items.each do |item|
+        //   raise Error::InvalidItem.new(
+        //     Error::Messages::INVALID_ITEM,
+        //     Error::Codes::ITEM_ERROR
+        //   )
+        // end
+        let code = String::from("items.each do |item|\n")
+            + "  raise Error::InvalidItem.new(\n"
+            + "    Error::Messages::INVALID_ITEM,\n"
+            + "    Error::Codes::ITEM_ERROR\n"
+            + "  )\n"
+            + "end";
+
+        // Test with cursor on INVALID_ITEM
+        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(2, 25));
+        let parse_result = ruby_prism::parse(code.as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Error");
+                assert_eq!(parts[1].to_string(), "Messages");
+                assert_eq!(constant.to_string(), "INVALID_ITEM");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
+        }
+
+        // Test with cursor on ITEM_ERROR
+        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(3, 20));
+        let parse_result = ruby_prism::parse(code.as_bytes());
+        visitor.visit(&parse_result.node());
+
+        // Ensure we found an identifier
+        let identifier = visitor.identifier.expect("Expected to find an identifier");
+
+        match identifier {
+            FullyQualifiedName::Constant(parts, constant) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].to_string(), "Error");
+                assert_eq!(parts[1].to_string(), "Codes");
+                assert_eq!(constant.to_string(), "ITEM_ERROR");
+            }
+            _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
     }
 }
