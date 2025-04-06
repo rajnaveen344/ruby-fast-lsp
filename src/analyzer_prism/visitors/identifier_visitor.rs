@@ -7,8 +7,8 @@ use crate::{
 use lsp_types::Position;
 use ruby_prism::{
     visit_arguments_node, visit_call_node, visit_class_node, visit_constant_path_node,
-    visit_module_node, CallNode, ClassNode, ConstantPathNode, ConstantReadNode, Location,
-    ModuleNode, Visit,
+    visit_def_node, visit_module_node, CallNode, ClassNode, ConstantPathNode, ConstantReadNode,
+    DefNode, Location, ModuleNode, Visit,
 };
 
 /// Visitor for finding identifiers at a specific position
@@ -40,100 +40,6 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
-    /// Based on a constant node target, a constant path node parent and a position, this method will find the exact
-    /// portion of the constant path that matches the requested position, for higher precision in hover and
-    /// definition. For example:
-    ///
-    /// ```ruby
-    /// Foo::Bar::BAZ
-    ///           ^ Going to definition here should go to Foo::Bar::Baz
-    ///      ^ Going to definition here should go to Foo::Bar - Parent of ConstantPathNode BAZ
-    /// ^ Going to definition here should go to Foo - Parent of ConstantPathNode Bar
-    /// ```
-    pub fn determine_const_path_target(
-        &self,
-        target: &ConstantPathNode,
-    ) -> (Vec<RubyNamespace>, bool) {
-        // Extract the full constant path text and cursor position
-        let position_offset = lsp_pos_to_prism_loc(self.position, &self.code);
-        let code = self.code.as_bytes();
-        let start = target.location().start_offset();
-        let end = target.location().end_offset();
-        let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
-
-        // Check if this is a root constant path (starts with ::)
-        let is_root_constant = target_str.starts_with("::");
-
-        // Handle constant paths with multiple parts (e.g., Foo::Bar::Baz or ::GLOBAL_CONSTANT)
-        if target_str.contains("::") {
-            // Split the path into parts
-            let parts: Vec<&str> = target_str.split("::").collect();
-
-            // Find which part the cursor is on
-            let mut current_offset = start;
-            let mut cursor_part_index = parts.len() - 1; // Default to last part
-            let mut on_scope_resolution = false;
-
-            for (i, part) in parts.iter().enumerate() {
-                let part_end = current_offset + part.len();
-
-                // Check if cursor is within this part
-                if position_offset >= current_offset && position_offset < part_end {
-                    cursor_part_index = i;
-                    break;
-                }
-
-                // Check if cursor is on the scope resolution operator ("::") between parts
-                if i < parts.len() - 1 {
-                    let scope_start = part_end;
-                    let scope_end = scope_start + 2; // "::" is 2 characters
-
-                    if position_offset >= scope_start && position_offset < scope_end {
-                        // Mark that we're on a scope resolution operator
-                        on_scope_resolution = true;
-                        break;
-                    }
-                }
-
-                current_offset = part_end + 2; // +2 for "::"
-            }
-
-            // If cursor is on scope resolution operator, return empty vector
-            if on_scope_resolution {
-                return (Vec::new(), false);
-            }
-
-            // Handle root constants (starting with ::)
-            if is_root_constant {
-                // If we're on the constant part (after ::), we need special handling
-                if parts[0].is_empty() {
-                    // For root constants, we need to skip the empty first segment
-                    // and return the remaining parts
-                    let result = parts[1..=cursor_part_index]
-                        .iter()
-                        .filter(|part| !part.is_empty()) // Skip empty parts
-                        .map(|part| RubyNamespace::new(part).unwrap())
-                        .collect::<Vec<RubyNamespace>>();
-
-                    return (result, true);
-                }
-            }
-
-            // For regular constants (not root), or if we're on a part before the constant
-            let result = parts[0..=cursor_part_index]
-                .iter()
-                .filter(|part| !part.is_empty()) // Skip empty parts
-                .map(|part| RubyNamespace::new(part).unwrap())
-                .collect::<Vec<RubyNamespace>>();
-
-            return (result, is_root_constant);
-        }
-
-        // Handle simple constant (not a path)
-        let name = String::from_utf8_lossy(target.name().unwrap().as_slice()).to_string();
-        (vec![RubyNamespace::new(&name).unwrap()], is_root_constant)
-    }
-
     fn collect_namespaces_recursive(&self, node: &ConstantPathNode, acc: &mut Vec<RubyNamespace>) {
         let name = String::from_utf8_lossy(node.name().unwrap().as_slice());
 
@@ -155,7 +61,10 @@ impl IdentifierVisitor {
 
 impl Visit<'_> for IdentifierVisitor {
     fn visit_class_node(&mut self, node: &ClassNode) {
-        // Add the class name to the namespace stack regardless of cursor position
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
         let name = String::from_utf8_lossy(&node.name().as_slice());
         self.namespace_stack
             .push(RubyNamespace::new(&name.to_string()).unwrap());
@@ -168,7 +77,10 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
-        // Add the module name to the namespace stack regardless of cursor position
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
         let name = String::from_utf8_lossy(&node.name().as_slice());
         self.namespace_stack
             .push(RubyNamespace::new(&name.to_string()).unwrap());
@@ -180,11 +92,29 @@ impl Visit<'_> for IdentifierVisitor {
         self.namespace_stack.pop();
     }
 
+    fn visit_def_node(&mut self, node: &DefNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        visit_def_node(self, node);
+    }
+
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
         if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
+        // Based on a constant node target, a constant path node parent and a position, this method will find the exact
+        // portion of the constant path that matches the requested position, for higher precision in hover and
+        // definition. For example:
+        //
+        // ```ruby
+        // Foo::Bar::BAZ
+        //           ^ Going to definition here should go to Foo::Bar::BAZ
+        //      ^ Going to definition here should go to Foo::Bar - Parent of ConstantPathNode BAZ
+        // ^ Going to definition here should go to Foo - Parent of ConstantPathNode Bar
+        // ```
         if let Some(parent_node) = node.parent() {
             if self.is_position_in_location(&parent_node.location()) {
                 visit_constant_path_node(self, node);
