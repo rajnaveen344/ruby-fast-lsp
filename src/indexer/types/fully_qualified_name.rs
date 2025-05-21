@@ -25,19 +25,22 @@ pub enum FullyQualifiedName {
 }
 
 impl FullyQualifiedName {
-    // Constructor helpers
+    // Eg. Foo::Bar::Baz
     pub fn namespace(namespace: Vec<RubyNamespace>) -> Self {
         FullyQualifiedName::Namespace(namespace)
     }
 
+    // Eg. a = Foo.new; a.bar
     pub fn instance_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
         FullyQualifiedName::InstanceMethod(namespace, method)
     }
 
+    // Eg. Foo.bar
     pub fn class_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
         FullyQualifiedName::ClassMethod(namespace, method)
     }
 
+    // Eg. Foo::CONST
     pub fn constant(namespace: Vec<RubyNamespace>, constant: RubyConstant) -> Self {
         FullyQualifiedName::Constant(namespace, constant)
     }
