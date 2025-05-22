@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
+use crate::indexer::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -12,6 +12,7 @@ pub enum EntryKind {
     },
     Module,
     Method {
+        name: RubyMethod,
         kind: MethodKind,
         parameters: Vec<String>,
         owner: FullyQualifiedName,
@@ -36,16 +37,17 @@ impl Display for EntryKind {
                 )
             }
             EntryKind::Module { .. } => write!(f, "Module"),
-            EntryKind::Method { kind, .. } => {
+            EntryKind::Method { name, kind, .. } => {
                 write!(
                     f,
-                    "Method{}",
+                    "Method{}: {}",
                     match kind {
                         MethodKind::Instance => " (Instance)",
                         MethodKind::Class => " (Class)",
                         MethodKind::Singleton => " (Singleton)",
                         MethodKind::ModuleFunc => " (ModuleFunc)",
-                    }
+                    },
+                    name
                 )
             }
             EntryKind::Constant { visibility, .. } => {

@@ -1,5 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::analyzer_prism::Identifier;
+
 use super::{ruby_constant::RubyConstant, ruby_method::RubyMethod, ruby_namespace::RubyNamespace};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -59,6 +61,17 @@ impl FullyQualifiedName {
     // Constructor helper for module methods
     pub fn module_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
         FullyQualifiedName::ModuleMethod(namespace, method)
+    }
+}
+
+impl From<Identifier> for FullyQualifiedName {
+    fn from(value: Identifier) -> Self {
+        match value {
+            Identifier::RubyNamespace(ns) => FullyQualifiedName::Namespace(ns),
+            Identifier::RubyConstant(ns, constant) => FullyQualifiedName::Constant(ns, constant),
+            Identifier::RubyMethod(ns, method) => FullyQualifiedName::InstanceMethod(ns, method),
+            _ => panic!("Unsupported identifier type for conversion to FullyQualifiedName"),
+        }
     }
 }
 

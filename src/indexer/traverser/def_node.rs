@@ -20,8 +20,10 @@ impl Visitor {
             let name_location = node.name_loc();
             let location = self.prism_loc_to_lsp_loc(name_location);
             let current_namespace_path = self.namespace_stack.clone();
-            let fqn =
-                FullyQualifiedName::instance_method(current_namespace_path.clone(), method_name);
+            let fqn = FullyQualifiedName::instance_method(
+                current_namespace_path.clone(),
+                method_name.clone(),
+            );
 
             debug!("Visiting method definition: {}", fqn);
 
@@ -35,6 +37,7 @@ impl Visitor {
                 fqn: fqn.clone(),
                 location,
                 kind: EntryKind::Method {
+                    name: method_name.into(),
                     kind: MethodKind::Instance,
                     parameters: vec![],
                     owner: owner_fqn,

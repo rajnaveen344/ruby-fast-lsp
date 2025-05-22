@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lsp_types::{Location, Url};
 
 use super::{
-    entry::{Entry, Mixin},
+    entry::{entry_kind::EntryKind, Entry, Mixin},
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
         ruby_namespace::RubyNamespace,
@@ -30,6 +30,10 @@ pub struct RubyIndex {
 
     // Mixins to support include, extend, and prepend helpers
     pub mixin_relationships: HashMap<FullyQualifiedName, Vec<Mixin>>,
+
+    // Temporarily used to find definitions by name until we have logic to determine the type of the receiver
+    // For example, if we have a method Foo#bar, its method by name is bar.
+    pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
 }
 
 impl RubyIndex {
@@ -40,6 +44,7 @@ impl RubyIndex {
             definitions: HashMap::new(),
             references: HashMap::new(),
             mixin_relationships: HashMap::new(),
+            methods_by_name: HashMap::new(),
         }
     }
 
@@ -52,11 +57,21 @@ impl RubyIndex {
         file_entries.push(entry.clone());
 
         // Add to the definitions map
-        let entries = self
+        let definition_entries = self
             .definitions
             .entry(entry.fqn.clone())
             .or_insert_with(Vec::new);
-        entries.push(entry);
+
+        definition_entries.push(entry.clone());
+
+        // Add to the methods_by_name map if the entry is of kind Method
+        if let EntryKind::Method { name, .. } = &entry.kind {
+            let method_entries = self
+                .methods_by_name
+                .entry(name.clone())
+                .or_insert_with(Vec::new);
+            method_entries.push(entry.clone());
+        }
     }
 
     pub fn remove_entries_for_uri(&mut self, uri: &Url) {

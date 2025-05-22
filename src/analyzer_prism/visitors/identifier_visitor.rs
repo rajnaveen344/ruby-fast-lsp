@@ -1,9 +1,9 @@
-use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
+use crate::analyzer_prism::position::lsp_pos_to_prism_loc;
+use crate::analyzer_prism::Identifier;
 use crate::indexer::types::ruby_constant::RubyConstant;
+use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
-use crate::{
-    analyzer_prism::position::lsp_pos_to_prism_loc, indexer::types::ruby_method::RubyMethod,
-};
+
 use lsp_types::Position;
 use ruby_prism::{
     visit_arguments_node, visit_call_node, visit_class_node, visit_constant_path_node,
@@ -15,9 +15,9 @@ use ruby_prism::{
 pub struct IdentifierVisitor {
     code: String,
     position: Position,
-    pub identifier: Option<FullyQualifiedName>,
+    pub identifier: Option<Identifier>,
     pub ancestors: Vec<RubyNamespace>,
-    pub namespace_stack: Vec<RubyNamespace>,
+    namespace_stack: Vec<RubyNamespace>,
 }
 
 impl IdentifierVisitor {
@@ -140,10 +140,10 @@ impl Visit<'_> for IdentifierVisitor {
             match RubyConstant::new(&last_part_str) {
                 Ok(constant) => {
                     namespaces.pop(); // Remove the last part (constant name)
-                    self.identifier = Some(FullyQualifiedName::constant(namespaces, constant));
+                    self.identifier = Some(Identifier::RubyConstant(namespaces, constant));
                 }
                 Err(_) => {
-                    self.identifier = Some(FullyQualifiedName::namespace(namespaces));
+                    self.identifier = Some(Identifier::RubyNamespace(namespaces));
                 }
             }
 
@@ -165,11 +165,11 @@ impl Visit<'_> for IdentifierVisitor {
 
         match RubyConstant::new(&constant_name) {
             Ok(constant) => {
-                self.identifier = Some(FullyQualifiedName::constant(Vec::new(), constant));
+                self.identifier = Some(Identifier::RubyConstant(Vec::new(), constant));
             }
             Err(_) => {
                 let namespace = RubyNamespace::new(constant_name.as_str()).unwrap();
-                self.identifier = Some(FullyQualifiedName::namespace(vec![namespace]));
+                self.identifier = Some(Identifier::RubyNamespace(vec![namespace]));
             }
         }
 
@@ -195,20 +195,19 @@ impl Visit<'_> for IdentifierVisitor {
             }
         }
 
+        if let Some(block) = node.block() {
+            if self.is_position_in_location(&block.location()) {
+                self.visit(&block);
+                return;
+            }
+        }
+
         let method_name_bytes = node.name().as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
 
         if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
-            // Determine the method type based on the receiver and context
-            if let Some(_receiver) = node.receiver() {
-                // TODO
-            } else {
-                self.identifier = Some(FullyQualifiedName::instance_method(
-                    self.namespace_stack.clone(),
-                    method_name,
-                ));
-                self.ancestors = self.namespace_stack.clone();
-            }
+            self.identifier = Some(Identifier::RubyMethod(vec![], method_name));
+            self.ancestors = self.namespace_stack.clone();
         }
 
         visit_call_node(self, node);
@@ -252,7 +251,7 @@ mod tests {
         // Special case for root constants
         if code.starts_with("::") {
             match identifier {
-                FullyQualifiedName::Constant(parts, constant) => {
+                Identifier::RubyConstant(parts, constant) => {
                     // For root constants, we expect an empty namespace vector
                     if expected_parts.len() == 1 {
                         // For direct root constants like ::GLOBAL_CONSTANT
@@ -299,8 +298,8 @@ mod tests {
 
         // Get the parts from the identifier - could be either a namespace or a constant
         let parts = match identifier {
-            FullyQualifiedName::Namespace(parts) => parts.clone(),
-            FullyQualifiedName::Constant(parts, _) => parts.clone(),
+            Identifier::RubyNamespace(parts) => parts.clone(),
+            Identifier::RubyConstant(parts, _) => parts.clone(),
             _ => panic!("Expected a Namespace or Constant FQN"),
         };
 
@@ -395,7 +394,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Namespace(parts) => {
+            Identifier::RubyNamespace(parts) => {
                 assert_eq!(parts.len(), 1);
                 assert_eq!(parts[0].to_string(), "Foo");
             }
@@ -414,7 +413,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Namespace(parts) => {
+            Identifier::RubyNamespace(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -435,7 +434,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::ModuleMethod(parts, method) => {
+            Identifier::RubyMethod(parts, method) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -457,7 +456,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Namespace(parts) => {
+            Identifier::RubyNamespace(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -478,7 +477,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -501,7 +500,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Namespace(parts) => {
+            Identifier::RubyNamespace(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -524,7 +523,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 4);
                 assert_eq!(parts[0].to_string(), "A");
                 assert_eq!(parts[1].to_string(), "B");
@@ -547,7 +546,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::InstanceMethod(_, method) => {
+            Identifier::RubyMethod(_, method) => {
                 assert_eq!(method.to_string(), "a");
             }
             _ => panic!("Expected InstanceMethod FQN, got {:?}", identifier),
@@ -567,7 +566,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
@@ -598,7 +597,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 4);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
@@ -618,7 +617,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 4);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
@@ -634,7 +633,7 @@ mod tests {
     fn test_constant_in_block() {
         // Test case with constant paths in a block:
         // items.each do |item|
-        //   raise Error::InvalidItem.new(
+        //   raise Error::Type.new(
         //     Error::Messages::INVALID_ITEM,
         //     Error::Codes::ITEM_ERROR
         //   )
@@ -655,7 +654,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
@@ -673,7 +672,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            FullyQualifiedName::Constant(parts, constant) => {
+            Identifier::RubyConstant(parts, constant) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Codes");

@@ -17,7 +17,7 @@ pub async fn find_references_at_position(
     let (identifier_opt, _) = analyzer.get_identifier(position);
 
     let identifier = match identifier_opt {
-        Some(fqn) => fqn.to_string(),
+        Some(fqn) => format!("{:?}", fqn), // Use Debug format
         None => {
             debug!("No identifier found at position {:?}", position);
             return None;
