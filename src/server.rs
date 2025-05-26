@@ -80,34 +80,12 @@ impl LanguageServer for RubyLanguageServer {
 
     async fn semantic_tokens_full(
         &self,
-        params: SemanticTokensParams, // 'params' is used for params.text_document.uri
+        params: SemanticTokensParams,
     ) -> LspResult<Option<SemanticTokensResult>> {
         eprintln!(
             "textDocument/semanticTokens/full: {:?}",
             params.text_document.uri
         );
         request::handle_semantic_tokens_full(self, params).await
-    }
-
-    async fn semantic_tokens_full_delta(
-        &self,
-        _params: SemanticTokensDeltaParams,
-    ) -> LspResult<Option<SemanticTokensFullDeltaResult>> {
-        // Correct return type
-        eprintln!("textDocument/semanticTokens/full/delta: {:?}", _params);
-        // Explicitly type the None to help the compiler with the trait signature
-        let result: Option<SemanticTokensFullDeltaResult> = None;
-        Ok(result) // TODO: Implement delta support
-    }
-
-    async fn semantic_tokens_range(
-        &self,
-        _params: SemanticTokensRangeParams,
-    ) -> LspResult<Option<SemanticTokensRangeResult>> {
-        // Correct return type
-        eprintln!("textDocument/semanticTokens/range: {:?}", _params);
-        // Explicitly type the None to help the compiler with the trait signature
-        let result: Option<SemanticTokensRangeResult> = None;
-        Ok(result) // TODO: Implement range support
     }
 }

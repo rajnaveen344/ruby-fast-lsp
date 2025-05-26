@@ -1,4 +1,4 @@
-use crate::capabilities::{self, definition, references};
+use crate::capabilities::{self, definition, references, semantic_tokens};
 use crate::indexer::events;
 use crate::server::RubyLanguageServer;
 use log::{info, warn};
@@ -127,21 +127,10 @@ pub async fn handle_references(
 
 pub async fn handle_semantic_tokens_full(
     _lang_server: &RubyLanguageServer,
-    _params: SemanticTokensParams,
+    params: SemanticTokensParams,
 ) -> LspResult<Option<SemanticTokensResult>> {
-    Ok(None) // TODO: Implement full support
-}
-
-pub async fn handle_semantic_tokens_full_delta(
-    _lang_server: &RubyLanguageServer,
-    _params: SemanticTokensDeltaParams,
-) -> LspResult<Option<SemanticTokensFullDeltaResult>> {
-    Ok(None) // TODO: Implement delta support
-}
-
-pub async fn handle_semantic_tokens_range(
-    _lang_server: &RubyLanguageServer,
-    _params: SemanticTokensRangeParams,
-) -> LspResult<Option<SemanticTokensRangeResult>> {
-    Ok(None) // TODO: Implement range support
+    let uri = params.text_document.uri.clone();
+    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
+    let result = semantic_tokens::get_semantic_tokens_full(content);
+    Ok(Some(result))
 }

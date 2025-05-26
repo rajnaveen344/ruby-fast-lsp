@@ -1,6 +1,6 @@
 use lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend,
-    SemanticTokensOptions, WorkDoneProgressOptions,
+    SemanticTokensOptions, SemanticTokensResult, WorkDoneProgressOptions,
 };
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
@@ -51,4 +51,8 @@ pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
         range: Some(false),
         full: Some(SemanticTokensFullOptions::Bool(true)),
     }
+}
+
+pub fn get_semantic_tokens_full(_content: String) -> SemanticTokensResult {
+    todo!()
 }
