@@ -139,18 +139,16 @@ pub async fn find_definition_at_position(
         }
         Identifier::RubyMethod(ns, method) => {
             // Start with the exact identifier
-            let search_fqn = Identifier::RubyMethod(ns, method);
-            info!(
-                "Searching for method with identifier: {:?}",
-                search_fqn.clone()
-            );
+            let iden = Identifier::RubyMethod(ns, method.clone());
+            info!("Searching for method with identifier: {:?}", iden.clone());
 
-            if let Some(entries) = index_guard.definitions.get(&search_fqn.clone().into()) {
+            // First try to find the method with the exact namespace
+            if let Some(entries) = index_guard.methods_by_name.get(&method) {
                 if !entries.is_empty() {
                     info!(
                         "Found {} method definition(s) for: {:?}",
                         entries.len(),
-                        search_fqn.clone()
+                        iden.clone()
                     );
 
                     // Include all methods with Direct origin

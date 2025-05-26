@@ -206,8 +206,30 @@ impl Visit<'_> for IdentifierVisitor {
         let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
 
         if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
-            self.identifier = Some(Identifier::RubyMethod(vec![], method_name));
-            self.ancestors = self.namespace_stack.clone();
+            // Get the namespace from the receiver if it exists
+            let mut namespace = vec![];
+
+            if let Some(receiver) = node.receiver() {
+                // Eg. Foo::Bar.baz
+                // Foo::Bar is ConstantPathNode, Foo is ConstantReadNode, baz is CallNode
+                if let Some(constant_path) = receiver.as_constant_path_node() {
+                    let mut namespaces = vec![];
+                    self.collect_namespaces_recursive(&constant_path, &mut namespaces);
+                    namespace = namespaces;
+                }
+
+                // Eg. Foo.bar, Foo::bar
+                // Foo is ConstantReadNode, bar is CallNode
+                if let Some(constant_read) = receiver.as_constant_read_node() {
+                    let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                    if let Ok(ns) = RubyNamespace::new(&name) {
+                        namespace.push(ns);
+                    }
+                }
+            }
+
+            self.identifier = Some(Identifier::RubyMethod(namespace, method_name));
+            self.ancestors = vec![];
         }
 
         visit_call_node(self, node);
@@ -423,7 +445,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_module_method_call() {
         // Test case: Foo::Bar.baz with cursor at baz (module method call)
         let mut visitor = IdentifierVisitor::new("Foo::Bar.baz".to_string(), Position::new(0, 10));
@@ -440,7 +461,7 @@ mod tests {
                 assert_eq!(parts[1].to_string(), "Bar");
                 assert_eq!(method.to_string(), "baz");
             }
-            _ => panic!("Expected ModuleMethod FQN, got {:?}", identifier),
+            _ => panic!("Expected Method identifier, got {:?}", identifier),
         }
     }
 
