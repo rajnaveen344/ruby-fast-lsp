@@ -10,7 +10,22 @@ impl RubyMethod {
             return Err("Method name cannot be empty");
         }
 
-        let mut chars = name.chars();
+        let original_name = name;
+        let mut name_for_validation = name;
+
+        // Handle valid suffixes: ?, !, =
+        if let Some(last_char) = name.chars().last() {
+            if last_char == '?' || last_char == '!' || last_char == '=' {
+                name_for_validation = &name[..name.len() - 1];
+            }
+        }
+
+        // If name is empty after removing suffix, it's invalid
+        if name_for_validation.is_empty() {
+            return Err("Method name cannot be just a suffix");
+        }
+
+        let mut chars = name_for_validation.chars();
         let first = chars.next().unwrap();
 
         // Start with lowercase or _
@@ -18,12 +33,13 @@ impl RubyMethod {
             return Err("Method name must start with lowercase or _");
         }
 
-        // Allow word-like characters and _
+        // Remaining chars must be XID_continue or _
         if !chars.all(|c| unicode_ident::is_xid_continue(c) || c == '_') {
-            return Err("Invalid method character");
+            return Err("Invalid character in method name");
         }
 
-        Ok(Self(name.to_string()))
+        // Use the original name with the suffix preserved
+        Ok(Self(original_name.to_string()))
     }
 }
 
@@ -91,6 +107,48 @@ mod tests {
     #[test]
     fn test_try_from_empty() {
         let method = RubyMethod::try_from("");
+        assert!(method.is_err());
+    }
+    
+    #[test]
+    fn test_method_with_question_mark() {
+        let method = RubyMethod::try_from("empty?");
+        assert_eq!(method.unwrap().to_string(), "empty?");
+    }
+    
+    #[test]
+    fn test_method_with_exclamation_mark() {
+        let method = RubyMethod::try_from("save!");
+        assert_eq!(method.unwrap().to_string(), "save!");
+    }
+    
+    #[test]
+    fn test_method_with_equals() {
+        let method = RubyMethod::try_from("name=");
+        assert_eq!(method.unwrap().to_string(), "name=");
+    }
+    
+    #[test]
+    fn test_invalid_suffix_only() {
+        let method = RubyMethod::try_from("?");
+        assert!(method.is_err());
+        
+        let method = RubyMethod::try_from("!");
+        assert!(method.is_err());
+        
+        let method = RubyMethod::try_from("=");
+        assert!(method.is_err());
+    }
+    
+    #[test]
+    fn test_invalid_with_suffix() {
+        let method = RubyMethod::try_from("Invalid?");
+        assert!(method.is_err());
+        
+        let method = RubyMethod::try_from("Invalid!");
+        assert!(method.is_err());
+        
+        let method = RubyMethod::try_from("Invalid=");
         assert!(method.is_err());
     }
 }
