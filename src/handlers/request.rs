@@ -1,4 +1,4 @@
-use crate::capabilities::{definition, references};
+use crate::capabilities::{self, definition, references};
 use crate::indexer::events;
 use crate::server::RubyLanguageServer;
 use log::{info, warn};
@@ -34,6 +34,9 @@ pub async fn handle_initialize(
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            capabilities::semantic_tokens::get_semantic_tokens_options(),
+        )),
         ..ServerCapabilities::default()
     };
 
@@ -120,4 +123,25 @@ pub async fn handle_references(
     .await;
 
     Ok(references)
+}
+
+pub async fn handle_semantic_tokens_full(
+    _lang_server: &RubyLanguageServer,
+    _params: SemanticTokensParams,
+) -> LspResult<Option<SemanticTokensResult>> {
+    Ok(None) // TODO: Implement full support
+}
+
+pub async fn handle_semantic_tokens_full_delta(
+    _lang_server: &RubyLanguageServer,
+    _params: SemanticTokensDeltaParams,
+) -> LspResult<Option<SemanticTokensFullDeltaResult>> {
+    Ok(None) // TODO: Implement delta support
+}
+
+pub async fn handle_semantic_tokens_range(
+    _lang_server: &RubyLanguageServer,
+    _params: SemanticTokensRangeParams,
+) -> LspResult<Option<SemanticTokensRangeResult>> {
+    Ok(None) // TODO: Implement range support
 }
