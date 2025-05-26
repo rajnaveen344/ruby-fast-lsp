@@ -2,6 +2,9 @@ use lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, WorkDoneProgressOptions,
 };
+use ruby_prism::Visit;
+
+use crate::analyzer_prism::visitors::token_visitor::TokenVisitor;
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,
@@ -29,14 +32,17 @@ pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::DECORATOR,
 ];
 
-pub const TOKEN_MODIFIERS: [SemanticTokenModifier; 7] = [
+pub const TOKEN_MODIFIERS: [SemanticTokenModifier; 10] = [
     SemanticTokenModifier::DECLARATION,
     SemanticTokenModifier::DEFINITION,
     SemanticTokenModifier::READONLY,
     SemanticTokenModifier::STATIC,
     SemanticTokenModifier::DEPRECATED,
     SemanticTokenModifier::ABSTRACT,
+    SemanticTokenModifier::ASYNC,
+    SemanticTokenModifier::MODIFICATION,
     SemanticTokenModifier::DOCUMENTATION,
+    SemanticTokenModifier::DEFAULT_LIBRARY,
 ];
 
 pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
@@ -53,9 +59,14 @@ pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     }
 }
 
-pub fn get_semantic_tokens_full(_content: String) -> SemanticTokensResult {
+pub fn get_semantic_tokens_full(content: String) -> SemanticTokensResult {
+    let parse_result = ruby_prism::parse(content.as_bytes());
+    let mut visitor = TokenVisitor::new(content.clone());
+    let root_node = parse_result.node();
+    visitor.visit(&root_node);
+
     SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
-        data: vec![],
+        data: visitor.tokens,
     })
 }
