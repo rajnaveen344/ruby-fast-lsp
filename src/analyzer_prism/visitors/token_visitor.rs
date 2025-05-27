@@ -5,7 +5,7 @@ use crate::{
 };
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 use ruby_prism::{
-    visit_block_local_variable_node, visit_call_node, visit_local_variable_and_write_node,
+    visit_block_local_variable_node, visit_local_variable_and_write_node,
     visit_local_variable_operator_write_node, visit_local_variable_or_write_node,
     visit_local_variable_read_node, visit_local_variable_target_node,
     visit_local_variable_write_node, CallNode, Location, Visit,
@@ -91,6 +91,12 @@ impl TokenVisitor {
 
 impl Visit<'_> for TokenVisitor {
     fn visit_call_node(&mut self, node: &CallNode) {
+        if let Some(receiver) = node.receiver() {
+            self.visit(&receiver);
+        }
+
+        // To produce tokens in the same order as the code written, we add the method token here.
+        // Changing the position of this block in this method will result in tokens being out of order.
         if let Some(message_loc) = node.message_loc() {
             let msg = self.code[message_loc.start_offset()..message_loc.end_offset()].to_string();
             if msg.starts_with("[") && (msg.ends_with("]") || msg.ends_with("]=")) {
@@ -100,7 +106,13 @@ impl Visit<'_> for TokenVisitor {
             }
         }
 
-        visit_call_node(self, node);
+        if let Some(arguments) = node.arguments() {
+            self.visit_arguments_node(&arguments);
+        }
+
+        if let Some(block) = node.block() {
+            self.visit(&block);
+        }
     }
 
     fn visit_local_variable_read_node(&mut self, node: &ruby_prism::LocalVariableReadNode<'_>) {
