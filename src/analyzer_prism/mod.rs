@@ -1,6 +1,7 @@
 use crate::indexer::types::ruby_constant::RubyConstant;
 use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
+use crate::indexer::types::ruby_variable::RubyVariable;
 use lsp_types::Position;
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
@@ -28,15 +29,11 @@ pub enum Identifier {
 
     // Eg. foo = 1; foo;
     //              ^    -> (foo)
-    RubyLocalVariable(String),
-
     // Eg. @foo = 1; @foo;
     //               ^    -> ([], @foo)
-    RubyInstanceVariable(Vec<RubyNamespace>, String),
-
     // Eg. @@foo = 1; @@foo;
     //                ^    -> ([], @@foo)
-    RubyClassVariable(Vec<RubyNamespace>, String),
+    RubyVariable(Option<RubyMethod>, RubyVariable),
 }
 
 /// Main analyzer for Ruby code using Prism

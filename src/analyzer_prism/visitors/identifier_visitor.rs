@@ -3,21 +3,24 @@ use crate::analyzer_prism::Identifier;
 use crate::indexer::types::ruby_constant::RubyConstant;
 use crate::indexer::types::ruby_method::RubyMethod;
 use crate::indexer::types::ruby_namespace::RubyNamespace;
+use crate::indexer::types::ruby_variable::{RubyVariable, RubyVariableType};
 
 use lsp_types::Position;
 use ruby_prism::{
     visit_arguments_node, visit_call_node, visit_class_node, visit_constant_path_node,
-    visit_def_node, visit_module_node, CallNode, ClassNode, ConstantPathNode, ConstantReadNode,
-    DefNode, Location, ModuleNode, Visit,
+    visit_def_node, visit_local_variable_read_node, visit_module_node, CallNode, ClassNode,
+    ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode, Location, ModuleNode,
+    Visit,
 };
 
 /// Visitor for finding identifiers at a specific position
 pub struct IdentifierVisitor {
     code: String,
     position: Position,
+    namespace_stack: Vec<RubyNamespace>,
+    current_method: Option<RubyMethod>,
     pub identifier: Option<Identifier>,
     pub ancestors: Vec<RubyNamespace>,
-    namespace_stack: Vec<RubyNamespace>,
 }
 
 impl IdentifierVisitor {
@@ -25,9 +28,10 @@ impl IdentifierVisitor {
         Self {
             code,
             position,
+            namespace_stack: Vec::new(),
+            current_method: None,
             identifier: None,
             ancestors: Vec::new(),
-            namespace_stack: Vec::new(),
         }
     }
 
@@ -97,7 +101,11 @@ impl Visit<'_> for IdentifierVisitor {
             return;
         }
 
+        let name = String::from_utf8_lossy(&node.name().as_slice()).to_string();
+        let method = RubyMethod::from(name);
+        self.current_method = Some(method);
         visit_def_node(self, node);
+        self.current_method = None;
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
@@ -233,6 +241,27 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         visit_call_node(self, node);
+    }
+
+    fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        // Extract the variable name
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+
+        // Create a RubyVariable with the Local type
+        if let Ok(variable) = RubyVariable::new(&variable_name, RubyVariableType::Local) {
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+            self.ancestors = self.namespace_stack.clone();
+        }
+
+        // Continue visiting the node
+        visit_local_variable_read_node(self, node);
     }
 }
 

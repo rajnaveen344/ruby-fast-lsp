@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
+use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::indexer::RubyIndexer;
 
 /// Find the definition(s) of a symbol at the given position
@@ -168,14 +169,26 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-        Identifier::RubyLocalVariable(_) => {
-            info!("Local variable not indexed");
-        }
-        Identifier::RubyInstanceVariable(_, _) => {
-            info!("Instance variable not indexed");
-        }
-        Identifier::RubyClassVariable(_, _) => {
-            info!("Class variable not indexed");
+        Identifier::RubyVariable(method, variable) => {
+            let fqn = FullyQualifiedName::variable(ancestors, method, variable);
+
+            if let Some(entries) = index_guard.definitions.get(&fqn.clone().into()) {
+                if !entries.is_empty() {
+                    info!(
+                        "Found {} variable definition(s) for: {:?}",
+                        entries.len(),
+                        fqn
+                    );
+                    // Add all locations to our result
+                    for entry in entries {
+                        found_locations.push(entry.location.clone());
+                    }
+
+                    if !found_locations.is_empty() {
+                        return Some(found_locations);
+                    }
+                }
+            }
         }
     }
 
