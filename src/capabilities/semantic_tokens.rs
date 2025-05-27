@@ -7,7 +7,7 @@ use lsp_types::{
 use ruby_prism::Visit;
 use std::{collections::HashMap, time::Instant};
 
-use crate::analyzer_prism::visitors::token_visitor::TokenVisitor;
+use crate::analyzer_prism::visitors::{empty_visitor::EmptyVisitor, token_visitor::TokenVisitor};
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,
@@ -91,7 +91,14 @@ pub fn get_semantic_tokens_full(content: String) -> SemanticTokensResult {
     let root_node = parse_result.node();
     visitor.visit(&root_node);
     let visit_time = start_time.elapsed() - parse_time;
-    info!("Performance: token_generation took {:?}", visit_time);
+    info!(
+        "Performance: token_generation_visitor took {:?}",
+        visit_time
+    );
+    let mut empty_visitor = EmptyVisitor {};
+    empty_visitor.visit(&root_node);
+    let empty_visit_time = start_time.elapsed() - parse_time - visit_time;
+    info!("Performance: empty_visitor took {:?}", empty_visit_time);
 
     SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
