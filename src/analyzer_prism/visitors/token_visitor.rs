@@ -1,8 +1,5 @@
-use crate::capabilities::semantic_tokens::TOKEN_TYPES;
-use crate::{
-    analyzer_prism::position::prism_offset_to_lsp_pos,
-    capabilities::semantic_tokens::TOKEN_MODIFIERS,
-};
+use crate::analyzer_prism::position::prism_offset_to_lsp_pos;
+use crate::capabilities::semantic_tokens::{TOKEN_MODIFIERS_MAP, TOKEN_TYPES_MAP};
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 use ruby_prism::{
     visit_block_local_variable_node, visit_local_variable_and_write_node,
@@ -74,18 +71,17 @@ impl TokenVisitor {
     }
 
     fn token_type_to_index(&self, token_type: SemanticTokenType) -> u32 {
-        TOKEN_TYPES
-            .iter()
-            .position(|t| t == &token_type)
-            .map(|pos| pos as u32)
-            .unwrap_or(0)
+        match TOKEN_TYPES_MAP.get(&token_type) {
+            Some(&index) => index,
+            None => 0,
+        }
     }
 
     fn token_modifiers_to_bitset(&self, modifiers: &[SemanticTokenModifier]) -> u32 {
         modifiers
             .iter()
-            .filter_map(|modifier| TOKEN_MODIFIERS.iter().position(|m| m == modifier))
-            .fold(0, |bitset, pos| bitset | (1 << pos))
+            .filter_map(|modifier| TOKEN_MODIFIERS_MAP.get(modifier))
+            .fold(0, |bitset, &pos| bitset | (1 << pos))
     }
 }
 
@@ -101,6 +97,7 @@ impl Visit<'_> for TokenVisitor {
             let msg = self.code[message_loc.start_offset()..message_loc.end_offset()].to_string();
             if msg.starts_with("[") && (msg.ends_with("]") || msg.ends_with("]=")) {
                 // "[]" or "[]=" are not method tokens. Do nothing.
+                // Eg. hash[:key]; hash['key'] = 1;
             } else {
                 self.add_token(&message_loc, SemanticTokenType::METHOD, &[]);
             }
