@@ -3,14 +3,14 @@ use std::sync::{Arc, Mutex};
 use lsp_types::{Location as LspLocation, Position, Range, Url};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_module_node, CallNode, ClassNode, ConstantPathWriteNode,
-    ConstantWriteNode, DefNode, ModuleNode, Visit,
+    visit_def_node, visit_local_variable_write_node, visit_module_node, CallNode, ClassNode,
+    ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode, ModuleNode, Visit,
 };
 
 use super::{
     entry::{Entry, MethodVisibility},
     index::RubyIndex,
-    types::ruby_namespace::RubyNamespace,
+    types::{ruby_method::RubyMethod, ruby_namespace::RubyNamespace},
 };
 
 mod call_node;
@@ -18,6 +18,7 @@ mod class_node;
 mod constant_path_write_node;
 mod constant_write_node;
 mod def_node;
+mod local_variable_write_node;
 mod module_node;
 mod singleton_class_node;
 mod utils;
@@ -27,8 +28,8 @@ pub struct Visitor {
     pub uri: Url,
     pub content: String,
     pub namespace_stack: Vec<RubyNamespace>,
+    pub current_method: Option<RubyMethod>,
     pub _visibility_stack: Vec<MethodVisibility>,
-    pub _current_method: Option<String>,
     pub _owner_stack: Vec<Entry>,
 }
 
@@ -39,8 +40,8 @@ impl Visitor {
             uri,
             content,
             namespace_stack: vec![],
+            current_method: None,
             _visibility_stack: vec![MethodVisibility::Public],
-            _current_method: None,
             _owner_stack: vec![],
         }
     }
@@ -116,5 +117,11 @@ impl Visit<'_> for Visitor {
         self.process_constant_path_write_node_entry(node);
         visit_constant_path_write_node(self, node);
         self.process_constant_path_write_node_exit(node);
+    }
+
+    fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode) {
+        self.process_local_variable_write_node_entry(node);
+        visit_local_variable_write_node(self, node);
+        self.process_local_variable_write_node_exit(node);
     }
 }

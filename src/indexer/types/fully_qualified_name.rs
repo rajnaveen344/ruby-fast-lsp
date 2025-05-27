@@ -2,7 +2,10 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::analyzer_prism::Identifier;
 
-use super::{ruby_constant::RubyConstant, ruby_method::RubyMethod, ruby_namespace::RubyNamespace};
+use super::{
+    ruby_constant::RubyConstant, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
+    ruby_variable::RubyVariable,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FullyQualifiedName {
@@ -24,6 +27,9 @@ pub enum FullyQualifiedName {
 
     /// Constant, e.g., `Foo::CONST` → `Constant(vec!["Foo"], RubyConstant::new("CONST"))`
     Constant(Vec<RubyNamespace>, RubyConstant),
+
+    /// Local variable, e.g., `a = 1` → `LocalVariable(vec!["Foo"], Some(RubyMethod::new("bar")), "a")`
+    Variable(Vec<RubyNamespace>, Option<RubyMethod>, RubyVariable),
 }
 
 impl FullyQualifiedName {
@@ -55,12 +61,21 @@ impl FullyQualifiedName {
             FullyQualifiedName::ClassMethod(ns, _) => ns,
             FullyQualifiedName::ModuleMethod(ns, _) => ns,
             FullyQualifiedName::Constant(ns, _) => ns,
+            FullyQualifiedName::Variable(ns, _, _) => ns,
         }
     }
 
     // Constructor helper for module methods
     pub fn module_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
         FullyQualifiedName::ModuleMethod(namespace, method)
+    }
+
+    pub fn variable(
+        namespace: Vec<RubyNamespace>,
+        method: Option<RubyMethod>,
+        variable: RubyVariable,
+    ) -> Self {
+        FullyQualifiedName::Variable(namespace, method, variable)
     }
 }
 
@@ -96,6 +111,13 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
             FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
             FullyQualifiedName::Constant(_, constant) => write!(f, "{namespace}::{constant}"),
+            FullyQualifiedName::Variable(_, method, variable) => {
+                if let Some(method) = method {
+                    write!(f, "{namespace}#{method}{variable}")
+                } else {
+                    write!(f, "{namespace}{variable}")
+                }
+            }
         }
     }
 }

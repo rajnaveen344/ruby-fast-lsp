@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use log::debug;
+use log::{debug, warn};
 use ruby_prism::DefNode;
 
 use crate::indexer::{
@@ -37,7 +37,7 @@ impl Visitor {
                 fqn: fqn.clone(),
                 location,
                 kind: EntryKind::Method {
-                    name: method_name.into(),
+                    name: method_name.clone().into(),
                     kind: MethodKind::Instance,
                     parameters: vec![],
                     owner: owner_fqn,
@@ -52,13 +52,13 @@ impl Visitor {
             index.add_entry(entry);
             debug!("Added method entry: {}", fqn);
 
-            self._current_method = Some(fqn.to_string());
+            self.current_method = Some(method_name.clone());
         } else {
-            debug!("Skipping invalid method name: {}", method_name_str);
+            warn!("Skipping invalid method name: {}", method_name_str);
         }
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
-        self._current_method = None;
+        self.current_method = None;
     }
 }

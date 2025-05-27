@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use crate::indexer::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+use crate::indexer::types::{
+    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
+};
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -23,6 +25,9 @@ pub enum EntryKind {
     Constant {
         value: Option<String>,
         visibility: Option<ConstVisibility>,
+    },
+    Variable {
+        name: RubyVariable,
     },
 }
 
@@ -61,6 +66,7 @@ impl Display for EntryKind {
                     }
                 )
             }
+            EntryKind::Variable { name, .. } => write!(f, "Variable: {}", name),
         }
     }
 }
