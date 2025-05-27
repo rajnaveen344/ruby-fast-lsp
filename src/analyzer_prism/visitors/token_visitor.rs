@@ -4,7 +4,12 @@ use crate::{
     capabilities::semantic_tokens::TOKEN_MODIFIERS,
 };
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
-use ruby_prism::{visit_call_node, CallNode, Location, Visit};
+use ruby_prism::{
+    visit_block_local_variable_node, visit_call_node, visit_local_variable_and_write_node,
+    visit_local_variable_operator_write_node, visit_local_variable_or_write_node,
+    visit_local_variable_read_node, visit_local_variable_target_node,
+    visit_local_variable_write_node, CallNode, Location, Visit,
+};
 
 pub struct TokenVisitor {
     code: String,
@@ -21,7 +26,6 @@ impl TokenVisitor {
         }
     }
 
-    /// Generic method to add a token of any type
     fn add_token(
         &mut self,
         location: &Location,
@@ -90,12 +94,76 @@ impl Visit<'_> for TokenVisitor {
         if let Some(message_loc) = node.message_loc() {
             let msg = self.code[message_loc.start_offset()..message_loc.end_offset()].to_string();
             if msg.starts_with("[") && (msg.ends_with("]") || msg.ends_with("]=")) {
-                return;
+                // "[]" or "[]=" are not method tokens. Do nothing.
+            } else {
+                self.add_token(&message_loc, SemanticTokenType::METHOD, &[]);
             }
-
-            self.add_token(&message_loc, SemanticTokenType::METHOD, &[]);
         }
 
         visit_call_node(self, node);
+    }
+
+    fn visit_local_variable_read_node(&mut self, node: &ruby_prism::LocalVariableReadNode<'_>) {
+        self.add_token(&node.location(), SemanticTokenType::VARIABLE, &[]);
+        visit_local_variable_read_node(self, node);
+    }
+
+    fn visit_local_variable_write_node(&mut self, node: &ruby_prism::LocalVariableWriteNode<'_>) {
+        self.add_token(
+            &node.name_loc(),
+            SemanticTokenType::VARIABLE,
+            &[SemanticTokenModifier::DECLARATION],
+        );
+        visit_local_variable_write_node(self, node);
+    }
+
+    fn visit_local_variable_and_write_node(
+        &mut self,
+        node: &ruby_prism::LocalVariableAndWriteNode<'_>,
+    ) {
+        self.add_token(
+            &node.name_loc(),
+            SemanticTokenType::VARIABLE,
+            &[SemanticTokenModifier::DECLARATION],
+        );
+        visit_local_variable_and_write_node(self, node);
+    }
+
+    fn visit_local_variable_or_write_node(
+        &mut self,
+        node: &ruby_prism::LocalVariableOrWriteNode<'_>,
+    ) {
+        self.add_token(
+            &node.name_loc(),
+            SemanticTokenType::VARIABLE,
+            &[SemanticTokenModifier::DECLARATION],
+        );
+        visit_local_variable_or_write_node(self, node);
+    }
+
+    fn visit_local_variable_operator_write_node(
+        &mut self,
+        node: &ruby_prism::LocalVariableOperatorWriteNode<'_>,
+    ) {
+        self.add_token(
+            &node.name_loc(),
+            SemanticTokenType::VARIABLE,
+            &[SemanticTokenModifier::DECLARATION],
+        );
+        visit_local_variable_operator_write_node(self, node);
+    }
+
+    fn visit_local_variable_target_node(&mut self, node: &ruby_prism::LocalVariableTargetNode<'_>) {
+        self.add_token(
+            &node.location(),
+            SemanticTokenType::VARIABLE,
+            &[SemanticTokenModifier::DECLARATION],
+        );
+        visit_local_variable_target_node(self, node);
+    }
+
+    fn visit_block_local_variable_node(&mut self, node: &ruby_prism::BlockLocalVariableNode<'_>) {
+        self.add_token(&node.location(), SemanticTokenType::VARIABLE, &[]);
+        visit_block_local_variable_node(self, node);
     }
 }
