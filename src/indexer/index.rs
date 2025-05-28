@@ -4,10 +4,7 @@ use lsp_types::{Location, Url};
 
 use super::{
     entry::{entry_kind::EntryKind, Entry, Mixin},
-    types::{
-        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
-        ruby_namespace::RubyNamespace,
-    },
+    types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod},
 };
 
 #[derive(Debug)]
@@ -105,36 +102,5 @@ impl RubyIndex {
             .entry(fully_qualified_name)
             .or_insert_with(Vec::new)
             .push(location);
-    }
-
-    // Add a namespace ancestor relationship
-    pub fn add_namespace_ancestor(
-        &mut self,
-        _namespace: FullyQualifiedName,
-        _ancestor: FullyQualifiedName,
-    ) {
-        todo!()
-    }
-
-    // Get the ancestor chain for a namespace
-    pub fn get_namespace_ancestors(
-        &self,
-        _namespace: &FullyQualifiedName,
-    ) -> Vec<FullyQualifiedName> {
-        todo!()
-    }
-
-    // Find definition by name in a namespace and its ancestors
-    pub fn find_definition_in_namespace(
-        &self,
-        _method_name: &RubyMethod,
-        _namespace: Option<&RubyNamespace>,
-    ) -> Option<&Entry> {
-        todo!()
-    }
-
-    // Find all definitions of a method by name in all namespaces
-    pub fn find_all_definitions_by_method(&self, _method_name: &RubyMethod) -> Vec<&Entry> {
-        todo!()
     }
 }
