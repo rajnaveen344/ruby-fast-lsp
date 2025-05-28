@@ -39,12 +39,6 @@ async fn init_and_open_file(fixture_file: &str) -> RubyLanguageServer {
     init_logger();
     let server = RubyLanguageServer::default();
 
-    // Enable debug mode for the indexer
-    {
-        let mut indexer = server.indexer.lock().await;
-        indexer.set_debug_mode(true);
-    }
-
     let params = InitializeParams {
         workspace_folders: None,
         ..Default::default()

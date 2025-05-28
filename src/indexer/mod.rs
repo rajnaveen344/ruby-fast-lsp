@@ -15,23 +15,17 @@ use traverser::Visitor;
 
 pub struct RubyIndexer {
     index: Arc<Mutex<RubyIndex>>,
-    debug_mode: bool,
 }
 
 impl RubyIndexer {
     pub fn new() -> Result<Self, String> {
         Ok(RubyIndexer {
             index: Arc::new(Mutex::new(RubyIndex::new())),
-            debug_mode: false,
         })
     }
 
     pub fn index(&self) -> Arc<Mutex<RubyIndex>> {
         self.index.clone()
-    }
-
-    pub fn set_debug_mode(&mut self, debug: bool) {
-        self.debug_mode = debug;
     }
 
     pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {

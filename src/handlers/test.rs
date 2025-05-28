@@ -59,7 +59,6 @@ mod tests {
             let mut indexer = server.indexer.lock().await;
             // The file needs to be indexed before we can find definitions
             // In a real scenario, this would happen on file open or initialize
-            indexer.set_debug_mode(true);
 
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
@@ -122,8 +121,6 @@ mod tests {
         // Mock an indexer that would return references
         {
             let mut indexer = server.indexer.lock().await;
-            // The file needs to be indexed before we can find references
-            indexer.set_debug_mode(true);
 
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
@@ -274,7 +271,6 @@ mod tests {
         // Index both files
         {
             let mut indexer = server.indexer.lock().await;
-            indexer.set_debug_mode(true); // Enable debug mode
 
             println!("Indexing file1...");
             let result1 = indexer.process_file(file1_uri.clone(), file1_content);
