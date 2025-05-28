@@ -1,8 +1,8 @@
 use ruby_prism::SingletonClassNode;
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn _process_singleton_class_node_entry(&mut self, _node: &SingletonClassNode) {
         todo!()
     }

@@ -6,9 +6,9 @@ use crate::indexer::{
     types::{fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant},
 };
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         debug!("Visiting constant write node: {}", constant_name);

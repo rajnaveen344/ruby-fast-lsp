@@ -6,12 +6,12 @@ use ruby_prism::{parse, Visit};
 
 pub mod entry;
 pub mod events;
-mod index;
-mod traverser;
+pub mod index;
 pub mod types;
 
 use index::RubyIndex;
-use traverser::Visitor;
+
+use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 
 pub struct RubyIndexer {
     index: Arc<Mutex<RubyIndex>>,
@@ -33,7 +33,7 @@ impl RubyIndexer {
 
         let parse_result = parse(content.as_bytes());
         let node = parse_result.node();
-        let mut visitor = Visitor::new(self.index.clone(), uri.clone(), content.to_string());
+        let mut visitor = IndexVisitor::new(self.index.clone(), uri.clone(), content.to_string());
 
         visitor.visit(&node);
 

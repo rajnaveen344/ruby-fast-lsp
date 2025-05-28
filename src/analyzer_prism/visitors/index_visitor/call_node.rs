@@ -3,9 +3,9 @@ use ruby_prism::CallNode;
 
 use crate::indexer::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         // Check if it's a simple method call (receiverless or self)
         // TODO: Handle calls with explicit receivers (e.g., obj.method)

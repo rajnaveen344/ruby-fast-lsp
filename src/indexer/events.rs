@@ -10,7 +10,9 @@ use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use super::{index::RubyIndex, traverser::Visitor, RubyIndexer};
+use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+
+use super::{index::RubyIndex, RubyIndexer};
 
 pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Result<()> {
     let start_time = Instant::now();
@@ -176,7 +178,7 @@ fn process_single_file(
     let node = parse_result.node();
 
     // Create a visitor and process the AST
-    let mut visitor = Visitor::new(index, uri.clone(), content.clone());
+    let mut visitor = IndexVisitor::new(index, uri.clone(), content.clone());
     visitor.visit(&node);
 
     debug!("Processed file: {}", uri);

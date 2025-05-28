@@ -9,9 +9,9 @@ use crate::indexer::{
     },
 };
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn process_constant_path_write_node_entry(&mut self, node: &ConstantPathWriteNode) {
         // Extract the constant path
         let constant_path = node.target();

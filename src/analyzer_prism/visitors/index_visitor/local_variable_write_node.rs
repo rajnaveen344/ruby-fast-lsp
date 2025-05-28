@@ -9,9 +9,9 @@ use crate::indexer::{
     },
 };
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn process_local_variable_write_node_entry(&mut self, node: &LocalVariableWriteNode) {
         // Extract the variable name from the node
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();

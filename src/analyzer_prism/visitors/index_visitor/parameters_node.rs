@@ -9,9 +9,9 @@ use crate::indexer::{
     },
 };
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     /// Ruby supports 7 types of method parameters
     /// 1. Required parameters
     /// 2. Optional parameters

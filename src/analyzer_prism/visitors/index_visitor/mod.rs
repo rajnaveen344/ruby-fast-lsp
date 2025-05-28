@@ -8,8 +8,7 @@ use ruby_prism::{
     ModuleNode, Visit,
 };
 
-use super::{
-    entry::{Entry, MethodVisibility},
+use crate::indexer::{
     index::RubyIndex,
     types::{ruby_method::RubyMethod, ruby_namespace::RubyNamespace},
 };
@@ -23,19 +22,16 @@ mod local_variable_write_node;
 mod module_node;
 mod parameters_node;
 mod singleton_class_node;
-mod utils;
 
-pub struct Visitor {
+pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub content: String,
     pub namespace_stack: Vec<RubyNamespace>,
     pub current_method: Option<RubyMethod>,
-    pub _visibility_stack: Vec<MethodVisibility>,
-    pub _owner_stack: Vec<Entry>,
 }
 
-impl Visitor {
+impl IndexVisitor {
     pub fn new(index: Arc<Mutex<RubyIndex>>, uri: Url, content: String) -> Self {
         Self {
             index,
@@ -43,8 +39,6 @@ impl Visitor {
             content,
             namespace_stack: vec![],
             current_method: None,
-            _visibility_stack: vec![MethodVisibility::Public],
-            _owner_stack: vec![],
         }
     }
 
@@ -84,7 +78,7 @@ impl Visitor {
     }
 }
 
-impl Visit<'_> for Visitor {
+impl Visit<'_> for IndexVisitor {
     fn visit_module_node(&mut self, node: &ModuleNode) {
         self.process_module_node_entry(node);
         visit_module_node(self, node);

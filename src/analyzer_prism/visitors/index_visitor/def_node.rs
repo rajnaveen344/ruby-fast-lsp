@@ -8,9 +8,9 @@ use crate::indexer::{
     types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod},
 };
 
-use super::Visitor;
+use super::IndexVisitor;
 
-impl Visitor {
+impl IndexVisitor {
     pub fn process_def_node_entry(&mut self, node: &DefNode) {
         let method_name_id = node.name();
         let method_name_bytes = method_name_id.as_slice();
