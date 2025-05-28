@@ -36,7 +36,7 @@ impl Default for RubyLanguageServer {
 #[tower_lsp::async_trait]
 impl LanguageServer for RubyLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
-        request::handle_initialize(self, params).await
+        notification::handle_initialize(self, params).await
     }
 
     async fn initialized(&self, params: InitializedParams) {
@@ -44,7 +44,7 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn shutdown(&self) -> LspResult<()> {
-        request::handle_shutdown(self).await
+        notification::handle_shutdown(self).await
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
