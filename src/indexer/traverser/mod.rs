@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 use lsp_types::{Location as LspLocation, Position, Range, Url};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_local_variable_write_node, visit_module_node, CallNode, ClassNode,
-    ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode, ModuleNode, Visit,
+    visit_def_node, visit_local_variable_write_node, visit_module_node, visit_parameters_node,
+    CallNode, ClassNode, ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode,
+    ModuleNode, Visit,
 };
 
 use super::{
@@ -20,6 +21,7 @@ mod constant_write_node;
 mod def_node;
 mod local_variable_write_node;
 mod module_node;
+mod parameters_node;
 mod singleton_class_node;
 mod utils;
 
@@ -123,5 +125,11 @@ impl Visit<'_> for Visitor {
         self.process_local_variable_write_node_entry(node);
         visit_local_variable_write_node(self, node);
         self.process_local_variable_write_node_exit(node);
+    }
+
+    fn visit_parameters_node(&mut self, node: &ruby_prism::ParametersNode<'_>) {
+        self.process_parameters_node_entry(node);
+        visit_parameters_node(self, node);
+        self.process_parameters_node_exit(node);
     }
 }
