@@ -6,18 +6,19 @@ mod tests {
         WorkDoneProgressParams,
     };
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     use crate::handlers::request;
-    use crate::indexer::RubyIndexer;
+    use crate::indexer::index::RubyIndex;
     use crate::server::RubyLanguageServer;
 
     // Helper function to create a test server with an indexer
     fn create_test_server() -> RubyLanguageServer {
-        let indexer = RubyIndexer::new().expect("Failed to create indexer");
+        let index = RubyIndex::new();
         let client = None;
         RubyLanguageServer {
             client,
-            indexer: tokio::sync::Mutex::new(indexer),
+            index: Arc::new(Mutex::new(index)),
         }
     }
 
@@ -36,7 +37,7 @@ mod tests {
     #[tokio::test]
     async fn test_goto_definition_handler() {
         // Create a server with a mock indexer
-        let server = create_test_server();
+        let mut server = create_test_server();
 
         // Create the parameters for the goto definition request
         let uri = fixture_uri("class_declaration.rb");
@@ -54,16 +55,13 @@ mod tests {
             partial_result_params: lsp_types::PartialResultParams::default(),
         };
 
-        // Mock an indexer that would return a definition
+        // Index the file before we can find definitions
+        // In a real scenario, this would happen on file open or initialize
         {
-            let mut indexer = server.indexer.lock().await;
-            // The file needs to be indexed before we can find definitions
-            // In a real scenario, this would happen on file open or initialize
-
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
             let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-            let _ = indexer.process_file(uri.clone(), &content);
+            server.process_file(uri.clone(), &content).expect("Failed to index file");
         }
 
         // Call the handler
@@ -97,7 +95,7 @@ mod tests {
     #[tokio::test]
     async fn test_references_handler() {
         // Create a server with a mock indexer
-        let server = create_test_server();
+        let mut server = create_test_server();
 
         // Create the parameters for the references request
         let uri = fixture_uri("class_declaration.rb");
@@ -118,14 +116,13 @@ mod tests {
             partial_result_params: lsp_types::PartialResultParams::default(),
         };
 
-        // Mock an indexer that would return references
+        // Index the file before we can find references
+        // In a real scenario, this would happen on file open or initialize
         {
-            let mut indexer = server.indexer.lock().await;
-
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
             let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-            let _ = indexer.process_file(uri.clone(), &content);
+            server.process_file(uri.clone(), &content).expect("Failed to index file");
         }
 
         // Call the handler
@@ -156,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_definitions_handler() {
         // Create a test server
-        let server = create_test_server();
+        let mut server = create_test_server();
 
         // Create file URIs for multiple class definitions
         let file1_uri = fixture_uri("class_file1.rb");
@@ -173,6 +170,14 @@ mod tests {
         // Ensure fixture files exist with correct content
         ensure_fixture_file_exists(&file1_path, file1_content);
         ensure_fixture_file_exists(&file2_path, file2_content);
+
+        // Index both files
+        server
+            .process_file(file1_uri.clone(), file1_content)
+            .expect("Failed to index file1");
+        server
+            .process_file(file2_uri.clone(), file2_content)
+            .expect("Failed to index file2");
 
         // Setup params for goto definition at the class name
         let params = GotoDefinitionParams {
@@ -192,17 +197,6 @@ mod tests {
                 partial_result_token: None,
             },
         };
-
-        // Index both files
-        {
-            let mut indexer = server.indexer.lock().await;
-            indexer
-                .process_file(file1_uri.clone(), file1_content)
-                .unwrap();
-            indexer
-                .process_file(file2_uri.clone(), file2_content)
-                .unwrap();
-        }
 
         // Call handler
         let result = request::handle_goto_definition(&server, params).await;
@@ -247,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn test_method_definitions_handler() {
         // Create a test server
-        let server = create_test_server();
+        let mut server = create_test_server();
 
         // Create file URIs for multiple method definitions
         let file1_uri = fixture_uri("method_file1.rb");
@@ -269,38 +263,31 @@ mod tests {
         ensure_fixture_file_exists(&file2_path, file2_content);
 
         // Index both files
-        {
-            let mut indexer = server.indexer.lock().await;
+        let result1 = server.process_file(file1_uri.clone(), file1_content);
+        assert!(result1.is_ok(), "Failed to index file1: {:?}", result1);
 
-            println!("Indexing file1...");
-            let result1 = indexer.process_file(file1_uri.clone(), file1_content);
-            println!("Result of indexing file1: {:?}", result1);
-
-            println!("Indexing file2...");
-            let result2 = indexer.process_file(file2_uri.clone(), file2_content);
-            println!("Result of indexing file2: {:?}", result2);
-
-            // Print the indexed definitions
-            println!("Indexed definitions:");
-            let index = indexer.index();
-            let locked_index = index.lock().unwrap();
-            for (fqn, entries) in &locked_index.definitions {
-                println!("FQN: {}, Entries: {}", fqn, entries.len());
-                for entry in entries {
-                    println!(
-                        "  Entry: {}, Type: {:?}, URI: {}",
-                        entry.fqn, entry.kind, entry.location.uri
-                    );
-                }
+        let result2 = server.process_file(file2_uri.clone(), file2_content);
+        assert!(result2.is_ok(), "Failed to index file2: {:?}", result2);
+        
+        // Print the indexed definitions
+        println!("Indexed definitions:");
+        let locked_index = server.index.lock().unwrap();
+        for (fqn, entries) in &locked_index.definitions {
+            println!("FQN: {}, Entries: {}", fqn, entries.len());
+            for entry in entries {
+                println!(
+                    "  Entry: {}, Type: {:?}, URI: {}",
+                    entry.fqn, entry.kind, entry.location.uri
+                );
             }
+        }
 
-            // Print the indexed references
-            println!("Indexed references:");
-            for (fqn, locations) in &locked_index.references {
-                println!("FQN: {}, References: {}", fqn, locations.len());
-                for loc in locations {
-                    println!("  Location URI: {}, Range: {:?}", loc.uri, loc.range);
-                }
+        // Print the indexed references
+        println!("Indexed references:");
+        for (fqn, locations) in &locked_index.references {
+            println!("FQN: {}, References: {}", fqn, locations.len());
+            for loc in locations {
+                println!("  Location URI: {}, Range: {:?}", loc.uri, loc.range);
             }
         }
 

@@ -11,10 +11,11 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::server::RubyLanguageServer;
 
-use super::{index::RubyIndex, RubyIndexer};
+use super::index::RubyIndex;
 
-pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Result<()> {
+pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Result<()> {
     let start_time = Instant::now();
     info!("Indexing workspace folder: {}", folder_uri);
 
@@ -35,7 +36,7 @@ pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Resul
 
     // Process files in parallel
     let indexing_start = Instant::now();
-    process_files_parallel(indexer, files).await?;
+    process_files_parallel(server, files).await?;
     let indexing_duration = indexing_start.elapsed();
 
     let total_duration = start_time.elapsed();
@@ -47,7 +48,7 @@ pub async fn init_workspace(indexer: &mut RubyIndexer, folder_uri: Url) -> Resul
 }
 
 // Process files in parallel using a semaphore to limit concurrency
-async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) -> Result<()> {
+async fn process_files_parallel(server: &RubyLanguageServer, files: Vec<PathBuf>) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
@@ -70,8 +71,8 @@ async fn process_files_parallel(indexer: &mut RubyIndexer, files: Vec<PathBuf>) 
         files.len()
     );
 
-    // Create a shared indexer reference
-    let index_ref = indexer.index();
+    // Create a shared server reference
+    let index_ref = server.index();
     let setup_duration = setup_start.elapsed();
     debug!("Parallel indexing setup completed in {:?}", setup_duration);
 
@@ -186,36 +187,39 @@ fn process_single_file(
 }
 
 // Handler for didOpen notification
-pub fn file_opened(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
+pub fn file_opened(server: &RubyLanguageServer, uri: Url, content: &str) -> Result<(), String> {
     // Remove any existing entries for this file (in case it was previously indexed)
-    indexer.index().lock().unwrap().remove_entries_for_uri(&uri);
+    server.index.lock().unwrap().remove_entries_for_uri(&uri);
 
     // Index the file
-    indexer.process_file(uri, content)
+    process_single_file(server.index.clone(), uri, content.to_string())
 }
 
 // Handler for didChange/didClose notification
-pub fn file_changed(indexer: &mut RubyIndexer, uri: Url, content: &str) -> Result<(), String> {
+pub fn file_changed(server: &RubyLanguageServer, uri: Url, content: &str) -> Result<(), String> {
     // Remove existing entries
-    indexer.index().lock().unwrap().remove_entries_for_uri(&uri);
+    server.index.lock().unwrap().remove_entries_for_uri(&uri);
 
-    // Re-index with new content
-    indexer.process_file(uri, content)
+    // Index the file
+    process_single_file(server.index.clone(), uri, content.to_string())
 }
 
-pub fn file_created(_indexer: &mut RubyIndexer, _uri: Url) -> Result<(), String> {
+pub fn file_created(server: &RubyLanguageServer, _uri: Url) -> Result<(), String> {
+    let _index = server.index.lock().unwrap();
     todo!()
 }
 
 pub fn file_renamed(
-    _indexer: &mut RubyIndexer,
+    server: &RubyLanguageServer,
     _old_uri: Url,
     _new_uri: Url,
 ) -> Result<(), String> {
+    let _index = server.index.lock().unwrap();
     todo!()
 }
 
-pub fn file_deleted(_indexer: &mut RubyIndexer, _uri: Url) -> Result<(), String> {
+pub fn file_deleted(server: &RubyLanguageServer, _uri: Url) -> Result<(), String> {
+    let _index = server.index.lock().unwrap();
     todo!()
 }
 
@@ -252,7 +256,7 @@ async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
 // This function is kept for reference but is no longer used directly
 // The functionality has been moved to the parallel processing implementation
 #[allow(dead_code)]
-async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -> Result<()> {
+async fn index_workspace_file(server: &mut RubyLanguageServer, file_path: &Path) -> Result<()> {
     // Read the file content
     let content = fs::read_to_string(file_path).await?;
 
@@ -261,8 +265,8 @@ async fn index_workspace_file(indexer: &mut RubyIndexer, file_path: &Path) -> Re
         .map_err(|_| anyhow::anyhow!("Failed to convert file path to URI"))?;
 
     // Index the file
-    indexer
-        .process_file(uri, &content)
+    server
+        .process_file(uri.clone(), &content)
         .map_err(|e| anyhow::anyhow!("Failed to index file: {}", e))?;
 
     Ok(())
@@ -350,18 +354,18 @@ mod tests {
             file_paths.push(file_path.clone());
         }
 
-        // Create an indexer for parallel processing
-        let mut parallel_indexer = RubyIndexer::new().map_err(|e| anyhow::anyhow!(e))?;
+        // Create a server for parallel processing
+        let parallel_server = RubyLanguageServer::default();
 
         // Process files in parallel and measure time
         let start_time = Instant::now();
-        process_files_parallel(&mut parallel_indexer, file_paths.clone()).await?;
+        process_files_parallel(&parallel_server, file_paths.clone()).await?;
         let parallel_duration = start_time.elapsed();
 
         println!("Parallel processing took: {:?}", parallel_duration);
 
         // Verify that the index contains entries for all the classes
-        let index_ref = parallel_indexer.index();
+        let index_ref = parallel_server.index();
         let index = index_ref.lock().unwrap();
         assert_eq!(index.file_entries.len(), 500);
 
@@ -378,12 +382,12 @@ mod tests {
         assert_eq!(class_count, 500);
 
         // Now test sequential processing for comparison
-        let mut sequential_indexer = RubyIndexer::new().map_err(|e| anyhow::anyhow!(e))?;
+        let mut sequential_server = RubyLanguageServer::default();
 
         // Process files sequentially and measure time
         let start_time = Instant::now();
         for file_path in &file_paths {
-            if let Err(e) = index_workspace_file(&mut sequential_indexer, file_path).await {
+            if let Err(e) = index_workspace_file(&mut sequential_server, file_path).await {
                 error!("Error indexing file {}: {:?}", file_path.display(), e);
             }
         }
@@ -396,7 +400,7 @@ mod tests {
         );
 
         // Verify sequential indexing results
-        let index_ref = sequential_indexer.index();
+        let index_ref = sequential_server.index();
         let index = index_ref.lock().unwrap();
         assert_eq!(index.file_entries.len(), 500);
 

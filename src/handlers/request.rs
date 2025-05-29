@@ -15,8 +15,8 @@ pub async fn handle_goto_definition(
         .clone();
     let position = params.text_document_position_params.position;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let indexer = lang_server.indexer.lock().await;
-    let definition = definition::find_definition_at_position(&indexer, position, &content).await;
+    let definition =
+        definition::find_definition_at_position(&lang_server, position, &content).await;
 
     // Convert Vec<Location> to GotoDefinitionResponse
     match definition {
@@ -65,9 +65,8 @@ pub async fn handle_references(
     let position = params.text_document_position.position;
     let include_declaration = params.context.include_declaration;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let indexer = lang_server.indexer.lock().await;
     let references = references::find_references_at_position(
-        &indexer,
+        lang_server,
         &uri,
         position,
         &content,

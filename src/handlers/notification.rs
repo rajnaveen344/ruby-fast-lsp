@@ -11,7 +11,6 @@ pub async fn handle_initialize(
 ) -> LspResult<InitializeResult> {
     info!("Initializing Ruby LSP server");
 
-    let mut indexer = lang_server.indexer.lock().await;
     let workspace_folders = params.workspace_folders;
 
     if let Some(folder) = workspace_folders.and_then(|folders| folders.first().cloned()) {
@@ -19,13 +18,13 @@ pub async fn handle_initialize(
             "Indexing workspace folder using workspace folder: {:?}",
             folder.uri.as_str()
         );
-        let _ = events::init_workspace(&mut indexer, folder.uri.clone()).await;
+        let _ = events::init_workspace(lang_server, folder.uri.clone()).await;
     } else if let Some(root_uri) = params.root_uri {
         info!(
             "Indexing workspace folder using root URI: {:?}",
             root_uri.as_str()
         );
-        let _ = events::init_workspace(&mut indexer, root_uri.clone()).await;
+        let _ = events::init_workspace(lang_server, root_uri.clone()).await;
     } else {
         warn!("No workspace folder or root URI provided. A workspace folder is required to function properly");
     }
@@ -56,8 +55,7 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
 
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
-    let mut indexer = lang_server.indexer.lock().await;
-    let res = events::file_opened(&mut indexer, uri, &content);
+    let res = events::file_opened(lang_server, uri, &content);
 
     if let Err(e) = res {
         error!("Error indexing document: {}", e);
@@ -75,8 +73,7 @@ pub async fn handle_did_change(
 
     for change in params.content_changes {
         let content = change.text.clone();
-        let mut indexer = lang_server.indexer.lock().await;
-        let res = events::file_changed(&mut indexer, uri.clone(), &content);
+        let res = events::file_changed(lang_server, uri.clone(), &content);
 
         if let Err(e) = res {
             error!("Error re-indexing document: {}", e);
@@ -90,9 +87,8 @@ pub async fn handle_did_close(
 ) {
     debug!("Did close: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
-    let mut indexer = lang_server.indexer.lock().await;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let res = events::file_changed(&mut indexer, uri, &content);
+    let res = events::file_changed(lang_server, uri, &content);
 
     if let Err(e) = res {
         error!("Error re-indexing document: {}", e);

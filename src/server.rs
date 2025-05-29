@@ -1,26 +1,45 @@
+use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::handlers::{notification, request};
-use crate::indexer::RubyIndexer;
+use crate::indexer::index::RubyIndex;
 use anyhow::Result;
 use log::debug;
 use lsp_types::*;
+use ruby_prism::Visit;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
 
+#[derive(Clone)]
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
-    pub indexer: Mutex<RubyIndexer>,
+    pub index: Arc<Mutex<RubyIndex>>,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
-        let indexer = RubyIndexer::new().map_err(|e| anyhow::anyhow!(e))?;
-
+        let index = RubyIndex::new();
         Ok(Self {
             client: Some(client),
-            indexer: Mutex::new(indexer),
+            index: Arc::new(Mutex::new(index)),
         })
+    }
+
+    pub fn index(&self) -> Arc<Mutex<RubyIndex>> {
+        self.index.clone()
+    }
+
+    pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {
+        self.index.lock().unwrap().remove_entries_for_uri(&uri);
+
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let node = parse_result.node();
+        let mut visitor = IndexVisitor::new(self.index.clone(), uri.clone(), content.to_string());
+
+        visitor.visit(&node);
+
+        debug!("Processed file: {}", uri);
+        Ok(())
     }
 }
 
@@ -28,7 +47,7 @@ impl Default for RubyLanguageServer {
     fn default() -> Self {
         RubyLanguageServer {
             client: None,
-            indexer: Mutex::new(RubyIndexer::new().unwrap()),
+            index: Arc::new(Mutex::new(RubyIndex::new())),
         }
     }
 }

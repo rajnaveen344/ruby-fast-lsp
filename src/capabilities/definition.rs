@@ -5,14 +5,14 @@ use std::time::Instant;
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
 use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
-use crate::indexer::RubyIndexer;
+use crate::server::RubyLanguageServer;
 
 /// Find the definition(s) of a symbol at the given position
 ///
 /// Returns a vector of locations if definitions are found, or None if no definitions are found.
 /// Multiple definitions can be returned when a symbol is defined in multiple places.
 pub async fn find_definition_at_position(
-    indexer: &RubyIndexer,
+    server: &RubyLanguageServer,
     position: Position,
     content: &str,
 ) -> Option<Vec<Location>> {
@@ -36,8 +36,7 @@ pub async fn find_definition_at_position(
     );
 
     // Get the index and search for the definition
-    let index = indexer.index();
-    let index_guard = index.lock().unwrap();
+    let index = server.index.lock().unwrap();
     let identifier = identifier.unwrap();
     let mut found_locations = Vec::new();
 
@@ -54,7 +53,7 @@ pub async fn find_definition_at_position(
 
                 let search_fqn = Identifier::RubyConstant(combined_ns, constant.clone());
 
-                if let Some(entries) = index_guard.definitions.get(&search_fqn.clone().into()) {
+                if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
                     if !entries.is_empty() {
                         info!(
                             "Found {} constant definition(s) in ancestor namespace for: {:?}",
@@ -75,7 +74,7 @@ pub async fn find_definition_at_position(
 
             // Try at the top level (empty namespace)
             let top_level_fqn = Identifier::RubyConstant(ns, constant.clone());
-            if let Some(entries) = index_guard.definitions.get(&top_level_fqn.clone().into()) {
+            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
                 if !entries.is_empty() {
                     info!(
                         "Found {} constant definition(s) at top level for: {:?}",
@@ -102,7 +101,7 @@ pub async fn find_definition_at_position(
 
                 let search_fqn = Identifier::RubyNamespace(combined_ns);
 
-                if let Some(entries) = index_guard.definitions.get(&search_fqn.clone().into()) {
+                if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
                     if !entries.is_empty() {
                         debug!(
                             "Found {} namespace definition(s) in ancestor namespace for: {:?}",
@@ -123,7 +122,7 @@ pub async fn find_definition_at_position(
 
             // Try at the top level
             let top_level_fqn = Identifier::RubyNamespace(ns.clone());
-            if let Some(entries) = index_guard.definitions.get(&top_level_fqn.clone().into()) {
+            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
                 if !entries.is_empty() {
                     debug!(
                         "Found {} namespace definition(s) at top level for: {:?}",
@@ -144,7 +143,7 @@ pub async fn find_definition_at_position(
             info!("Searching for method with identifier: {:?}", iden.clone());
 
             // First try to find the method with the exact namespace
-            if let Some(entries) = index_guard.methods_by_name.get(&method) {
+            if let Some(entries) = index.methods_by_name.get(&method) {
                 if !entries.is_empty() {
                     info!(
                         "Found {} method definition(s) for: {:?}",
@@ -172,7 +171,7 @@ pub async fn find_definition_at_position(
         Identifier::RubyVariable(method, variable) => {
             let fqn = FullyQualifiedName::variable(ancestors, method, variable);
 
-            if let Some(entries) = index_guard.definitions.get(&fqn.clone().into()) {
+            if let Some(entries) = index.definitions.get(&fqn.clone().into()) {
                 if !entries.is_empty() {
                     info!(
                         "Found {} variable definition(s) for: {:?}",

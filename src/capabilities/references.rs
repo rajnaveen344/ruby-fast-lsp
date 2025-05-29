@@ -2,11 +2,11 @@ use log::debug;
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
-use crate::indexer::RubyIndexer;
+use crate::server::RubyLanguageServer;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(
-    indexer: &RubyIndexer,
+    server: &RubyLanguageServer,
     _uri: &Url,
     position: Position,
     content: &str,
@@ -27,8 +27,7 @@ pub async fn find_references_at_position(
     debug!("Looking for references to: {}", identifier);
 
     // Use the indexer to find the matching fully qualified name
-    let index_arc = indexer.index();
-    let index = index_arc.lock().unwrap();
+    let index = server.index.lock().unwrap();
 
     // Check if this is a method call (starts with # or .)
     let is_method =
