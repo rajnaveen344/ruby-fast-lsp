@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use log::{debug, warn};
 use ruby_prism::DefNode;
 
-use crate::indexer::{
-    entry::{entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility},
-    types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod},
+use crate::indexer::entry::{
+    entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::IndexVisitor;
 

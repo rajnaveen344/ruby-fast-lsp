@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::indexer::types::{
+use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
 };
 

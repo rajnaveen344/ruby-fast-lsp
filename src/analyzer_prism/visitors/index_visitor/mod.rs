@@ -8,10 +8,8 @@ use ruby_prism::{
     ModuleNode, Visit,
 };
 
-use crate::indexer::{
-    index::RubyIndex,
-    types::{ruby_method::RubyMethod, ruby_namespace::RubyNamespace},
-};
+use crate::indexer::index::RubyIndex;
+use crate::types::{ruby_method::RubyMethod, ruby_namespace::RubyNamespace};
 
 mod call_node;
 mod class_node;

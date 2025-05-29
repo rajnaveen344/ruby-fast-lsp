@@ -5,6 +5,7 @@ mod tests {
         ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Url,
         WorkDoneProgressParams,
     };
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -19,6 +20,7 @@ mod tests {
         RubyLanguageServer {
             client,
             index: Arc::new(Mutex::new(index)),
+            docs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -61,7 +63,9 @@ mod tests {
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
             let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-            server.process_file(uri.clone(), &content).expect("Failed to index file");
+            server
+                .process_file(uri.clone(), &content)
+                .expect("Failed to index file");
         }
 
         // Call the handler
@@ -122,7 +126,9 @@ mod tests {
             // Read the file content and manually trigger indexing
             let file_path = uri.to_file_path().unwrap();
             let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-            server.process_file(uri.clone(), &content).expect("Failed to index file");
+            server
+                .process_file(uri.clone(), &content)
+                .expect("Failed to index file");
         }
 
         // Call the handler
@@ -268,7 +274,7 @@ mod tests {
 
         let result2 = server.process_file(file2_uri.clone(), file2_content);
         assert!(result2.is_ok(), "Failed to index file2: {:?}", result2);
-        
+
         // Print the indexed definitions
         println!("Indexed definitions:");
         let locked_index = server.index.lock().unwrap();

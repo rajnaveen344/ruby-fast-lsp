@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use lsp_types::Location;
 
-use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::{Entry, EntryKind};
 

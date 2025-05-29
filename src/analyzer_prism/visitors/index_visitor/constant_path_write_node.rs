@@ -1,12 +1,10 @@
 use log::{debug, error};
 use ruby_prism::{ConstantPathNode, ConstantPathWriteNode};
 
-use crate::indexer::{
-    entry::{entry_builder::EntryBuilder, entry_kind::EntryKind},
-    types::{
-        fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant,
-        ruby_namespace::RubyNamespace,
-    },
+use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+use crate::types::{
+    fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant,
+    ruby_namespace::RubyNamespace,
 };
 
 use super::IndexVisitor;

@@ -5,6 +5,7 @@ pub mod indexer;
 pub mod server;
 #[cfg(test)]
 pub mod test;
+pub mod types;
 
 use std::process::exit;
 

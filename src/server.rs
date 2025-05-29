@@ -1,10 +1,12 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
+use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::debug;
 use lsp_types::*;
 use ruby_prism::Visit;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -14,6 +16,7 @@ use tower_lsp::{Client, LanguageServer};
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
     pub index: Arc<Mutex<RubyIndex>>,
+    pub docs: Arc<Mutex<HashMap<Url, RubyDocument>>>,
 }
 
 impl RubyLanguageServer {
@@ -22,6 +25,7 @@ impl RubyLanguageServer {
         Ok(Self {
             client: Some(client),
             index: Arc::new(Mutex::new(index)),
+            docs: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -48,6 +52,7 @@ impl Default for RubyLanguageServer {
         RubyLanguageServer {
             client: None,
             index: Arc::new(Mutex::new(RubyIndex::new())),
+            docs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

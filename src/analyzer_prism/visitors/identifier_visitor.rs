@@ -1,9 +1,9 @@
 use crate::analyzer_prism::position::lsp_pos_to_prism_loc;
 use crate::analyzer_prism::Identifier;
-use crate::indexer::types::ruby_constant::RubyConstant;
-use crate::indexer::types::ruby_method::RubyMethod;
-use crate::indexer::types::ruby_namespace::RubyNamespace;
-use crate::indexer::types::ruby_variable::{RubyVariable, RubyVariableType};
+use crate::types::ruby_constant::RubyConstant;
+use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyNamespace;
+use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 
 use lsp_types::Position;
 use ruby_prism::{

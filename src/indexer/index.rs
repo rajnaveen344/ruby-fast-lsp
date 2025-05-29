@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use lsp_types::{Location, Url};
 
-use super::{
-    entry::{entry_kind::EntryKind, Entry, Mixin},
-    types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod},
-};
+use crate::indexer::entry::{entry_kind::EntryKind, Entry, Mixin};
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 #[derive(Debug)]
 pub struct RubyIndex {

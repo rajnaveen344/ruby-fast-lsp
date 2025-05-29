@@ -1,7 +1,7 @@
-use crate::indexer::types::ruby_constant::RubyConstant;
-use crate::indexer::types::ruby_method::RubyMethod;
-use crate::indexer::types::ruby_namespace::RubyNamespace;
-use crate::indexer::types::ruby_variable::RubyVariable;
+use crate::types::ruby_constant::RubyConstant;
+use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyNamespace;
+use crate::types::ruby_variable::RubyVariable;
 use lsp_types::Position;
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;

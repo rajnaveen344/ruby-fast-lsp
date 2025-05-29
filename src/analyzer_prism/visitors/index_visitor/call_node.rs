@@ -1,7 +1,7 @@
 use log::debug;
 use ruby_prism::CallNode;
 
-use crate::indexer::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::IndexVisitor;
 

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use entry_kind::EntryKind;
 use lsp_types::Location;
 
-use super::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 #[derive(Debug, Clone)]
 pub struct Entry {

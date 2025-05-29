@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
-use crate::indexer::types::fully_qualified_name::FullyQualifiedName;
 use crate::server::RubyLanguageServer;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 /// Find the definition(s) of a symbol at the given position
 ///
