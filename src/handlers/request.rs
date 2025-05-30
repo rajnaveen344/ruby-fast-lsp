@@ -18,37 +18,10 @@ pub async fn handle_goto_definition(
     let definition =
         definition::find_definition_at_position(&lang_server, position, &content).await;
 
-    // Convert Vec<Location> to GotoDefinitionResponse
     match definition {
         Some(locations) => {
-            if locations.len() == 1 {
-                // If there's only one location, return a scalar response
-                let location = locations[0].clone();
-                info!(
-                    "Returning goto definition location: uri={}, range={}:{}-{}:{}",
-                    location.uri,
-                    location.range.start.line,
-                    location.range.start.character,
-                    location.range.end.line,
-                    location.range.end.character
-                );
-                Ok(Some(GotoDefinitionResponse::Scalar(location)))
-            } else {
-                // If there are multiple locations, return an array response
-                info!("Returning {} goto definition locations", locations.len());
-                for (i, location) in locations.iter().enumerate() {
-                    info!(
-                        "Location {}: uri={}, range={}:{}-{}:{}",
-                        i + 1,
-                        location.uri,
-                        location.range.start.line,
-                        location.range.start.character,
-                        location.range.end.line,
-                        location.range.end.character
-                    );
-                }
-                Ok(Some(GotoDefinitionResponse::Array(locations)))
-            }
+            info!("Returning {} goto definition locations", locations.len());
+            Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {
             info!("No definition found for position {:?}", position);
