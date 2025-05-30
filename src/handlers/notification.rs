@@ -1,6 +1,7 @@
 use crate::capabilities;
 use crate::handlers::helpers::{init_workspace, process_file_for_indexing};
 use crate::server::RubyLanguageServer;
+use crate::types::ruby_document::RubyDocument;
 use log::{debug, error, info, warn};
 use lsp_types::*;
 use std::time::Instant;
@@ -52,14 +53,16 @@ pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {
 
 pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let start_time = Instant::now();
-    // Did open handler started
-
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
 
-    // Process the file for indexing
-    let index_ref = lang_server.index();
-    let result = process_file_for_indexing(index_ref, uri.clone(), &content);
+    lang_server.docs.lock().unwrap().insert(
+        uri.clone(),
+        RubyDocument::new(uri.clone(), content.clone(), params.text_document.version),
+    );
+
+    let index = lang_server.index();
+    let result = process_file_for_indexing(index, uri.clone(), &content);
 
     if let Err(e) = result {
         error!("Error indexing document: {}", e);
@@ -74,11 +77,15 @@ pub async fn handle_did_change(
 ) {
     debug!("Did change: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
-    let index_ref = lang_server.index();
+    let index = lang_server.index();
 
     for change in params.content_changes {
         let content = change.text.clone();
-        let result = process_file_for_indexing(index_ref.clone(), uri.clone(), &content);
+        let doc = RubyDocument::new(uri.clone(), content.clone(), params.text_document.version);
+
+        lang_server.docs.lock().unwrap().insert(uri.clone(), doc);
+
+        let result = process_file_for_indexing(index.clone(), uri.clone(), &content);
 
         if let Err(e) = result {
             error!("Error re-indexing document: {}", e);
