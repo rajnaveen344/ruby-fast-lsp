@@ -370,4 +370,49 @@ impl Visit<'_> for TokenVisitor {
         self.add_token(&node.location(), SemanticTokenType::VARIABLE, &[]);
         visit_block_local_variable_node(self, node);
     }
+
+    fn visit_if_node(&mut self, node: &ruby_prism::IfNode<'_>) {
+        // Determine if this is a modifier-style if (e.g., puts "hello" if condition)
+        let is_modifier_style = node.statements().as_ref().map_or(false, |stmts| {
+            stmts.location().start_offset() < node.predicate().location().start_offset()
+        });
+
+        // Visit nodes in the appropriate order based on style
+        if is_modifier_style {
+            // Modifier style: statements → predicate → subsequent
+            node.statements()
+                .map(|stmts| self.visit_statements_node(&stmts));
+            self.visit(&node.predicate());
+        } else {
+            // Regular style: predicate → statements → subsequent
+            self.visit(&node.predicate());
+            node.statements()
+                .map(|stmts| self.visit_statements_node(&stmts));
+        }
+
+        // Visit subsequent nodes (else/elsif) if present
+        node.subsequent().map(|subsequent| self.visit(&subsequent));
+    }
+
+    fn visit_unless_node(&mut self, node: &ruby_prism::UnlessNode<'_>) {
+        let is_modifier_style = node.statements().as_ref().map_or(false, |stmts| {
+            stmts.location().start_offset() < node.predicate().location().start_offset()
+        });
+
+        if is_modifier_style {
+            // Modifier style: statements → predicate → subsequent
+            node.statements()
+                .map(|stmts| self.visit_statements_node(&stmts));
+            self.visit(&node.predicate());
+        } else {
+            // Regular style: predicate → statements → subsequent
+            self.visit(&node.predicate());
+            node.statements()
+                .map(|stmts| self.visit_statements_node(&stmts));
+        }
+
+        // Visit subsequent nodes (else/elsif) if present
+        node.else_clause()
+            .map(|else_clause| self.visit_else_node(&else_clause));
+    }
 }
