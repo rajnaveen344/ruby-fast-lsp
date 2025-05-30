@@ -9,6 +9,9 @@ pub struct RubyDocument {
     pub content: String,
     pub version: i32,
     /// Byte offset at the start of each line (last element is total content length)
+    /// Eg. def foo\n  puts 'Hello'\nend\n
+    ///     ^ -> 0   ^ -> 8         ^ -> 23
+    ///     line_offsets = [0, 8, 23, 27]
     line_offsets: Vec<usize>,
 }
 
@@ -26,7 +29,7 @@ impl RubyDocument {
     }
 
     /// Updates document content and version, recomputing line offsets
-    pub fn update_content(&mut self, content: String, version: i32) {
+    pub fn update(&mut self, content: String, version: i32) {
         self.content = content;
         self.version = version;
         self.compute_line_offsets();
@@ -157,7 +160,7 @@ mod tests {
     fn test_update_content() {
         let mut doc = create_test_document();
         let new_content = "class Foo\n  def bar\n  end\nend";
-        doc.update_content(new_content.to_string(), 2);
+        doc.update(new_content.to_string(), 2);
 
         // Verify content and version updated
         assert_eq!(doc.version, 2);
@@ -179,10 +182,8 @@ mod tests {
         let parsed_doc = ruby_prism::parse(doc.content.as_bytes());
         let node = parsed_doc.node();
 
-        // Create a range covering "puts" in the second line (byte offsets 10-14)
-        // Line 1 starts at offset 8, "puts" starts at offset 10 (2 chars in)
-        let start_pos = doc.offset_to_position(0); // Position of 'p' in "puts"
-        let end_pos = doc.offset_to_position(26); // Position after 's' in "puts"
+        let start_pos = doc.offset_to_position(0); // Position of 'd' in "def"
+        let end_pos = doc.offset_to_position(26); // Position after 'd' in "end"
         let expected_range = Range::new(start_pos, end_pos);
 
         // Test with the location from a real node
