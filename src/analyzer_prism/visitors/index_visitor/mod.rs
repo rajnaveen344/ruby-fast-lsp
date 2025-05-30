@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use lsp_types::{Location as LspLocation, Position, Range, Url};
+use lsp_types::{Location as LspLocation, Url};
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
     visit_def_node, visit_local_variable_write_node, visit_module_node, visit_parameters_node,
@@ -9,7 +9,10 @@ use ruby_prism::{
 };
 
 use crate::indexer::index::RubyIndex;
-use crate::types::{ruby_method::RubyMethod, ruby_namespace::RubyNamespace};
+use crate::server::RubyLanguageServer;
+use crate::types::{
+    ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
+};
 
 mod call_node;
 mod class_node;
@@ -24,55 +27,27 @@ mod singleton_class_node;
 pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
-    pub content: String,
+    pub document: RubyDocument,
     pub namespace_stack: Vec<RubyNamespace>,
     pub current_method: Option<RubyMethod>,
 }
 
 impl IndexVisitor {
-    pub fn new(index: Arc<Mutex<RubyIndex>>, uri: Url, content: String) -> Self {
+    pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
+        let document = server.docs.lock().unwrap().get(&uri).unwrap().clone();
         Self {
-            index,
+            index: server.index(),
             uri,
-            content,
+            document,
             namespace_stack: vec![],
             current_method: None,
         }
     }
 
     pub fn prism_loc_to_lsp_loc(&self, loc: ruby_prism::Location) -> LspLocation {
-        let start_offset = loc.start_offset();
-        let end_offset = loc.end_offset();
         let uri = self.uri.clone();
-
-        // Calculate correct line and character positions by counting newlines
-        let (start_line, start_character) = self.offset_to_position(&self.content, start_offset);
-        let (end_line, end_character) = self.offset_to_position(&self.content, end_offset);
-
-        let range = Range::new(
-            Position::new(start_line, start_character),
-            Position::new(end_line, end_character),
-        );
+        let range = self.document.location_to_range(&loc);
         LspLocation::new(uri, range)
-    }
-
-    // Helper function to convert byte offset to (line, character) position
-    fn offset_to_position(&self, content: &str, offset: usize) -> (u32, u32) {
-        let mut line = 0;
-        let mut line_start_offset = 0;
-
-        // Find the line containing the offset by counting newlines
-        for (i, c) in content.chars().take(offset).enumerate() {
-            if c == '\n' {
-                line += 1;
-                line_start_offset = i + 1; // +1 to skip the newline character
-            }
-        }
-
-        // Character offset within the line
-        let character = (offset - line_start_offset) as u32;
-
-        (line, character)
     }
 }
 

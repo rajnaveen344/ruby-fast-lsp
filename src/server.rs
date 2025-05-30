@@ -36,9 +36,13 @@ impl RubyLanguageServer {
     pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {
         self.index.lock().unwrap().remove_entries_for_uri(&uri);
 
+        // Create or update document in the docs HashMap
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        self.docs.lock().unwrap().insert(uri.clone(), document);
+
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
-        let mut visitor = IndexVisitor::new(self.index.clone(), uri.clone(), content.to_string());
+        let mut visitor = IndexVisitor::new(self, uri.clone());
 
         visitor.visit(&node);
 

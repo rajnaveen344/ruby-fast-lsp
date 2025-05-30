@@ -61,8 +61,7 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         RubyDocument::new(uri.clone(), content.clone(), params.text_document.version),
     );
 
-    let index = lang_server.index();
-    let result = process_file_for_indexing(index, uri.clone(), &content);
+    let result = process_file_for_indexing(lang_server, uri.clone());
 
     if let Err(e) = result {
         error!("Error indexing document: {}", e);
@@ -77,7 +76,6 @@ pub async fn handle_did_change(
 ) {
     debug!("Did change: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
-    let index = lang_server.index();
 
     for change in params.content_changes {
         let content = change.text.clone();
@@ -85,7 +83,7 @@ pub async fn handle_did_change(
 
         lang_server.docs.lock().unwrap().insert(uri.clone(), doc);
 
-        let result = process_file_for_indexing(index.clone(), uri.clone(), &content);
+        let result = process_file_for_indexing(lang_server, uri.clone());
 
         if let Err(e) = result {
             error!("Error re-indexing document: {}", e);
@@ -99,9 +97,7 @@ pub async fn handle_did_close(
 ) {
     debug!("Did close: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
-    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let index_ref = lang_server.index();
-    let result = process_file_for_indexing(index_ref, uri, &content);
+    let result = process_file_for_indexing(lang_server, uri);
 
     if let Err(e) = result {
         error!("Error re-indexing document: {}", e);

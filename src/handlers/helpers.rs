@@ -1,6 +1,6 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
+use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, error, info};
 use lsp_types::*;
@@ -71,8 +71,10 @@ pub async fn process_files_parallel(
         files.len()
     );
 
-    // Create a shared server reference
+    // Create a shared reference to the server's index
     let index_ref = server.index();
+    // Clone the server for use in async tasks
+    let server_clone = server.clone();
     let setup_duration = setup_start.elapsed();
     debug!("Parallel indexing setup completed in {:?}", setup_duration);
 
@@ -87,6 +89,9 @@ pub async fn process_files_parallel(
         let index_clone = index_ref.clone();
         let file_path_clone = file_path.clone();
 
+        // Clone server for this task
+        let server_task = server_clone.clone();
+        
         // Spawn a task for each file
         tasks.spawn(async move {
             // Acquire a permit from the semaphore
@@ -108,9 +113,13 @@ pub async fn process_files_parallel(
                     return Err(anyhow::anyhow!("Failed to convert file path to URI"));
                 }
             };
+            
+            // Create or update document in the docs HashMap
+            let document = RubyDocument::new(uri.clone(), content, 0);
+            server_task.docs.lock().unwrap().insert(uri.clone(), document);
 
             // Process the file
-            process_file_for_indexing(index_clone, uri, &content).map_err(|e| {
+            process_file_for_indexing(&server_task, uri).map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to process file {}: {}",
                     file_path_clone.display(),
@@ -194,20 +203,24 @@ pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(ruby_files)
 }
 
-pub fn process_file_for_indexing(
-    index: Arc<std::sync::Mutex<RubyIndex>>,
-    uri: Url,
-    content: &str,
-) -> Result<(), String> {
+pub fn process_file_for_indexing(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
     // Remove any existing entries for this URI
-    index.lock().unwrap().remove_entries_for_uri(&uri);
+    server.index().lock().unwrap().remove_entries_for_uri(&uri);
+
+    // Get the document from the server's docs HashMap
+    let document = match server.docs.lock().unwrap().get(&uri) {
+        Some(doc) => doc.clone(),
+        None => {
+            return Err(format!("Document not found for URI: {}", uri));
+        }
+    };
 
     // Parse the file
-    let parse_result = parse(content.as_bytes());
+    let parse_result = parse(document.content.as_bytes());
     let node = parse_result.node();
 
     // Create a visitor and process the AST
-    let mut visitor = IndexVisitor::new(index, uri.clone(), content.to_string());
+    let mut visitor = IndexVisitor::new(server, uri.clone());
     visitor.visit(&node);
 
     debug!("Processed file: {}", uri);
