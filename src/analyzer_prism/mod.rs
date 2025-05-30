@@ -1,8 +1,9 @@
 use crate::types::ruby_constant::RubyConstant;
+use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyNamespace;
 use crate::types::ruby_variable::RubyVariable;
-use lsp_types::Position;
+use lsp_types::{Position, Url};
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
 
@@ -57,7 +58,10 @@ impl RubyPrismAnalyzer {
     /// Returns the identifier and the ancestors stack at the time of the lookup.
     pub fn get_identifier(&self, position: Position) -> (Option<Identifier>, Vec<RubyNamespace>) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
-        let mut visitor = IdentifierVisitor::new(self.code.clone(), position);
+        // Create a RubyDocument with a dummy URI since we only need it for position handling
+        let uri = Url::parse("file:///dummy.rb").unwrap();
+        let document = RubyDocument::new(uri, self.code.clone(), 0);
+        let mut visitor = IdentifierVisitor::new(document, position);
         let root_node = parse_result.node();
         visitor.visit(&root_node);
         (visitor.identifier, visitor.ancestors)

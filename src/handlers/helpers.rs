@@ -71,8 +71,6 @@ pub async fn process_files_parallel(
         files.len()
     );
 
-    // Create a shared reference to the server's index
-    let index_ref = server.index();
     // Clone the server for use in async tasks
     let server_clone = server.clone();
     let setup_duration = setup_start.elapsed();
@@ -86,12 +84,11 @@ pub async fn process_files_parallel(
     let files_count = files.len();
     for file_path in files {
         let semaphore_clone = semaphore.clone();
-        let index_clone = index_ref.clone();
         let file_path_clone = file_path.clone();
 
         // Clone server for this task
         let server_task = server_clone.clone();
-        
+
         // Spawn a task for each file
         tasks.spawn(async move {
             // Acquire a permit from the semaphore
@@ -113,10 +110,14 @@ pub async fn process_files_parallel(
                     return Err(anyhow::anyhow!("Failed to convert file path to URI"));
                 }
             };
-            
+
             // Create or update document in the docs HashMap
             let document = RubyDocument::new(uri.clone(), content, 0);
-            server_task.docs.lock().unwrap().insert(uri.clone(), document);
+            server_task
+                .docs
+                .lock()
+                .unwrap()
+                .insert(uri.clone(), document);
 
             // Process the file
             process_file_for_indexing(&server_task, uri).map_err(|e| {

@@ -1,6 +1,6 @@
-use crate::analyzer_prism::position::lsp_pos_to_prism_loc;
 use crate::analyzer_prism::Identifier;
 use crate::types::ruby_constant::RubyConstant;
+use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyNamespace;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
@@ -15,7 +15,7 @@ use ruby_prism::{
 
 /// Visitor for finding identifiers at a specific position
 pub struct IdentifierVisitor {
-    code: String,
+    document: RubyDocument,
     position: Position,
     namespace_stack: Vec<RubyNamespace>,
     current_method: Option<RubyMethod>,
@@ -24,9 +24,9 @@ pub struct IdentifierVisitor {
 }
 
 impl IdentifierVisitor {
-    pub fn new(code: String, position: Position) -> Self {
+    pub fn new(document: RubyDocument, position: Position) -> Self {
         Self {
-            code,
+            document,
             position,
             namespace_stack: Vec::new(),
             current_method: None,
@@ -36,7 +36,7 @@ impl IdentifierVisitor {
     }
 
     pub fn is_position_in_location(&self, location: &Location) -> bool {
-        let position_offset = lsp_pos_to_prism_loc(self.position, &self.code);
+        let position_offset = self.document.position_to_offset(self.position);
 
         let start_offset = location.start_offset();
         let end_offset = location.end_offset();
@@ -134,7 +134,7 @@ impl Visit<'_> for IdentifierVisitor {
         self.collect_namespaces_recursive(node, &mut namespaces);
 
         // Check if first two char are ::
-        let code = self.code.as_bytes();
+        let code = self.document.content.as_bytes();
         let start = node.location().start_offset();
         let end = start + 2;
         let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
@@ -268,11 +268,13 @@ impl Visit<'_> for IdentifierVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lsp_types::Position;
+    use lsp_types::{Position, Url};
 
     // Helper function to test the full visitor behavior
     fn test_visitor(code: &str, position: Position, expected_parts: Vec<&str>) {
-        let mut visitor = IdentifierVisitor::new(code.to_string(), position);
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, position);
         let parse_result = ruby_prism::parse(code.as_bytes());
 
         // Use the full visitor pattern
@@ -437,7 +439,9 @@ mod tests {
     #[test]
     fn test_constant_in_method_call() {
         // Test case: Foo.bar with cursor at Foo
-        let mut visitor = IdentifierVisitor::new("Foo.bar".to_string(), Position::new(0, 1));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, "Foo.bar".to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 1));
         let parse_result = ruby_prism::parse("Foo.bar".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -456,7 +460,9 @@ mod tests {
     #[test]
     fn test_constant_path_in_method_call() {
         // Test case: Foo::Bar.baz with cursor at Bar
-        let mut visitor = IdentifierVisitor::new("Foo::Bar.baz".to_string(), Position::new(0, 6));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, "Foo::Bar.baz".to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 6));
         let parse_result = ruby_prism::parse("Foo::Bar.baz".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -476,7 +482,9 @@ mod tests {
     #[test]
     fn test_module_method_call() {
         // Test case: Foo::Bar.baz with cursor at baz (module method call)
-        let mut visitor = IdentifierVisitor::new("Foo::Bar.baz".to_string(), Position::new(0, 10));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, "Foo::Bar.baz".to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 10));
         let parse_result = ruby_prism::parse("Foo::Bar.baz".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -497,8 +505,11 @@ mod tests {
     #[test]
     fn test_namespace_in_method_call() {
         // Test case: Foo::Bar::Baz.foo with cursor at Bar
-        let mut visitor =
-            IdentifierVisitor::new("Foo::Bar::Baz.foo".to_string(), Position::new(0, 6));
+        let mut visitor = {
+            let uri = Url::parse("file:///test.rb").unwrap();
+            let document = RubyDocument::new(uri, "Foo::Bar::Baz.foo".to_string(), 1);
+            IdentifierVisitor::new(document, Position::new(0, 6))
+        };
         let parse_result = ruby_prism::parse("Foo::Bar::Baz.foo".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -518,8 +529,11 @@ mod tests {
     #[test]
     fn test_constant_in_nested_expression() {
         // Test case: Foo::Bar::Baz::ABC with cursor at ABC
-        let mut visitor =
-            IdentifierVisitor::new("Foo::Bar::Baz::ABC".to_string(), Position::new(0, 15));
+        let mut visitor = {
+            let uri = Url::parse("file:///test.rb").unwrap();
+            let document = RubyDocument::new(uri, "Foo::Bar::Baz::ABC".to_string(), 1);
+            IdentifierVisitor::new(document, Position::new(0, 15))
+        };
         let parse_result = ruby_prism::parse("Foo::Bar::Baz::ABC".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -541,8 +555,11 @@ mod tests {
     #[test]
     fn test_constant_in_method_arguments() {
         // Test case: method(Foo::Bar) with cursor at Bar
-        let mut visitor =
-            IdentifierVisitor::new("method(Foo::Bar)".to_string(), Position::new(0, 12));
+        let mut visitor = {
+            let uri = Url::parse("file:///test.rb").unwrap();
+            let document = RubyDocument::new(uri, "method(Foo::Bar)".to_string(), 1);
+            IdentifierVisitor::new(document, Position::new(0, 12))
+        };
         let parse_result = ruby_prism::parse("method(Foo::Bar)".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -562,10 +579,9 @@ mod tests {
     #[test]
     fn test_nested_constant_in_method_arguments() {
         // Test case: method(A::B::C::D::CONST) with cursor at CONST
-        let mut visitor = IdentifierVisitor::new(
-            "method(A::B::C::D::CONST)".to_string(),
-            Position::new(0, 19),
-        );
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, "method(A::B::C::D::CONST)".to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 20));
         let parse_result = ruby_prism::parse("method(A::B::C::D::CONST)".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -588,7 +604,9 @@ mod tests {
     #[test]
     fn test_deeply_nested_call_node() {
         // Test case: a.b.c.d.e with cursor at d
-        let mut visitor = IdentifierVisitor::new("a.b.c.d.e".to_string(), Position::new(0, 0));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, "a.b.c.d.e".to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 0));
         let parse_result = ruby_prism::parse("a.b.c.d.e".as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -608,7 +626,9 @@ mod tests {
         // Test case: raise Error::Type.new(Error::Messages::CONSTANT, Error::Codes::CODE)
         // with cursor at CONSTANT
         let code = "raise Error::Type.new(Error::Messages::CONSTANT, Error::Codes::CODE)";
-        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(0, 40));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(0, 40));
         let parse_result = ruby_prism::parse(code.as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -639,7 +659,9 @@ mod tests {
             + "        )";
 
         // Test with cursor on INVALID_SYNTAX
-        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(1, 60));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(1, 60));
         let parse_result = ruby_prism::parse(code.as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -659,7 +681,9 @@ mod tests {
         }
 
         // Test with cursor on PARSE_ERROR
-        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(2, 55));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(2, 55));
         let parse_result = ruby_prism::parse(code.as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -696,7 +720,9 @@ mod tests {
             + "end";
 
         // Test with cursor on INVALID_ITEM
-        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(2, 25));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(2, 25));
         let parse_result = ruby_prism::parse(code.as_bytes());
         visitor.visit(&parse_result.node());
 
@@ -714,7 +740,9 @@ mod tests {
         }
 
         // Test with cursor on ITEM_ERROR
-        let mut visitor = IdentifierVisitor::new(code.to_string(), Position::new(3, 20));
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, code.to_string(), 1);
+        let mut visitor = IdentifierVisitor::new(document, Position::new(3, 20));
         let parse_result = ruby_prism::parse(code.as_bytes());
         visitor.visit(&parse_result.node());
 
