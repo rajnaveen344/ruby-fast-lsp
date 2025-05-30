@@ -7,7 +7,7 @@ let client;
 function getServerPath() {
     const platform = process.platform;
     const extension = platform === 'win32' ? '.exe' : '';
-    
+
     if (platform === 'darwin') {
         return path.join(__dirname, 'bin', 'macos', 'ruby-fast-lsp');
     } else if (platform === 'linux') {
@@ -15,7 +15,7 @@ function getServerPath() {
     } else if (platform === 'win32') {
         return path.join(__dirname, 'bin', 'win32', 'ruby-fast-lsp.exe');
     }
-    
+
     throw new Error(`Unsupported platform: ${platform}`);
 }
 
@@ -25,21 +25,21 @@ function activate(context) {
         args: [],
         transport: TransportKind.stdio
     };
-    
+
     const clientOptions = {
         documentSelector: [{ scheme: 'file', language: 'ruby' }],
         synchronize: {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/*.rb')
         }
     };
-    
+
     client = new LanguageClient(
         'ruby-fast-lsp',
         'Ruby Fast LSP',
         serverOptions,
         clientOptions
     );
-    
+
     client.start();
 }
 

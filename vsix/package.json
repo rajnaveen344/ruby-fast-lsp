@@ -10,7 +10,7 @@
     "url": "https://github.com/rajnaveen344/ruby-fast-lsp"
   },
   "engines": {
-    "vscode": "^1.60.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Programming Languages",
@@ -42,6 +42,6 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "vscode-languageclient": "^7.0.0"
+    "vscode-languageclient": "^9.0.1"
   }
 }

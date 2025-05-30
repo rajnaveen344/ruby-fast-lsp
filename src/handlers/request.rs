@@ -1,4 +1,4 @@
-use crate::capabilities::{definition, references, semantic_tokens};
+use crate::capabilities::{definition, inlay_hints, references, semantic_tokens};
 use crate::server::RubyLanguageServer;
 use log::info;
 use lsp_types::*;
@@ -58,4 +58,13 @@ pub async fn handle_semantic_tokens_full(
         lang_server,
         params.text_document.uri,
     )))
+}
+
+pub async fn handle_inlay_hints(
+    lang_server: &RubyLanguageServer,
+    params: InlayHintParams,
+) -> LspResult<Option<Vec<InlayHint>>> {
+    Ok(Some(
+        inlay_hints::handle_inlay_hints(lang_server, params).await,
+    ))
 }

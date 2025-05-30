@@ -3,8 +3,13 @@ use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
-use log::debug;
-use lsp_types::*;
+use log::{debug, info};
+use lsp_types::{
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams,
+    SemanticTokensResult, Url,
+};
 use ruby_prism::Visit;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -115,5 +120,22 @@ impl LanguageServer for RubyLanguageServer {
             params.text_document.uri
         );
         request::handle_semantic_tokens_full(self, params).await
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> LspResult<Option<Vec<lsp_types::InlayHint>>> {
+        info!(
+            "Inlay hint request received for {:?}",
+            params.text_document.uri.path()
+        );
+
+        let start_time = Instant::now();
+        let result = request::handle_inlay_hints(self, params).await;
+
+        info!("[PERF] Inlay hint completed in {:?}", start_time.elapsed());
+
+        result
     }
 }

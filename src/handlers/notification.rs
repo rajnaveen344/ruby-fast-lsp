@@ -35,6 +35,9 @@ pub async fn handle_initialize(
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        inlay_hint_provider: Some(OneOf::Right(
+            capabilities::inlay_hints::get_inlay_hints_capability(),
+        )),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             capabilities::semantic_tokens::get_semantic_tokens_options(),
         )),
