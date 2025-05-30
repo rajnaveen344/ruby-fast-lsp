@@ -51,11 +51,11 @@ pub async fn handle_references(
 }
 
 pub async fn handle_semantic_tokens_full(
-    _lang_server: &RubyLanguageServer,
+    lang_server: &RubyLanguageServer,
     params: SemanticTokensParams,
 ) -> LspResult<Option<SemanticTokensResult>> {
-    let uri = params.text_document.uri.clone();
-    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let result = semantic_tokens::get_semantic_tokens_full(content);
-    Ok(Some(result))
+    Ok(Some(semantic_tokens::get_semantic_tokens_full(
+        lang_server,
+        params.text_document.uri,
+    )))
 }

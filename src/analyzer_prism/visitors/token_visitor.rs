@@ -1,5 +1,5 @@
-use crate::analyzer_prism::position::prism_offset_to_lsp_pos;
 use crate::capabilities::semantic_tokens::{TOKEN_MODIFIERS_MAP, TOKEN_TYPES_MAP};
+use crate::types::ruby_document::RubyDocument;
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 use ruby_prism::{
     visit_block_local_variable_node, visit_local_variable_and_write_node,
@@ -9,15 +9,15 @@ use ruby_prism::{
 };
 
 pub struct TokenVisitor {
-    code: String,
+    document: RubyDocument,
     pub tokens: Vec<SemanticToken>,
     current_position: (u32, u32),
 }
 
 impl TokenVisitor {
-    pub fn new(code: String) -> Self {
+    pub fn new(document: RubyDocument) -> Self {
         Self {
-            code,
+            document,
             tokens: Vec::new(),
             current_position: (0, 0),
         }
@@ -31,8 +31,10 @@ impl TokenVisitor {
     ) {
         let token_type_index = self.token_type_to_index(token_type);
         let modifiers_bitset = self.token_modifiers_to_bitset(modifiers);
-        let start_pos = prism_offset_to_lsp_pos(location.start_offset(), &self.code);
-        let end_pos = prism_offset_to_lsp_pos(location.end_offset(), &self.code);
+        
+        // Use RubyDocument's position methods instead of custom conversion
+        let start_pos = self.document.offset_to_position(location.start_offset());
+        let end_pos = self.document.offset_to_position(location.end_offset());
 
         let delta_line = start_pos.line - self.current_position.0;
         let delta_column = if delta_line == 0 {
@@ -51,7 +53,7 @@ impl TokenVisitor {
             let start = location.start_offset() as usize;
             let end = location.end_offset() as usize;
 
-            self.code[start..end]
+            self.document.content[start..end]
                 .chars()
                 .map(|c| if c.len_utf16() == 2 { 2 } else { 1 })
                 .sum::<u32>()
@@ -94,7 +96,7 @@ impl Visit<'_> for TokenVisitor {
         // To produce tokens in the same order as the code written, we add the method token here.
         // Changing the position of this block in this method will result in tokens being out of order.
         if let Some(message_loc) = node.message_loc() {
-            let msg = self.code[message_loc.start_offset()..message_loc.end_offset()].to_string();
+            let msg = self.document.content[message_loc.start_offset()..message_loc.end_offset()].to_string();
             if msg.starts_with("[") && (msg.ends_with("]") || msg.ends_with("]=")) {
                 // "[]" or "[]=" are not method tokens. Do nothing.
                 // Eg. hash[:key]; hash['key'] = 1;

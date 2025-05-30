@@ -2,12 +2,16 @@ use lazy_static::lazy_static;
 use log::info;
 use lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, WorkDoneProgressOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, Url,
+    WorkDoneProgressOptions,
 };
 use ruby_prism::Visit;
 use std::{collections::HashMap, time::Instant};
 
-use crate::analyzer_prism::visitors::{empty_visitor::EmptyVisitor, token_visitor::TokenVisitor};
+use crate::{
+    analyzer_prism::visitors::{empty_visitor::EmptyVisitor, token_visitor::TokenVisitor},
+    server::RubyLanguageServer,
+};
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,
@@ -82,12 +86,28 @@ pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     }
 }
 
-pub fn get_semantic_tokens_full(content: String) -> SemanticTokensResult {
+pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> SemanticTokensResult {
     let start_time = Instant::now();
+
+    // Get the document from server cache
+    let document = match server.docs.lock().unwrap().get(&uri) {
+        Some(doc) => doc.clone(), // Clone the document to avoid holding the lock
+        None => {
+            info!("Document not found in cache for URI: {}", uri);
+            return SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: Vec::new(),
+            });
+        }
+    };
+
+    let content = document.content.clone();
     let parse_result = ruby_prism::parse(content.as_bytes());
     let parse_time = start_time.elapsed();
     info!("Performance: parse took {:?}", parse_time);
-    let mut visitor = TokenVisitor::new(content.clone());
+
+    // Pass the document to the visitor
+    let mut visitor = TokenVisitor::new(document);
     let root_node = parse_result.node();
     visitor.visit(&root_node);
     let visit_time = start_time.elapsed() - parse_time;
@@ -95,6 +115,8 @@ pub fn get_semantic_tokens_full(content: String) -> SemanticTokensResult {
         "Performance: token_generation_visitor took {:?}",
         visit_time
     );
+
+    // Performance measurement with empty visitor
     let mut empty_visitor = EmptyVisitor {};
     empty_visitor.visit(&root_node);
     let empty_visit_time = start_time.elapsed() - parse_time - visit_time;
