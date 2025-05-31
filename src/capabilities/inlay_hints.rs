@@ -1,4 +1,3 @@
-use log::info;
 use lsp_types::{
     InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
     WorkDoneProgressOptions,
@@ -14,9 +13,10 @@ pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
 }
 
 pub async fn handle_inlay_hints(
-    _server: &RubyLanguageServer,
-    _params: InlayHintParams,
+    server: &RubyLanguageServer,
+    params: InlayHintParams,
 ) -> Vec<InlayHint> {
-    info!("Inlay hints request received");
-    Vec::new()
+    let uri = params.text_document.uri;
+    let docs = server.docs.lock().unwrap();
+    docs.get(&uri).unwrap().get_inlay_hints()
 }

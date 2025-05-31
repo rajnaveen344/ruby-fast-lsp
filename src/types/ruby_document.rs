@@ -1,6 +1,8 @@
-use lsp_types::{Position, Range, Url};
-use ruby_prism::Location;
+use lsp_types::{InlayHint, Position, Range, Url};
+use ruby_prism::{Location, Visit};
 use std::cmp;
+
+use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -13,6 +15,7 @@ pub struct RubyDocument {
     ///     ^ -> 0   ^ -> 8         ^ -> 23
     ///     line_offsets = [0, 8, 23, 27]
     line_offsets: Vec<usize>,
+    inlay_hints: Vec<InlayHint>,
 }
 
 impl RubyDocument {
@@ -23,8 +26,10 @@ impl RubyDocument {
             content,
             version,
             line_offsets: Vec::new(),
+            inlay_hints: Vec::new(),
         };
         doc.compute_line_offsets();
+        doc.compute_inlay_hints();
         doc
     }
 
@@ -33,6 +38,7 @@ impl RubyDocument {
         self.content = content;
         self.version = version;
         self.compute_line_offsets();
+        self.compute_inlay_hints();
     }
 
     /// Computes byte offsets at the start of each line
@@ -104,6 +110,25 @@ impl RubyDocument {
             self.offset_to_position(location.start_offset()),
             self.offset_to_position(location.end_offset()),
         )
+    }
+
+    /// Computes inlay hints for the document by parsing it and using the inlay visitor
+    pub fn compute_inlay_hints(&mut self) {
+        let parse_result = ruby_prism::parse(self.content.as_bytes());
+        let node = parse_result.node();
+
+        let hints = {
+            let mut visitor = InlayVisitor::new(self);
+            visitor.visit(&node);
+            visitor.inlay_hints()
+        };
+
+        self.inlay_hints = hints;
+    }
+
+    /// Returns the computed inlay hints for the document
+    pub fn get_inlay_hints(&self) -> Vec<InlayHint> {
+        self.inlay_hints.clone()
     }
 }
 
