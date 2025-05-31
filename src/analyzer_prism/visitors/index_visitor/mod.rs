@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use lsp_types::{Location as LspLocation, Url};
 use ruby_prism::{
-    visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_local_variable_write_node, visit_module_node, visit_parameters_node,
-    CallNode, ClassNode, ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode,
-    ModuleNode, Visit,
+    visit_class_node, visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
+    visit_local_variable_write_node, visit_module_node, visit_parameters_node, ClassNode,
+    ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode, ModuleNode, Visit,
 };
 
 use crate::indexer::index::RubyIndex;
@@ -14,7 +13,6 @@ use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
 };
 
-mod call_node;
 mod class_node;
 mod constant_path_write_node;
 mod constant_write_node;
@@ -68,12 +66,6 @@ impl Visit<'_> for IndexVisitor {
         self.process_def_node_entry(node);
         visit_def_node(self, node);
         self.process_def_node_exit(node);
-    }
-
-    fn visit_call_node(&mut self, node: &CallNode) {
-        self.process_call_node_entry(node);
-        visit_call_node(self, node);
-        self.process_call_node_exit(node);
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode) {

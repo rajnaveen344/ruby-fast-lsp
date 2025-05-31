@@ -37,17 +37,23 @@ pub async fn handle_references(
     let uri = params.text_document_position.text_document.uri.clone();
     let position = params.text_document_position.position;
     let include_declaration = params.context.include_declaration;
-    let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let references = references::find_references_at_position(
-        lang_server,
-        &uri,
-        position,
-        &content,
-        include_declaration,
-    )
-    .await;
+    let doc = lang_server.get_doc(&uri);
 
-    Ok(references)
+    if let Some(doc) = doc {
+        let content = doc.content.clone();
+        let references = references::find_references_at_position(
+            lang_server,
+            &uri,
+            position,
+            &content,
+            include_declaration,
+        )
+        .await;
+
+        return Ok(references);
+    }
+
+    Ok(None)
 }
 
 pub async fn handle_semantic_tokens_full(

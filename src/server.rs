@@ -38,6 +38,10 @@ impl RubyLanguageServer {
         self.index.clone()
     }
 
+    pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
+        self.docs.lock().unwrap().get(uri).cloned()
+    }
+
     pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {
         self.index.lock().unwrap().remove_entries_for_uri(&uri);
 
@@ -108,7 +112,16 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
-        request::handle_references(self, params).await
+        info!(
+            "References request received for {:?}",
+            params.text_document_position.text_document.uri.path()
+        );
+        let start_time = Instant::now();
+        let result = request::handle_references(self, params).await;
+
+        info!("[PERF] References completed in {:?}", start_time.elapsed());
+
+        result
     }
 
     async fn semantic_tokens_full(
