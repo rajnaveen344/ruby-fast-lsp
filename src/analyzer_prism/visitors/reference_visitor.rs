@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use log::info;
 use lsp_types::Url;
 use ruby_prism::{
     visit_class_node, visit_module_node, ClassNode, ConstantPathNode, ModuleNode, Visit,
@@ -98,30 +97,14 @@ impl Visit<'_> for ReferenceVisitor {
                 FullyQualifiedName::namespace(combined_ns.clone())
             };
 
-            println!("Searching key: {}", fqn);
             let key = fqn.clone();
-            let locations_to_add = {
-                let index_guard = self.index.lock().unwrap();
-                if let Some(entries) = index_guard.definitions.get(&key) {
-                    entries
-                        .iter()
-                        .map(|entry| entry.location.clone())
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                }
-            };
-
-            if !locations_to_add.is_empty() {
-                let mut index = self.index.lock().unwrap();
-                info!(
-                    "Adding {} references for: {:?}",
-                    locations_to_add.len(),
-                    fqn
-                );
-                for location in locations_to_add {
-                    index.add_reference(fqn.clone(), location);
-                }
+            let mut index = self.index.lock().unwrap();
+            let entries = index.definitions.get(&key);
+            if let Some(_) = entries {
+                let location = self
+                    .document
+                    .prism_location_to_lsp_location(&node.location());
+                index.add_reference(fqn.clone(), location);
 
                 return;
             }
@@ -174,16 +157,8 @@ end
         let uri = Url::parse("file:///dummy.rb").unwrap();
         open_file(&server, code, &uri);
 
-        {
-            let index = server.index.lock().unwrap();
-            index
-                .definitions
-                .keys()
-                .for_each(|k| println!("Found key: {}", k));
-        }
-
         let references =
-            references::find_references_at_position(&server, &uri, Position::new(3, 15)).await;
+            references::find_references_at_position(&server, &uri, Position::new(4, 19)).await;
 
         assert_eq!(references.unwrap().len(), 1);
     }

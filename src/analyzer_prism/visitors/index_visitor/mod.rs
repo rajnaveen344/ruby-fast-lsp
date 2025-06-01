@@ -44,7 +44,7 @@ impl IndexVisitor {
 
     pub fn prism_loc_to_lsp_loc(&self, loc: ruby_prism::Location) -> LspLocation {
         let uri = self.uri.clone();
-        let range = self.document.location_to_range(&loc);
+        let range = self.document.prism_location_to_lsp_range(&loc);
         LspLocation::new(uri, range)
     }
 }

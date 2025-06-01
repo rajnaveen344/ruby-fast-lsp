@@ -1,5 +1,5 @@
-use lsp_types::{InlayHint, Position, Range, Url};
-use ruby_prism::{Location, Visit};
+use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
+use ruby_prism::{Location as PrismLocation, Visit};
 use std::cmp;
 
 use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
@@ -105,11 +105,15 @@ impl RubyDocument {
     }
 
     /// Converts a ruby_prism Location to an LSP Range
-    pub fn location_to_range(&self, location: &Location) -> Range {
+    pub fn prism_location_to_lsp_range(&self, location: &PrismLocation) -> Range {
         Range::new(
             self.offset_to_position(location.start_offset()),
             self.offset_to_position(location.end_offset()),
         )
+    }
+
+    pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {
+        LspLocation::new(self.uri.clone(), self.prism_location_to_lsp_range(location))
     }
 
     /// Computes inlay hints for the document by parsing it and using the inlay visitor
@@ -213,7 +217,7 @@ mod tests {
 
         // Test with the location from a real node
         let def_node_loc = node.location();
-        let actual_range = doc.location_to_range(&def_node_loc);
+        let actual_range = doc.prism_location_to_lsp_range(&def_node_loc);
 
         assert_eq!(expected_range, actual_range);
     }

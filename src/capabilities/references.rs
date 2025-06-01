@@ -61,6 +61,7 @@ pub async fn find_references_at_position(
         }
     }
 
+    println!("Looking for references to: {:?}", fqn);
     info!("Looking for references to: {}", fqn);
 
     let index = server.index.lock().unwrap();

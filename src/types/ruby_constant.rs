@@ -28,9 +28,11 @@ impl RubyConstant {
     }
 }
 
-impl From<String> for RubyConstant {
-    fn from(value: String) -> Self {
-        RubyConstant(value)
+impl TryFrom<String> for RubyConstant {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        RubyConstant::new(&value)
     }
 }
 
@@ -61,14 +63,14 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let constant = RubyConstant::from(String::from("FOO"));
+        let constant = RubyConstant::try_from(String::from("FOO")).unwrap();
         assert_eq!(constant.to_string(), "FOO");
     }
 
     #[test]
     fn test_from_str() {
         // Test the TryFrom implementation indirectly via String conversion first
-        let constant_from_string = RubyConstant::from(String::from("FOO"));
+        let constant_from_string = RubyConstant::try_from(String::from("FOO")).unwrap();
         assert_eq!(constant_from_string.to_string(), "FOO");
 
         // Test TryFrom directly
