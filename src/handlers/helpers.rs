@@ -1,4 +1,5 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -32,22 +33,45 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
         file_search_duration
     );
 
-    // Process files in parallel
-    let indexing_start = Instant::now();
-    process_files_parallel(server, files).await?;
-    let indexing_duration = indexing_start.elapsed();
+    // Process files in parallel for indexing
+    let definitions_index_start = Instant::now();
+    process_files_parallel(server, files.clone(), ProcessingMode::Definitions).await?;
+    let definitions_index_duration = definitions_index_start.elapsed();
+    info!(
+        "Definitions indexing completed in {:?}",
+        definitions_index_duration
+    );
+
+    // Process files in parallel for references after indexing is complete
+    let references_index_start = Instant::now();
+    process_files_parallel(server, files, ProcessingMode::References).await?;
+    let references_index_duration = references_index_start.elapsed();
+    info!(
+        "References indexing completed in {:?}",
+        references_index_duration
+    );
 
     let total_duration = start_time.elapsed();
     info!(
-        "Workspace indexing completed in {:?} (file search: {:?}, indexing: {:?})",
-        total_duration, file_search_duration, indexing_duration
+        "Workspace initialization completed in {:?} (file search: {:?}, definitions indexing: {:?}, references indexing: {:?})",
+        total_duration, file_search_duration, definitions_index_duration, references_index_duration
     );
     Ok(())
+}
+
+/// Enum to specify which processing mode to use
+#[derive(Clone, Copy, Debug)]
+pub enum ProcessingMode {
+    /// Process files for definitions (first pass)
+    Definitions,
+    /// Process files for references (second pass, after indexing)
+    References,
 }
 
 pub async fn process_files_parallel(
     server: &RubyLanguageServer,
     files: Vec<PathBuf>,
+    mode: ProcessingMode,
 ) -> Result<()> {
     if files.is_empty() {
         return Ok(());
@@ -65,16 +89,9 @@ pub async fn process_files_parallel(
     let max_concurrent = std::cmp::max(1, num_cores * 3 / 4);
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-    debug!(
-        "Parallelizing indexing with {} concurrent workers for {} files",
-        max_concurrent,
-        files.len()
-    );
-
     // Clone the server for use in async tasks
     let server_clone = server.clone();
     let setup_duration = setup_start.elapsed();
-    debug!("Parallel indexing setup completed in {:?}", setup_duration);
 
     // Create a set to track all spawned tasks
     let mut tasks = JoinSet::new();
@@ -119,14 +136,23 @@ pub async fn process_files_parallel(
                 .unwrap()
                 .insert(uri.clone(), document);
 
-            // Process the file
-            process_file_for_indexing(&server_task, uri).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to process file {}: {}",
-                    file_path_clone.display(),
-                    e
-                )
-            })
+            // Process the file based on the mode
+            match mode {
+                ProcessingMode::Definitions => {
+                    process_file_for_definitions(&server_task, uri.clone()).map_err(|e| {
+                        anyhow::anyhow!("Failed to index file {}: {}", file_path_clone.display(), e)
+                    })
+                }
+                ProcessingMode::References => {
+                    process_file_for_references(&server_task, uri.clone()).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to process references in file {}: {}",
+                            file_path_clone.display(),
+                            e
+                        )
+                    })
+                }
+            }
         });
     }
     let spawn_duration = spawn_start.elapsed();
@@ -162,12 +188,14 @@ pub async fn process_files_parallel(
     let wait_duration = wait_start.elapsed();
     let total_duration = setup_start.elapsed();
 
-    debug!(
-        "Parallel indexing completed in {:?} (setup: {:?}, spawn: {:?}, processing: {:?})",
-        total_duration, setup_duration, spawn_duration, wait_duration
-    );
     info!(
-        "Successfully indexed {} files ({} failed)",
+        "Parallel {:?} completed in {:?} (setup: {:?}, spawn: {:?}, processing: {:?})",
+        mode, total_duration, setup_duration, spawn_duration, wait_duration
+    );
+
+    info!(
+        "Successfully completed {:?} for {} files ({} failed)",
+        mode,
         files_count - failed_tasks,
         failed_tasks
     );
@@ -204,7 +232,7 @@ pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(ruby_files)
 }
 
-pub fn process_file_for_indexing(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
+pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
     // Remove any existing entries for this URI
     server.index().lock().unwrap().remove_entries_for_uri(&uri);
 
@@ -224,6 +252,28 @@ pub fn process_file_for_indexing(server: &RubyLanguageServer, uri: Url) -> Resul
     let mut visitor = IndexVisitor::new(server, uri.clone());
     visitor.visit(&node);
 
-    debug!("Processed file: {}", uri);
+    debug!("Indexed file: {}", uri);
+    Ok(())
+}
+
+/// Process a file for references after indexing is complete
+pub fn process_file_for_references(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
+    // Get the document from the server's docs HashMap
+    let document = match server.docs.lock().unwrap().get(&uri) {
+        Some(doc) => doc.clone(),
+        None => {
+            return Err(format!("Document not found for URI: {}", uri));
+        }
+    };
+
+    // Parse the file
+    let parse_result = parse(document.content.as_bytes());
+    let node = parse_result.node();
+
+    // Create a reference visitor and process the AST
+    let mut visitor = ReferenceVisitor::new(server, uri.clone());
+    visitor.visit(&node);
+
+    debug!("Processed references in file: {}", uri);
     Ok(())
 }

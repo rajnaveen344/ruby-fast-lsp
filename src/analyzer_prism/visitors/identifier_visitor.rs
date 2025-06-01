@@ -13,14 +13,22 @@ use ruby_prism::{
     Visit,
 };
 
+pub enum IdentifierType {
+    ModuleDef,
+    ClassDef,
+    MethodDef,
+    Call,
+}
+
 /// Visitor for finding identifiers at a specific position
 pub struct IdentifierVisitor {
     document: RubyDocument,
     position: Position,
     namespace_stack: Vec<RubyNamespace>,
     current_method: Option<RubyMethod>,
-    pub identifier: Option<Identifier>,
     pub ancestors: Vec<RubyNamespace>,
+    pub identifier: Option<Identifier>,
+    pub identifier_type: IdentifierType,
 }
 
 impl IdentifierVisitor {
@@ -30,8 +38,9 @@ impl IdentifierVisitor {
             position,
             namespace_stack: Vec::new(),
             current_method: None,
-            identifier: None,
             ancestors: Vec::new(),
+            identifier: None,
+            identifier_type: IdentifierType::Call,
         }
     }
 
@@ -86,6 +95,17 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         let name = String::from_utf8_lossy(&node.name().as_slice());
+
+        let name_loc = node.constant_path().location();
+
+        if self.is_position_in_location(&name_loc) {
+            let namespace = RubyNamespace::new(&name.to_string()).unwrap();
+            self.identifier = Some(Identifier::RubyNamespace(vec![namespace]));
+            self.identifier_type = IdentifierType::ModuleDef;
+            self.ancestors = self.namespace_stack.clone();
+            return;
+        }
+
         self.namespace_stack
             .push(RubyNamespace::new(&name.to_string()).unwrap());
 
@@ -103,7 +123,16 @@ impl Visit<'_> for IdentifierVisitor {
 
         let name = String::from_utf8_lossy(&node.name().as_slice()).to_string();
         let method = RubyMethod::from(name);
-        self.current_method = Some(method);
+        self.current_method = Some(method.clone());
+
+        // Is position on method name
+        let name_loc = node.name_loc();
+        if self.is_position_in_location(&name_loc) {
+            self.identifier = Some(Identifier::RubyMethod(vec![], method));
+            self.identifier_type = IdentifierType::MethodDef;
+            self.ancestors = vec![];
+        }
+
         visit_def_node(self, node);
         self.current_method = None;
     }

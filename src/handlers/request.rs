@@ -36,24 +36,11 @@ pub async fn handle_references(
 ) -> LspResult<Option<Vec<Location>>> {
     let uri = params.text_document_position.text_document.uri.clone();
     let position = params.text_document_position.position;
-    let include_declaration = params.context.include_declaration;
-    let doc = lang_server.get_doc(&uri);
+    let _include_declaration = params.context.include_declaration;
 
-    if let Some(doc) = doc {
-        let content = doc.content.clone();
-        let references = references::find_references_at_position(
-            lang_server,
-            &uri,
-            position,
-            &content,
-            include_declaration,
-        )
-        .await;
+    let references = references::find_references_at_position(lang_server, &uri, position).await;
 
-        return Ok(references);
-    }
-
-    Ok(None)
+    Ok(references)
 }
 
 pub async fn handle_semantic_tokens_full(

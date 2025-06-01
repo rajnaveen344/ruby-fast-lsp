@@ -10,6 +10,7 @@ use visitors::identifier_visitor::IdentifierVisitor;
 // Export the visitors module
 pub mod position;
 pub mod visitors;
+pub mod utils;
 
 // Enum to represent different types of identifiers at a specific position
 #[derive(Debug, Clone)]

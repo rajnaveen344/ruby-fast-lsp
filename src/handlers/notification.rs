@@ -1,8 +1,10 @@
 use crate::capabilities;
-use crate::handlers::helpers::{init_workspace, process_file_for_indexing};
+use crate::handlers::helpers::{
+    init_workspace, process_file_for_definitions, process_file_for_references,
+};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use lsp_types::*;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -64,11 +66,8 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         RubyDocument::new(uri.clone(), content.clone(), params.text_document.version),
     );
 
-    let result = process_file_for_indexing(lang_server, uri.clone());
-
-    if let Err(e) = result {
-        error!("Error indexing document: {}", e);
-    }
+    let _ = process_file_for_definitions(lang_server, uri.clone());
+    let _ = process_file_for_references(lang_server, uri.clone());
 
     debug!("[PERF] File indexed in {:?}", start_time.elapsed());
 }
@@ -86,11 +85,8 @@ pub async fn handle_did_change(
 
         lang_server.docs.lock().unwrap().insert(uri.clone(), doc);
 
-        let result = process_file_for_indexing(lang_server, uri.clone());
-
-        if let Err(e) = result {
-            error!("Error re-indexing document: {}", e);
-        }
+        let _ = process_file_for_definitions(lang_server, uri.clone());
+        let _ = process_file_for_references(lang_server, uri.clone());
     }
 }
 
@@ -100,11 +96,8 @@ pub async fn handle_did_close(
 ) {
     debug!("Did close: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
-    let result = process_file_for_indexing(lang_server, uri);
-
-    if let Err(e) = result {
-        error!("Error re-indexing document: {}", e);
-    }
+    let _ = process_file_for_definitions(lang_server, uri.clone());
+    let _ = process_file_for_references(lang_server, uri.clone());
 }
 
 pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {

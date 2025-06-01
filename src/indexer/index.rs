@@ -94,7 +94,6 @@ impl RubyIndex {
             .retain(|_, refs| refs.iter().all(|loc| loc.uri != *uri));
     }
 
-    // Add a reference to a symbol
     pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
         self.references
             .entry(fully_qualified_name)
