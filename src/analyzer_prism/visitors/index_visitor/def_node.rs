@@ -28,9 +28,9 @@ impl IndexVisitor {
             debug!("Visiting method definition: {}", fqn);
 
             let owner_fqn = if current_namespace_path.is_empty() {
-                FullyQualifiedName::Namespace(vec![])
+                FullyQualifiedName::Constant(vec![])
             } else {
-                FullyQualifiedName::Namespace(current_namespace_path)
+                FullyQualifiedName::Constant(current_namespace_path)
             };
 
             let entry = Entry {

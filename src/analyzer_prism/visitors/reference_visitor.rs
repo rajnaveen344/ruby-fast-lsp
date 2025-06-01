@@ -10,8 +10,8 @@ use crate::{
     indexer::index::RubyIndex,
     server::RubyLanguageServer,
     types::{
-        fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant,
-        ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
+        fully_qualified_name::FullyQualifiedName, ruby_document::RubyDocument,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
     },
 };
 
@@ -19,7 +19,7 @@ pub struct ReferenceVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<RubyNamespace>,
+    pub namespace_stack: Vec<RubyConstant>,
     pub current_method: Option<RubyMethod>,
 }
 
@@ -39,16 +39,14 @@ impl ReferenceVisitor {
 impl Visit<'_> for ReferenceVisitor {
     fn visit_module_node(&mut self, node: &ModuleNode) {
         let name = String::from_utf8_lossy(node.name().as_slice());
-        self.namespace_stack
-            .push(RubyNamespace::new(&name).unwrap());
+        self.namespace_stack.push(RubyConstant::new(&name).unwrap());
         visit_module_node(self, node);
         self.namespace_stack.pop();
     }
 
     fn visit_class_node(&mut self, node: &ClassNode) {
         let name = String::from_utf8_lossy(node.name().as_slice());
-        self.namespace_stack
-            .push(RubyNamespace::new(&name).unwrap());
+        self.namespace_stack.push(RubyConstant::new(&name).unwrap());
         visit_class_node(self, node);
         self.namespace_stack.pop();
     }
@@ -85,17 +83,7 @@ impl Visit<'_> for ReferenceVisitor {
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(namespaces.iter().cloned());
 
-            let fqn = if let Some(last_part) = combined_ns.last() {
-                match RubyConstant::try_from(last_part.to_string()) {
-                    Ok(ruby_constant) => {
-                        combined_ns.pop(); // Remove the last namespace as it is the constant
-                        FullyQualifiedName::constant(combined_ns, ruby_constant)
-                    }
-                    Err(_) => FullyQualifiedName::namespace(combined_ns.clone()),
-                }
-            } else {
-                FullyQualifiedName::namespace(combined_ns.clone())
-            };
+            let fqn = FullyQualifiedName::namespace(combined_ns.clone());
 
             let key = fqn.clone();
             let mut index = self.index.lock().unwrap();

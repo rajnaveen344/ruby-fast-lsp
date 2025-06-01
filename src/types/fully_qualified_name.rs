@@ -2,76 +2,64 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::analyzer_prism::Identifier;
 
-use super::{
-    ruby_constant::RubyConstant, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
-    ruby_variable::RubyVariable,
-};
+use super::{ruby_namespace::RubyConstant, ruby_method::RubyMethod, ruby_variable::RubyVariable};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FullyQualifiedName {
     /// Represents a class or module (namespace).
     /// Example: `Foo::Bar` → `Namespace(vec!["Foo", "Bar"])`
-    Namespace(Vec<RubyNamespace>),
+    Constant(Vec<RubyConstant>),
 
     /// Instance method, e.g., `Foo#bar` → `InstanceMethod(vec!["Foo"], RubyMethod::new("bar"))`
-    InstanceMethod(Vec<RubyNamespace>, RubyMethod),
+    InstanceMethod(Vec<RubyConstant>, RubyMethod),
 
     /// Class/singleton method, e.g., `Foo.bar` → `ClassMethod(vec!["Foo"], RubyMethod::new("bar"))`
-    ClassMethod(Vec<RubyNamespace>, RubyMethod),
+    ClassMethod(Vec<RubyConstant>, RubyMethod),
 
     /// Module function, e.g., `Foo::bar` → `ModuleMethod(vec!["Foo"], RubyMethod::new("bar"))`
     /// These are methods created with `module_function` and have a dual nature:
     /// - Public class method on the module
     /// - Private instance method when included in other classes
-    ModuleMethod(Vec<RubyNamespace>, RubyMethod),
-
-    /// Constant, e.g., `Foo::CONST` → `Constant(vec!["Foo"], RubyConstant::new("CONST"))`
-    Constant(Vec<RubyNamespace>, RubyConstant),
+    ModuleMethod(Vec<RubyConstant>, RubyMethod),
 
     /// Local variable, e.g., `a = 1` → `LocalVariable(vec!["Foo"], Some(RubyMethod::new("bar")), "a")`
-    Variable(Vec<RubyNamespace>, Option<RubyMethod>, RubyVariable),
+    Variable(Vec<RubyConstant>, Option<RubyMethod>, RubyVariable),
 }
 
 impl FullyQualifiedName {
     // Eg. Foo::Bar::Baz
-    pub fn namespace(namespace: Vec<RubyNamespace>) -> Self {
-        FullyQualifiedName::Namespace(namespace)
+    pub fn namespace(namespace: Vec<RubyConstant>) -> Self {
+        FullyQualifiedName::Constant(namespace)
     }
 
     // Eg. a = Foo.new; a.bar
-    pub fn instance_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
+    pub fn instance_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
         FullyQualifiedName::InstanceMethod(namespace, method)
     }
 
     // Eg. Foo.bar
-    pub fn class_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
+    pub fn class_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
         FullyQualifiedName::ClassMethod(namespace, method)
     }
 
-    // Eg. Foo::CONST
-    pub fn constant(namespace: Vec<RubyNamespace>, constant: RubyConstant) -> Self {
-        FullyQualifiedName::Constant(namespace, constant)
-    }
-
     // Common accessor for namespace parts
-    pub fn namespace_parts(&self) -> &[RubyNamespace] {
+    pub fn namespace_parts(&self) -> &Vec<RubyConstant> {
         match self {
-            FullyQualifiedName::Namespace(ns) => ns,
+            FullyQualifiedName::Constant(ns) => ns,
             FullyQualifiedName::InstanceMethod(ns, _) => ns,
             FullyQualifiedName::ClassMethod(ns, _) => ns,
             FullyQualifiedName::ModuleMethod(ns, _) => ns,
-            FullyQualifiedName::Constant(ns, _) => ns,
             FullyQualifiedName::Variable(ns, _, _) => ns,
         }
     }
 
     // Constructor helper for module methods
-    pub fn module_method(namespace: Vec<RubyNamespace>, method: RubyMethod) -> Self {
+    pub fn module_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
         FullyQualifiedName::ModuleMethod(namespace, method)
     }
 
     pub fn variable(
-        namespace: Vec<RubyNamespace>,
+        namespace: Vec<RubyConstant>,
         method: Option<RubyMethod>,
         variable: RubyVariable,
     ) -> Self {
@@ -82,16 +70,15 @@ impl FullyQualifiedName {
 impl From<Identifier> for FullyQualifiedName {
     fn from(value: Identifier) -> Self {
         match value {
-            Identifier::RubyNamespace(ns) => FullyQualifiedName::Namespace(ns),
-            Identifier::RubyConstant(ns, constant) => FullyQualifiedName::Constant(ns, constant),
+            Identifier::RubyConstant(ns) => FullyQualifiedName::Constant(ns),
             Identifier::RubyMethod(ns, method) => FullyQualifiedName::InstanceMethod(ns, method),
             _ => panic!("Unsupported identifier type for conversion to FullyQualifiedName"),
         }
     }
 }
 
-impl From<Vec<RubyNamespace>> for FullyQualifiedName {
-    fn from(value: Vec<RubyNamespace>) -> Self {
+impl From<Vec<RubyConstant>> for FullyQualifiedName {
+    fn from(value: Vec<RubyConstant>) -> Self {
         FullyQualifiedName::namespace(value)
     }
 }
@@ -106,11 +93,10 @@ impl Display for FullyQualifiedName {
             .join("::");
 
         match self {
-            FullyQualifiedName::Namespace(_) => write!(f, "{namespace}"),
+            FullyQualifiedName::Constant(_) => write!(f, "{namespace}"),
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
             FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
-            FullyQualifiedName::Constant(_, constant) => write!(f, "{namespace}::{constant}"),
             FullyQualifiedName::Variable(_, method, variable) => {
                 if let Some(method) = method {
                     write!(f, "{namespace}#{method}{variable}")
@@ -129,8 +115,8 @@ mod tests {
     #[test]
     fn test_fully_qualified_name() {
         let fqn = FullyQualifiedName::namespace(vec![
-            RubyNamespace::new("Foo").unwrap(),
-            RubyNamespace::new("Bar").unwrap(),
+            RubyConstant::new("Foo").unwrap(),
+            RubyConstant::new("Bar").unwrap(),
         ]);
         assert_eq!(fqn.to_string(), "Foo::Bar");
     }
@@ -139,8 +125,8 @@ mod tests {
     fn test_instance_method() {
         let fqn = FullyQualifiedName::instance_method(
             vec![
-                RubyNamespace::new("Foo").unwrap(),
-                RubyNamespace::new("Bar").unwrap(),
+                RubyConstant::new("Foo").unwrap(),
+                RubyConstant::new("Bar").unwrap(),
             ],
             RubyMethod::new("baz").unwrap(),
         );
@@ -151,24 +137,12 @@ mod tests {
     fn test_class_method() {
         let fqn = FullyQualifiedName::class_method(
             vec![
-                RubyNamespace::new("Foo").unwrap(),
-                RubyNamespace::new("Bar").unwrap(),
+                RubyConstant::new("Foo").unwrap(),
+                RubyConstant::new("Bar").unwrap(),
             ],
             RubyMethod::new("baz").unwrap(),
         );
         assert_eq!(fqn.to_string(), "Foo::Bar.baz");
-    }
-
-    #[test]
-    fn test_constant() {
-        let fqn = FullyQualifiedName::constant(
-            vec![
-                RubyNamespace::new("Foo").unwrap(),
-                RubyNamespace::new("Bar").unwrap(),
-            ],
-            RubyConstant::new("BAZ").unwrap(),
-        );
-        assert_eq!(fqn.to_string(), "Foo::Bar::BAZ");
     }
 
     // invalid
@@ -181,8 +155,8 @@ mod tests {
     #[test]
     fn test_namespace_parts() {
         let fqn = FullyQualifiedName::namespace(vec![
-            RubyNamespace::new("Foo").unwrap(),
-            RubyNamespace::new("Bar").unwrap(),
+            RubyConstant::new("Foo").unwrap(),
+            RubyConstant::new("Bar").unwrap(),
         ]);
 
         assert_eq!(fqn.to_string(), "Foo::Bar");
@@ -192,8 +166,8 @@ mod tests {
     fn test_module_method() {
         let fqn = FullyQualifiedName::module_method(
             vec![
-                RubyNamespace::new("Foo").unwrap(),
-                RubyNamespace::new("Bar").unwrap(),
+                RubyConstant::new("Foo").unwrap(),
+                RubyConstant::new("Bar").unwrap(),
             ],
             RubyMethod::new("baz").unwrap(),
         );

@@ -1,4 +1,4 @@
-use crate::types::ruby_namespace::RubyNamespace;
+use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::ConstantPathNode;
 
 /// Recursively collect all namespaces from a ConstantPathNode
@@ -9,7 +9,7 @@ use ruby_prism::ConstantPathNode;
 ///     RubyNamespace("API"),
 ///     RubyNamespace("Users")
 /// ]`
-pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyNamespace>) {
+pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) {
     let name = String::from_utf8_lossy(node.name().unwrap().as_slice());
 
     if let Some(parent) = node.parent() {
@@ -20,9 +20,9 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyNamespace>)
         if let Some(parent_const_read) = parent.as_constant_read_node() {
             let parent_name =
                 String::from_utf8_lossy(parent_const_read.name().as_slice()).to_string();
-            acc.push(RubyNamespace::new(&parent_name).unwrap());
+            acc.push(RubyConstant::new(&parent_name).unwrap());
         }
     }
 
-    acc.push(RubyNamespace::new(&name.to_string()).unwrap());
+    acc.push(RubyConstant::new(&name.to_string()).unwrap());
 }

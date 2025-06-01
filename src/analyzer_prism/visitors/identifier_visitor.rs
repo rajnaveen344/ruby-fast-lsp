@@ -1,8 +1,7 @@
 use crate::analyzer_prism::Identifier;
-use crate::types::ruby_constant::RubyConstant;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyNamespace;
+use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 
 use lsp_types::Position;
@@ -24,9 +23,9 @@ pub enum IdentifierType {
 pub struct IdentifierVisitor {
     document: RubyDocument,
     position: Position,
-    namespace_stack: Vec<RubyNamespace>,
+    namespace_stack: Vec<RubyConstant>,
     current_method: Option<RubyMethod>,
-    pub ancestors: Vec<RubyNamespace>,
+    pub ancestors: Vec<RubyConstant>,
     pub identifier: Option<Identifier>,
     pub identifier_type: IdentifierType,
 }
@@ -53,7 +52,7 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
-    fn collect_namespaces_recursive(&self, node: &ConstantPathNode, acc: &mut Vec<RubyNamespace>) {
+    fn collect_namespaces_recursive(&self, node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) {
         let name = String::from_utf8_lossy(node.name().unwrap().as_slice());
 
         if let Some(parent) = node.parent() {
@@ -64,11 +63,11 @@ impl IdentifierVisitor {
             if let Some(parent_const_read) = parent.as_constant_read_node() {
                 let parent_name =
                     String::from_utf8_lossy(parent_const_read.name().as_slice()).to_string();
-                acc.push(RubyNamespace::new(&parent_name).unwrap());
+                acc.push(RubyConstant::new(&parent_name).unwrap());
             }
         }
 
-        acc.push(RubyNamespace::new(&name.to_string()).unwrap());
+        acc.push(RubyConstant::new(&name.to_string()).unwrap());
     }
 }
 
@@ -80,7 +79,7 @@ impl Visit<'_> for IdentifierVisitor {
 
         let name = String::from_utf8_lossy(&node.name().as_slice());
         self.namespace_stack
-            .push(RubyNamespace::new(&name.to_string()).unwrap());
+            .push(RubyConstant::new(&name.to_string()).unwrap());
 
         // Visit the class body
         visit_class_node(self, &node);
@@ -99,15 +98,15 @@ impl Visit<'_> for IdentifierVisitor {
         let name_loc = node.constant_path().location();
 
         if self.is_position_in_location(&name_loc) {
-            let namespace = RubyNamespace::new(&name.to_string()).unwrap();
-            self.identifier = Some(Identifier::RubyNamespace(vec![namespace]));
+            let namespace = RubyConstant::new(&name.to_string()).unwrap();
+            self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
             self.identifier_type = IdentifierType::ModuleDef;
             self.ancestors = self.namespace_stack.clone();
             return;
         }
 
         self.namespace_stack
-            .push(RubyNamespace::new(&name.to_string()).unwrap());
+            .push(RubyConstant::new(&name.to_string()).unwrap());
 
         // Visit the module body
         visit_module_node(self, &node);
@@ -169,27 +168,16 @@ impl Visit<'_> for IdentifierVisitor {
         let target_str = String::from_utf8_lossy(&code[start..end]).to_string();
         let is_root_constant = target_str.starts_with("::");
 
-        // Process the last part of the namespace
-        if let Some(last_part) = namespaces.last() {
-            let last_part_str = last_part.to_string();
+        // Process the namespace
+        if !namespaces.is_empty() {
+            self.identifier = Some(Identifier::RubyConstant(namespaces));
+        }
 
-            // Determine if it's a constant or namespace
-            match RubyConstant::new(&last_part_str) {
-                Ok(constant) => {
-                    namespaces.pop(); // Remove the last part (constant name)
-                    self.identifier = Some(Identifier::RubyConstant(namespaces, constant));
-                }
-                Err(_) => {
-                    self.identifier = Some(Identifier::RubyNamespace(namespaces));
-                }
-            }
-
-            // Set ancestors based on whether it's a root constant
-            if is_root_constant {
-                self.ancestors = vec![];
-            } else {
-                self.ancestors = self.namespace_stack.clone();
-            }
+        // Set ancestors based on whether it's a root constant
+        if is_root_constant {
+            self.ancestors = vec![];
+        } else {
+            self.ancestors = self.namespace_stack.clone();
         }
     }
 
@@ -200,14 +188,11 @@ impl Visit<'_> for IdentifierVisitor {
 
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
-        match RubyConstant::new(&constant_name) {
-            Ok(constant) => {
-                self.identifier = Some(Identifier::RubyConstant(Vec::new(), constant));
-            }
-            Err(_) => {
-                let namespace = RubyNamespace::new(constant_name.as_str()).unwrap();
-                self.identifier = Some(Identifier::RubyNamespace(vec![namespace]));
-            }
+        // Create a RubyConstant from the constant name
+        if let Ok(constant) = RubyConstant::new(&constant_name) {
+            self.identifier = Some(Identifier::RubyConstant(vec![constant]));
+        } else {
+            self.identifier = Some(Identifier::RubyConstant(Vec::new()));
         }
 
         self.ancestors = self.namespace_stack.clone();
@@ -259,7 +244,7 @@ impl Visit<'_> for IdentifierVisitor {
                 // Foo is ConstantReadNode, bar is CallNode
                 if let Some(constant_read) = receiver.as_constant_read_node() {
                     let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-                    if let Ok(ns) = RubyNamespace::new(&name) {
+                    if let Ok(ns) = RubyConstant::new(&name) {
                         namespace.push(ns);
                     }
                 }
@@ -333,7 +318,7 @@ mod tests {
         // Special case for root constants
         if code.starts_with("::") {
             match identifier {
-                Identifier::RubyConstant(parts, constant) => {
+                Identifier::RubyConstant(parts) => {
                     // For root constants, we expect an empty namespace vector
                     if expected_parts.len() == 1 {
                         // For direct root constants like ::GLOBAL_CONSTANT
@@ -343,7 +328,7 @@ mod tests {
                             "Expected empty namespace vector for root constant"
                         );
                         assert_eq!(
-                            constant.to_string(),
+                            parts[0].to_string(),
                             expected_parts[0],
                             "Expected constant name to match"
                         );
@@ -367,7 +352,7 @@ mod tests {
                             );
                         }
                         assert_eq!(
-                            constant.to_string(),
+                            parts.last().unwrap().to_string(),
                             expected_parts[expected_parts.len() - 1],
                             "Expected constant name to match"
                         );
@@ -380,8 +365,8 @@ mod tests {
 
         // Get the parts from the identifier - could be either a namespace or a constant
         let parts = match identifier {
-            Identifier::RubyNamespace(parts) => parts.clone(),
-            Identifier::RubyConstant(parts, _) => parts.clone(),
+            Identifier::RubyConstant(parts) => parts.clone(),
+            // This line is no longer needed with the combined RubyConstant type
             _ => panic!("Expected a Namespace or Constant FQN"),
         };
 
@@ -478,7 +463,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyNamespace(parts) => {
+            Identifier::RubyConstant(parts) => {
                 assert_eq!(parts.len(), 1);
                 assert_eq!(parts[0].to_string(), "Foo");
             }
@@ -499,7 +484,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyNamespace(parts) => {
+            Identifier::RubyConstant(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -546,7 +531,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyNamespace(parts) => {
+            Identifier::RubyConstant(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -570,12 +555,12 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 3);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 4);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
                 assert_eq!(parts[2].to_string(), "Baz");
-                assert_eq!(constant.to_string(), "ABC");
+                assert_eq!(parts[3].to_string(), "ABC");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -596,7 +581,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyNamespace(parts) => {
+            Identifier::RubyConstant(parts) => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -618,13 +603,13 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 4);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "A");
                 assert_eq!(parts[1].to_string(), "B");
                 assert_eq!(parts[2].to_string(), "C");
                 assert_eq!(parts[3].to_string(), "D");
-                assert_eq!(constant.to_string(), "CONST");
+                assert_eq!(parts[4].to_string(), "CONST");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -665,11 +650,11 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 2);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
-                assert_eq!(constant.to_string(), "CONSTANT");
+                assert_eq!(parts[2].to_string(), "CONSTANT");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -698,13 +683,13 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 4);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
                 assert_eq!(parts[2].to_string(), "Constants");
                 assert_eq!(parts[3].to_string(), "ErrorMessages");
-                assert_eq!(constant.to_string(), "INVALID_SYNTAX");
+                assert_eq!(parts[4].to_string(), "INVALID_SYNTAX");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -720,13 +705,13 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 4);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
                 assert_eq!(parts[2].to_string(), "Constants");
                 assert_eq!(parts[3].to_string(), "ErrorCodes");
-                assert_eq!(constant.to_string(), "PARSE_ERROR");
+                assert_eq!(parts[4].to_string(), "PARSE_ERROR");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -759,11 +744,11 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 2);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
-                assert_eq!(constant.to_string(), "INVALID_ITEM");
+                assert_eq!(parts[2].to_string(), "INVALID_ITEM");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }
@@ -779,11 +764,11 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts, constant) => {
-                assert_eq!(parts.len(), 2);
+            Identifier::RubyConstant(parts) => {
+                assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Codes");
-                assert_eq!(constant.to_string(), "ITEM_ERROR");
+                assert_eq!(parts[2].to_string(), "ITEM_ERROR");
             }
             _ => panic!("Expected Constant FQN, got {:?}", identifier),
         }

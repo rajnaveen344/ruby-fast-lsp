@@ -3,8 +3,7 @@ use ruby_prism::{ConstantPathNode, ConstantPathWriteNode};
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
-    fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant,
-    ruby_namespace::RubyNamespace,
+    fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant,
 };
 
 use super::IndexVisitor;
@@ -35,10 +34,13 @@ impl IndexVisitor {
         };
 
         // Extract the namespace path
-        let namespace_parts = self.extract_namespace_parts(&constant_path);
+        let mut namespace_parts = self.extract_namespace_parts(&constant_path);
+        
+        // With the combined RubyConstant type, we add the constant to the namespace parts
+        namespace_parts.push(constant);
 
-        // Create a FullyQualifiedName using the extracted namespace and the constant
-        let fqn = FullyQualifiedName::constant(namespace_parts, constant);
+        // Create a FullyQualifiedName using the namespace parts
+        let fqn = FullyQualifiedName::namespace(namespace_parts);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()
@@ -64,7 +66,7 @@ impl IndexVisitor {
     }
 
     // Helper method to extract namespace parts from a ConstantPathNode
-    pub fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyNamespace> {
+    pub fn extract_namespace_parts(&self, node: &ConstantPathNode) -> Vec<RubyConstant> {
         let mut namespace_parts = Vec::new();
 
         // Start with the parent node if it exists
@@ -78,7 +80,7 @@ impl IndexVisitor {
                     // Add the parent's name
                     if let Some(name) = parent_path.name() {
                         let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
-                        if let Ok(namespace) = RubyNamespace::new(&name_str) {
+                        if let Ok(namespace) = RubyConstant::new(&name_str) {
                             namespace_parts.push(namespace);
                         }
                     }
@@ -88,7 +90,7 @@ impl IndexVisitor {
                     if let Some(constant_read) = parent.as_constant_read_node() {
                         let name_str =
                             String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-                        if let Ok(namespace) = RubyNamespace::new(&name_str) {
+                        if let Ok(namespace) = RubyConstant::new(&name_str) {
                             namespace_parts.push(namespace);
                         }
                     }

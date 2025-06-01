@@ -2,7 +2,7 @@ use log::{debug, error};
 use ruby_prism::ClassNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyNamespace};
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
 
@@ -11,7 +11,7 @@ impl IndexVisitor {
         let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
         debug!("Visiting class node: {}", name_str);
 
-        let namespace = RubyNamespace::new(&name_str);
+        let namespace = RubyConstant::new(&name_str);
 
         if let Err(e) = namespace {
             error!("Error creating namespace: {}", e);

@@ -1,7 +1,6 @@
-use crate::types::ruby_constant::RubyConstant;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyNamespace;
+use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::RubyVariable;
 use lsp_types::{Position, Url};
 use ruby_prism::Visit;
@@ -9,25 +8,22 @@ use visitors::identifier_visitor::IdentifierVisitor;
 
 // Export the visitors module
 pub mod position;
-pub mod visitors;
 pub mod utils;
+pub mod visitors;
 
 // Enum to represent different types of identifiers at a specific position
 #[derive(Debug, Clone)]
 pub enum Identifier {
-    // Eg. Foo::Bar::Baz | Can be class/module name
-    //               ^     -> ([Foo, Bar, Baz])
+    // Eg. Foo::Bar::BAZ | Can be class/module/constant name
+    //               ^     -> ([Foo, Bar, BAZ])
     //          ^          -> ([Foo, Bar])
-    RubyNamespace(Vec<RubyNamespace>),
-
-    // Eg. Foo::Bar::Baz::CONST
-    RubyConstant(Vec<RubyNamespace>, RubyConstant),
+    RubyConstant(Vec<RubyConstant>),
 
     // Eg. foo; foo.bar;
     //              ^    -> ([], bar)
     // Eg. Foo::Bar.baz;
     //              ^    -> ([Foo, Bar], baz)
-    RubyMethod(Vec<RubyNamespace>, RubyMethod),
+    RubyMethod(Vec<RubyConstant>, RubyMethod),
 
     // Eg. foo = 1; foo;
     //              ^    -> (foo)
@@ -41,7 +37,7 @@ pub enum Identifier {
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {
     pub code: String,
-    pub namespace_stack: Vec<RubyNamespace>,
+    pub namespace_stack: Vec<RubyConstant>,
 }
 
 impl RubyPrismAnalyzer {
@@ -52,12 +48,12 @@ impl RubyPrismAnalyzer {
         }
     }
 
-    pub fn get_namespace_stack(&self) -> Vec<RubyNamespace> {
+    pub fn get_namespace_stack(&self) -> Vec<RubyConstant> {
         self.namespace_stack.clone()
     }
 
     /// Returns the identifier and the ancestors stack at the time of the lookup.
-    pub fn get_identifier(&self, position: Position) -> (Option<Identifier>, Vec<RubyNamespace>) {
+    pub fn get_identifier(&self, position: Position) -> (Option<Identifier>, Vec<RubyConstant>) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
         let uri = Url::parse("file:///dummy.rb").unwrap();
@@ -91,12 +87,9 @@ mod tests {
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "CONST_A");
-                assert!(
-                    ns.is_empty(),
-                    "Namespace should be empty for top-level constant"
-                );
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.len(), 1, "Should have one constant");
+                assert_eq!(ns[0].to_string(), "CONST_A");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
@@ -124,10 +117,15 @@ end
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "CONST_B");
-                assert_eq!(ns.len(), 1, "Namespace should have one entry: Outer");
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.last().unwrap().to_string(), "CONST_B");
+                assert_eq!(
+                    ns.len(),
+                    2,
+                    "Namespace should have two entries: Outer and CONST_B"
+                );
                 assert_eq!(ns[0].to_string(), "Outer");
+                assert_eq!(ns[1].to_string(), "CONST_B");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
@@ -158,10 +156,15 @@ end
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "CONST_A");
-                assert_eq!(ns.len(), 1, "Namespace for CONST_A should be Inner");
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.last().unwrap().to_string(), "CONST_A");
+                assert_eq!(
+                    ns.len(),
+                    2,
+                    "Namespace should have two entries: Inner and CONST_A"
+                );
                 assert_eq!(ns[0].to_string(), "Inner");
+                assert_eq!(ns[1].to_string(), "CONST_A");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
@@ -190,15 +193,16 @@ end
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "CONST_C");
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.last().unwrap().to_string(), "CONST_C");
                 assert_eq!(
                     ns.len(),
-                    2,
-                    "Namespace should have two entries: Outer, Inner"
+                    3,
+                    "Namespace should have three entries: Outer, Inner, CONST_C"
                 );
                 assert_eq!(ns[0].to_string(), "Outer");
                 assert_eq!(ns[1].to_string(), "Inner");
+                assert_eq!(ns[2].to_string(), "CONST_C");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
@@ -230,11 +234,12 @@ val = ::Outer::Inner::CONST_A
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "CONST_A");
-                assert_eq!(ns.len(), 2);
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.last().unwrap().to_string(), "CONST_A");
+                assert_eq!(ns.len(), 3);
                 assert_eq!(ns[0].to_string(), "Outer");
                 assert_eq!(ns[1].to_string(), "Inner");
+                assert_eq!(ns[2].to_string(), "CONST_A");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
@@ -252,7 +257,7 @@ val = ::Outer::Inner::CONST_A
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyNamespace(ns) => {
+            Identifier::RubyConstant(ns) => {
                 assert_eq!(ns.len(), 2);
                 assert_eq!(ns[0].to_string(), "Outer");
                 assert_eq!(ns[1].to_string(), "Inner");
@@ -273,7 +278,7 @@ val = ::Outer::Inner::CONST_A
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyNamespace(ns) => {
+            Identifier::RubyConstant(ns) => {
                 assert_eq!(ns.len(), 1);
                 assert_eq!(ns[0].to_string(), "Outer");
             }
@@ -304,11 +309,12 @@ end
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
 
         match identifier {
-            Identifier::RubyConstant(ns, constant) => {
-                assert_eq!(constant.to_string(), "TopLevelConst");
-                assert!(
-                    ns.is_empty(),
-                    "Namespace should be empty for top-level constant"
+            Identifier::RubyConstant(ns) => {
+                assert_eq!(ns.last().unwrap().to_string(), "TopLevelConst");
+                assert_eq!(
+                    ns.len(),
+                    1,
+                    "Namespace should have one entry for top-level constant"
                 );
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),

@@ -297,6 +297,8 @@ mod tests {
             }
         }
 
+        drop(locked_index);
+
         // Setup params for goto definition at the method name "process" in ClassA
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {

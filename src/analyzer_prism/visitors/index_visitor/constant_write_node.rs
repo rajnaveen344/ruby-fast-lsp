@@ -2,7 +2,7 @@ use log::{debug, error};
 use ruby_prism::ConstantWriteNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_constant::RubyConstant};
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
 
@@ -21,7 +21,10 @@ impl IndexVisitor {
         };
 
         // Create a FullyQualifiedName using the current namespace stack and the constant
-        let fqn = FullyQualifiedName::constant(self.namespace_stack.clone(), constant);
+        // With the combined RubyConstant type, we add the constant to the namespace stack
+        let mut namespace_with_constant = self.namespace_stack.clone();
+        namespace_with_constant.push(constant);
+        let fqn = FullyQualifiedName::namespace(namespace_with_constant);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()

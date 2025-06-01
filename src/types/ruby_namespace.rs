@@ -1,9 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyNamespace(String);
+pub struct RubyConstant(String);
 
-impl RubyNamespace {
+impl RubyConstant {
     /// Creates a validated namespace segment.
     /// Returns `Err` if invalid Ruby class/module name.
     pub fn new(name: &str) -> Result<Self, &'static str> {
@@ -30,20 +30,20 @@ impl RubyNamespace {
     /// Splits a "Foo::Bar::Baz" string into validated segments.
     pub fn from_qualified_name(fqn: &str) -> Result<Vec<Self>, &'static str> {
         fqn.split("::")
-            .map(|segment| RubyNamespace::new(segment.trim()))
+            .map(|segment| RubyConstant::new(segment.trim()))
             .collect()
     }
 }
 
-impl TryFrom<&str> for RubyNamespace {
+impl TryFrom<&str> for RubyConstant {
     type Error = &'static str;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        RubyNamespace::new(value)
+        RubyConstant::new(value)
     }
 }
 
-impl Display for RubyNamespace {
+impl Display for RubyConstant {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -55,13 +55,13 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let namespace = RubyNamespace::new("Foo");
+        let namespace = RubyConstant::new("Foo");
         assert_eq!(namespace.unwrap().to_string(), "Foo");
     }
 
     #[test]
     fn test_from_qualified_name() {
-        let namespaces = RubyNamespace::from_qualified_name("Foo::Bar::Baz");
+        let namespaces = RubyConstant::from_qualified_name("Foo::Bar::Baz");
         assert_eq!(namespaces.as_ref().unwrap().len(), 3);
         assert_eq!(namespaces.as_ref().unwrap()[0].to_string(), "Foo");
         assert_eq!(namespaces.as_ref().unwrap()[1].to_string(), "Bar");
@@ -70,25 +70,25 @@ mod tests {
 
     #[test]
     fn test_try_from() {
-        let namespace = RubyNamespace::try_from("Foo");
+        let namespace = RubyConstant::try_from("Foo");
         assert_eq!(namespace.unwrap().to_string(), "Foo");
     }
 
     #[test]
     fn test_display() {
-        let namespace = RubyNamespace::new("Foo").unwrap();
+        let namespace = RubyConstant::new("Foo").unwrap();
         assert_eq!(namespace.to_string(), "Foo");
     }
 
     #[test]
     fn test_try_from_invalid() {
-        let namespace = RubyNamespace::try_from("foo");
+        let namespace = RubyConstant::try_from("foo");
         assert!(namespace.is_err());
     }
 
     #[test]
     fn test_try_from_empty() {
-        let namespace = RubyNamespace::try_from("");
+        let namespace = RubyConstant::try_from("");
         assert!(namespace.is_err());
     }
 }

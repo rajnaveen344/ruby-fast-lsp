@@ -37,17 +37,11 @@ pub async fn find_references_at_position(
     let fqn: FullyQualifiedName;
 
     match &identifier {
-        Identifier::RubyNamespace(ns) => {
+        Identifier::RubyConstant(ns) => {
             // For namespaces, combine ancestors with the namespace parts
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(ns.clone());
             fqn = FullyQualifiedName::namespace(combined_ns);
-        }
-        Identifier::RubyConstant(ns, constant) => {
-            // For constants, combine ancestors with the namespace parts
-            let mut combined_ns = ancestors.clone();
-            combined_ns.extend(ns.clone());
-            fqn = FullyQualifiedName::constant(combined_ns, constant.clone());
         }
         Identifier::RubyMethod(ns, method) => {
             // For methods, combine ancestors with the namespace parts

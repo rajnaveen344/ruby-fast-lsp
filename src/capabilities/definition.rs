@@ -42,20 +42,21 @@ pub async fn find_definition_at_position(
 
     // If not found directly, try based on the identifier type
     match identifier.clone() {
-        Identifier::RubyConstant(ns, constant) => {
+        Identifier::RubyConstant(ns) => {
             // Start with the current namespace and ancestors
             let mut search_namespaces = ancestors.clone();
 
             // Search through ancestor namespaces
             while !search_namespaces.is_empty() {
+                // For each ancestor, try to find the namespace
                 let mut combined_ns = search_namespaces.clone();
                 combined_ns.extend(ns.iter().cloned());
 
-                let search_fqn = Identifier::RubyConstant(combined_ns, constant.clone());
+                let search_fqn = Identifier::RubyConstant(combined_ns);
 
                 if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
                     if !entries.is_empty() {
-                        info!(
+                        debug!(
                             "Found {} constant definition(s) in ancestor namespace for: {:?}",
                             entries.len(),
                             search_fqn
@@ -72,60 +73,12 @@ pub async fn find_definition_at_position(
                 search_namespaces.pop();
             }
 
-            // Try at the top level (empty namespace)
-            let top_level_fqn = Identifier::RubyConstant(ns, constant.clone());
-            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
-                if !entries.is_empty() {
-                    info!(
-                        "Found {} constant definition(s) at top level for: {:?}",
-                        entries.len(),
-                        top_level_fqn
-                    );
-                    // Add all locations to our result
-                    for entry in entries {
-                        found_locations.push(entry.location.clone());
-                    }
-                    return Some(found_locations);
-                }
-            }
-        }
-        Identifier::RubyNamespace(ref ns) => {
-            // Start with the current namespace and ancestors
-            let mut search_namespaces = ancestors.clone();
-
-            // Search through ancestor namespaces
-            while !search_namespaces.is_empty() {
-                // For each ancestor, try to find the namespace
-                let mut combined_ns = search_namespaces.clone();
-                combined_ns.extend(ns.iter().cloned());
-
-                let search_fqn = Identifier::RubyNamespace(combined_ns);
-
-                if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
-                    if !entries.is_empty() {
-                        debug!(
-                            "Found {} namespace definition(s) in ancestor namespace for: {:?}",
-                            entries.len(),
-                            search_fqn
-                        );
-                        // Add all locations to our result
-                        for entry in entries {
-                            found_locations.push(entry.location.clone());
-                        }
-                        return Some(found_locations);
-                    }
-                }
-
-                // Pop the last namespace and try again
-                search_namespaces.pop();
-            }
-
             // Try at the top level
-            let top_level_fqn = Identifier::RubyNamespace(ns.clone());
+            let top_level_fqn = Identifier::RubyConstant(ns.clone());
             if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
                 if !entries.is_empty() {
                     debug!(
-                        "Found {} namespace definition(s) at top level for: {:?}",
+                        "Found {} constant definition(s) at top level for: {:?}",
                         entries.len(),
                         top_level_fqn
                     );

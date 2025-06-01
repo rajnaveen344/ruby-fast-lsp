@@ -10,7 +10,7 @@ use ruby_prism::{
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::{
-    ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyNamespace,
+    ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
 };
 
 mod class_node;
@@ -26,7 +26,7 @@ pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<RubyNamespace>,
+    pub namespace_stack: Vec<RubyConstant>,
     pub current_method: Option<RubyMethod>,
 }
 
