@@ -1,8 +1,9 @@
 use crate::capabilities::semantic_tokens::{TOKEN_MODIFIERS_MAP, TOKEN_TYPES_MAP};
 use crate::types::ruby_document::RubyDocument;
+use log::debug;
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 use ruby_prism::{
-    visit_block_local_variable_node, visit_local_variable_and_write_node,
+    visit_block_local_variable_node, visit_constant_path_node, visit_local_variable_and_write_node,
     visit_local_variable_operator_write_node, visit_local_variable_or_write_node,
     visit_local_variable_read_node, visit_local_variable_target_node,
     visit_local_variable_write_node, CallNode, Location, Visit,
@@ -58,6 +59,16 @@ impl TokenVisitor {
                 .map(|c| if c.len_utf16() == 2 { 2 } else { 1 })
                 .sum::<u32>()
         };
+
+        debug!(
+            "Adding token for {} at {}:{}-{}:{}",
+            &self.document.content
+                [location.start_offset() as usize..location.end_offset() as usize],
+            start_pos.line,
+            start_pos.character,
+            end_pos.line,
+            end_pos.character
+        );
 
         // Add token to the list
         self.tokens.push(SemanticToken {
@@ -414,5 +425,14 @@ impl Visit<'_> for TokenVisitor {
         // Visit subsequent nodes (else/elsif) if present
         node.else_clause()
             .map(|else_clause| self.visit_else_node(&else_clause));
+    }
+
+    fn visit_constant_path_node(&mut self, node: &ruby_prism::ConstantPathNode<'_>) {
+        visit_constant_path_node(self, node);
+        self.add_token(&node.name_loc(), SemanticTokenType::CLASS, &[]);
+    }
+
+    fn visit_constant_read_node(&mut self, node: &ruby_prism::ConstantReadNode<'_>) {
+        self.add_token(&node.location(), SemanticTokenType::CLASS, &[]);
     }
 }
