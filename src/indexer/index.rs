@@ -69,17 +69,20 @@ impl RubyIndex {
         }
     }
 
+    pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
+        self.references
+            .entry(fully_qualified_name)
+            .or_insert_with(Vec::new)
+            .push(location);
+    }
+
     pub fn remove_entries_for_uri(&mut self, uri: &Url) {
-        // If no entries for this URI, return early
-        if !self.file_entries.contains_key(uri) {
-            return;
-        }
+        let entries = match self.file_entries.remove(uri) {
+            Some(entries) => entries,
+            None => return, // No entries for this URI
+        };
 
-        // Collect all entries
-        let entries = self.file_entries.remove(uri).unwrap();
-
-        // Remove each entry from the definitions map
-        for entry in entries {
+        for entry in &entries {
             if let Some(fqn_entries) = self.definitions.get_mut(&entry.fqn) {
                 fqn_entries.retain(|e| e.location.uri != *uri);
 
@@ -89,15 +92,88 @@ impl RubyIndex {
             }
         }
 
-        // Remove all references mapped to this URI
-        self.references
-            .retain(|_, refs| refs.iter().all(|loc| loc.uri != *uri));
+        let method_names: Vec<RubyMethod> = entries
+            .iter()
+            .filter_map(|entry| {
+                if let EntryKind::Method { name, .. } = &entry.kind {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for method_name in method_names {
+            if let Some(method_entries) = self.methods_by_name.get_mut(&method_name) {
+                method_entries.retain(|e| e.location.uri != *uri);
+
+                if method_entries.is_empty() {
+                    self.methods_by_name.remove(&method_name);
+                }
+            }
+        }
     }
 
-    pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
-        self.references
-            .entry(fully_qualified_name)
-            .or_insert_with(Vec::new)
-            .push(location);
+    pub fn remove_references_for_uri(&mut self, uri: &Url) {
+        for refs in self.references.values_mut() {
+            refs.retain(|loc| loc.uri != *uri);
+        }
+
+        self.references.retain(|_, refs| !refs.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{indexer::entry::entry_builder::EntryBuilder, types::ruby_namespace::RubyConstant};
+
+    use super::*;
+
+    #[test]
+    fn test_add_entry() {
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file://test.rb").unwrap();
+        let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Test").unwrap()]);
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::Class {
+                superclass: None,
+                is_singleton: false,
+            })
+            .build()
+            .unwrap();
+        index.add_entry(entry);
+        assert_eq!(index.definitions.len(), 1);
+        assert_eq!(index.references.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_entries_for_uri() {
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file:///test.rb").unwrap();
+
+        let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Test").unwrap()]);
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::Class {
+                superclass: None,
+                is_singleton: false,
+            })
+            .build()
+            .unwrap();
+        index.add_entry(entry);
+        assert_eq!(index.definitions.len(), 1);
+        assert_eq!(index.references.len(), 0);
+        index.remove_entries_for_uri(&uri);
+        assert_eq!(index.definitions.len(), 0);
+        assert_eq!(index.references.len(), 0);
     }
 }

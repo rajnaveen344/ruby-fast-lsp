@@ -258,6 +258,9 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
 
 /// Process a file for references after indexing is complete
 pub fn process_file_for_references(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
+    // Remove any existing references for this URI
+    server.index().lock().unwrap().remove_references_for_uri(&uri);
+    
     // Get the document from the server's docs HashMap
     let document = match server.docs.lock().unwrap().get(&uri) {
         Some(doc) => doc.clone(),
