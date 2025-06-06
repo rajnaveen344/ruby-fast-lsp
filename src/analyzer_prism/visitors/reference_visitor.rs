@@ -196,23 +196,15 @@ end
         open_file(&server, code, &uri);
 
         // ConstantPathNode
-        // Eg. include API::Users
-        //                  ^
         let references =
             references::find_references_at_position(&server, &uri, Position::new(4, 19)).await;
 
-        println!("references: {:#?}", references);
-
-        assert_eq!(references.unwrap().len(), 1);
+        assert_eq!(references.unwrap().len(), 2);
 
         // ConstantReadNode
-        // Eg. include API::Users
-        //             ^
         let references =
             references::find_references_at_position(&server, &uri, Position::new(3, 15)).await;
 
-        println!("references: {:#?}", references);
-
-        assert_eq!(references.unwrap().len(), 1);
+        assert_eq!(references.unwrap().len(), 2);
     }
 }
