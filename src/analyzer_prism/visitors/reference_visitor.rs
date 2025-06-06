@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use lsp_types::Url;
 use ruby_prism::{
-    visit_class_node, visit_module_node, ClassNode, ConstantPathNode, ModuleNode, Visit,
+    visit_class_node, visit_constant_path_node, visit_constant_read_node, visit_module_node,
+    ClassNode, ConstantPathNode, ModuleNode, Visit,
 };
 
 use crate::{
@@ -79,26 +80,75 @@ impl Visit<'_> for ReferenceVisitor {
         let mut namespaces = Vec::new();
         collect_namespaces(node, &mut namespaces);
 
+        // Check from current namespace to root namespace
         while !ancestors.is_empty() {
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(namespaces.iter().cloned());
 
-            let fqn = FullyQualifiedName::namespace(combined_ns.clone());
-
-            let key = fqn.clone();
+            let fqn = FullyQualifiedName::namespace(combined_ns);
             let mut index = self.index.lock().unwrap();
-            let entries = index.definitions.get(&key);
+            let entries = index.definitions.get(&fqn);
             if let Some(_) = entries {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
                 index.add_reference(fqn.clone(), location);
-
-                return;
             }
 
             ancestors.pop();
         }
+
+        // Check from root namespace
+        let fqn = FullyQualifiedName::namespace(namespaces);
+        let mut index = self.index.lock().unwrap();
+        let entries = index.definitions.get(&fqn);
+        if let Some(_) = entries {
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            index.add_reference(fqn.clone(), location);
+        }
+
+        drop(index);
+
+        visit_constant_path_node(self, node);
+    }
+
+    fn visit_constant_read_node(&mut self, node: &ruby_prism::ConstantReadNode<'_>) {
+        let mut ancestors = self.namespace_stack.clone();
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let namespaces = vec![RubyConstant::new(&name).unwrap()];
+
+        while !ancestors.is_empty() {
+            let mut combined_ns = ancestors.clone();
+            combined_ns.extend(namespaces.iter().cloned());
+
+            let fqn = FullyQualifiedName::namespace(combined_ns);
+            let mut index = self.index.lock().unwrap();
+            let entries = index.definitions.get(&fqn);
+            if let Some(_) = entries {
+                let location = self
+                    .document
+                    .prism_location_to_lsp_location(&node.location());
+                index.add_reference(fqn.clone(), location);
+            }
+
+            ancestors.pop();
+        }
+
+        let fqn = FullyQualifiedName::namespace(namespaces);
+        let mut index = self.index.lock().unwrap();
+        let entries = index.definitions.get(&fqn);
+        if let Some(_) = entries {
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            index.add_reference(fqn, location);
+        }
+
+        drop(index);
+
+        visit_constant_read_node(self, node);
     }
 }
 
@@ -145,8 +195,23 @@ end
         let uri = Url::parse("file:///dummy.rb").unwrap();
         open_file(&server, code, &uri);
 
+        // ConstantPathNode
+        // Eg. include API::Users
+        //                  ^
         let references =
             references::find_references_at_position(&server, &uri, Position::new(4, 19)).await;
+
+        println!("references: {:#?}", references);
+
+        assert_eq!(references.unwrap().len(), 1);
+
+        // ConstantReadNode
+        // Eg. include API::Users
+        //             ^
+        let references =
+            references::find_references_at_position(&server, &uri, Position::new(3, 15)).await;
+
+        println!("references: {:#?}", references);
 
         assert_eq!(references.unwrap().len(), 1);
     }

@@ -7,14 +7,15 @@ use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 use lsp_types::Position;
 use ruby_prism::{
     visit_arguments_node, visit_call_node, visit_class_node, visit_constant_path_node,
-    visit_def_node, visit_local_variable_read_node, visit_module_node, CallNode, ClassNode,
-    ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode, Location, ModuleNode,
-    Visit,
+    visit_constant_write_node, visit_def_node, visit_local_variable_read_node, visit_module_node,
+    CallNode, ClassNode, ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode,
+    Location, ModuleNode, Visit,
 };
 
 pub enum IdentifierType {
     ModuleDef,
     ClassDef,
+    ConstantDef,
     MethodDef,
     Call,
 }
@@ -78,6 +79,17 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         let name = String::from_utf8_lossy(&node.name().as_slice());
+
+        let name_loc = node.constant_path().location();
+
+        if self.is_position_in_location(&name_loc) {
+            let namespace = RubyConstant::new(&name.to_string()).unwrap();
+            self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+            self.identifier_type = IdentifierType::ClassDef;
+            self.ancestors = self.namespace_stack.clone();
+            return;
+        }
+
         self.namespace_stack
             .push(RubyConstant::new(&name.to_string()).unwrap());
 
@@ -134,6 +146,25 @@ impl Visit<'_> for IdentifierVisitor {
 
         visit_def_node(self, node);
         self.current_method = None;
+    }
+
+    fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'_>) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let constant = RubyConstant::new(&name).unwrap();
+
+        let name_loc = node.name_loc();
+        if self.is_position_in_location(&name_loc) {
+            self.identifier = Some(Identifier::RubyConstant(vec![constant]));
+            self.identifier_type = IdentifierType::ConstantDef;
+            self.ancestors = self.namespace_stack.clone();
+            return;
+        }
+
+        visit_constant_write_node(self, node);
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
