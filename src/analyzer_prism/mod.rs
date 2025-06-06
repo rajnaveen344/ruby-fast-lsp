@@ -9,7 +9,6 @@ use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
 
 // Export the visitors module
-pub mod position;
 pub mod utils;
 pub mod visitors;
 
