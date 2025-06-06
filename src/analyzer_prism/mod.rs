@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -32,6 +34,28 @@ pub enum Identifier {
     // Eg. @@foo = 1; @@foo;
     //                ^    -> ([], @@foo)
     RubyVariable(Option<RubyMethod>, RubyVariable),
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Identifier::RubyConstant(ns) => {
+                let ns_str: Vec<String> = ns.iter().map(|c| c.to_string()).collect();
+                write!(f, "{}", ns_str.join("::"))
+            }
+            Identifier::RubyMethod(ns, method) => {
+                let ns_str: Vec<String> = ns.iter().map(|c| c.to_string()).collect();
+                write!(f, "{}#{}", ns_str.join("::"), method)
+            }
+            Identifier::RubyVariable(method, variable) => {
+                if let Some(m) = method {
+                    write!(f, "{}#{}", m, variable)
+                } else {
+                    write!(f, "{}", variable)
+                }
+            }
+        }
+    }
 }
 
 /// Main analyzer for Ruby code using Prism

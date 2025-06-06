@@ -24,7 +24,16 @@ pub enum IdentifierType {
 pub struct IdentifierVisitor {
     document: RubyDocument,
     position: Position,
-    namespace_stack: Vec<RubyConstant>,
+
+    /// Stack of namespaces for each scope
+    /// To support module/class definitions with ConstantPathNode
+    /// we store the namespace stack for each scope as Vec<Vec<RubyConstant>>
+    /// Eg. module A; end
+    /// namespace_stack = [[A]]
+    /// Eg. module A::B::C; end;
+    /// namespace_stack = [[A, B, C]]
+    namespace_stack: Vec<Vec<RubyConstant>>,
+
     current_method: Option<RubyMethod>,
     pub ancestors: Vec<RubyConstant>,
     pub identifier: Option<Identifier>,
@@ -78,20 +87,36 @@ impl Visit<'_> for IdentifierVisitor {
             return;
         }
 
-        let name = String::from_utf8_lossy(&node.name().as_slice());
-
-        let name_loc = node.constant_path().location();
+        let constant_path = node.constant_path();
+        let name_loc = constant_path.location();
 
         if self.is_position_in_location(&name_loc) {
-            let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+            // Handle constant path node for class definition
+            if let Some(constant_path_node) = constant_path.as_constant_path_node() {
+                let mut namespaces = Vec::new();
+                self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+                self.identifier = Some(Identifier::RubyConstant(namespaces));
+            } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
+                let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
+                let namespace = RubyConstant::new(&name.to_string()).unwrap();
+                self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+            }
             self.identifier_type = IdentifierType::ClassDef;
-            self.ancestors = self.namespace_stack.clone();
+            // Flatten the namespace stack into a single vector of constants
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             return;
         }
 
-        self.namespace_stack
-            .push(RubyConstant::new(&name.to_string()).unwrap());
+        // Add the class name to the namespace stack
+        if let Some(constant_path_node) = constant_path.as_constant_path_node() {
+            let mut namespaces = Vec::new();
+            self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+            self.namespace_stack.push(namespaces);
+        } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
+            let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
+            let namespace = RubyConstant::new(&name.to_string()).unwrap();
+            self.namespace_stack.push(vec![namespace]);
+        }
 
         // Visit the class body
         visit_class_node(self, &node);
@@ -105,20 +130,36 @@ impl Visit<'_> for IdentifierVisitor {
             return;
         }
 
-        let name = String::from_utf8_lossy(&node.name().as_slice());
-
-        let name_loc = node.constant_path().location();
+        let constant_path = node.constant_path();
+        let name_loc = constant_path.location();
 
         if self.is_position_in_location(&name_loc) {
-            let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+            // Handle constant path node for module definition
+            if let Some(constant_path_node) = constant_path.as_constant_path_node() {
+                let mut namespaces = Vec::new();
+                self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+                self.identifier = Some(Identifier::RubyConstant(namespaces));
+            } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
+                let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
+                let namespace = RubyConstant::new(&name.to_string()).unwrap();
+                self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+            }
             self.identifier_type = IdentifierType::ModuleDef;
-            self.ancestors = self.namespace_stack.clone();
+            // Flatten the namespace stack into a single vector of constants
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             return;
         }
 
-        self.namespace_stack
-            .push(RubyConstant::new(&name.to_string()).unwrap());
+        // Add the module name to the namespace stack
+        if let Some(constant_path_node) = constant_path.as_constant_path_node() {
+            let mut namespaces = Vec::new();
+            self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+            self.namespace_stack.push(namespaces);
+        } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
+            let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
+            let namespace = RubyConstant::new(&name.to_string()).unwrap();
+            self.namespace_stack.push(vec![namespace]);
+        }
 
         // Visit the module body
         visit_module_node(self, &node);
@@ -160,7 +201,7 @@ impl Visit<'_> for IdentifierVisitor {
         if self.is_position_in_location(&name_loc) {
             self.identifier = Some(Identifier::RubyConstant(vec![constant]));
             self.identifier_type = IdentifierType::ConstantDef;
-            self.ancestors = self.namespace_stack.clone();
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             return;
         }
 
@@ -208,7 +249,7 @@ impl Visit<'_> for IdentifierVisitor {
         if is_root_constant {
             self.ancestors = vec![];
         } else {
-            self.ancestors = self.namespace_stack.clone();
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
         }
     }
 
@@ -226,7 +267,7 @@ impl Visit<'_> for IdentifierVisitor {
             self.identifier = Some(Identifier::RubyConstant(Vec::new()));
         }
 
-        self.ancestors = self.namespace_stack.clone();
+        self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
@@ -302,7 +343,7 @@ impl Visit<'_> for IdentifierVisitor {
                 self.current_method.clone(),
                 variable,
             ));
-            self.ancestors = self.namespace_stack.clone();
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
         }
 
         // Continue visiting the node
