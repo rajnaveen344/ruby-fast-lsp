@@ -5,10 +5,27 @@ A fast Language Server Protocol implementation for Ruby written in Rust.
 ## Features
 
 - Syntax highlighting
+- Inlay Hints
+- Go to definition 
+  - Modules (Done 🎉)
+  - Classes (Done 🎉)
+  - Constants (Done 🎉)
+  - Methods (Partial Support)
+- Find references 
+  - Modules (Done 🎉)
+  - Classes (Done 🎉)
+  - Constants (Done 🎉)
+  - Methods (Work in Progress)
+
+## TODO
+- Run/Debug support
+- Gem file support
+- Type checker
 - Code completion
 - Hover information
-- Go to definition
 - Error checking
+- Diagnostics
+- Meta programming
 
 ## Usage
 
@@ -30,6 +47,6 @@ Please report issues on the GitHub repository.
 
 ## Release Notes
 
-### 0.1.0
+### 2025.24.0
 
 Initial release of Ruby Fast LSP.
