@@ -1,6 +1,6 @@
 # Ruby Fast LSP
 
-A fast Language Server Protocol implementation for Ruby written in Rust.
+High-performance Ruby Language Server written in Rust, delivering fast code navigation, syntax highlighting, and intelligent code insights for Ruby developers.
 
 ## Features
 
