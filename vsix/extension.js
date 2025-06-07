@@ -6,17 +6,38 @@ let client;
 
 function getServerPath() {
     const platform = process.platform;
-    const extension = platform === 'win32' ? '.exe' : '';
+    const arch = process.arch;
+    const isWindows = platform === 'win32';
+    const extension = isWindows ? '.exe' : '';
+    const binaryName = `ruby-fast-lsp${extension}`;
 
-    if (platform === 'darwin') {
-        return path.join(__dirname, 'bin', 'macos', 'ruby-fast-lsp');
-    } else if (platform === 'linux') {
-        return path.join(__dirname, 'bin', 'linux', 'ruby-fast-lsp');
-    } else if (platform === 'win32') {
-        return path.join(__dirname, 'bin', 'win32', 'ruby-fast-lsp.exe');
+    // Map platform.arch to the correct binary path
+    const platformMap = {
+        'darwin': {
+            'x64': 'macos-x64',
+            'arm64': 'macos-arm64'
+        },
+        'linux': {
+            'x64': 'linux-x64',
+            'arm64': 'linux-arm64'
+        },
+        'win32': {
+            'x64': 'win32-x64',
+            'arm64': 'win32-arm64'
+        }
+    };
+
+    const platformInfo = platformMap[platform];
+    if (!platformInfo) {
+        throw new Error(`Unsupported platform: ${platform}`);
     }
 
-    throw new Error(`Unsupported platform: ${platform}`);
+    const platformDir = platformInfo[arch];
+    if (!platformDir) {
+        throw new Error(`Unsupported architecture ${arch} for platform ${platform}`);
+    }
+
+    return path.join(__dirname, 'bin', platformDir, binaryName);
 }
 
 function activate(context) {

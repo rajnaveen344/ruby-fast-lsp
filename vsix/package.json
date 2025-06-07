@@ -2,8 +2,8 @@
   "name": "ruby-fast-lsp",
   "displayName": "Ruby Fast LSP",
   "description": "A fast Language Server Protocol implementation for Ruby",
-  "version": "0.1.0",
-  "publisher": "rajnaveen344",
+  "version": "2025.24.0",
+  "publisher": "naveenraj",
   "icon": "icon.png",
   "repository": {
     "type": "git",
