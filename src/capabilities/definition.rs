@@ -113,7 +113,8 @@ pub async fn find_definition_at_position(
 
             // First check the current scope (top of the stack)
             if let Some(var_scope) = scope_stack.last().cloned() {
-                let var_type = RubyVariableType::Local(1, var_scope);
+                let var_type =
+                    RubyVariableType::Local(scope_stack.len() as LVScopeDepth, var_scope.clone());
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
                     let fqn = FullyQualifiedName::variable(
                         uri.clone(),
@@ -135,8 +136,8 @@ pub async fn find_definition_at_position(
                 }
             }
 
-            // Then check parent scopes
-            for (depth, scope) in scope_stack.iter().enumerate().skip(1) {
+            // Then check parent scopes (from innermost to outermost)
+            for (depth, scope) in scope_stack.iter().enumerate().skip(1).rev() {
                 let var_scope = scope.clone();
                 let var_type = RubyVariableType::Local((depth + 1) as LVScopeDepth, var_scope);
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
