@@ -132,9 +132,16 @@ pub async fn find_definition_at_position(
                         entries.len(),
                         fqn
                     );
-                    // Add all locations to our result
                     for entry in entries {
-                        found_locations.push(entry.location.clone());
+                        let entry_start = &entry.location.range.start;
+
+                        // Filter entries to only include those defined before the current position
+                        if entry_start.line < position.line
+                            || (entry_start.line == position.line
+                                && entry_start.character <= position.character)
+                        {
+                            found_locations.push(entry.location.clone());
+                        }
                     }
 
                     if !found_locations.is_empty() {
