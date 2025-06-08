@@ -7,7 +7,6 @@ use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
-use crate::types::scope_kind::{LVScopeDepth, LVScopeKind};
 
 /// Find the definition(s) of a symbol at the given position
 ///
@@ -34,9 +33,9 @@ pub async fn find_definition_at_position(
     }
 
     info!(
-        "Looking for definition of: {:?}->{}",
-        identifier.clone().unwrap(),
+        "Looking for definition of: {}->{}",
         FullyQualifiedName::from(ancestors.clone()),
+        identifier.clone().unwrap(),
     );
 
     // Get the index and search for the definition
@@ -114,17 +113,12 @@ pub async fn find_definition_at_position(
             let scope_stack = variable.variable_type();
 
             let mut scope_stack = match scope_stack {
-                RubyVariableType::Local(_, _, scope_stack) => scope_stack.clone(),
+                RubyVariableType::Local(scope_stack) => scope_stack.clone(),
                 _ => Vec::new(),
             };
 
             while !scope_stack.is_empty() {
-                let var_scope = scope_stack.last().unwrap();
-                let var_type = RubyVariableType::Local(
-                    scope_stack.len() as LVScopeDepth,
-                    var_scope.clone(),
-                    scope_stack.clone(),
-                );
+                let var_type = RubyVariableType::Local(scope_stack.clone());
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
                     let fqn = FullyQualifiedName::variable(
                         uri.clone(),
@@ -146,7 +140,7 @@ pub async fn find_definition_at_position(
             }
 
             // Finally check top-level scope
-            let var_type = RubyVariableType::Local(0, LVScopeKind::TopLevel, Vec::new());
+            let var_type = RubyVariableType::Local(Vec::new());
             if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
                 let fqn = FullyQualifiedName::variable(
                     uri.clone(),

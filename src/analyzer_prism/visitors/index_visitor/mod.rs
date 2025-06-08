@@ -13,7 +13,6 @@ use crate::server::RubyLanguageServer;
 use crate::types::scope_kind::LVScopeKind;
 use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
-    scope_kind::LVScopeDepth,
 };
 
 mod block_node;
@@ -72,17 +71,6 @@ impl IndexVisitor {
 
     fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
         self.scope_stack.pop()
-    }
-
-    fn current_lv_scope_kind(&self) -> LVScopeKind {
-        match self.scope_stack.last() {
-            Some(scope) => scope.clone(),
-            None => LVScopeKind::TopLevel,
-        }
-    }
-
-    fn current_lv_scope_depth(&self) -> LVScopeDepth {
-        self.scope_stack.len() as LVScopeDepth
     }
 }
 

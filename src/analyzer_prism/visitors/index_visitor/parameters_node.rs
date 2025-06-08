@@ -67,11 +67,7 @@ impl IndexVisitor {
 
         let var = RubyVariable::new(
             param_name,
-            RubyVariableType::Local(
-                self.current_lv_scope_depth(),
-                self.current_lv_scope_kind(),
-                self.scope_stack.clone(),
-            ),
+            RubyVariableType::Local(self.scope_stack.clone()),
         );
 
         info!("Adding local variable entry: {:?}", var.clone().unwrap());

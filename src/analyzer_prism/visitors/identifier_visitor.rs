@@ -3,7 +3,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
-use crate::types::scope_kind::{LVScopeDepth, LVScopeKind};
+use crate::types::scope_kind::LVScopeKind;
 
 use lsp_types::Position;
 use ruby_prism::{
@@ -101,17 +101,6 @@ impl IdentifierVisitor {
 
     fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
         self.scope_stack.pop()
-    }
-
-    fn current_lv_scope_kind(&self) -> LVScopeKind {
-        match self.scope_stack.last() {
-            Some(scope) => scope.clone(),
-            None => LVScopeKind::TopLevel,
-        }
-    }
-
-    fn current_lv_scope_depth(&self) -> LVScopeDepth {
-        self.scope_stack.len() as LVScopeDepth
     }
 }
 
@@ -385,11 +374,7 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(
-                self.current_lv_scope_depth(),
-                self.current_lv_scope_kind(),
-                self.scope_stack.clone(),
-            ),
+            RubyVariableType::Local(self.scope_stack.clone()),
         );
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
