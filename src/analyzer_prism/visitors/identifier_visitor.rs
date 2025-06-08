@@ -3,14 +3,15 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
-use crate::types::scope_kind::LVScopeKind;
+use crate::types::scope_kind::{LVScopeDepth, LVScopeKind};
 
 use lsp_types::Position;
 use ruby_prism::{
-    visit_arguments_node, visit_call_node, visit_class_node, visit_constant_path_node,
-    visit_constant_write_node, visit_def_node, visit_local_variable_read_node, visit_module_node,
-    CallNode, ClassNode, ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode,
-    Location, ModuleNode, Visit,
+    visit_arguments_node, visit_block_node, visit_call_node, visit_class_node,
+    visit_constant_path_node, visit_constant_write_node, visit_def_node,
+    visit_local_variable_read_node, visit_module_node, BlockNode, CallNode, ClassNode,
+    ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode, Location, ModuleNode,
+    Visit,
 };
 
 pub enum IdentifierType {
@@ -34,7 +35,7 @@ pub struct IdentifierVisitor {
     /// Eg. module A::B::C; end;
     /// namespace_stack = [[A, B, C]]
     namespace_stack: Vec<Vec<RubyConstant>>,
-
+    scope_stack: Vec<LVScopeKind>,
     current_method: Option<RubyMethod>,
     pub ancestors: Vec<RubyConstant>,
     pub identifier: Option<Identifier>,
@@ -47,6 +48,7 @@ impl IdentifierVisitor {
             document,
             position,
             namespace_stack: Vec::new(),
+            scope_stack: Vec::new(),
             current_method: None,
             ancestors: Vec::new(),
             identifier: None,
@@ -80,6 +82,37 @@ impl IdentifierVisitor {
 
         acc.push(RubyConstant::new(&name.to_string()).unwrap());
     }
+
+    fn push_ns_scope(&mut self, namespace: RubyConstant) {
+        self.namespace_stack.push(vec![namespace]);
+    }
+
+    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
+        self.namespace_stack.push(namespaces);
+    }
+
+    fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
+        self.namespace_stack.pop()
+    }
+
+    fn push_lv_scope(&mut self, kind: LVScopeKind) {
+        self.scope_stack.push(kind);
+    }
+
+    fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
+        self.scope_stack.pop()
+    }
+
+    fn current_lv_scope_kind(&self) -> LVScopeKind {
+        match self.scope_stack.last() {
+            Some(scope) => scope.clone(),
+            None => LVScopeKind::TopLevel,
+        }
+    }
+
+    fn current_lv_scope_depth(&self) -> LVScopeDepth {
+        self.scope_stack.len() as LVScopeDepth
+    }
 }
 
 impl Visit<'_> for IdentifierVisitor {
@@ -112,18 +145,21 @@ impl Visit<'_> for IdentifierVisitor {
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
             self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
-            self.namespace_stack.push(namespaces);
+            self.push_ns_scopes(namespaces);
+            self.push_lv_scope(LVScopeKind::Constant);
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
             let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.namespace_stack.push(vec![namespace]);
+            self.push_ns_scope(namespace);
+            self.push_lv_scope(LVScopeKind::Constant);
         }
 
         // Visit the class body
         visit_class_node(self, &node);
 
         // Remove the class name from the namespace stack
-        self.namespace_stack.pop();
+        self.pop_ns_scope();
+        self.pop_lv_scope();
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
@@ -155,18 +191,21 @@ impl Visit<'_> for IdentifierVisitor {
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
             self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
-            self.namespace_stack.push(namespaces);
+            self.push_ns_scopes(namespaces);
+            self.push_lv_scope(LVScopeKind::Constant);
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
             let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.namespace_stack.push(vec![namespace]);
+            self.push_ns_scope(namespace);
+            self.push_lv_scope(LVScopeKind::Constant);
         }
 
         // Visit the module body
         visit_module_node(self, &node);
 
         // Remove the module name from the namespace stack
-        self.namespace_stack.pop();
+        self.pop_ns_scope();
+        self.pop_lv_scope();
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
@@ -177,6 +216,7 @@ impl Visit<'_> for IdentifierVisitor {
         let name = String::from_utf8_lossy(&node.name().as_slice()).to_string();
         let method = RubyMethod::from(name);
         self.current_method = Some(method.clone());
+        self.push_lv_scope(LVScopeKind::Method);
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -188,6 +228,13 @@ impl Visit<'_> for IdentifierVisitor {
 
         visit_def_node(self, node);
         self.current_method = None;
+        self.pop_lv_scope();
+    }
+
+    fn visit_block_node(&mut self, node: &BlockNode) {
+        self.push_lv_scope(LVScopeKind::Block);
+        visit_block_node(self, node);
+        self.pop_lv_scope();
     }
 
     fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'_>) {
@@ -335,17 +382,17 @@ impl Visit<'_> for IdentifierVisitor {
             return;
         }
 
-        // Extract the variable name
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-
-        // Create a RubyVariable with the Local type
-        // Using Method scope kind as a default for now
-        if let Ok(variable) = RubyVariable::new(&variable_name, RubyVariableType::Local(0, LVScopeKind::Method)) {
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.current_lv_scope_depth(), self.current_lv_scope_kind()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier = Some(Identifier::RubyVariable(
                 self.current_method.clone(),
                 variable,
             ));
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
         }
 
         // Continue visiting the node

@@ -5,7 +5,6 @@ use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
     ruby_variable::{RubyVariable, RubyVariableType},
-    scope_kind::LVScopeKind,
 };
 
 use super::IndexVisitor;
@@ -66,9 +65,11 @@ impl IndexVisitor {
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
         debug!("Adding parameter: {}", param_name);
 
-        // Create a RubyVariable with the local variable type and validate it
-        // Parameters are in the method scope with the current scope depth
-        match RubyVariable::new(param_name, RubyVariableType::Local(self.scope_depth, LVScopeKind::Method)) {
+        let var = RubyVariable::new(
+            param_name,
+            RubyVariableType::Local(self.current_lv_scope_depth(), self.current_lv_scope_kind()),
+        );
+        match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(

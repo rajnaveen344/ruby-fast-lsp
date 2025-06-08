@@ -2,18 +2,21 @@ use std::sync::{Arc, Mutex};
 
 use lsp_types::{Location as LspLocation, Url};
 use ruby_prism::{
-    visit_class_node, visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
-    visit_local_variable_write_node, visit_module_node, visit_parameters_node, ClassNode,
-    ConstantPathWriteNode, ConstantWriteNode, DefNode, LocalVariableWriteNode, ModuleNode, Visit,
+    visit_block_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
+    visit_def_node, visit_local_variable_write_node, visit_module_node, visit_parameters_node,
+    BlockNode, ClassNode, ConstantPathWriteNode, ConstantWriteNode, DefNode,
+    LocalVariableWriteNode, ModuleNode, Visit,
 };
 
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
+use crate::types::scope_kind::LVScopeKind;
 use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
     scope_kind::LVScopeDepth,
 };
 
+mod block_node;
 mod class_node;
 mod constant_path_write_node;
 mod constant_write_node;
@@ -28,9 +31,8 @@ pub struct IndexVisitor {
     pub uri: Url,
     pub document: RubyDocument,
     pub namespace_stack: Vec<RubyConstant>,
-    pub scope_stack: Vec<()>,
-    pub scope_depth: LVScopeDepth,
     pub current_method: Option<RubyMethod>,
+    pub scope_stack: Vec<LVScopeKind>,
 }
 
 impl IndexVisitor {
@@ -42,7 +44,6 @@ impl IndexVisitor {
             document,
             namespace_stack: vec![],
             scope_stack: vec![],
-            scope_depth: 0,
             current_method: None,
         }
     }
@@ -51,6 +52,37 @@ impl IndexVisitor {
         let uri = self.uri.clone();
         let range = self.document.prism_location_to_lsp_range(&loc);
         LspLocation::new(uri, range)
+    }
+
+    fn push_ns_scope(&mut self, namespace: RubyConstant) {
+        self.namespace_stack.push(namespace);
+    }
+
+    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
+        self.namespace_stack.extend(namespaces);
+    }
+
+    fn pop_ns_scope(&mut self) -> Option<RubyConstant> {
+        self.namespace_stack.pop()
+    }
+
+    fn push_lv_scope(&mut self, kind: LVScopeKind) {
+        self.scope_stack.push(kind);
+    }
+
+    fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
+        self.scope_stack.pop()
+    }
+
+    fn current_lv_scope_kind(&self) -> LVScopeKind {
+        match self.scope_stack.last() {
+            Some(scope) => scope.clone(),
+            None => LVScopeKind::TopLevel,
+        }
+    }
+
+    fn current_lv_scope_depth(&self) -> LVScopeDepth {
+        self.scope_stack.len() as LVScopeDepth
     }
 }
 
@@ -71,6 +103,12 @@ impl Visit<'_> for IndexVisitor {
         self.process_def_node_entry(node);
         visit_def_node(self, node);
         self.process_def_node_exit(node);
+    }
+
+    fn visit_block_node(&mut self, node: &BlockNode) {
+        self.process_block_node_entry(node);
+        visit_block_node(self, node);
+        self.process_block_node_exit(node);
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode) {

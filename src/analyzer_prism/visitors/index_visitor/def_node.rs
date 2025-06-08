@@ -6,6 +6,7 @@ use ruby_prism::DefNode;
 use crate::indexer::entry::{
     entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
+use crate::types::scope_kind::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::IndexVisitor;
@@ -53,6 +54,10 @@ impl IndexVisitor {
             debug!("Added method entry: {}", fqn);
 
             self.current_method = Some(method_name.clone());
+
+            drop(index);
+
+            self.push_lv_scope(LVScopeKind::Method);
         } else {
             warn!("Skipping invalid method name: {}", method_name_str);
         }
@@ -60,5 +65,6 @@ impl IndexVisitor {
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.current_method = None;
+        self.pop_lv_scope();
     }
 }

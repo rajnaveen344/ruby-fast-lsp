@@ -2,6 +2,7 @@ use log::{debug, error};
 use ruby_prism::ClassNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+use crate::types::scope_kind::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
@@ -24,15 +25,13 @@ impl IndexVisitor {
         let const_path = node.constant_path();
         let fqn = if let Some(path_node) = const_path.as_constant_path_node() {
             // Extract namespace parts from the constant path
-            let mut namespace_parts = self.extract_namespace_parts(&path_node);
-            // Add the current class name to the namespace parts
-            namespace_parts.push(namespace.clone());
-            // Push the namespace to the stack for proper scoping during traversal
-            self.namespace_stack.extend(namespace_parts.clone());
+            let namespace_parts = self.extract_namespace_parts(&path_node);
+            self.push_ns_scopes(namespace_parts.clone());
+            self.push_lv_scope(LVScopeKind::Constant);
             FullyQualifiedName::namespace(self.namespace_stack.clone())
         } else {
-            // Regular class definition (not a constant path)
-            self.namespace_stack.push(namespace);
+            self.push_ns_scope(namespace);
+            self.push_lv_scope(LVScopeKind::Constant);
             FullyQualifiedName::namespace(self.namespace_stack.clone())
         };
 
@@ -56,6 +55,7 @@ impl IndexVisitor {
     }
 
     pub fn process_class_node_exit(&mut self, _node: &ClassNode) {
-        self.namespace_stack.pop();
+        self.pop_ns_scope();
+        self.pop_lv_scope();
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt;
+
 pub type LVScopeDepth = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -93,4 +95,17 @@ pub enum LVScopeKind {
     /// puts x  # => 1 (unchanged)
     /// ```
     ExplicitBlockLocal,
+}
+
+impl fmt::Display for LVScopeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LVScopeKind::TopLevel => write!(f, "TopLevel"),
+            LVScopeKind::Constant => write!(f, "Constant"),
+            LVScopeKind::Method => write!(f, "Method"),
+            LVScopeKind::Block => write!(f, "Block"),
+            LVScopeKind::Rescue => write!(f, "Rescue"),
+            LVScopeKind::ExplicitBlockLocal => write!(f, "ExplicitBlockLocal"),
+        }
+    }
 }

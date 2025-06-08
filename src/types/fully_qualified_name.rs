@@ -97,12 +97,8 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
             FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
-            FullyQualifiedName::Variable(_, method, variable) => {
-                if let Some(method) = method {
-                    write!(f, "{namespace}#{method}{variable}")
-                } else {
-                    write!(f, "{namespace}{variable}")
-                }
+            FullyQualifiedName::Variable(_, _, variable) => {
+                write!(f, "{}", variable)
             }
         }
     }

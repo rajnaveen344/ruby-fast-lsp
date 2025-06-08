@@ -2,6 +2,7 @@ use log::{debug, error};
 use ruby_prism::ModuleNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+use crate::types::scope_kind::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
@@ -28,11 +29,13 @@ impl IndexVisitor {
             // Add the current module name to the namespace parts
             namespace_parts.push(namespace.clone());
             // Push the namespace to the stack for proper scoping during traversal
-            self.namespace_stack.extend(namespace_parts.clone());
+            self.push_ns_scopes(namespace_parts.clone());
+            self.push_lv_scope(LVScopeKind::Constant);
             FullyQualifiedName::namespace(self.namespace_stack.clone())
         } else {
             // Regular module definition (not a constant path)
-            self.namespace_stack.push(namespace);
+            self.push_ns_scope(namespace);
+            self.push_lv_scope(LVScopeKind::Constant);
             FullyQualifiedName::namespace(self.namespace_stack.clone())
         };
 
@@ -53,6 +56,7 @@ impl IndexVisitor {
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {
-        self.namespace_stack.pop();
+        self.pop_ns_scope();
+        self.pop_lv_scope();
     }
 }

@@ -189,7 +189,9 @@ impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
 impl fmt::Display for RubyVariable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variable_type() {
-            RubyVariableType::Local(_, _) => write!(f, ">{}", self.0),
+            RubyVariableType::Local(depth, kind) => {
+                write!(f, "!{} - depth: {}, kind: {}", self.0, depth, kind)
+            }
             RubyVariableType::Instance => write!(f, "@{}", self.0),
             RubyVariableType::Class => write!(f, "@@{}", self.0),
             RubyVariableType::Global => write!(f, "${}", self.0),

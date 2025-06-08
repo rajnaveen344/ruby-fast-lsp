@@ -31,7 +31,7 @@ pub async fn find_definition_at_position(
     }
 
     info!(
-        "Looking for definition of: {}, with ancestors: {}",
+        "Looking for definition of: {:#?}, with ancestors: {}",
         identifier.clone().unwrap(),
         FullyQualifiedName::from(ancestors.clone())
     );

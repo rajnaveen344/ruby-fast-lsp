@@ -1,11 +1,10 @@
-use log::{debug, error};
+use log::{debug, error, info};
 use ruby_prism::LocalVariableWriteNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
     ruby_variable::{RubyVariable, RubyVariableType},
-    scope_kind::LVScopeKind,
 };
 
 use super::IndexVisitor;
@@ -16,9 +15,13 @@ impl IndexVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         debug!("Visiting local variable write node: {}", variable_name);
 
-        // Create a RubyVariable with the local variable type and validate it
-        // Using the visitor's current scope depth and Method scope kind
-        match RubyVariable::new(&variable_name, RubyVariableType::Local(self.scope_depth, LVScopeKind::Method)) {
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.current_lv_scope_depth(), self.current_lv_scope_kind()),
+        );
+
+        info!("Adding local variable entry: {}", var.clone().unwrap());
+        match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(
