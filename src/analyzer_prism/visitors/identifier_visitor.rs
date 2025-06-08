@@ -385,14 +385,17 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.current_lv_scope_depth(), self.current_lv_scope_kind()),
+            RubyVariableType::Local(
+                self.current_lv_scope_depth(),
+                self.current_lv_scope_kind(),
+                self.scope_stack.clone(),
+            ),
         );
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier = Some(Identifier::RubyVariable(
                 self.current_method.clone(),
                 variable,
-                self.scope_stack.clone(),
             ));
         }
 

@@ -8,7 +8,7 @@ pub struct RubyVariable(String, RubyVariableType);
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum RubyVariableType {
-    Local(LVScopeDepth, LVScopeKind),
+    Local(LVScopeDepth, LVScopeKind, Vec<LVScopeKind>),
     Instance,
     Class,
     Global,
@@ -18,7 +18,7 @@ impl RubyVariable {
     pub fn new(name: &str, variable_type: RubyVariableType) -> Result<Self, &'static str> {
         // Validate the variable name based on its type
         match variable_type {
-            RubyVariableType::Local(_, _) => validate_local_variable(name)?,
+            RubyVariableType::Local(_, _, _) => validate_local_variable(name)?,
             RubyVariableType::Instance => validate_instance_variable(name)?,
             RubyVariableType::Class => validate_class_variable(name)?,
             RubyVariableType::Global => validate_global_variable(name)?,
@@ -26,7 +26,7 @@ impl RubyVariable {
 
         // Store the name without prefixes to avoid doubling them in Display
         let clean_name = match variable_type {
-            RubyVariableType::Local(_, _) => name.to_string(),
+            RubyVariableType::Local(_, _, _) => name.to_string(),
             RubyVariableType::Instance => {
                 if name.starts_with('@') {
                     name[1..].to_string()
@@ -189,8 +189,12 @@ impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
 impl fmt::Display for RubyVariable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variable_type() {
-            RubyVariableType::Local(depth, kind) => {
-                write!(f, "!{} - depth: {}, kind: {}", self.0, depth, kind)
+            RubyVariableType::Local(depth, kind, scopes) => {
+                write!(
+                    f,
+                    "!{} - depth: {}, kind: {}, scopes: {:?}",
+                    self.0, depth, kind, scopes
+                )
             }
             RubyVariableType::Instance => write!(f, "@{}", self.0),
             RubyVariableType::Class => write!(f, "@@{}", self.0),
@@ -205,53 +209,74 @@ mod tests {
 
     #[test]
     fn test_local_variable_valid() {
-        let result = RubyVariable::new("foo", RubyVariableType::Local(0, LVScopeKind::Method));
+        let result = RubyVariable::new(
+            "foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        );
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "foo");
         assert_eq!(
             *var.variable_type(),
-            RubyVariableType::Local(0, LVScopeKind::Method)
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new())
         );
     }
 
     #[test]
     fn test_local_variable_with_different_scopes() {
         // Test method scope
-        let result = RubyVariable::new("foo", RubyVariableType::Local(0, LVScopeKind::Method));
+        let result = RubyVariable::new(
+            "foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        );
         assert!(result.is_ok());
 
         // Test block scope
-        let result = RubyVariable::new("bar", RubyVariableType::Local(1, LVScopeKind::Block));
+        let result = RubyVariable::new(
+            "bar",
+            RubyVariableType::Local(1, LVScopeKind::Block, Vec::new()),
+        );
         assert!(result.is_ok());
 
         // Test top level scope
-        let result = RubyVariable::new("baz", RubyVariableType::Local(0, LVScopeKind::TopLevel));
+        let result = RubyVariable::new(
+            "baz",
+            RubyVariableType::Local(0, LVScopeKind::TopLevel, Vec::new()),
+        );
         assert!(result.is_ok());
 
         // Test explicit block local scope
         let result = RubyVariable::new(
             "qux",
-            RubyVariableType::Local(2, LVScopeKind::ExplicitBlockLocal),
+            RubyVariableType::Local(2, LVScopeKind::ExplicitBlockLocal, Vec::new()),
         );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_with_underscore() {
-        let result = RubyVariable::new("_foo", RubyVariableType::Local(0, LVScopeKind::Method));
+        let result = RubyVariable::new(
+            "_foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_invalid_uppercase() {
-        let result = RubyVariable::new("Foo", RubyVariableType::Local(0, LVScopeKind::Method));
+        let result = RubyVariable::new(
+            "Foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_local_variable_invalid_empty() {
-        let result = RubyVariable::new("", RubyVariableType::Local(0, LVScopeKind::Method));
+        let result = RubyVariable::new(
+            "",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        );
         assert!(result.is_err());
     }
 
@@ -320,24 +345,31 @@ mod tests {
 
     #[test]
     fn test_try_from() {
-        let result =
-            RubyVariable::try_from(("foo", RubyVariableType::Local(0, LVScopeKind::Method)));
+        let result = RubyVariable::try_from((
+            "foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        ));
         assert!(result.is_ok());
 
         let result = RubyVariable::try_from(("@bar", RubyVariableType::Instance));
         assert!(result.is_ok());
 
-        let result =
-            RubyVariable::try_from(("Foo", RubyVariableType::Local(0, LVScopeKind::Method)));
+        let result = RubyVariable::try_from((
+            "Foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        ));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_display() {
         // For local variables, the prefix is added by Display
-        let var =
-            RubyVariable::new("foo", RubyVariableType::Local(0, LVScopeKind::Method)).unwrap();
-        assert_eq!(var.to_string(), ">foo");
+        let var = RubyVariable::new(
+            "foo",
+            RubyVariableType::Local(0, LVScopeKind::Method, Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(var.to_string(), "!foo - depth: 0, kind: Method, scopes: []");
 
         // For instance variables, the @ is stripped in try_new and added back in Display
         let var = RubyVariable::new("@bar", RubyVariableType::Instance).unwrap();

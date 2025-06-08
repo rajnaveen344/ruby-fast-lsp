@@ -1,9 +1,9 @@
 use std::fmt;
 
+use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::RubyVariable;
-use crate::types::{ruby_document::RubyDocument, scope_kind::LVScopeKind};
 use lsp_types::{Position, Url};
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
@@ -32,7 +32,7 @@ pub enum Identifier {
     //               ^    -> ([], @foo)
     // Eg. @@foo = 1; @@foo;
     //                ^    -> ([], @@foo)
-    RubyVariable(Option<RubyMethod>, RubyVariable, Vec<LVScopeKind>),
+    RubyVariable(Option<RubyMethod>, RubyVariable),
 }
 
 impl fmt::Display for Identifier {
@@ -46,9 +46,9 @@ impl fmt::Display for Identifier {
                 let ns_str: Vec<String> = ns.iter().map(|c| c.to_string()).collect();
                 write!(f, "{}#{}", ns_str.join("::"), method)
             }
-            Identifier::RubyVariable(method, variable, scope) => {
+            Identifier::RubyVariable(method, variable) => {
                 if let Some(m) = method {
-                    write!(f, "{}!{}, scope: {:?}", m, variable, scope)
+                    write!(f, "{}!{}", m, variable)
                 } else {
                     write!(f, "{}", variable)
                 }

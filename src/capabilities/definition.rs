@@ -108,13 +108,23 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-        Identifier::RubyVariable(method, variable, scope_stack) => {
+        Identifier::RubyVariable(method, variable) => {
             let mut found_locations = Vec::new();
 
-            // First check the current scope (top of the stack)
-            if let Some(var_scope) = scope_stack.last().cloned() {
-                let var_type =
-                    RubyVariableType::Local(scope_stack.len() as LVScopeDepth, var_scope.clone());
+            let scope_stack = variable.variable_type();
+
+            let mut scope_stack = match scope_stack {
+                RubyVariableType::Local(_, _, scope_stack) => scope_stack.clone(),
+                _ => Vec::new(),
+            };
+
+            while !scope_stack.is_empty() {
+                let var_scope = scope_stack.last().unwrap();
+                let var_type = RubyVariableType::Local(
+                    scope_stack.len() as LVScopeDepth,
+                    var_scope.clone(),
+                    scope_stack.clone(),
+                );
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
                     let fqn = FullyQualifiedName::variable(
                         uri.clone(),
@@ -122,10 +132,7 @@ pub async fn find_definition_at_position(
                         method.clone(),
                         var,
                     );
-                    info!(
-                        "Looking for variable definition in current scope: {:?}",
-                        fqn
-                    );
+                    info!("Looking for variable definition in parent scope: {:?}", fqn);
                     if let Some(entries) = index.definitions.get(&fqn.into()) {
                         found_locations.extend(entries.iter().map(|e| e.location.clone()));
                     }
@@ -134,35 +141,12 @@ pub async fn find_definition_at_position(
                 if !found_locations.is_empty() {
                     return Some(found_locations);
                 }
-            }
 
-            // Then check parent scopes (from innermost to outermost)
-            for (depth, scope) in scope_stack.iter().enumerate().skip(1).rev() {
-                let var_scope = scope.clone();
-                let var_type = RubyVariableType::Local((depth + 1) as LVScopeDepth, var_scope);
-                if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                    let fqn = FullyQualifiedName::variable(
-                        uri.clone(),
-                        ancestors.clone(),
-                        method.clone(),
-                        var,
-                    );
-                    info!(
-                        "Looking for variable definition in parent scope {}: {:?}",
-                        depth, fqn
-                    );
-                    if let Some(entries) = index.definitions.get(&fqn.into()) {
-                        found_locations.extend(entries.iter().map(|e| e.location.clone()));
-                    }
-                }
-
-                if !found_locations.is_empty() {
-                    return Some(found_locations);
-                }
+                scope_stack.pop();
             }
 
             // Finally check top-level scope
-            let var_type = RubyVariableType::Local(0, LVScopeKind::TopLevel);
+            let var_type = RubyVariableType::Local(0, LVScopeKind::TopLevel, Vec::new());
             if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
                 let fqn = FullyQualifiedName::variable(
                     uri.clone(),
