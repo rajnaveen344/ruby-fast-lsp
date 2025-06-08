@@ -1,5 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
+use lsp_types::Url;
+
 use crate::analyzer_prism::Identifier;
 
 use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant, ruby_variable::RubyVariable};
@@ -23,7 +25,7 @@ pub enum FullyQualifiedName {
     ModuleMethod(Vec<RubyConstant>, RubyMethod),
 
     /// Local variable, e.g., `a = 1` → `LocalVariable(vec!["Foo"], Some(RubyMethod::new("bar")), "a")`
-    Variable(Vec<RubyConstant>, Option<RubyMethod>, RubyVariable),
+    Variable(Url, Vec<RubyConstant>, Option<RubyMethod>, RubyVariable),
 }
 
 impl FullyQualifiedName {
@@ -49,7 +51,7 @@ impl FullyQualifiedName {
             FullyQualifiedName::InstanceMethod(ns, _) => ns,
             FullyQualifiedName::ClassMethod(ns, _) => ns,
             FullyQualifiedName::ModuleMethod(ns, _) => ns,
-            FullyQualifiedName::Variable(ns, _, _) => ns,
+            FullyQualifiedName::Variable(_, ns, _, _) => ns,
         }
     }
 
@@ -59,11 +61,12 @@ impl FullyQualifiedName {
     }
 
     pub fn variable(
+        uri: Url,
         namespace: Vec<RubyConstant>,
         method: Option<RubyMethod>,
         variable: RubyVariable,
     ) -> Self {
-        FullyQualifiedName::Variable(namespace, method, variable)
+        FullyQualifiedName::Variable(uri, namespace, method, variable)
     }
 }
 
@@ -97,7 +100,7 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
             FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
-            FullyQualifiedName::Variable(_, _, variable) => {
+            FullyQualifiedName::Variable(_, _, _, variable) => {
                 write!(f, "{}", variable)
             }
         }

@@ -75,6 +75,7 @@ impl IndexVisitor {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(
+                    self.uri.clone(),
                     self.namespace_stack.clone(),
                     self.current_method.clone(),
                     variable.clone(),

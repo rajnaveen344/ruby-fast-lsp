@@ -1,5 +1,5 @@
 use log::{debug, info};
-use lsp_types::{Location, Position};
+use lsp_types::{Location, Position, Url};
 use std::time::Instant;
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
@@ -15,6 +15,7 @@ use crate::types::scope_kind::{LVScopeDepth, LVScopeKind};
 /// Multiple definitions can be returned when a symbol is defined in multiple places.
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
+    uri: Url,
     position: Position,
     content: &str,
 ) -> Option<Vec<Location>> {
@@ -114,7 +115,12 @@ pub async fn find_definition_at_position(
             if let Some(var_scope) = scope_stack.last().cloned() {
                 let var_type = RubyVariableType::Local(1, var_scope);
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                    let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
+                    let fqn = FullyQualifiedName::variable(
+                        uri.clone(),
+                        ancestors.clone(),
+                        method.clone(),
+                        var,
+                    );
                     info!(
                         "Looking for variable definition in current scope: {:?}",
                         fqn
@@ -130,7 +136,12 @@ pub async fn find_definition_at_position(
                 let var_scope = scope.clone();
                 let var_type = RubyVariableType::Local((depth + 1) as LVScopeDepth, var_scope);
                 if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                    let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
+                    let fqn = FullyQualifiedName::variable(
+                        uri.clone(),
+                        ancestors.clone(),
+                        method.clone(),
+                        var,
+                    );
                     info!(
                         "Looking for variable definition in parent scope {}: {:?}",
                         depth, fqn
@@ -144,7 +155,12 @@ pub async fn find_definition_at_position(
             // Finally check top-level scope
             let var_type = RubyVariableType::Local(0, LVScopeKind::TopLevel);
             if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
+                let fqn = FullyQualifiedName::variable(
+                    uri.clone(),
+                    ancestors.clone(),
+                    method.clone(),
+                    var,
+                );
                 info!("Looking for variable definition in top level: {:?}", fqn);
                 if let Some(entries) = index.definitions.get(&fqn.into()) {
                     found_locations.extend(entries.iter().map(|e| e.location.clone()));

@@ -16,7 +16,7 @@ pub async fn handle_goto_definition(
     let position = params.text_document_position_params.position;
     let content = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
     let definition =
-        definition::find_definition_at_position(&lang_server, position, &content).await;
+        definition::find_definition_at_position(&lang_server, uri, position, &content).await;
 
     match definition {
         Some(locations) => {
