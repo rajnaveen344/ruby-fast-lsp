@@ -129,6 +129,10 @@ pub async fn find_definition_at_position(
                         found_locations.extend(entries.iter().map(|e| e.location.clone()));
                     }
                 }
+
+                if !found_locations.is_empty() {
+                    return Some(found_locations);
+                }
             }
 
             // Then check parent scopes
@@ -149,6 +153,10 @@ pub async fn find_definition_at_position(
                     if let Some(entries) = index.definitions.get(&fqn.into()) {
                         found_locations.extend(entries.iter().map(|e| e.location.clone()));
                     }
+                }
+
+                if !found_locations.is_empty() {
+                    return Some(found_locations);
                 }
             }
 
