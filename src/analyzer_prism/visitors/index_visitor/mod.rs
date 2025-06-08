@@ -11,6 +11,7 @@ use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+    scope_kind::LVScopeDepth,
 };
 
 mod class_node;
@@ -27,6 +28,8 @@ pub struct IndexVisitor {
     pub uri: Url,
     pub document: RubyDocument,
     pub namespace_stack: Vec<RubyConstant>,
+    pub scope_stack: Vec<()>,
+    pub scope_depth: LVScopeDepth,
     pub current_method: Option<RubyMethod>,
 }
 
@@ -38,6 +41,8 @@ impl IndexVisitor {
             uri,
             document,
             namespace_stack: vec![],
+            scope_stack: vec![],
+            scope_depth: 0,
             current_method: None,
         }
     }

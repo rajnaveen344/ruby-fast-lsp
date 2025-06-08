@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::analyzer_prism::Identifier;
 
-use super::{ruby_namespace::RubyConstant, ruby_method::RubyMethod, ruby_variable::RubyVariable};
+use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant, ruby_variable::RubyVariable};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FullyQualifiedName {

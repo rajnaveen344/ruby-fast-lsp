@@ -3,6 +3,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
+use crate::types::scope_kind::LVScopeKind;
 
 use lsp_types::Position;
 use ruby_prism::{
@@ -338,7 +339,8 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
         // Create a RubyVariable with the Local type
-        if let Ok(variable) = RubyVariable::new(&variable_name, RubyVariableType::Local) {
+        // Using Method scope kind as a default for now
+        if let Ok(variable) = RubyVariable::new(&variable_name, RubyVariableType::Local(0, LVScopeKind::Method)) {
             self.identifier = Some(Identifier::RubyVariable(
                 self.current_method.clone(),
                 variable,

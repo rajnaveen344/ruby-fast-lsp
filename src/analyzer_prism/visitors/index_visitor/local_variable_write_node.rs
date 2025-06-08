@@ -5,6 +5,7 @@ use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
     ruby_variable::{RubyVariable, RubyVariableType},
+    scope_kind::LVScopeKind,
 };
 
 use super::IndexVisitor;
@@ -16,7 +17,8 @@ impl IndexVisitor {
         debug!("Visiting local variable write node: {}", variable_name);
 
         // Create a RubyVariable with the local variable type and validate it
-        match RubyVariable::new(&variable_name, RubyVariableType::Local) {
+        // Using the visitor's current scope depth and Method scope kind
+        match RubyVariable::new(&variable_name, RubyVariableType::Local(self.scope_depth, LVScopeKind::Method)) {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(
