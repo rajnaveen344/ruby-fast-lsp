@@ -48,7 +48,7 @@ impl fmt::Display for Identifier {
             }
             Identifier::RubyVariable(method, variable) => {
                 if let Some(m) = method {
-                    write!(f, "{}!{}", m, variable)
+                    write!(f, "{}:{}", m, variable)
                 } else {
                     write!(f, "{}", variable)
                 }

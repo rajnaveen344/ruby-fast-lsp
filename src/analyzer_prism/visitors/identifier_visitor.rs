@@ -8,10 +8,10 @@ use crate::types::scope_kind::LVScopeKind;
 use lsp_types::Position;
 use ruby_prism::{
     visit_arguments_node, visit_block_node, visit_call_node, visit_class_node,
-    visit_constant_path_node, visit_constant_write_node, visit_def_node,
-    visit_local_variable_read_node, visit_module_node, BlockNode, CallNode, ClassNode,
-    ConstantPathNode, ConstantReadNode, DefNode, LocalVariableReadNode, Location, ModuleNode,
-    Visit,
+    visit_class_variable_read_node, visit_constant_path_node, visit_constant_write_node,
+    visit_def_node, visit_instance_variable_read_node, visit_local_variable_read_node,
+    visit_module_node, BlockNode, CallNode, ClassNode, ConstantPathNode, ConstantReadNode, DefNode,
+    LocalVariableReadNode, Location, ModuleNode, Visit,
 };
 
 pub enum IdentifierType {
@@ -386,6 +386,45 @@ impl Visit<'_> for IdentifierVisitor {
 
         // Continue visiting the node
         visit_local_variable_read_node(self, node);
+    }
+
+    fn visit_class_variable_read_node(&mut self, node: &ruby_prism::ClassVariableReadNode<'_>) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_class_variable_read_node(self, node);
+    }
+
+    fn visit_instance_variable_read_node(
+        &mut self,
+        node: &ruby_prism::InstanceVariableReadNode<'_>,
+    ) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(&variable_name, RubyVariableType::Instance);
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_instance_variable_read_node(self, node);
     }
 }
 
