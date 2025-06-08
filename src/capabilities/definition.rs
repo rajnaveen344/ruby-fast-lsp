@@ -6,6 +6,8 @@ use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
+use crate::types::scope_kind::{LVScopeDepth, LVScopeKind};
 
 /// Find the definition(s) of a symbol at the given position
 ///
@@ -31,9 +33,9 @@ pub async fn find_definition_at_position(
     }
 
     info!(
-        "Looking for definition of: {:#?}, with ancestors: {}",
+        "Looking for definition of: {:?}->{}",
         identifier.clone().unwrap(),
-        FullyQualifiedName::from(ancestors.clone())
+        FullyQualifiedName::from(ancestors.clone()),
     );
 
     // Get the index and search for the definition
@@ -57,11 +59,6 @@ pub async fn find_definition_at_position(
 
                 if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
                     if !entries.is_empty() {
-                        debug!(
-                            "Found {} constant definition(s) in ancestor namespace for: {:?}",
-                            entries.len(),
-                            search_fqn
-                        );
                         // Add all locations to our result
                         for entry in entries {
                             found_locations.push(entry.location.clone());
@@ -78,12 +75,6 @@ pub async fn find_definition_at_position(
             let top_level_fqn = Identifier::RubyConstant(ns.clone());
             if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
                 if !entries.is_empty() {
-                    debug!(
-                        "Found {} constant definition(s) at top level for: {:?}",
-                        entries.len(),
-                        top_level_fqn
-                    );
-                    // Add all locations to our result
                     for entry in entries {
                         found_locations.push(entry.location.clone());
                     }
@@ -99,12 +90,6 @@ pub async fn find_definition_at_position(
             // First try to find the method with the exact namespace
             if let Some(entries) = index.methods_by_name.get(&method) {
                 if !entries.is_empty() {
-                    info!(
-                        "Found {} method definition(s) for: {:?}",
-                        entries.len(),
-                        iden.clone()
-                    );
-
                     // Include all methods with Direct origin
                     for entry in entries {
                         if let EntryKind::Method { origin, .. } = &entry.kind {
@@ -122,32 +107,52 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-        Identifier::RubyVariable(method, variable) => {
-            let fqn = FullyQualifiedName::variable(ancestors, method, variable);
+        Identifier::RubyVariable(method, variable, scope_stack) => {
+            let mut found_locations = Vec::new();
 
-            if let Some(entries) = index.definitions.get(&fqn.clone().into()) {
-                if !entries.is_empty() {
+            // First check the current scope (top of the stack)
+            if let Some(var_scope) = scope_stack.last().cloned() {
+                let var_type = RubyVariableType::Local(1, var_scope);
+                if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
+                    let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
                     info!(
-                        "Found {} variable definition(s) for: {:?}",
-                        entries.len(),
+                        "Looking for variable definition in current scope: {:?}",
                         fqn
                     );
-                    for entry in entries {
-                        let entry_start = &entry.location.range.start;
-
-                        // Filter entries to only include those defined before the current position
-                        if entry_start.line < position.line
-                            || (entry_start.line == position.line
-                                && entry_start.character <= position.character)
-                        {
-                            found_locations.push(entry.location.clone());
-                        }
-                    }
-
-                    if !found_locations.is_empty() {
-                        return Some(found_locations);
+                    if let Some(entries) = index.definitions.get(&fqn.into()) {
+                        found_locations.extend(entries.iter().map(|e| e.location.clone()));
                     }
                 }
+            }
+
+            // Then check parent scopes
+            for (depth, scope) in scope_stack.iter().enumerate().skip(1) {
+                let var_scope = scope.clone();
+                let var_type = RubyVariableType::Local((depth + 1) as LVScopeDepth, var_scope);
+                if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
+                    let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
+                    info!(
+                        "Looking for variable definition in parent scope {}: {:?}",
+                        depth, fqn
+                    );
+                    if let Some(entries) = index.definitions.get(&fqn.into()) {
+                        found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                    }
+                }
+            }
+
+            // Finally check top-level scope
+            let var_type = RubyVariableType::Local(0, LVScopeKind::TopLevel);
+            if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
+                let fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
+                info!("Looking for variable definition in top level: {:?}", fqn);
+                if let Some(entries) = index.definitions.get(&fqn.into()) {
+                    found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                }
+            }
+
+            if !found_locations.is_empty() {
+                return Some(found_locations);
             }
         }
     }
@@ -155,9 +160,8 @@ pub async fn find_definition_at_position(
     debug!("No definition found for {:?}", identifier);
 
     // If we found any locations during the search, return them
-    if !found_locations.is_empty() {
-        Some(found_locations)
-    } else {
-        None
+    match found_locations.is_empty() {
+        true => None,
+        false => Some(found_locations),
     }
 }

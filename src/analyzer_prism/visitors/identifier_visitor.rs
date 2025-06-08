@@ -392,6 +392,7 @@ impl Visit<'_> for IdentifierVisitor {
             self.identifier = Some(Identifier::RubyVariable(
                 self.current_method.clone(),
                 variable,
+                self.scope_stack.clone(),
             ));
         }
 

@@ -49,7 +49,7 @@ pub async fn find_references_at_position(
             combined_ns.extend(ns.clone());
             fqn = FullyQualifiedName::instance_method(combined_ns, method.clone());
         }
-        Identifier::RubyVariable(method, variable) => {
+        Identifier::RubyVariable(method, variable, scope_stack) => {
             // For variables, use ancestors as the namespace
             fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), variable.clone());
         }

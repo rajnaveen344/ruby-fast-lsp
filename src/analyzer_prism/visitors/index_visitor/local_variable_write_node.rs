@@ -20,7 +20,7 @@ impl IndexVisitor {
             RubyVariableType::Local(self.current_lv_scope_depth(), self.current_lv_scope_kind()),
         );
 
-        info!("Adding local variable entry: {}", var.clone().unwrap());
+        info!("Adding local variable entry: {:?}", var.clone().unwrap());
         match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
