@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use log::info;
+use log::{debug, info};
 use lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, Url,
@@ -8,10 +8,7 @@ use lsp_types::{
 use ruby_prism::Visit;
 use std::{collections::HashMap, time::Instant};
 
-use crate::{
-    analyzer_prism::visitors::{empty_visitor::EmptyVisitor, token_visitor::TokenVisitor},
-    server::RubyLanguageServer,
-};
+use crate::{analyzer_prism::visitors::token_visitor::TokenVisitor, server::RubyLanguageServer};
 
 pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,
@@ -104,23 +101,14 @@ pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> Semant
     let content = document.content.clone();
     let parse_result = ruby_prism::parse(content.as_bytes());
     let parse_time = start_time.elapsed();
-    info!("Performance: parse took {:?}", parse_time);
+    debug!("[PERF] parse took {:?}", parse_time);
 
     // Pass the document to the visitor
     let mut visitor = TokenVisitor::new(document);
     let root_node = parse_result.node();
     visitor.visit(&root_node);
     let visit_time = start_time.elapsed() - parse_time;
-    info!(
-        "Performance: token_generation_visitor took {:?}",
-        visit_time
-    );
-
-    // Performance measurement with empty visitor
-    let mut empty_visitor = EmptyVisitor {};
-    empty_visitor.visit(&root_node);
-    let empty_visit_time = start_time.elapsed() - parse_time - visit_time;
-    info!("Performance: empty_visitor took {:?}", empty_visit_time);
+    debug!("[PERF] token_generation_visitor took {:?}", visit_time);
 
     SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,

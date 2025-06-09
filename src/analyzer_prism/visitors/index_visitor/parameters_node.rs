@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error};
 use ruby_prism::ParametersNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
@@ -63,14 +63,12 @@ impl IndexVisitor {
 
     // Helper method to add a parameter to the index
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
-        debug!("Adding parameter: {}", param_name);
-
         let var = RubyVariable::new(
             param_name,
             RubyVariableType::Local(self.scope_stack.clone()),
         );
 
-        info!("Adding local variable entry: {:?}", var.clone().unwrap());
+        debug!("Adding local variable entry: {:?}", var.clone().unwrap());
         match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable

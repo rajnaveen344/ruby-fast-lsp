@@ -1,6 +1,6 @@
 use crate::capabilities::{definition, inlay_hints, references, semantic_tokens};
 use crate::server::RubyLanguageServer;
-use log::info;
+use log::{debug, info};
 use lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
 
@@ -20,7 +20,7 @@ pub async fn handle_goto_definition(
 
     match definition {
         Some(locations) => {
-            info!("Returning {} goto definition locations", locations.len());
+            debug!("Returning {} goto definition locations", locations.len());
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {
@@ -36,7 +36,6 @@ pub async fn handle_references(
 ) -> LspResult<Option<Vec<Location>>> {
     let uri = params.text_document_position.text_document.uri.clone();
     let position = params.text_document_position.position;
-    let _include_declaration = params.context.include_declaration;
 
     let references = references::find_references_at_position(lang_server, &uri, position).await;
 

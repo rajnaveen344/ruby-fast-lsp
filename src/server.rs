@@ -85,25 +85,51 @@ impl LanguageServer for RubyLanguageServer {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        notification::handle_did_open(self, params).await
+        info!("Document opened: {}", params.text_document.uri.path());
+        let start_time = Instant::now();
+        notification::handle_did_open(self, params).await;
+        info!(
+            "[PERF] Document open handler completed in {:?}",
+            start_time.elapsed()
+        );
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        notification::handle_did_change(self, params).await
+        info!("Document changed: {}", params.text_document.uri.path());
+        let start_time = Instant::now();
+        notification::handle_did_change(self, params).await;
+        info!(
+            "[PERF] Document change handler completed in {:?}",
+            start_time.elapsed()
+        );
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        notification::handle_did_close(self, params).await
+        info!("Document closed: {}", params.text_document.uri.path());
+        let start_time = Instant::now();
+        notification::handle_did_close(self, params).await;
+        info!(
+            "[PERF] Document close handler completed in {:?}",
+            start_time.elapsed()
+        );
     }
 
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
+        info!(
+            "Goto definition request received for {:?}",
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .path()
+        );
         let start_time = Instant::now();
         let result = request::handle_goto_definition(self, params).await;
 
-        debug!(
+        info!(
             "[PERF] Goto definition completed in {:?}",
             start_time.elapsed()
         );
@@ -128,11 +154,19 @@ impl LanguageServer for RubyLanguageServer {
         &self,
         params: SemanticTokensParams,
     ) -> LspResult<Option<SemanticTokensResult>> {
-        eprintln!(
-            "textDocument/semanticTokens/full: {:?}",
-            params.text_document.uri
+        info!(
+            "Semantic tokens request received for {:?}",
+            params.text_document.uri.path()
         );
-        request::handle_semantic_tokens_full(self, params).await
+        let start_time = Instant::now();
+        let result = request::handle_semantic_tokens_full(self, params).await;
+
+        info!(
+            "[PERF] Semantic tokens completed in {:?}",
+            start_time.elapsed()
+        );
+
+        result
     }
 
     async fn inlay_hint(

@@ -6,25 +6,22 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, info, warn};
 use lsp_types::*;
-use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
 
 pub async fn handle_initialize(
     lang_server: &RubyLanguageServer,
     params: InitializeParams,
 ) -> LspResult<InitializeResult> {
-    info!("Initializing Ruby LSP server");
-
     let workspace_folders = params.workspace_folders;
 
     if let Some(folder) = workspace_folders.and_then(|folders| folders.first().cloned()) {
-        info!(
+        debug!(
             "Indexing workspace folder using workspace folder: {:?}",
             folder.uri.as_str()
         );
         let _ = init_workspace(lang_server, folder.uri.clone()).await;
     } else if let Some(root_uri) = params.root_uri {
-        info!(
+        debug!(
             "Indexing workspace folder using root URI: {:?}",
             root_uri.as_str()
         );
@@ -52,12 +49,9 @@ pub async fn handle_initialize(
     })
 }
 
-pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {
-    info!("Server initialized");
-}
+pub async fn handle_initialized(_: &RubyLanguageServer, _: InitializedParams) {}
 
 pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
-    let start_time = Instant::now();
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
 
@@ -68,15 +62,12 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
 
     let _ = process_file_for_definitions(lang_server, uri.clone());
     let _ = process_file_for_references(lang_server, uri.clone());
-
-    debug!("[PERF] File indexed in {:?}", start_time.elapsed());
 }
 
 pub async fn handle_did_change(
     lang_server: &RubyLanguageServer,
     params: DidChangeTextDocumentParams,
 ) {
-    debug!("Did change: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
 
     for change in params.content_changes {
@@ -94,7 +85,6 @@ pub async fn handle_did_close(
     lang_server: &RubyLanguageServer,
     params: DidCloseTextDocumentParams,
 ) {
-    debug!("Did close: {:?}", params.text_document.uri.as_str());
     let uri = params.text_document.uri.clone();
     let _ = process_file_for_definitions(lang_server, uri.clone());
     let _ = process_file_for_references(lang_server, uri.clone());

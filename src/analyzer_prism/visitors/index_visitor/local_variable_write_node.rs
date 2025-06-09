@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error};
 use ruby_prism::LocalVariableWriteNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
@@ -20,7 +20,7 @@ impl IndexVisitor {
             RubyVariableType::Local(self.scope_stack.clone()),
         );
 
-        info!("Adding local variable entry: {:?}", var.clone().unwrap());
+        debug!("Adding local variable entry: {:?}", var.clone().unwrap());
         match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
