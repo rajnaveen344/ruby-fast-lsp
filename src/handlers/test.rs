@@ -9,6 +9,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    use crate::analyzer_prism::RubyPrismAnalyzer;
     use crate::handlers::request;
     use crate::indexer::index::RubyIndex;
     use crate::server::RubyLanguageServer;
@@ -321,7 +322,7 @@ mod tests {
         // Test the identifier finding first
         {
             let content = std::fs::read_to_string(file1_path.clone()).unwrap();
-            let analyzer = crate::analyzer_prism::RubyPrismAnalyzer::new(content.to_string());
+            let analyzer = RubyPrismAnalyzer::new(file1_uri.clone(), content.to_string());
             let position = Position {
                 line: 1,
                 character: 6,

@@ -74,7 +74,7 @@ async fn test_goto_definition_class_declaration() {
     // Debug: Try multiple positions to find the right one for "Foo"
     let content = std::fs::read_to_string(fixture_uri(fixture_file).to_file_path().unwrap())
         .expect("Failed to read fixture file");
-    let analyzer = RubyPrismAnalyzer::new(content.to_string());
+    let analyzer = RubyPrismAnalyzer::new(fixture_uri(fixture_file), content.to_string());
 
     // Try multiple positions to find the correct one for "Foo"
     for char_pos in 12..17 {
@@ -211,7 +211,7 @@ async fn test_find_references_method() {
     let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
 
     // Try different positions to find the identifier
-    let analyzer = RubyPrismAnalyzer::new(content.to_string());
+    let analyzer = RubyPrismAnalyzer::new(file_uri.clone(), content.to_string());
 
     // Find position where the 'bar' method is called in line 7
     let pos = Position {

@@ -23,7 +23,7 @@ pub async fn find_references_at_position(
     let content = doc.content.clone();
 
     // Use the analyzer to find the identifier at the position and get its fully qualified name
-    let analyzer = RubyPrismAnalyzer::new(content.to_string());
+    let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
     let (identifier_opt, ancestors) = analyzer.get_identifier(position);
 
     if let None = identifier_opt {

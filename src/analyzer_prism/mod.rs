@@ -59,13 +59,15 @@ impl fmt::Display for Identifier {
 
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {
+    pub uri: Url,
     pub code: String,
     pub namespace_stack: Vec<RubyConstant>,
 }
 
 impl RubyPrismAnalyzer {
-    pub fn new(code: String) -> Self {
+    pub fn new(uri: Url, code: String) -> Self {
         Self {
+            uri,
             code,
             namespace_stack: Vec::new(),
         }
@@ -79,8 +81,7 @@ impl RubyPrismAnalyzer {
     pub fn get_identifier(&self, position: Position) -> (Option<Identifier>, Vec<RubyConstant>) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
-        let uri = Url::parse("file:///dummy.rb").unwrap();
-        let document = RubyDocument::new(uri, self.code.clone(), 0);
+        let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
         let mut visitor = IdentifierVisitor::new(document, position);
         let root_node = parse_result.node();
         visitor.visit(&root_node);
@@ -94,7 +95,7 @@ mod tests {
 
     // Helper function to parse content and create an analyzer
     fn create_analyzer(content: &str) -> RubyPrismAnalyzer {
-        RubyPrismAnalyzer::new(content.to_string())
+        RubyPrismAnalyzer::new(Url::parse("file:///dummy.rb").unwrap(), content.to_string())
     }
 
     #[test]

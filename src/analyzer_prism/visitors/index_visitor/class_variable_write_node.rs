@@ -1,5 +1,8 @@
 use log::{debug, error};
-use ruby_prism::ClassVariableWriteNode;
+use ruby_prism::{
+    ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
+    ClassVariableTargetNode, ClassVariableWriteNode,
+};
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
@@ -10,16 +13,14 @@ use crate::types::{
 use super::IndexVisitor;
 
 impl IndexVisitor {
-    pub fn process_class_variable_write_node_entry(&mut self, node: &ClassVariableWriteNode) {
-        // Extract the variable name from the node
-        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        debug!("Visiting class variable write node: {}", variable_name);
+    fn process_class_variable_write(&mut self, name: &[u8], name_loc: ruby_prism::Location) {
+        let variable_name = String::from_utf8_lossy(name).to_string();
+        debug!("Processing class variable: {}", variable_name);
 
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
 
         match var {
             Ok(variable) => {
-                // Create a fully qualified name for the variable
                 // Class variables are associated with the class/module, not with methods
                 let fqn = FullyQualifiedName::variable(
                     self.namespace_stack.clone(),
@@ -31,13 +32,12 @@ impl IndexVisitor {
 
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
-                    .location(self.prism_loc_to_lsp_loc(node.name_loc()))
+                    .location(self.prism_loc_to_lsp_loc(name_loc))
                     .kind(EntryKind::Variable {
                         name: variable.clone(),
                     })
                     .build();
 
-                // Add the entry to the index
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock().unwrap();
                     index.add_entry(entry);
@@ -52,7 +52,60 @@ impl IndexVisitor {
         }
     }
 
+    // ClassVariableWriteNode
+    pub fn process_class_variable_write_node_entry(&mut self, node: &ClassVariableWriteNode) {
+        self.process_class_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
     pub fn process_class_variable_write_node_exit(&mut self, _node: &ClassVariableWriteNode) {
+        // No-op for now
+    }
+
+    // ClassVariableTargetNode
+    pub fn process_class_variable_target_node_entry(&mut self, node: &ClassVariableTargetNode) {
+        self.process_class_variable_write(node.name().as_slice(), node.location());
+    }
+
+    pub fn process_class_variable_target_node_exit(&mut self, _node: &ClassVariableTargetNode) {
+        // No-op for now
+    }
+
+    // ClassVariableOrWriteNode
+    pub fn process_class_variable_or_write_node_entry(&mut self, node: &ClassVariableOrWriteNode) {
+        self.process_class_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_class_variable_or_write_node_exit(&mut self, _node: &ClassVariableOrWriteNode) {
+        // No-op for now
+    }
+
+    // ClassVariableAndWriteNode
+    pub fn process_class_variable_and_write_node_entry(
+        &mut self,
+        node: &ClassVariableAndWriteNode,
+    ) {
+        self.process_class_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_class_variable_and_write_node_exit(
+        &mut self,
+        _node: &ClassVariableAndWriteNode,
+    ) {
+        // No-op for now
+    }
+
+    // ClassVariableOperatorWriteNode
+    pub fn process_class_variable_operator_write_node_entry(
+        &mut self,
+        node: &ClassVariableOperatorWriteNode,
+    ) {
+        self.process_class_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_class_variable_operator_write_node_exit(
+        &mut self,
+        _node: &ClassVariableOperatorWriteNode,
+    ) {
         // No-op for now
     }
 }

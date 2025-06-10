@@ -13,11 +13,11 @@ use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 /// Multiple definitions can be returned when a symbol is defined in multiple places.
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
-    _uri: Url,
+    uri: Url,
     position: Position,
     content: &str,
 ) -> Option<Vec<Location>> {
-    let analyzer = RubyPrismAnalyzer::new(content.to_string());
+    let analyzer = RubyPrismAnalyzer::new(uri, content.to_string());
 
     let (identifier, ancestors) = analyzer.get_identifier(position);
 

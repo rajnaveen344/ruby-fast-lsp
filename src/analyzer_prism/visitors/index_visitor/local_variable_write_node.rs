@@ -1,5 +1,8 @@
 use log::{debug, error};
-use ruby_prism::LocalVariableWriteNode;
+use ruby_prism::{
+    LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
+    LocalVariableTargetNode, LocalVariableWriteNode, Location,
+};
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
@@ -10,36 +13,33 @@ use crate::types::{
 use super::IndexVisitor;
 
 impl IndexVisitor {
-    pub fn process_local_variable_write_node_entry(&mut self, node: &LocalVariableWriteNode) {
-        // Extract the variable name from the node
-        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        debug!("Visiting local variable write node: {}", variable_name);
+    fn process_local_variable_write(&mut self, name: &[u8], name_loc: Location) {
+        let variable_name = String::from_utf8_lossy(name).to_string();
+        debug!("Processing local variable: {}", variable_name);
 
         let var = RubyVariable::new(
             &variable_name,
             RubyVariableType::Local(self.uri.clone(), self.scope_stack.clone()),
         );
 
-        debug!("Adding local variable entry: {:?}", var.clone().unwrap());
         match var {
             Ok(variable) => {
-                // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(
                     self.namespace_stack.clone(),
                     self.current_method.clone(),
                     variable.clone(),
                 );
 
-                // Create an entry with EntryKind::Variable
+                debug!("Adding local variable entry: {:?}", fqn);
+
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
-                    .location(self.prism_loc_to_lsp_loc(node.name_loc()))
+                    .location(self.prism_loc_to_lsp_loc(name_loc))
                     .kind(EntryKind::Variable {
                         name: variable.clone(),
                     })
                     .build();
 
-                // Add the entry to the index
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock().unwrap();
                     index.add_entry(entry);
@@ -54,7 +54,60 @@ impl IndexVisitor {
         }
     }
 
+    // LocalVariableWriteNode
+    pub fn process_local_variable_write_node_entry(&mut self, node: &LocalVariableWriteNode) {
+        self.process_local_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
     pub fn process_local_variable_write_node_exit(&mut self, _node: &LocalVariableWriteNode) {
+        // No-op for now
+    }
+
+    // LocalVariableTargetNode
+    pub fn process_local_variable_target_node_entry(&mut self, node: &LocalVariableTargetNode) {
+        self.process_local_variable_write(node.name().as_slice(), node.location());
+    }
+
+    pub fn process_local_variable_target_node_exit(&mut self, _node: &LocalVariableTargetNode) {
+        // No-op for now
+    }
+
+    // LocalVariableOrWriteNode
+    pub fn process_local_variable_or_write_node_entry(&mut self, node: &LocalVariableOrWriteNode) {
+        self.process_local_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_local_variable_or_write_node_exit(&mut self, _node: &LocalVariableOrWriteNode) {
+        // No-op for now
+    }
+
+    // LocalVariableAndWriteNode
+    pub fn process_local_variable_and_write_node_entry(
+        &mut self,
+        node: &LocalVariableAndWriteNode,
+    ) {
+        self.process_local_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_local_variable_and_write_node_exit(
+        &mut self,
+        _node: &LocalVariableAndWriteNode,
+    ) {
+        // No-op for now
+    }
+
+    // LocalVariableOperatorWriteNode
+    pub fn process_local_variable_operator_write_node_entry(
+        &mut self,
+        node: &LocalVariableOperatorWriteNode,
+    ) {
+        self.process_local_variable_write(node.name().as_slice(), node.name_loc());
+    }
+
+    pub fn process_local_variable_operator_write_node_exit(
+        &mut self,
+        _node: &LocalVariableOperatorWriteNode,
+    ) {
         // No-op for now
     }
 }
