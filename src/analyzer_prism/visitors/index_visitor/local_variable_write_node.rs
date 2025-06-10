@@ -17,7 +17,7 @@ impl IndexVisitor {
 
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.scope_stack.clone()),
+            RubyVariableType::Local(self.uri.clone(), self.scope_stack.clone()),
         );
 
         debug!("Adding local variable entry: {:?}", var.clone().unwrap());
@@ -25,7 +25,6 @@ impl IndexVisitor {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(
-                    self.uri.clone(),
                     self.namespace_stack.clone(),
                     self.current_method.clone(),
                     variable.clone(),

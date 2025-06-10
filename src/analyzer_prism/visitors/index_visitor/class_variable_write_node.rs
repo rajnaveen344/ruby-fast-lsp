@@ -22,7 +22,6 @@ impl IndexVisitor {
                 // Create a fully qualified name for the variable
                 // Class variables are associated with the class/module, not with methods
                 let fqn = FullyQualifiedName::variable(
-                    self.uri.clone(),
                     self.namespace_stack.clone(),
                     None, // No method context for class variables
                     variable.clone(),

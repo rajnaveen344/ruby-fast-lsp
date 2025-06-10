@@ -22,7 +22,6 @@ impl IndexVisitor {
                 // Create a fully qualified name for the global variable
                 // Global variables are not associated with any namespace or method
                 let fqn = FullyQualifiedName::variable(
-                    self.uri.clone(),
                     vec![], // No namespace for globals
                     None,   // No method context for globals
                     variable.clone(),
@@ -44,7 +43,10 @@ impl IndexVisitor {
                     index.add_entry(entry);
                     debug!("Added global variable entry: {:?}", variable);
                 } else {
-                    error!("Error creating entry for global variable: {}", variable_name);
+                    error!(
+                        "Error creating entry for global variable: {}",
+                        variable_name
+                    );
                 }
             }
             Err(err) => {
@@ -52,7 +54,6 @@ impl IndexVisitor {
             }
         }
     }
-
 
     pub fn process_global_variable_write_node_exit(&mut self, _node: &GlobalVariableWriteNode) {
         // No-op for now

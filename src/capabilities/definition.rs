@@ -13,7 +13,7 @@ use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 /// Multiple definitions can be returned when a symbol is defined in multiple places.
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
-    uri: Url,
+    _uri: Url,
     position: Position,
     content: &str,
 ) -> Option<Vec<Location>> {
@@ -107,14 +107,13 @@ pub async fn find_definition_at_position(
             let var_type = variable.variable_type();
 
             match var_type {
-                RubyVariableType::Local(scope_stack) => {
+                RubyVariableType::Local(uri, scope_stack) => {
                     // Handle local variables with scope
                     let mut scope_stack = scope_stack.clone();
                     while !scope_stack.is_empty() {
-                        let var_type = RubyVariableType::Local(scope_stack.clone());
+                        let var_type = RubyVariableType::Local(uri.clone(), scope_stack.clone());
                         if let Ok(var) = RubyVariable::new(&var_name, var_type) {
                             let fqn = FullyQualifiedName::variable(
-                                uri.clone(),
                                 ancestors.clone(),
                                 method.clone(),
                                 var,
@@ -135,14 +134,10 @@ pub async fn find_definition_at_position(
                     }
 
                     // Check top-level scope for local variables
-                    let var_type = RubyVariableType::Local(Vec::new());
+                    let var_type = RubyVariableType::Local(uri.clone(), Vec::new());
                     if let Ok(var) = RubyVariable::new(&var_name, var_type) {
-                        let fqn = FullyQualifiedName::variable(
-                            uri.clone(),
-                            ancestors.clone(),
-                            method.clone(),
-                            var,
-                        );
+                        let fqn =
+                            FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
                         debug!("Looking for local variable in top level: {:?}", fqn);
                         if let Some(entries) = index.definitions.get(&fqn.into()) {
                             found_locations.extend(entries.iter().map(|e| e.location.clone()));
@@ -152,7 +147,6 @@ pub async fn find_definition_at_position(
                 RubyVariableType::Instance => {
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Instance) {
                         let fqn = FullyQualifiedName::variable(
-                            uri.clone(),
                             ancestors.clone(),
                             None, // No method context for instance variables
                             var,
@@ -167,7 +161,6 @@ pub async fn find_definition_at_position(
                     // For class variables, we only need to check the class/module scope
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Class) {
                         let fqn = FullyQualifiedName::variable(
-                            uri.clone(),
                             ancestors.clone(),
                             None, // No method context for class variables
                             var,
@@ -181,7 +174,6 @@ pub async fn find_definition_at_position(
                 RubyVariableType::Global => {
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Global) {
                         let fqn = FullyQualifiedName::variable(
-                            uri.clone(),
                             vec![], // No namespace for globals
                             None,   // No method context for globals
                             var,

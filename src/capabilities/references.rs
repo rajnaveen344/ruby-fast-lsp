@@ -51,12 +51,7 @@ pub async fn find_references_at_position(
         }
         Identifier::RubyVariable(method, variable) => {
             // For variables, use ancestors as the namespace
-            fqn = FullyQualifiedName::variable(
-                uri.clone(),
-                ancestors.clone(),
-                method.clone(),
-                variable.clone(),
-            );
+            fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), variable.clone());
         }
     }
 
