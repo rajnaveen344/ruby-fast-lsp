@@ -59,6 +59,7 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         uri.clone(),
         RubyDocument::new(uri.clone(), content.clone(), params.text_document.version),
     );
+    debug!("Doc cache size: {}", lang_server.docs.lock().unwrap().len());
 
     let _ = process_file_for_definitions(lang_server, uri.clone());
     let _ = process_file_for_references(lang_server, uri.clone());
@@ -86,8 +87,8 @@ pub async fn handle_did_close(
     params: DidCloseTextDocumentParams,
 ) {
     let uri = params.text_document.uri.clone();
-    let _ = process_file_for_definitions(lang_server, uri.clone());
-    let _ = process_file_for_references(lang_server, uri.clone());
+    lang_server.docs.lock().unwrap().remove(&uri);
+    debug!("Doc cache size: {}", lang_server.docs.lock().unwrap().len());
 }
 
 pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {

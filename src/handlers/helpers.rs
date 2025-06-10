@@ -9,6 +9,7 @@ use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Semaphore;
@@ -79,8 +80,7 @@ pub async fn process_files_parallel(
 
     let setup_start = Instant::now();
 
-    // Get the number of logical cores for optimal parallelism
-    let num_cores = std::thread::available_parallelism()
+    let num_cores = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::new(4).unwrap())
         .get();
 
@@ -89,29 +89,22 @@ pub async fn process_files_parallel(
     let max_concurrent = std::cmp::max(1, num_cores * 3 / 4);
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-    // Clone the server for use in async tasks
     let server_clone = server.clone();
     let setup_duration = setup_start.elapsed();
 
-    // Create a set to track all spawned tasks
     let mut tasks = JoinSet::new();
 
-    // Spawn tasks for each file
     let spawn_start = Instant::now();
     let files_count = files.len();
     for file_path in files {
         let semaphore_clone = semaphore.clone();
         let file_path_clone = file_path.clone();
 
-        // Clone server for this task
         let server_task = server_clone.clone();
 
-        // Spawn a task for each file
         tasks.spawn(async move {
-            // Acquire a permit from the semaphore
             let _permit = semaphore_clone.acquire().await.unwrap();
 
-            // Read the file content
             let content = match fs::read_to_string(&file_path_clone).await {
                 Ok(content) => content,
                 Err(e) => {
@@ -120,7 +113,6 @@ pub async fn process_files_parallel(
                 }
             };
 
-            // Create a file URI
             let uri = match Url::from_file_path(&file_path_clone) {
                 Ok(uri) => uri,
                 Err(_) => {
@@ -128,7 +120,6 @@ pub async fn process_files_parallel(
                 }
             };
 
-            // Create or update document in the docs HashMap
             let document = RubyDocument::new(uri.clone(), content, 0);
             server_task
                 .docs
@@ -136,8 +127,7 @@ pub async fn process_files_parallel(
                 .unwrap()
                 .insert(uri.clone(), document);
 
-            // Process the file based on the mode
-            match mode {
+            let result = match mode {
                 ProcessingMode::Definitions => {
                     process_file_for_definitions(&server_task, uri.clone()).map_err(|e| {
                         anyhow::anyhow!("Failed to index file {}: {}", file_path_clone.display(), e)
@@ -152,7 +142,11 @@ pub async fn process_files_parallel(
                         )
                     })
                 }
-            }
+            };
+
+            server_task.docs.lock().unwrap().remove(&uri);
+
+            result
         });
     }
     let spawn_duration = spawn_start.elapsed();
@@ -259,8 +253,12 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
 /// Process a file for references after indexing is complete
 pub fn process_file_for_references(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
     // Remove any existing references for this URI
-    server.index().lock().unwrap().remove_references_for_uri(&uri);
-    
+    server
+        .index()
+        .lock()
+        .unwrap()
+        .remove_references_for_uri(&uri);
+
     // Get the document from the server's docs HashMap
     let document = match server.docs.lock().unwrap().get(&uri) {
         Some(doc) => doc.clone(),
