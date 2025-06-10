@@ -2,10 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use lsp_types::{Location as LspLocation, Url};
 use ruby_prism::{
-    visit_block_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_local_variable_write_node, visit_module_node, visit_parameters_node,
-    BlockNode, ClassNode, ConstantPathWriteNode, ConstantWriteNode, DefNode,
-    LocalVariableWriteNode, ModuleNode, Visit,
+    visit_block_node, visit_class_node, visit_class_variable_write_node,
+    visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
+    visit_global_variable_write_node, visit_instance_variable_write_node,
+    visit_local_variable_write_node, visit_module_node, visit_parameters_node, BlockNode, ClassNode,
+    ClassVariableWriteNode, ConstantPathWriteNode, ConstantWriteNode, DefNode, GlobalVariableWriteNode,
+    InstanceVariableWriteNode, LocalVariableWriteNode, ModuleNode, Visit,
 };
 
 use crate::indexer::index::RubyIndex;
@@ -17,9 +19,12 @@ use crate::types::{
 
 mod block_node;
 mod class_node;
+mod class_variable_write_node;
+mod global_variable_write_node;
 mod constant_path_write_node;
 mod constant_write_node;
 mod def_node;
+mod instance_variable_write_node;
 mod local_variable_write_node;
 mod module_node;
 mod parameters_node;
@@ -121,5 +126,23 @@ impl Visit<'_> for IndexVisitor {
         self.process_parameters_node_entry(node);
         visit_parameters_node(self, node);
         self.process_parameters_node_exit(node);
+    }
+
+    fn visit_class_variable_write_node(&mut self, node: &ClassVariableWriteNode) {
+        self.process_class_variable_write_node_entry(node);
+        visit_class_variable_write_node(self, node);
+        self.process_class_variable_write_node_exit(node);
+    }
+
+    fn visit_instance_variable_write_node(&mut self, node: &InstanceVariableWriteNode) {
+        self.process_instance_variable_write_node_entry(node);
+        visit_instance_variable_write_node(self, node);
+        self.process_instance_variable_write_node_exit(node);
+    }
+
+    fn visit_global_variable_write_node(&mut self, node: &GlobalVariableWriteNode) {
+        self.process_global_variable_write_node_entry(node);
+        visit_global_variable_write_node(self, node);
+        self.process_global_variable_write_node_exit(node);
     }
 }

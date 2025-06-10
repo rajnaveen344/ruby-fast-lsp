@@ -16,7 +16,6 @@ pub enum RubyVariableType {
 
 impl RubyVariable {
     pub fn new(name: &str, variable_type: RubyVariableType) -> Result<Self, &'static str> {
-        // Validate the variable name based on its type
         match variable_type {
             RubyVariableType::Local(_) => validate_local_variable(name)?,
             RubyVariableType::Instance => validate_instance_variable(name)?,
@@ -24,33 +23,7 @@ impl RubyVariable {
             RubyVariableType::Global => validate_global_variable(name)?,
         };
 
-        // Store the name without prefixes to avoid doubling them in Display
-        let clean_name = match variable_type {
-            RubyVariableType::Local(_) => name.to_string(),
-            RubyVariableType::Instance => {
-                if name.starts_with('@') {
-                    name[1..].to_string()
-                } else {
-                    name.to_string()
-                }
-            }
-            RubyVariableType::Class => {
-                if name.starts_with("@@") {
-                    name[2..].to_string()
-                } else {
-                    name.to_string()
-                }
-            }
-            RubyVariableType::Global => {
-                if name.starts_with('$') {
-                    name[1..].to_string()
-                } else {
-                    name.to_string()
-                }
-            }
-        };
-
-        Ok(RubyVariable(clean_name, variable_type))
+        Ok(RubyVariable(name.to_string(), variable_type))
     }
 
     pub fn name(&self) -> &String {
@@ -189,10 +162,10 @@ impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
 impl fmt::Display for RubyVariable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variable_type() {
-            RubyVariableType::Local(_) => write!(f, "!{}", self.0),
-            RubyVariableType::Instance => write!(f, "@{}", self.0),
-            RubyVariableType::Class => write!(f, "@@{}", self.0),
-            RubyVariableType::Global => write!(f, "${}", self.0),
+            RubyVariableType::Local(_) => write!(f, "{}", self.0),
+            RubyVariableType::Instance => write!(f, "{}", self.0),
+            RubyVariableType::Class => write!(f, "{}", self.0),
+            RubyVariableType::Global => write!(f, "{}", self.0),
         }
     }
 }
@@ -324,19 +297,15 @@ mod tests {
 
     #[test]
     fn test_display() {
-        // For local variables, the prefix is added by Display
         let var = RubyVariable::new("foo", RubyVariableType::Local(Vec::new())).unwrap();
-        assert_eq!(var.to_string(), "!foo - depth: 0, kind: Method, scopes: []");
+        assert_eq!(var.to_string(), "foo");
 
-        // For instance variables, the @ is stripped in try_new and added back in Display
         let var = RubyVariable::new("@bar", RubyVariableType::Instance).unwrap();
         assert_eq!(var.to_string(), "@bar");
 
-        // For class variables, the @@ is stripped in try_new and added back in Display
         let var = RubyVariable::new("@@baz", RubyVariableType::Class).unwrap();
         assert_eq!(var.to_string(), "@@baz");
 
-        // For global variables, the $ is stripped in try_new and added back in Display
         let var = RubyVariable::new("$qux", RubyVariableType::Global).unwrap();
         assert_eq!(var.to_string(), "$qux");
     }

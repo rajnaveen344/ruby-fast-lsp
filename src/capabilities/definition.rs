@@ -103,48 +103,94 @@ pub async fn find_definition_at_position(
         }
         Identifier::RubyVariable(method, variable) => {
             let mut found_locations = Vec::new();
+            let var_name = variable.name().clone();
+            let var_type = variable.variable_type();
 
-            let scope_stack = variable.variable_type();
+            match var_type {
+                RubyVariableType::Local(scope_stack) => {
+                    // Handle local variables with scope
+                    let mut scope_stack = scope_stack.clone();
+                    while !scope_stack.is_empty() {
+                        let var_type = RubyVariableType::Local(scope_stack.clone());
+                        if let Ok(var) = RubyVariable::new(&var_name, var_type) {
+                            let fqn = FullyQualifiedName::variable(
+                                uri.clone(),
+                                ancestors.clone(),
+                                method.clone(),
+                                var,
+                            );
+                            debug!(
+                                "Looking for local variable definition with scope: {:?}",
+                                fqn
+                            );
+                            if let Some(entries) = index.definitions.get(&fqn.into()) {
+                                found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                            }
+                        }
 
-            let mut scope_stack = match scope_stack {
-                RubyVariableType::Local(scope_stack) => scope_stack.clone(),
-                _ => Vec::new(),
-            };
+                        if !found_locations.is_empty() {
+                            return Some(found_locations);
+                        }
+                        scope_stack.pop();
+                    }
 
-            while !scope_stack.is_empty() {
-                let var_type = RubyVariableType::Local(scope_stack.clone());
-                if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                    let fqn = FullyQualifiedName::variable(
-                        uri.clone(),
-                        ancestors.clone(),
-                        method.clone(),
-                        var,
-                    );
-                    debug!("Looking for variable definition with scope: {:?}", fqn);
-                    if let Some(entries) = index.definitions.get(&fqn.into()) {
-                        found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                    // Check top-level scope for local variables
+                    let var_type = RubyVariableType::Local(Vec::new());
+                    if let Ok(var) = RubyVariable::new(&var_name, var_type) {
+                        let fqn = FullyQualifiedName::variable(
+                            uri.clone(),
+                            ancestors.clone(),
+                            method.clone(),
+                            var,
+                        );
+                        debug!("Looking for local variable in top level: {:?}", fqn);
+                        if let Some(entries) = index.definitions.get(&fqn.into()) {
+                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                        }
                     }
                 }
-
-                if !found_locations.is_empty() {
-                    return Some(found_locations);
+                RubyVariableType::Instance => {
+                    if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Instance) {
+                        let fqn = FullyQualifiedName::variable(
+                            uri.clone(),
+                            ancestors.clone(),
+                            None, // No method context for instance variables
+                            var,
+                        );
+                        debug!("Looking for instance variable definition: {:?}", fqn);
+                        if let Some(entries) = index.definitions.get(&fqn.into()) {
+                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                        }
+                    }
                 }
-
-                scope_stack.pop();
-            }
-
-            // Finally check top-level scope
-            let var_type = RubyVariableType::Local(Vec::new());
-            if let Ok(var) = RubyVariable::new(variable.name(), var_type) {
-                let fqn = FullyQualifiedName::variable(
-                    uri.clone(),
-                    ancestors.clone(),
-                    method.clone(),
-                    var,
-                );
-                debug!("Looking for variable definition in top level: {:?}", fqn);
-                if let Some(entries) = index.definitions.get(&fqn.into()) {
-                    found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                RubyVariableType::Class => {
+                    // For class variables, we only need to check the class/module scope
+                    if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Class) {
+                        let fqn = FullyQualifiedName::variable(
+                            uri.clone(),
+                            ancestors.clone(),
+                            None, // No method context for class variables
+                            var,
+                        );
+                        debug!("Looking for class variable definition: {:?}", fqn);
+                        if let Some(entries) = index.definitions.get(&fqn.into()) {
+                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                        }
+                    }
+                }
+                RubyVariableType::Global => {
+                    if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Global) {
+                        let fqn = FullyQualifiedName::variable(
+                            uri.clone(),
+                            vec![], // No namespace for globals
+                            None,   // No method context for globals
+                            var,
+                        );
+                        debug!("Looking for global variable definition: {:?}", fqn);
+                        if let Some(entries) = index.definitions.get(&fqn.into()) {
+                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                        }
+                    }
                 }
             }
 
