@@ -123,10 +123,37 @@ pub async fn find_definition_at_position(
                                 fqn
                             );
                             if let Some(entries) = index.definitions.get(&fqn.into()) {
-                                found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                                // Filter entries that are before the cursor position
+                                let mut valid_entries: Vec<_> = entries
+                                    .iter()
+                                    .filter(|e| e.location.range.start < position)
+                                    .collect();
+
+                                // Sort by position in reverse (latest first)
+                                valid_entries.sort_by(|a, b| {
+                                    b.location
+                                        .range
+                                        .start
+                                        .line
+                                        .cmp(&a.location.range.start.line)
+                                        .then_with(|| {
+                                            b.location
+                                                .range
+                                                .start
+                                                .character
+                                                .cmp(&a.location.range.start.character)
+                                        })
+                                });
+
+                                // Take the latest entry if any
+                                if let Some(latest_entry) = valid_entries.first() {
+                                    found_locations.push(latest_entry.location.clone());
+                                    return Some(found_locations);
+                                }
                             }
                         }
 
+                        // If we found a definition in this scope, return it
                         if !found_locations.is_empty() {
                             return Some(found_locations);
                         }
@@ -140,7 +167,32 @@ pub async fn find_definition_at_position(
                             FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);
                         debug!("Looking for local variable in top level: {:?}", fqn);
                         if let Some(entries) = index.definitions.get(&fqn.into()) {
-                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+                            // Filter entries that are before the cursor position
+                            let mut valid_entries: Vec<_> = entries
+                                .iter()
+                                .filter(|e| e.location.range.start < position)
+                                .collect();
+
+                            // Sort by position in reverse (latest first)
+                            valid_entries.sort_by(|a, b| {
+                                b.location
+                                    .range
+                                    .start
+                                    .line
+                                    .cmp(&a.location.range.start.line)
+                                    .then_with(|| {
+                                        b.location
+                                            .range
+                                            .start
+                                            .character
+                                            .cmp(&a.location.range.start.character)
+                                    })
+                            });
+
+                            // Take the latest entry if any
+                            if let Some(latest_entry) = valid_entries.first() {
+                                found_locations.push(latest_entry.location.clone());
+                            }
                         }
                     }
                 }
