@@ -1,6 +1,7 @@
 use log::{debug, error};
 use ruby_prism::ClassNode;
 
+use crate::analyzer_prism::utils;
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::scope_kind::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
@@ -25,7 +26,8 @@ impl IndexVisitor {
         let const_path = node.constant_path();
         let fqn = if let Some(path_node) = const_path.as_constant_path_node() {
             // Extract namespace parts from the constant path
-            let namespace_parts = self.extract_namespace_parts(&path_node);
+            let mut namespace_parts = Vec::new();
+            utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts.clone());
             self.push_lv_scope(LVScopeKind::Constant);
             FullyQualifiedName::namespace(self.namespace_stack.clone())

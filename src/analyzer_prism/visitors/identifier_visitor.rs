@@ -1,3 +1,4 @@
+use crate::analyzer_prism::utils;
 use crate::analyzer_prism::Identifier;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
@@ -66,24 +67,6 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
-    fn collect_namespaces_recursive(&self, node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) {
-        let name = String::from_utf8_lossy(node.name().unwrap().as_slice());
-
-        if let Some(parent) = node.parent() {
-            if let Some(parent_const) = parent.as_constant_path_node() {
-                self.collect_namespaces_recursive(&parent_const, acc);
-            }
-
-            if let Some(parent_const_read) = parent.as_constant_read_node() {
-                let parent_name =
-                    String::from_utf8_lossy(parent_const_read.name().as_slice()).to_string();
-                acc.push(RubyConstant::new(&parent_name).unwrap());
-            }
-        }
-
-        acc.push(RubyConstant::new(&name.to_string()).unwrap());
-    }
-
     fn push_ns_scope(&mut self, namespace: RubyConstant) {
         self.namespace_stack.push(vec![namespace]);
     }
@@ -118,7 +101,7 @@ impl Visit<'_> for IdentifierVisitor {
             // Handle constant path node for class definition
             if let Some(constant_path_node) = constant_path.as_constant_path_node() {
                 let mut namespaces = Vec::new();
-                self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+                utils::collect_namespaces(&constant_path_node, &mut namespaces);
                 self.identifier = Some(Identifier::RubyConstant(namespaces));
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
@@ -134,7 +117,7 @@ impl Visit<'_> for IdentifierVisitor {
         // Add the class name to the namespace stack
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
-            self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+            utils::collect_namespaces(&constant_path_node, &mut namespaces);
             self.push_ns_scopes(namespaces);
             self.push_lv_scope(LVScopeKind::Constant);
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
@@ -164,7 +147,7 @@ impl Visit<'_> for IdentifierVisitor {
             // Handle constant path node for module definition
             if let Some(constant_path_node) = constant_path.as_constant_path_node() {
                 let mut namespaces = Vec::new();
-                self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+                utils::collect_namespaces(&constant_path_node, &mut namespaces);
                 self.identifier = Some(Identifier::RubyConstant(namespaces));
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
@@ -180,7 +163,7 @@ impl Visit<'_> for IdentifierVisitor {
         // Add the module name to the namespace stack
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
-            self.collect_namespaces_recursive(&constant_path_node, &mut namespaces);
+            utils::collect_namespaces(&constant_path_node, &mut namespaces);
             self.push_ns_scopes(namespaces);
             self.push_lv_scope(LVScopeKind::Constant);
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
@@ -269,7 +252,7 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         let mut namespaces = vec![];
-        self.collect_namespaces_recursive(node, &mut namespaces);
+        utils::collect_namespaces(node, &mut namespaces);
 
         // Check if first two char are ::
         let code = self.document.content.as_bytes();
@@ -346,7 +329,7 @@ impl Visit<'_> for IdentifierVisitor {
                 // Foo::Bar is ConstantPathNode, Foo is ConstantReadNode, baz is CallNode
                 if let Some(constant_path) = receiver.as_constant_path_node() {
                     let mut namespaces = vec![];
-                    self.collect_namespaces_recursive(&constant_path, &mut namespaces);
+                    utils::collect_namespaces(&constant_path, &mut namespaces);
                     namespace = namespaces;
                 }
 
