@@ -79,12 +79,14 @@ impl Visit<'_> for ReferenceVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
+            self.push_lv_scope(LVScopeKind::Constant);
             visit_module_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            self.push_lv_scope(LVScopeKind::Constant);
             visit_module_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
@@ -98,12 +100,14 @@ impl Visit<'_> for ReferenceVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
+            self.push_lv_scope(LVScopeKind::Constant);
             visit_class_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            self.push_lv_scope(LVScopeKind::Constant);
             visit_class_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
@@ -112,7 +116,13 @@ impl Visit<'_> for ReferenceVisitor {
 
     fn visit_def_node(&mut self, node: &DefNode) {
         self.push_lv_scope(LVScopeKind::Method);
+
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let method = RubyMethod::from(name);
+        self.current_method = Some(method);
         visit_def_node(self, node);
+        self.current_method = None;
+
         self.pop_lv_scope();
     }
 
@@ -246,7 +256,10 @@ impl Visit<'_> for ReferenceVisitor {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
-            debug!("Adding local variable reference: {} at {:?}", fqn, location);
+            debug!(
+                "Adding local variable reference: {:?} at {:?}",
+                fqn, location
+            );
             index.add_reference(fqn, location);
         }
 

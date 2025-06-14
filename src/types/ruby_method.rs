@@ -109,45 +109,45 @@ mod tests {
         let method = RubyMethod::try_from("");
         assert!(method.is_err());
     }
-    
+
     #[test]
     fn test_method_with_question_mark() {
         let method = RubyMethod::try_from("empty?");
         assert_eq!(method.unwrap().to_string(), "empty?");
     }
-    
+
     #[test]
     fn test_method_with_exclamation_mark() {
         let method = RubyMethod::try_from("save!");
         assert_eq!(method.unwrap().to_string(), "save!");
     }
-    
+
     #[test]
     fn test_method_with_equals() {
         let method = RubyMethod::try_from("name=");
         assert_eq!(method.unwrap().to_string(), "name=");
     }
-    
+
     #[test]
     fn test_invalid_suffix_only() {
         let method = RubyMethod::try_from("?");
         assert!(method.is_err());
-        
+
         let method = RubyMethod::try_from("!");
         assert!(method.is_err());
-        
+
         let method = RubyMethod::try_from("=");
         assert!(method.is_err());
     }
-    
+
     #[test]
     fn test_invalid_with_suffix() {
         let method = RubyMethod::try_from("Invalid?");
         assert!(method.is_err());
-        
+
         let method = RubyMethod::try_from("Invalid!");
         assert!(method.is_err());
-        
+
         let method = RubyMethod::try_from("Invalid=");
         assert!(method.is_err());
     }
