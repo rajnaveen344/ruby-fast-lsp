@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::Identifier;
@@ -55,21 +55,20 @@ pub async fn find_references_at_position(
         }
     }
 
-    info!("Looking for references to: {}", fqn);
+    debug!("Looking for references to: {:?}", fqn);
 
     let index = server.index.lock().unwrap();
 
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
-            // Filter out references that appear before the current position
-            let filtered_entries: Vec<Location> = entries
-                .iter()
-                .filter(|loc| {
-                    // Only include references that are after the current position
-                    loc.uri == *uri && loc.range.start >= position
-                })
-                .cloned()
-                .collect();
+            let filtered_entries: Vec<Location> = match &identifier {
+                Identifier::RubyVariable(_, _) => entries
+                    .iter()
+                    .filter(|loc| loc.uri == *uri && loc.range.start >= position)
+                    .cloned()
+                    .collect(),
+                _ => entries.to_owned(),
+            };
 
             if !filtered_entries.is_empty() {
                 info!("Found {} references to: {}", filtered_entries.len(), fqn);

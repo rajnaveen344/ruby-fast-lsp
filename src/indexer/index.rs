@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::debug;
 use lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, Mixin};
@@ -70,6 +71,8 @@ impl RubyIndex {
     }
 
     pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
+        debug!("Adding reference: {:?}", fully_qualified_name);
+
         self.references
             .entry(fully_qualified_name)
             .or_insert_with(Vec::new)
