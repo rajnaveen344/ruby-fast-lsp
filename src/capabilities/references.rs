@@ -61,8 +61,20 @@ pub async fn find_references_at_position(
 
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
-            info!("Found {} references to: {}", entries.len(), fqn);
-            return Some(entries.clone());
+            // Filter out references that appear before the current position
+            let filtered_entries: Vec<Location> = entries
+                .iter()
+                .filter(|loc| {
+                    // Only include references that are after the current position
+                    loc.uri == *uri && loc.range.start >= position
+                })
+                .cloned()
+                .collect();
+
+            if !filtered_entries.is_empty() {
+                info!("Found {} references to: {}", filtered_entries.len(), fqn);
+                return Some(filtered_entries);
+            }
         }
     }
 

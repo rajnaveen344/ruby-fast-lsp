@@ -7,13 +7,18 @@ use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 use crate::types::scope_kind::LVScopeKind;
 
 use lsp_types::Position;
+use ruby_prism::ParametersNode;
 use ruby_prism::{
     visit_arguments_node, visit_block_node, visit_call_node, visit_class_node,
     visit_class_variable_read_node, visit_constant_path_node, visit_constant_write_node,
     visit_def_node, visit_global_variable_read_node, visit_instance_variable_read_node,
-    visit_local_variable_read_node, visit_module_node, BlockNode, CallNode, ClassNode,
-    ConstantPathNode, ConstantReadNode, DefNode, GlobalVariableReadNode, LocalVariableReadNode,
-    Location, ModuleNode, Visit,
+    visit_local_variable_and_write_node, visit_local_variable_operator_write_node,
+    visit_local_variable_or_write_node, visit_local_variable_read_node,
+    visit_local_variable_target_node, visit_local_variable_write_node, visit_module_node,
+    BlockNode, CallNode, ClassNode, ConstantPathNode, ConstantReadNode, DefNode,
+    GlobalVariableReadNode, LocalVariableAndWriteNode, LocalVariableOperatorWriteNode,
+    LocalVariableOrWriteNode, LocalVariableReadNode, LocalVariableTargetNode,
+    LocalVariableWriteNode, Location, ModuleNode, Visit,
 };
 
 pub enum IdentifierType {
@@ -21,6 +26,7 @@ pub enum IdentifierType {
     ClassDef,
     ConstantDef,
     MethodDef,
+    LVarDef,
     Call,
 }
 
@@ -210,6 +216,90 @@ impl Visit<'_> for IdentifierVisitor {
         self.pop_lv_scope();
     }
 
+    fn visit_parameters_node(&mut self, node: &ParametersNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        // Required parameters
+        let requireds = node.requireds();
+        for required in requireds.iter() {
+            if let Some(param) = required.as_required_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type = RubyVariableType::Local(
+                        self.document.uri.clone(),
+                        self.scope_stack.clone(),
+                    );
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.identifier =
+                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier_type = IdentifierType::LVarDef;
+                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                }
+            }
+        }
+
+        // Optional parameters
+        let optionals = node.optionals();
+        for optional in optionals.iter() {
+            if let Some(param) = optional.as_optional_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type = RubyVariableType::Local(
+                        self.document.uri.clone(),
+                        self.scope_stack.clone(),
+                    );
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.identifier =
+                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier_type = IdentifierType::LVarDef;
+                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                }
+            }
+        }
+
+        // Rest parameters
+        if let Some(rest) = node.rest() {
+            if let Some(param) = rest.as_rest_parameter_node() {
+                if let Some(name) = param.name() {
+                    if self.is_position_in_location(&param.location()) {
+                        let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                        let var_type = RubyVariableType::Local(
+                            self.document.uri.clone(),
+                            self.scope_stack.clone(),
+                        );
+                        let var = RubyVariable::new(&param_name, var_type).unwrap();
+                        self.identifier =
+                            Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                        self.identifier_type = IdentifierType::LVarDef;
+                        self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                    }
+                }
+            }
+        }
+
+        // Post parameters
+        for post in node.posts().iter() {
+            if let Some(param) = post.as_required_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type = RubyVariableType::Local(
+                        self.document.uri.clone(),
+                        self.scope_stack.clone(),
+                    );
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.identifier =
+                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier_type = IdentifierType::LVarDef;
+                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                }
+            }
+        }
+
+        // TODO: keywords, keyword_rest, block
+    }
+
     fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'_>) {
         if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
             return;
@@ -370,6 +460,121 @@ impl Visit<'_> for IdentifierVisitor {
 
         // Continue visiting the node
         visit_local_variable_read_node(self, node);
+    }
+
+    fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+            visit_local_variable_write_node(self, node);
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.document.uri.clone(), self.scope_stack.clone()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier_type = IdentifierType::LVarDef;
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_local_variable_write_node(self, node);
+    }
+
+    fn visit_local_variable_and_write_node(&mut self, node: &LocalVariableAndWriteNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+            visit_local_variable_and_write_node(self, node);
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.document.uri.clone(), self.scope_stack.clone()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier_type = IdentifierType::LVarDef;
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_local_variable_and_write_node(self, node);
+    }
+
+    fn visit_local_variable_or_write_node(&mut self, node: &LocalVariableOrWriteNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+            visit_local_variable_or_write_node(self, node);
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.document.uri.clone(), self.scope_stack.clone()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier_type = IdentifierType::LVarDef;
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_local_variable_or_write_node(self, node);
+    }
+
+    fn visit_local_variable_operator_write_node(&mut self, node: &LocalVariableOperatorWriteNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+            visit_local_variable_operator_write_node(self, node);
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.document.uri.clone(), self.scope_stack.clone()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier_type = IdentifierType::LVarDef;
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_local_variable_operator_write_node(self, node);
+    }
+
+    fn visit_local_variable_target_node(&mut self, node: &LocalVariableTargetNode) {
+        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+            visit_local_variable_target_node(self, node);
+            return;
+        }
+
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let var = RubyVariable::new(
+            &variable_name,
+            RubyVariableType::Local(self.document.uri.clone(), self.scope_stack.clone()),
+        );
+        if let Ok(variable) = var {
+            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.identifier_type = IdentifierType::LVarDef;
+            self.identifier = Some(Identifier::RubyVariable(
+                self.current_method.clone(),
+                variable,
+            ));
+        }
+
+        visit_local_variable_target_node(self, node);
     }
 
     fn visit_class_variable_read_node(&mut self, node: &ruby_prism::ClassVariableReadNode<'_>) {

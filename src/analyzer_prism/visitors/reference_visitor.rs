@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 use log::debug;
 use lsp_types::Url;
 use ruby_prism::{
-    visit_class_node, visit_constant_path_node, visit_constant_read_node, visit_module_node,
-    ClassNode, ConstantPathNode, ModuleNode, Visit,
+    visit_block_node, visit_class_node, visit_constant_path_node, visit_constant_read_node,
+    visit_def_node, visit_local_variable_read_node, visit_module_node, BlockNode, ClassNode,
+    ConstantPathNode, DefNode, LocalVariableReadNode, ModuleNode, Visit,
 };
 
 use crate::{
@@ -12,8 +13,12 @@ use crate::{
     indexer::index::RubyIndex,
     server::RubyLanguageServer,
     types::{
-        fully_qualified_name::FullyQualifiedName, ruby_document::RubyDocument,
-        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+        fully_qualified_name::FullyQualifiedName,
+        ruby_document::RubyDocument,
+        ruby_method::RubyMethod,
+        ruby_namespace::RubyConstant,
+        ruby_variable::{RubyVariable, RubyVariableType},
+        scope_kind::LVScopeKind,
     },
 };
 
@@ -22,6 +27,7 @@ pub struct ReferenceVisitor {
     pub uri: Url,
     pub document: RubyDocument,
     pub namespace_stack: Vec<Vec<RubyConstant>>,
+    pub scope_stack: Vec<LVScopeKind>,
     pub current_method: Option<RubyMethod>,
 }
 
@@ -33,6 +39,7 @@ impl ReferenceVisitor {
             uri,
             document,
             namespace_stack: vec![],
+            scope_stack: vec![],
             current_method: None,
         }
     }
@@ -54,6 +61,14 @@ impl ReferenceVisitor {
     fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
         self.namespace_stack.pop()
     }
+
+    fn push_lv_scope(&mut self, kind: LVScopeKind) {
+        self.scope_stack.push(kind);
+    }
+
+    fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
+        self.scope_stack.pop()
+    }
 }
 
 impl Visit<'_> for ReferenceVisitor {
@@ -66,11 +81,13 @@ impl Visit<'_> for ReferenceVisitor {
             self.push_ns_scopes(namespace_parts);
             visit_module_node(self, node);
             self.pop_ns_scope();
+            self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
             visit_module_node(self, node);
             self.pop_ns_scope();
+            self.pop_lv_scope();
         }
     }
 
@@ -83,12 +100,26 @@ impl Visit<'_> for ReferenceVisitor {
             self.push_ns_scopes(namespace_parts);
             visit_class_node(self, node);
             self.pop_ns_scope();
+            self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
             visit_class_node(self, node);
             self.pop_ns_scope();
+            self.pop_lv_scope();
         }
+    }
+
+    fn visit_def_node(&mut self, node: &DefNode) {
+        self.push_lv_scope(LVScopeKind::Method);
+        visit_def_node(self, node);
+        self.pop_lv_scope();
+    }
+
+    fn visit_block_node(&mut self, node: &BlockNode) {
+        self.push_lv_scope(LVScopeKind::Block);
+        visit_block_node(self, node);
+        self.pop_lv_scope();
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
@@ -193,6 +224,34 @@ impl Visit<'_> for ReferenceVisitor {
         drop(index);
 
         visit_constant_read_node(self, node);
+    }
+
+    fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode) {
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+
+        // Create a variable reference with the current scope
+        let var_type = RubyVariableType::Local(self.uri.clone(), self.scope_stack.clone());
+        let var = RubyVariable::new(&variable_name, var_type);
+
+        if let Ok(variable) = var {
+            // Create a fully qualified name for the variable reference
+            let fqn = FullyQualifiedName::variable(
+                self.current_namespace(),
+                self.current_method.clone(),
+                variable,
+            );
+
+            // Add the reference to the index
+            let mut index = self.index.lock().unwrap();
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            debug!("Adding local variable reference: {} at {:?}", fqn, location);
+            index.add_reference(fqn, location);
+        }
+
+        // Continue visiting the node
+        visit_local_variable_read_node(self, node);
     }
 }
 
