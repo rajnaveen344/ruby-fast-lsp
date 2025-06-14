@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error};
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
@@ -29,8 +29,6 @@ impl IndexVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
 
-            info!("Namespace parts: {:?}", namespace_parts);
-
             self.push_ns_scopes(namespace_parts);
             self.push_lv_scope(LVScopeKind::Constant);
 
@@ -46,7 +44,7 @@ impl IndexVisitor {
             FullyQualifiedName::namespace(current_namespace)
         };
 
-        info!("Adding class entry: {:?}", fqn);
+        debug!("Adding class entry: {:?}", fqn);
 
         let entry = EntryBuilder::new()
             .fqn(fqn)

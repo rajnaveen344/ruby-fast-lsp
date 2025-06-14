@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use log::debug;
 use lsp_types::Url;
 use ruby_prism::{
     visit_class_node, visit_constant_path_node, visit_constant_read_node, visit_module_node,
@@ -7,7 +8,7 @@ use ruby_prism::{
 };
 
 use crate::{
-    analyzer_prism::utils::collect_namespaces,
+    analyzer_prism::utils::{self, collect_namespaces},
     indexer::index::RubyIndex,
     server::RubyLanguageServer,
     types::{
@@ -20,7 +21,7 @@ pub struct ReferenceVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<RubyConstant>,
+    pub namespace_stack: Vec<Vec<RubyConstant>>,
     pub current_method: Option<RubyMethod>,
 }
 
@@ -35,21 +36,59 @@ impl ReferenceVisitor {
             current_method: None,
         }
     }
+
+    fn current_namespace(&self) -> Vec<RubyConstant> {
+        self.namespace_stack.iter().flatten().cloned().collect()
+    }
+
+    fn push_ns_scope(&mut self, namespace: RubyConstant) {
+        self.namespace_stack.push(vec![namespace]);
+    }
+
+    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
+        if !namespaces.is_empty() {
+            self.namespace_stack.push(namespaces);
+        }
+    }
+
+    fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
+        self.namespace_stack.pop()
+    }
 }
 
 impl Visit<'_> for ReferenceVisitor {
     fn visit_module_node(&mut self, node: &ModuleNode) {
-        let name = String::from_utf8_lossy(node.name().as_slice());
-        self.namespace_stack.push(RubyConstant::new(&name).unwrap());
-        visit_module_node(self, node);
-        self.namespace_stack.pop();
+        let const_path = node.constant_path();
+
+        if let Some(path_node) = const_path.as_constant_path_node() {
+            let mut namespace_parts = Vec::new();
+            utils::collect_namespaces(&path_node, &mut namespace_parts);
+            self.push_ns_scopes(namespace_parts);
+            visit_module_node(self, node);
+            self.pop_ns_scope();
+        } else {
+            let name = String::from_utf8_lossy(node.name().as_slice());
+            self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            visit_module_node(self, node);
+            self.pop_ns_scope();
+        }
     }
 
     fn visit_class_node(&mut self, node: &ClassNode) {
-        let name = String::from_utf8_lossy(node.name().as_slice());
-        self.namespace_stack.push(RubyConstant::new(&name).unwrap());
-        visit_class_node(self, node);
-        self.namespace_stack.pop();
+        let const_path = node.constant_path();
+
+        if let Some(path_node) = const_path.as_constant_path_node() {
+            let mut namespace_parts = Vec::new();
+            utils::collect_namespaces(&path_node, &mut namespace_parts);
+            self.push_ns_scopes(namespace_parts);
+            visit_class_node(self, node);
+            self.pop_ns_scope();
+        } else {
+            let name = String::from_utf8_lossy(node.name().as_slice());
+            self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            visit_class_node(self, node);
+            self.pop_ns_scope();
+        }
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
@@ -76,14 +115,15 @@ impl Visit<'_> for ReferenceVisitor {
         // Core::Platform::API::Users
         //
         // If not found, ignore
-        let mut ancestors = self.namespace_stack.clone();
+        let current_namespace = self.current_namespace();
         let mut namespaces = Vec::new();
         collect_namespaces(node, &mut namespaces);
 
         // Check from current namespace to root namespace
+        let mut ancestors = current_namespace;
         while !ancestors.is_empty() {
             let mut combined_ns = ancestors.clone();
-            combined_ns.extend(namespaces.iter().cloned());
+            combined_ns.extend(namespaces.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
             let mut index = self.index.lock().unwrap();
@@ -115,37 +155,41 @@ impl Visit<'_> for ReferenceVisitor {
     }
 
     fn visit_constant_read_node(&mut self, node: &ruby_prism::ConstantReadNode<'_>) {
-        let mut ancestors = self.namespace_stack.clone();
+        let current_namespace = self.current_namespace();
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let namespaces = vec![RubyConstant::new(&name).unwrap()];
+        let constant = RubyConstant::new(&name).unwrap();
 
+        // Check from current namespace to root namespace
+        let mut ancestors = current_namespace;
         while !ancestors.is_empty() {
             let mut combined_ns = ancestors.clone();
-            combined_ns.extend(namespaces.iter().cloned());
+            combined_ns.push(constant.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
             let mut index = self.index.lock().unwrap();
-            let entries = index.definitions.get(&fqn);
-            if let Some(_) = entries {
+            if index.definitions.contains_key(&fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                index.add_reference(fqn.clone(), location);
+                debug!("Adding reference: {}", fqn);
+                index.add_reference(fqn, location);
+                drop(index);
+                break;
             }
-
+            drop(index);
             ancestors.pop();
         }
 
-        let fqn = FullyQualifiedName::namespace(namespaces);
+        // Check in root namespace
+        let fqn = FullyQualifiedName::namespace(vec![constant]);
         let mut index = self.index.lock().unwrap();
-        let entries = index.definitions.get(&fqn);
-        if let Some(_) = entries {
+        if index.definitions.contains_key(&fqn) {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
+            debug!("Adding reference: {}", fqn);
             index.add_reference(fqn, location);
         }
-
         drop(index);
 
         visit_constant_read_node(self, node);

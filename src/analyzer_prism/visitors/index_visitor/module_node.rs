@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error};
 use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
@@ -31,24 +31,17 @@ impl IndexVisitor {
             self.push_ns_scopes(namespace_parts);
             self.push_lv_scope(LVScopeKind::Constant);
 
-            // Get the current namespace (which includes all pushed scopes)
             let current_namespace = self.current_namespace();
-
-            // Create a new namespace path that includes the module name
-            let mut full_namespace = current_namespace;
-            full_namespace.push(namespace);
-
-            FullyQualifiedName::namespace(full_namespace)
+            FullyQualifiedName::namespace(current_namespace)
         } else {
             self.push_ns_scope(namespace);
             self.push_lv_scope(LVScopeKind::Constant);
 
-            // Get the current namespace (which includes the just-pushed namespace)
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)
         };
 
-        info!("Adding module entry: {:?}", fqn);
+        debug!("Adding module entry: {:?}", fqn);
 
         let entry = EntryBuilder::new()
             .fqn(fqn)
