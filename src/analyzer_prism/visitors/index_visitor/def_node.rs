@@ -20,18 +20,18 @@ impl IndexVisitor {
         if let Ok(method_name) = RubyMethod::try_from(method_name_str.as_ref()) {
             let name_location = node.name_loc();
             let location = self.prism_loc_to_lsp_loc(name_location);
-            let current_namespace_path = self.namespace_stack.clone();
+            let current_namespace = self.current_namespace();
             let fqn = FullyQualifiedName::instance_method(
-                current_namespace_path.clone(),
+                current_namespace.clone(),
                 method_name.clone(),
             );
 
             debug!("Visiting method definition: {}", fqn);
 
-            let owner_fqn = if current_namespace_path.is_empty() {
+            let owner_fqn = if current_namespace.is_empty() {
                 FullyQualifiedName::Constant(vec![])
             } else {
-                FullyQualifiedName::Constant(current_namespace_path)
+                FullyQualifiedName::Constant(current_namespace)
             };
 
             let entry = Entry {

@@ -27,7 +27,7 @@ pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<RubyConstant>,
+    pub namespace_stack: Vec<Vec<RubyConstant>>,
     pub current_method: Option<RubyMethod>,
     pub scope_stack: Vec<LVScopeKind>,
 }
@@ -51,16 +51,20 @@ impl IndexVisitor {
         LspLocation::new(uri, range)
     }
 
-    fn push_ns_scope(&mut self, namespace: RubyConstant) {
-        self.namespace_stack.push(namespace);
+    pub fn push_ns_scope(&mut self, namespace: RubyConstant) {
+        self.namespace_stack.push(vec![namespace]);
     }
 
     fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        self.namespace_stack.extend(namespaces);
+        self.namespace_stack.push(namespaces);
     }
 
-    fn pop_ns_scope(&mut self) -> Option<RubyConstant> {
+    pub fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
         self.namespace_stack.pop()
+    }
+
+    pub fn current_namespace(&self) -> Vec<RubyConstant> {
+        self.namespace_stack.iter().flatten().cloned().collect()
     }
 
     fn push_lv_scope(&mut self, kind: LVScopeKind) {

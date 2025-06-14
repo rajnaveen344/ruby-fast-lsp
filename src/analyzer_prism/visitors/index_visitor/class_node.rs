@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{debug, error, info};
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
@@ -28,14 +28,25 @@ impl IndexVisitor {
             // Extract namespace parts from the constant path
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
-            self.push_ns_scopes(namespace_parts.clone());
+
+            info!("Namespace parts: {:?}", namespace_parts);
+
+            self.push_ns_scopes(namespace_parts);
             self.push_lv_scope(LVScopeKind::Constant);
-            FullyQualifiedName::namespace(self.namespace_stack.clone())
+
+            let current_namespace = self.current_namespace();
+
+            FullyQualifiedName::namespace(current_namespace)
         } else {
+            // For simple class definitions (not a constant path)
             self.push_ns_scope(namespace);
             self.push_lv_scope(LVScopeKind::Constant);
-            FullyQualifiedName::namespace(self.namespace_stack.clone())
+
+            let current_namespace = self.current_namespace();
+            FullyQualifiedName::namespace(current_namespace)
         };
+
+        info!("Adding class entry: {:?}", fqn);
 
         let entry = EntryBuilder::new()
             .fqn(fqn)

@@ -4,10 +4,10 @@ use ruby_prism::ConstantPathNode;
 /// Recursively collect all namespaces from a ConstantPathNode
 /// Eg: `Core::Platform::API::Users` will return
 /// `vec![
-///     RubyNamespace("Core"),
-///     RubyNamespace("Platform"),
-///     RubyNamespace("API"),
-///     RubyNamespace("Users")
+///     RubyConstant("Core"),
+///     RubyConstant("Platform"),
+///     RubyConstant("API"),
+///     RubyConstant("Users")
 /// ]`
 pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) {
     let name = String::from_utf8_lossy(node.name().unwrap().as_slice());

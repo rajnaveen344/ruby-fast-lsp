@@ -25,7 +25,7 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 let fqn = FullyQualifiedName::variable(
-                    self.namespace_stack.clone(),
+                    self.current_namespace(),
                     self.current_method.clone(),
                     variable.clone(),
                 );

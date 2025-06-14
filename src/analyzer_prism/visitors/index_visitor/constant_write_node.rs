@@ -21,10 +21,10 @@ impl IndexVisitor {
         };
 
         // Create a FullyQualifiedName using the current namespace stack and the constant
-        // With the combined RubyConstant type, we add the constant to the namespace stack
-        let mut namespace_with_constant = self.namespace_stack.clone();
-        namespace_with_constant.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace_with_constant);
+        // First get the current flattened namespace, then add the new constant
+        let mut namespace = self.current_namespace();
+        namespace.push(constant);
+        let fqn = FullyQualifiedName::namespace(namespace);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()

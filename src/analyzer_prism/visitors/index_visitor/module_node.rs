@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{debug, error, info};
 use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
@@ -28,18 +28,27 @@ impl IndexVisitor {
             // Extract namespace parts from the constant path
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
-            // Add the current module name to the namespace parts
-            namespace_parts.push(namespace.clone());
-            // Push the namespace to the stack for proper scoping during traversal
-            self.push_ns_scopes(namespace_parts.clone());
+            self.push_ns_scopes(namespace_parts);
             self.push_lv_scope(LVScopeKind::Constant);
-            FullyQualifiedName::namespace(self.namespace_stack.clone())
+
+            // Get the current namespace (which includes all pushed scopes)
+            let current_namespace = self.current_namespace();
+
+            // Create a new namespace path that includes the module name
+            let mut full_namespace = current_namespace;
+            full_namespace.push(namespace);
+
+            FullyQualifiedName::namespace(full_namespace)
         } else {
-            // Regular module definition (not a constant path)
             self.push_ns_scope(namespace);
             self.push_lv_scope(LVScopeKind::Constant);
-            FullyQualifiedName::namespace(self.namespace_stack.clone())
+
+            // Get the current namespace (which includes the just-pushed namespace)
+            let current_namespace = self.current_namespace();
+            FullyQualifiedName::namespace(current_namespace)
         };
+
+        info!("Adding module entry: {:?}", fqn);
 
         let entry = EntryBuilder::new()
             .fqn(fqn)

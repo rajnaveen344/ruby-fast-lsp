@@ -36,11 +36,13 @@ impl IndexVisitor {
         let mut namespace_parts = Vec::new();
         utils::collect_namespaces(&constant_path, &mut namespace_parts);
 
-        // With the combined RubyConstant type, we add the constant to the namespace parts
-        namespace_parts.push(constant);
+        // Get the current namespace and add the collected parts
+        let mut current_namespace = self.current_namespace();
+        current_namespace.extend(namespace_parts);
+        current_namespace.push(constant);
 
-        // Create a FullyQualifiedName using the namespace parts
-        let fqn = FullyQualifiedName::namespace(namespace_parts);
+        // Create a FullyQualifiedName using the combined namespace parts
+        let fqn = FullyQualifiedName::namespace(current_namespace);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()
