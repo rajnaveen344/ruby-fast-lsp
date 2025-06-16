@@ -43,12 +43,6 @@ impl RubyMethod {
     }
 }
 
-impl From<String> for RubyMethod {
-    fn from(value: String) -> Self {
-        RubyMethod::new(&value).unwrap()
-    }
-}
-
 impl TryFrom<&str> for RubyMethod {
     type Error = &'static str;
 
@@ -76,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let method = RubyMethod::from(String::from("foo"));
+        let method = RubyMethod::try_from("foo").unwrap();
         assert_eq!(method.to_string(), "foo");
     }
 

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use log::debug;
+use log::{debug, warn};
 use lsp_types::Url;
 use ruby_prism::{
     visit_block_node, visit_class_node, visit_constant_path_node, visit_constant_read_node,
@@ -118,7 +118,14 @@ impl Visit<'_> for ReferenceVisitor {
         self.push_lv_scope(LVScopeKind::Method);
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method = RubyMethod::from(name);
+        let method = RubyMethod::try_from(name.as_str());
+
+        if let Err(_) = method {
+            warn!("Skipping invalid method name: {}", name);
+            return;
+        }
+
+        let method = method.unwrap();
         self.current_method = Some(method);
         visit_def_node(self, node);
         self.current_method = None;

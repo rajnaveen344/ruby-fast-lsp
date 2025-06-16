@@ -6,6 +6,7 @@ use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 use crate::types::scope_kind::LVScopeKind;
 
+use log::warn;
 use lsp_types::Position;
 use ruby_prism::ParametersNode;
 use ruby_prism::{
@@ -193,7 +194,14 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         let name = String::from_utf8_lossy(&node.name().as_slice()).to_string();
-        let method = RubyMethod::from(name);
+        let method = RubyMethod::try_from(name.as_str());
+
+        if let Err(_) = method {
+            warn!("Invalid method name: {}", name);
+            return;
+        }
+
+        let method = method.unwrap();
         self.current_method = Some(method.clone());
         self.push_lv_scope(LVScopeKind::Method);
 
