@@ -45,7 +45,14 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
 
     // Process files in parallel for references after indexing is complete
     let references_index_start = Instant::now();
-    process_files_parallel(server, files, ProcessingMode::References).await?;
+    process_files_parallel(
+        server,
+        files,
+        ProcessingMode::References {
+            include_local_vars: false, // Skip local variable references during workspace init as they are file-scoped
+        },
+    )
+    .await?;
     let references_index_duration = references_index_start.elapsed();
     info!(
         "References indexing completed in {:?}",
@@ -65,8 +72,17 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
 pub enum ProcessingMode {
     /// Process files for definitions (first pass)
     Definitions,
-    /// Process files for references (second pass, after indexing)
-    References,
+    /// Process files for references (second pass)
+    References { include_local_vars: bool },
+}
+
+impl ProcessingMode {
+    pub fn include_local_vars(&self) -> bool {
+        match self {
+            ProcessingMode::Definitions => false,
+            ProcessingMode::References { include_local_vars } => *include_local_vars,
+        }
+    }
 }
 
 pub async fn process_files_parallel(
@@ -133,14 +149,15 @@ pub async fn process_files_parallel(
                         anyhow::anyhow!("Failed to index file {}: {}", file_path_clone.display(), e)
                     })
                 }
-                ProcessingMode::References => {
-                    process_file_for_references(&server_task, uri.clone()).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to process references in file {}: {}",
-                            file_path_clone.display(),
-                            e
-                        )
-                    })
+                ProcessingMode::References { include_local_vars } => {
+                    process_file_for_references(&server_task, uri.clone(), include_local_vars)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to process references in file {}: {}",
+                                file_path_clone.display(),
+                                e
+                            )
+                        })
                 }
             };
 
@@ -251,7 +268,11 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
 }
 
 /// Process a file for references after indexing is complete
-pub fn process_file_for_references(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
+pub fn process_file_for_references(
+    server: &RubyLanguageServer,
+    uri: Url,
+    include_local_vars: bool,
+) -> Result<(), String> {
     // Remove any existing references for this URI
     server
         .index()
@@ -272,7 +293,7 @@ pub fn process_file_for_references(server: &RubyLanguageServer, uri: Url) -> Res
     let node = parse_result.node();
 
     // Create a reference visitor and process the AST
-    let mut visitor = ReferenceVisitor::new(server, uri.clone());
+    let mut visitor = ReferenceVisitor::with_options(server, uri.clone(), include_local_vars);
     visitor.visit(&node);
 
     debug!("Processed references in file: {}", uri);

@@ -62,7 +62,7 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     debug!("Doc cache size: {}", lang_server.docs.lock().unwrap().len());
 
     let _ = process_file_for_definitions(lang_server, uri.clone());
-    let _ = process_file_for_references(lang_server, uri.clone());
+    let _ = process_file_for_references(lang_server, uri.clone(), true);
 }
 
 pub async fn handle_did_change(
@@ -78,7 +78,7 @@ pub async fn handle_did_change(
         lang_server.docs.lock().unwrap().insert(uri.clone(), doc);
 
         let _ = process_file_for_definitions(lang_server, uri.clone());
-        let _ = process_file_for_references(lang_server, uri.clone());
+        let _ = process_file_for_references(lang_server, uri.clone(), true);
     }
 }
 

@@ -29,10 +29,15 @@ pub struct ReferenceVisitor {
     pub namespace_stack: Vec<Vec<RubyConstant>>,
     pub scope_stack: Vec<LVScopeKind>,
     pub current_method: Option<RubyMethod>,
+    pub include_local_vars: bool,
 }
 
 impl ReferenceVisitor {
     pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
+        Self::with_options(server, uri, true)
+    }
+
+    pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
         let document = server.get_doc(&uri).unwrap();
         Self {
             index: server.index(),
@@ -41,6 +46,7 @@ impl ReferenceVisitor {
             namespace_stack: vec![],
             scope_stack: vec![],
             current_method: None,
+            include_local_vars,
         }
     }
 
@@ -244,6 +250,11 @@ impl Visit<'_> for ReferenceVisitor {
     }
 
     fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode) {
+        if !self.include_local_vars {
+            visit_local_variable_read_node(self, node);
+            return;
+        }
+
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
         // Create a variable reference with the current scope
@@ -288,6 +299,15 @@ mod tests {
     }
 
     fn open_file(server: &RubyLanguageServer, content: &str, uri: &Url) -> RubyDocument {
+        open_file_with_options(server, content, uri, true)
+    }
+
+    fn open_file_with_options(
+        server: &RubyLanguageServer,
+        content: &str,
+        uri: &Url,
+        include_local_vars: bool,
+    ) -> RubyDocument {
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
         server
             .docs
@@ -295,7 +315,7 @@ mod tests {
             .unwrap()
             .insert(uri.clone(), document.clone());
         let _ = process_file_for_definitions(server, uri.clone());
-        let _ = process_file_for_references(server, uri.clone());
+        let _ = process_file_for_references(server, uri.clone(), include_local_vars);
         document
     }
 
@@ -318,7 +338,6 @@ end
         let uri = Url::parse("file:///dummy.rb").unwrap();
         open_file(&server, code, &uri);
 
-        // ConstantPathNode
         let references =
             references::find_references_at_position(&server, &uri, Position::new(4, 19)).await;
 
@@ -329,5 +348,61 @@ end
             references::find_references_at_position(&server, &uri, Position::new(3, 15)).await;
 
         assert_eq!(references.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_local_variable_references() {
+        let code = r#"
+def my_method
+  local_var = 42
+  puts local_var  # Reference to local_var
+  
+  local_var.times do |i|
+    puts "Count: #{i}"
+  end
+  
+  local_var  # Another reference
+end
+
+my_method
+        "#;
+
+        let server = create_server();
+        let uri = Url::parse("file:///local_vars.rb").unwrap();
+
+        // First test with local vars enabled
+        open_file_with_options(&server, code, &uri, true);
+        let index = server.index();
+        let index_guard = index.lock().unwrap();
+
+        // Should find local variable references
+        let local_var_refs: Vec<_> = index_guard
+            .references
+            .iter()
+            .filter(|(fqn, _)| fqn.to_string().contains("local_var"))
+            .collect();
+
+        assert!(
+            !local_var_refs.is_empty(),
+            "Should find local variable references when include_local_vars is true"
+        );
+
+        // Now test with local vars disabled
+        let server = create_server();
+        open_file_with_options(&server, code, &uri, false);
+        let index = server.index();
+        let index_guard = index.lock().unwrap();
+
+        // Should not find any local variable references
+        let local_var_refs: Vec<_> = index_guard
+            .references
+            .iter()
+            .filter(|(fqn, _)| fqn.to_string().contains("local_var"))
+            .collect();
+
+        assert!(
+            local_var_refs.is_empty(),
+            "Should not find local variable references when include_local_vars is false"
+        );
     }
 }
