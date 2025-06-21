@@ -287,13 +287,19 @@ impl AstVisitor {
             Node::LocalVariableReadNode { .. } => {
                 let lvar_node = node.as_local_variable_read_node().unwrap();
                 let name = self.get_name_string(lvar_node.name().as_slice());
-                self.push_node("LocalVariableReadNode".to_string(), Some(name), None);
+                let depth = format!("depth: {}", lvar_node.depth());
+                self.push_node("LocalVariableReadNode".to_string(), Some(name), Some(depth));
                 self.pop_node();
             }
             Node::LocalVariableWriteNode { .. } => {
                 let lvasgn_node = node.as_local_variable_write_node().unwrap();
                 let name = self.get_name_string(lvasgn_node.name().as_slice());
-                self.push_node("LocalVariableWriteNode".to_string(), Some(name), None);
+                let depth = format!("depth: {}", lvasgn_node.depth());
+                self.push_node(
+                    "LocalVariableWriteNode".to_string(),
+                    Some(name),
+                    Some(depth),
+                );
 
                 // Process value
                 let value_node = lvasgn_node.value();
