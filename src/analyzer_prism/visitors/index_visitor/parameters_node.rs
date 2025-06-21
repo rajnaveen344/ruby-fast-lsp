@@ -68,11 +68,12 @@ impl IndexVisitor {
             RubyVariableType::Local(self.scope_stack.clone()),
         );
 
-        debug!("Adding local variable entry: {:?}", var.clone().unwrap());
         match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(variable.clone());
+
+                debug!("Adding local variable entry: {:?}", fqn);
 
                 // Create an entry with EntryKind::Variable
                 let entry = EntryBuilder::new()

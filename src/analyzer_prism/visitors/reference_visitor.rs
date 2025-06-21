@@ -296,28 +296,44 @@ impl Visit<'_> for ReferenceVisitor {
         }
 
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let location = self
+            .document
+            .prism_location_to_lsp_location(&node.location());
+        let mut index = self.index.lock().unwrap();
 
-        // Create a variable reference with the current scope
-        let var_type = RubyVariableType::Local(self.scope_stack.clone());
-        let var = RubyVariable::new(&variable_name, var_type);
+        // Search through scope stack from innermost to outermost scope
+        for i in (0..self.scope_stack.len()).rev() {
+            // Take all scopes up to the current level
+            let scopes = self.scope_stack[0..=i].to_vec();
+            let var_type = RubyVariableType::Local(scopes);
 
-        if let Ok(variable) = var {
-            // Create a fully qualified name for the variable reference
-            let fqn = FullyQualifiedName::variable(variable);
+            if let Ok(variable) = RubyVariable::new(&variable_name, var_type) {
+                let fqn = FullyQualifiedName::variable(variable);
 
-            // Add the reference to the index
-            let mut index = self.index.lock().unwrap();
-            let location = self
-                .document
-                .prism_location_to_lsp_location(&node.location());
-            debug!(
-                "Adding local variable reference: {:?} at {:?}",
-                fqn, location
-            );
-            index.add_reference(fqn, location);
+                debug!("Searching for variable: {:?}", fqn);
+
+                // Check if this variable is defined in the current scope level
+                if index.definitions.contains_key(&fqn) {
+                    debug!(
+                        "Adding local variable reference: {:?} at {:?}",
+                        fqn, location
+                    );
+                    index.add_reference(fqn, location);
+                    drop(index);
+                    visit_local_variable_read_node(self, node);
+                    return;
+                }
+            }
         }
 
-        // Continue visiting the node
+        // If we get here, no matching definition was found in any scope
+        debug!(
+            "No definition found for local variable '{}' at {:?}",
+            variable_name, location
+        );
+        drop(index);
+
+        // Continue visiting children nodes
         visit_local_variable_read_node(self, node);
     }
 }
