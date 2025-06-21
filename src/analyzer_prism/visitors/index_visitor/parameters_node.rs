@@ -72,11 +72,7 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 // Create a fully qualified name for the variable
-                let fqn = FullyQualifiedName::variable(
-                    self.current_namespace(),
-                    self.current_method.clone(),
-                    variable.clone(),
-                );
+                let fqn = FullyQualifiedName::variable(variable.clone());
 
                 // Create an entry with EntryKind::Variable
                 let entry = EntryBuilder::new()

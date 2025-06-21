@@ -101,7 +101,7 @@ pub async fn find_definition_at_position(
                 }
             }
         }
-        Identifier::RubyVariable(method, variable) => {
+        Identifier::RubyVariable(variable) => {
             let mut found_locations = Vec::new();
             let var_name = variable.name().clone();
             let var_type = variable.variable_type();
@@ -113,11 +113,7 @@ pub async fn find_definition_at_position(
                     while !scope_stack.is_empty() {
                         let var_type = RubyVariableType::Local(scope_stack.clone());
                         if let Ok(var) = RubyVariable::new(&var_name, var_type) {
-                            let fqn = FullyQualifiedName::variable(
-                                ancestors.clone(),
-                                method.clone(),
-                                var,
-                            );
+                            let fqn = FullyQualifiedName::variable(var.clone());
                             debug!(
                                 "Looking for local variable definition with scope: {:?}",
                                 fqn
@@ -162,11 +158,7 @@ pub async fn find_definition_at_position(
                 }
                 RubyVariableType::Instance => {
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Instance) {
-                        let fqn = FullyQualifiedName::variable(
-                            ancestors.clone(),
-                            None, // No method context for instance variables
-                            var,
-                        );
+                        let fqn = FullyQualifiedName::variable(var.clone());
                         debug!("Looking for instance variable definition: {:?}", fqn);
                         if let Some(entries) = index.definitions.get(&fqn.into()) {
                             found_locations.extend(entries.iter().map(|e| e.location.clone()));
@@ -176,11 +168,7 @@ pub async fn find_definition_at_position(
                 RubyVariableType::Class => {
                     // For class variables, we only need to check the class/module scope
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Class) {
-                        let fqn = FullyQualifiedName::variable(
-                            ancestors.clone(),
-                            None, // No method context for class variables
-                            var,
-                        );
+                        let fqn = FullyQualifiedName::variable(var.clone());
                         debug!("Looking for class variable definition: {:?}", fqn);
                         if let Some(entries) = index.definitions.get(&fqn.into()) {
                             found_locations.extend(entries.iter().map(|e| e.location.clone()));
@@ -189,11 +177,7 @@ pub async fn find_definition_at_position(
                 }
                 RubyVariableType::Global => {
                     if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Global) {
-                        let fqn = FullyQualifiedName::variable(
-                            vec![], // No namespace for globals
-                            None,   // No method context for globals
-                            var,
-                        );
+                        let fqn = FullyQualifiedName::variable(var.clone());
                         debug!("Looking for global variable definition: {:?}", fqn);
                         if let Some(entries) = index.definitions.get(&fqn.into()) {
                             found_locations.extend(entries.iter().map(|e| e.location.clone()));

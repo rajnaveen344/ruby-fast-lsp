@@ -22,8 +22,8 @@ pub enum FullyQualifiedName {
     /// - Private instance method when included in other classes
     ModuleMethod(Vec<RubyConstant>, RubyMethod),
 
-    /// Local variable, e.g., `a = 1` → `LocalVariable(vec!["Foo"], Some(RubyMethod::new("bar")), "a")`
-    Variable(Vec<RubyConstant>, Option<RubyMethod>, RubyVariable),
+    /// Local variable, e.g., `a = 1` → `LocalVariable("a")`
+    Variable(RubyVariable),
 }
 
 impl FullyQualifiedName {
@@ -43,13 +43,13 @@ impl FullyQualifiedName {
     }
 
     // Common accessor for namespace parts
-    pub fn namespace_parts(&self) -> &Vec<RubyConstant> {
+    pub fn namespace_parts(&self) -> Vec<RubyConstant> {
         match self {
-            FullyQualifiedName::Constant(ns) => ns,
-            FullyQualifiedName::InstanceMethod(ns, _) => ns,
-            FullyQualifiedName::ClassMethod(ns, _) => ns,
-            FullyQualifiedName::ModuleMethod(ns, _) => ns,
-            FullyQualifiedName::Variable(ns, _, _) => ns,
+            FullyQualifiedName::Constant(ns) => ns.clone(),
+            FullyQualifiedName::InstanceMethod(ns, _) => ns.clone(),
+            FullyQualifiedName::ClassMethod(ns, _) => ns.clone(),
+            FullyQualifiedName::ModuleMethod(ns, _) => ns.clone(),
+            FullyQualifiedName::Variable(_) => vec![],
         }
     }
 
@@ -58,12 +58,8 @@ impl FullyQualifiedName {
         FullyQualifiedName::ModuleMethod(namespace, method)
     }
 
-    pub fn variable(
-        namespace: Vec<RubyConstant>,
-        method: Option<RubyMethod>,
-        variable: RubyVariable,
-    ) -> Self {
-        FullyQualifiedName::Variable(namespace, method, variable)
+    pub fn variable(variable: RubyVariable) -> Self {
+        FullyQualifiedName::Variable(variable)
     }
 }
 
@@ -97,7 +93,7 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
             FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
-            FullyQualifiedName::Variable(_, _, variable) => {
+            FullyQualifiedName::Variable(variable) => {
                 write!(f, "{}", variable)
             }
         }

@@ -22,11 +22,7 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 // Class variables are associated with the class/module, not with methods
-                let fqn = FullyQualifiedName::variable(
-                    self.current_namespace(),
-                    None, // No method context for class variables
-                    variable.clone(),
-                );
+                let fqn = FullyQualifiedName::variable(variable.clone());
 
                 debug!("Adding class variable entry: {:?}", fqn);
 

@@ -22,11 +22,7 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 // Global variables are not associated with any namespace or method
-                let fqn = FullyQualifiedName::variable(
-                    vec![], // No namespace for globals
-                    None,   // No method context for globals
-                    variable.clone(),
-                );
+                let fqn = FullyQualifiedName::variable(variable.clone());
 
                 debug!("Adding global variable entry: {:?}", fqn);
 
@@ -74,11 +70,17 @@ impl IndexVisitor {
     }
 
     // GlobalVariableOrWriteNode
-    pub fn process_global_variable_or_write_node_entry(&mut self, node: &GlobalVariableOrWriteNode) {
+    pub fn process_global_variable_or_write_node_entry(
+        &mut self,
+        node: &GlobalVariableOrWriteNode,
+    ) {
         self.process_global_variable_write(node.name().as_slice(), node.name_loc());
     }
 
-    pub fn process_global_variable_or_write_node_exit(&mut self, _node: &GlobalVariableOrWriteNode) {
+    pub fn process_global_variable_or_write_node_exit(
+        &mut self,
+        _node: &GlobalVariableOrWriteNode,
+    ) {
         // No-op for now
     }
 

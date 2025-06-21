@@ -49,9 +49,9 @@ pub async fn find_references_at_position(
             combined_ns.extend(ns.clone());
             fqn = FullyQualifiedName::instance_method(combined_ns, method.clone());
         }
-        Identifier::RubyVariable(method, variable) => {
+        Identifier::RubyVariable(variable) => {
             // For variables, use ancestors as the namespace
-            fqn = FullyQualifiedName::variable(ancestors.clone(), method.clone(), variable.clone());
+            fqn = FullyQualifiedName::variable(variable.clone());
         }
     }
 
@@ -62,7 +62,7 @@ pub async fn find_references_at_position(
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
             let filtered_entries: Vec<Location> = match &identifier {
-                Identifier::RubyVariable(_, _) => entries
+                Identifier::RubyVariable(_) => entries
                     .iter()
                     .filter(|loc| loc.uri == *uri && loc.range.start >= position)
                     .cloned()

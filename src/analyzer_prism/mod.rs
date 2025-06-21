@@ -32,7 +32,7 @@ pub enum Identifier {
     //               ^    -> ([], @foo)
     // Eg. @@foo = 1; @@foo;
     //                ^    -> ([], @@foo)
-    RubyVariable(Option<RubyMethod>, RubyVariable),
+    RubyVariable(RubyVariable),
 }
 
 impl fmt::Display for Identifier {
@@ -46,12 +46,8 @@ impl fmt::Display for Identifier {
                 let ns_str: Vec<String> = ns.iter().map(|c| c.to_string()).collect();
                 write!(f, "{}#{}", ns_str.join("::"), method)
             }
-            Identifier::RubyVariable(method, variable) => {
-                if let Some(m) = method {
-                    write!(f, "{}:{}", m, variable)
-                } else {
-                    write!(f, "{}", variable)
-                }
+            Identifier::RubyVariable(variable) => {
+                write!(f, "{}", variable)
             }
         }
     }

@@ -282,8 +282,7 @@ impl Visit<'_> for IdentifierVisitor {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type = RubyVariableType::Local(self.scope_stack.clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier =
-                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
                     self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
                 }
@@ -298,8 +297,7 @@ impl Visit<'_> for IdentifierVisitor {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type = RubyVariableType::Local(self.scope_stack.clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier =
-                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
                     self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
                 }
@@ -314,8 +312,7 @@ impl Visit<'_> for IdentifierVisitor {
                         let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
                         let var_type = RubyVariableType::Local(self.scope_stack.clone());
                         let var = RubyVariable::new(&param_name, var_type).unwrap();
-                        self.identifier =
-                            Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                        self.identifier = Some(Identifier::RubyVariable(var));
                         self.identifier_type = IdentifierType::LVarDef;
                         self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
                     }
@@ -330,8 +327,7 @@ impl Visit<'_> for IdentifierVisitor {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type = RubyVariableType::Local(self.scope_stack.clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier =
-                        Some(Identifier::RubyVariable(self.current_method.clone(), var));
+                    self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
                     self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
                 }
@@ -493,10 +489,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         // Continue visiting the node
@@ -517,10 +510,7 @@ impl Visit<'_> for IdentifierVisitor {
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_local_variable_write_node(self, node);
@@ -540,10 +530,7 @@ impl Visit<'_> for IdentifierVisitor {
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_local_variable_and_write_node(self, node);
@@ -563,10 +550,7 @@ impl Visit<'_> for IdentifierVisitor {
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_local_variable_or_write_node(self, node);
@@ -586,10 +570,7 @@ impl Visit<'_> for IdentifierVisitor {
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_local_variable_operator_write_node(self, node);
@@ -609,10 +590,7 @@ impl Visit<'_> for IdentifierVisitor {
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
             self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(
-                self.current_method.clone(),
-                variable,
-            ));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_local_variable_target_node(self, node);
@@ -627,7 +605,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
-            self.identifier = Some(Identifier::RubyVariable(None, variable));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_class_variable_read_node(self, node);
@@ -645,7 +623,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Instance);
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
-            self.identifier = Some(Identifier::RubyVariable(None, variable));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_instance_variable_read_node(self, node);
@@ -660,7 +638,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Global);
         if let Ok(variable) = var {
             self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
-            self.identifier = Some(Identifier::RubyVariable(None, variable));
+            self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
         visit_global_variable_read_node(self, node);

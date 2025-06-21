@@ -22,11 +22,7 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 // Instance variables are associated with the class/module, not with methods
-                let fqn = FullyQualifiedName::variable(
-                    self.current_namespace(),
-                    None, // No method context for instance variables
-                    variable.clone(),
-                );
+                let fqn = FullyQualifiedName::variable(variable.clone());
 
                 debug!("Adding instance variable entry: {:?}", fqn);
 

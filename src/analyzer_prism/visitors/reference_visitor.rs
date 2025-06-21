@@ -303,11 +303,7 @@ impl Visit<'_> for ReferenceVisitor {
 
         if let Ok(variable) = var {
             // Create a fully qualified name for the variable reference
-            let fqn = FullyQualifiedName::variable(
-                self.current_namespace(),
-                self.current_method.clone(),
-                variable,
-            );
+            let fqn = FullyQualifiedName::variable(variable);
 
             // Add the reference to the index
             let mut index = self.index.lock().unwrap();
