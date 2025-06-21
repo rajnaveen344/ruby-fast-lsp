@@ -327,7 +327,7 @@ mod tests {
                 line: 1,
                 character: 6,
             };
-            let (identifier, _) = analyzer.get_identifier(position);
+            let (identifier, _, _) = analyzer.get_identifier(position);
             println!("Identifier found: {:?}", identifier);
         }
 

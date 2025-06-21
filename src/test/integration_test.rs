@@ -82,7 +82,7 @@ async fn test_goto_definition_class_declaration() {
             line: 15,
             character: char_pos,
         };
-        let (identifier, _) = analyzer.get_identifier(position);
+        let (identifier, _, _) = analyzer.get_identifier(position);
         info!("Identifier at line 15, char {}: {:?}", char_pos, identifier);
     }
 
@@ -218,7 +218,7 @@ async fn test_find_references_method() {
         line: 1,
         character: 6,
     };
-    let (identifier, _) = analyzer.get_identifier(pos);
+    let (identifier, _, _) = analyzer.get_identifier(pos);
     info!("Identifier found at position {:?}: {:?}", pos, identifier);
 
     // Find references to 'bar' method - use the position where we found the identifier

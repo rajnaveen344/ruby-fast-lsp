@@ -1,9 +1,9 @@
 use std::fmt;
 
-use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::RubyVariable;
+use crate::types::{ruby_document::RubyDocument, scope::LVScopeStack};
 use lsp_types::{Position, Url};
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
@@ -65,14 +65,17 @@ impl RubyPrismAnalyzer {
     }
 
     /// Returns the identifier and the ancestors stack at the time of the lookup.
-    pub fn get_identifier(&self, position: Position) -> (Option<Identifier>, Vec<RubyConstant>) {
+    pub fn get_identifier(
+        &self,
+        position: Position,
+    ) -> (Option<Identifier>, Vec<RubyConstant>, LVScopeStack) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
         let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
         let mut visitor = IdentifierVisitor::new(document, position);
         let root_node = parse_result.node();
         visitor.visit(&root_node);
-        (visitor.identifier, visitor.ancestors)
+        (visitor.identifier, visitor.ancestors, visitor.scope_stack)
     }
 }
 
@@ -92,7 +95,7 @@ mod tests {
 
         // Position cursor at "CONST_A"
         let position = Position::new(0, 2);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -122,7 +125,7 @@ end
 
         // Position cursor at "CONST_B"
         let position = Position::new(2, 5);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -161,7 +164,7 @@ end
 
         // Test position at "CONST_A" in the "Inner::CONST_A" reference (relative reference)
         let position = Position::new(6, 19);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -198,7 +201,7 @@ end
 
         // Position cursor at "CONST_C"
         let position = Position::new(3, 9);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -239,7 +242,7 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "CONST_A" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 25);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -262,7 +265,7 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "Inner" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 18);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -283,7 +286,7 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "Outer" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 12);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -314,7 +317,7 @@ end
 
         // Test position at "TopLevelConst" in the "val = TopLevelConst" reference
         let position = Position::new(3, 10);
-        let (identifier_opt, ancestors) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
