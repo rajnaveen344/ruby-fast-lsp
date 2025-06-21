@@ -55,6 +55,14 @@ impl RubyLanguageServer {
 
         visitor.visit(&node);
 
+        // Persist mutations made by the visitor back to the server's document store
+        // TODO: This is a temporary fix. We should be able to mutate the document in place
+        //       using docs: Arc<Mutex<HashMap<Url, Arc<Mutex<RubyDocument>>>>>
+        self.docs
+            .lock()
+            .unwrap()
+            .insert(uri.clone(), visitor.document.clone());
+
         debug!("Processed file: {}", uri);
         Ok(())
     }

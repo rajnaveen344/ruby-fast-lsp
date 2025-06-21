@@ -263,6 +263,15 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
     let mut visitor = IndexVisitor::new(server, uri.clone());
     visitor.visit(&node);
 
+    // Persist mutations (like local variable indexes) back to the server's document store
+    // TODO: This is a temporary fix. We should be able to mutate the document in place
+    //       using docs: Arc<Mutex<HashMap<Url, Arc<Mutex<RubyDocument>>>>> @server.rs
+    server
+        .docs
+        .lock()
+        .unwrap()
+        .insert(uri.clone(), visitor.document.clone());
+
     debug!("Indexed file: {}", uri);
     Ok(())
 }
