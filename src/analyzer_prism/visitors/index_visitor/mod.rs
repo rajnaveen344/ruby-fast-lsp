@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use lsp_types::{Location as LspLocation, Url};
+use lsp_types::{Location as LspLocation, Range, Url};
 use ruby_prism::*;
 
 use crate::indexer::index::RubyIndex;
@@ -35,12 +35,22 @@ pub struct IndexVisitor {
 impl IndexVisitor {
     pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
         let document = server.docs.lock().unwrap().get(&uri).unwrap().clone();
+        let lv_scope = LVScope::new(
+            LspLocation {
+                uri: uri.clone(),
+                range: Range::new(
+                    document.offset_to_position(0),
+                    document.offset_to_position(document.content.len()),
+                ),
+            },
+            LVScopeKind::TopLevel,
+        );
         Self {
             index: server.index(),
             uri,
             document,
             namespace_stack: vec![],
-            scope_stack: vec![],
+            scope_stack: vec![lv_scope],
             current_method: None,
         }
     }

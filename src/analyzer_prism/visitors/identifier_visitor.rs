@@ -9,6 +9,7 @@ use crate::types::scope::LVScopeKind;
 use crate::types::scope::LVScopeStack;
 
 use log::warn;
+use lsp_types::Range;
 use lsp_types::{Location as LSPLocation, Position};
 use ruby_prism::ParametersNode;
 use ruby_prism::{
@@ -55,11 +56,22 @@ pub struct IdentifierVisitor {
 
 impl IdentifierVisitor {
     pub fn new(document: RubyDocument, position: Position) -> Self {
+        let lv_scope = LVScope::new(
+            LSPLocation {
+                uri: document.uri.clone(),
+                range: Range::new(
+                    document.offset_to_position(0),
+                    document.offset_to_position(document.content.len()),
+                ),
+            },
+            LVScopeKind::TopLevel,
+        );
+
         Self {
             document,
             position,
             namespace_stack: Vec::new(),
-            scope_stack: Vec::new(),
+            scope_stack: vec![lv_scope],
             current_method: None,
             ancestors: Vec::new(),
             identifier: None,
