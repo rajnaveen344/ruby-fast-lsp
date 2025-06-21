@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use lsp_types::Location;
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -10,7 +8,6 @@ pub struct EntryBuilder {
     fqn: Option<FullyQualifiedName>,
     location: Option<Location>,
     kind: Option<EntryKind>,
-    metadata: HashMap<String, String>,
 }
 
 impl EntryBuilder {
@@ -20,7 +17,6 @@ impl EntryBuilder {
             fqn: None,
             location: None,
             kind: None,
-            metadata: HashMap::new(),
         }
     }
 
@@ -41,11 +37,6 @@ impl EntryBuilder {
         self.kind = Some(kind);
         self
     }
-    /// Add metadata key-value pair (optional)
-    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.insert(key.into(), value.into());
-        self
-    }
 
     /// Build the Entry with validation
     pub fn build(self) -> Result<Entry, &'static str> {
@@ -57,7 +48,6 @@ impl EntryBuilder {
             fqn,
             location,
             kind,
-            metadata: self.metadata,
         })
     }
 }

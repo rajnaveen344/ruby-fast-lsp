@@ -2,7 +2,6 @@ pub mod entry_builder;
 pub mod entry_kind;
 
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 
 use entry_kind::EntryKind;
 use lsp_types::Location;
@@ -19,9 +18,6 @@ pub struct Entry {
 
     /// Type-specific metadata
     pub kind: EntryKind,
-
-    /// Additional metadata (docstrings, annotations, etc)
-    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

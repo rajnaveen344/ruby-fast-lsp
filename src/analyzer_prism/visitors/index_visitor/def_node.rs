@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use log::{debug, warn};
 use ruby_prism::DefNode;
 
@@ -51,7 +49,6 @@ impl IndexVisitor {
                 origin: MethodOrigin::Direct,
                 origin_visibility: None,
             },
-            metadata: HashMap::new(),
         };
 
         let mut index = self.index.lock().unwrap();
