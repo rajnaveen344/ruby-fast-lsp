@@ -5,7 +5,7 @@ use ruby_prism::*;
 
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
-use crate::types::scope_kind::LVScopeKind;
+use crate::types::scope::{LVScope, LVScopeKind, LVScopeStack};
 use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
 };
@@ -29,7 +29,7 @@ pub struct IndexVisitor {
     pub document: RubyDocument,
     pub namespace_stack: Vec<Vec<RubyConstant>>,
     pub current_method: Option<RubyMethod>,
-    pub scope_stack: Vec<LVScopeKind>,
+    pub scope_stack: LVScopeStack,
 }
 
 impl IndexVisitor {
@@ -67,11 +67,11 @@ impl IndexVisitor {
         self.namespace_stack.iter().flatten().cloned().collect()
     }
 
-    fn push_lv_scope(&mut self, kind: LVScopeKind) {
-        self.scope_stack.push(kind);
+    fn push_lv_scope(&mut self, location: lsp_types::Location, kind: LVScopeKind) {
+        self.scope_stack.push(LVScope::new(location, kind));
     }
 
-    fn pop_lv_scope(&mut self) -> Option<LVScopeKind> {
+    fn pop_lv_scope(&mut self) -> Option<LVScope> {
         self.scope_stack.pop()
     }
 }

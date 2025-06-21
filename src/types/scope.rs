@@ -1,6 +1,42 @@
-use std::fmt;
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
 
-pub type LVScopeDepth = u32;
+use lsp_types::Location;
+
+pub type LVScopeStack = Vec<LVScope>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LVScope {
+    location: Location,
+    kind: LVScopeKind,
+}
+
+impl LVScope {
+    pub fn new(location: Location, kind: LVScopeKind) -> Self {
+        Self { location, kind }
+    }
+
+    pub fn location(&self) -> &Location {
+        &self.location
+    }
+
+    pub fn kind(&self) -> &LVScopeKind {
+        &self.kind
+    }
+}
+
+impl Hash for LVScope {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.location.uri.hash(state);
+        self.location.range.start.line.hash(state);
+        self.location.range.start.character.hash(state);
+        self.location.range.end.line.hash(state);
+        self.location.range.end.character.hash(state);
+        self.kind.hash(state);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LVScopeKind {

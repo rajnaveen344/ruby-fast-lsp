@@ -107,11 +107,11 @@ pub async fn find_definition_at_position(
             let var_type = variable.variable_type();
 
             match var_type {
-                RubyVariableType::Local(uri, scope_stack) => {
+                RubyVariableType::Local(scope_stack) => {
                     // Handle local variables with scope
                     let mut scope_stack = scope_stack.clone();
                     while !scope_stack.is_empty() {
-                        let var_type = RubyVariableType::Local(uri.clone(), scope_stack.clone());
+                        let var_type = RubyVariableType::Local(scope_stack.clone());
                         if let Ok(var) = RubyVariable::new(&var_name, var_type) {
                             let fqn = FullyQualifiedName::variable(
                                 ancestors.clone(),
@@ -161,7 +161,7 @@ pub async fn find_definition_at_position(
                     }
 
                     // Check top-level scope for local variables
-                    let var_type = RubyVariableType::Local(uri.clone(), Vec::new());
+                    let var_type = RubyVariableType::Local(Vec::new());
                     if let Ok(var) = RubyVariable::new(&var_name, var_type) {
                         let fqn =
                             FullyQualifiedName::variable(ancestors.clone(), method.clone(), var);

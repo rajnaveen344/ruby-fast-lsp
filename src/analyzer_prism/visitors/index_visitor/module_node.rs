@@ -3,7 +3,7 @@ use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
-use crate::types::scope_kind::LVScopeKind;
+use crate::types::scope::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
@@ -22,6 +22,14 @@ impl IndexVisitor {
 
         let namespace = namespace.unwrap();
 
+        let body_loc = if let Some(body) = node.body() {
+            self.document
+                .prism_location_to_lsp_location(&body.location())
+        } else {
+            self.document
+                .prism_location_to_lsp_location(&node.location())
+        };
+
         // Check if this is a constant path (e.g., A::B::C)
         let const_path = node.constant_path();
         let fqn = if let Some(path_node) = const_path.as_constant_path_node() {
@@ -29,13 +37,13 @@ impl IndexVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
-            self.push_lv_scope(LVScopeKind::Constant);
+            self.push_lv_scope(body_loc, LVScopeKind::Constant);
 
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)
         } else {
             self.push_ns_scope(namespace);
-            self.push_lv_scope(LVScopeKind::Constant);
+            self.push_lv_scope(body_loc, LVScopeKind::Constant);
 
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)

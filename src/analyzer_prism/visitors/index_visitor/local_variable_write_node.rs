@@ -19,7 +19,7 @@ impl IndexVisitor {
 
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.uri.clone(), self.scope_stack.clone()),
+            RubyVariableType::Local(self.scope_stack.clone()),
         );
 
         match var {

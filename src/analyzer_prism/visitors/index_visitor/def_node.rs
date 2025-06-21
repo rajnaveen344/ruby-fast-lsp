@@ -6,7 +6,7 @@ use ruby_prism::DefNode;
 use crate::indexer::entry::{
     entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
-use crate::types::scope_kind::LVScopeKind;
+use crate::types::scope::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::IndexVisitor;
@@ -62,7 +62,15 @@ impl IndexVisitor {
 
         drop(index);
 
-        self.push_lv_scope(LVScopeKind::Method);
+        let body_loc = if let Some(body) = node.body() {
+            self.document
+                .prism_location_to_lsp_location(&body.location())
+        } else {
+            self.document
+                .prism_location_to_lsp_location(&node.location())
+        };
+
+        self.push_lv_scope(body_loc, LVScopeKind::Method);
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {

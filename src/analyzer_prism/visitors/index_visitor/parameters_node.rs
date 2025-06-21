@@ -65,7 +65,7 @@ impl IndexVisitor {
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
         let var = RubyVariable::new(
             param_name,
-            RubyVariableType::Local(self.uri.clone(), self.scope_stack.clone()),
+            RubyVariableType::Local(self.scope_stack.clone()),
         );
 
         debug!("Adding local variable entry: {:?}", var.clone().unwrap());

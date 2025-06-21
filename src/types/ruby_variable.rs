@@ -1,16 +1,13 @@
+use crate::types::scope::LVScopeStack;
 use std::convert::TryFrom;
 use std::fmt;
-
-use lsp_types::Url;
-
-use crate::types::scope_kind::LVScopeKind;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct RubyVariable(String, RubyVariableType);
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum RubyVariableType {
-    Local(Url, Vec<LVScopeKind>), // Scope stack
+    Local(LVScopeStack),
     Instance,
     Class,
     Global,
@@ -19,7 +16,7 @@ pub enum RubyVariableType {
 impl RubyVariable {
     pub fn new(name: &str, variable_type: RubyVariableType) -> Result<Self, &'static str> {
         match variable_type {
-            RubyVariableType::Local(_, _) => validate_local_variable(name)?,
+            RubyVariableType::Local(_) => validate_local_variable(name)?,
             RubyVariableType::Instance => validate_instance_variable(name)?,
             RubyVariableType::Class => validate_class_variable(name)?,
             RubyVariableType::Global => validate_global_variable(name)?,
@@ -164,7 +161,7 @@ impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
 impl fmt::Display for RubyVariable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variable_type() {
-            RubyVariableType::Local(_, _) => write!(f, "{}", self.0),
+            RubyVariableType::Local(_) => write!(f, "{}", self.0),
             RubyVariableType::Instance => write!(f, "{}", self.0),
             RubyVariableType::Class => write!(f, "{}", self.0),
             RubyVariableType::Global => write!(f, "{}", self.0),
@@ -178,14 +175,14 @@ mod tests {
 
     #[test]
     fn test_local_variable_valid() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result = RubyVariable::new("foo", RubyVariableType::Local(url.clone(), Vec::new()));
+        let scope_stack = LVScopeStack::new();
+        let result = RubyVariable::new("foo", RubyVariableType::Local(scope_stack.clone()));
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "foo");
 
-        if let RubyVariableType::Local(file_url, _) = var.variable_type() {
-            assert_eq!(file_url, &url);
+        if let RubyVariableType::Local(stack) = var.variable_type() {
+            assert_eq!(stack, &scope_stack);
         } else {
             panic!("Expected Local variant");
         }
@@ -193,43 +190,42 @@ mod tests {
 
     #[test]
     fn test_local_variable_with_different_scopes() {
-        let url = Url::parse("file:///test.rb").unwrap();
+        let scope_stack = LVScopeStack::new();
         // Test method scope
-        let result = RubyVariable::new("foo", RubyVariableType::Local(url.clone(), Vec::new()));
+        let result = RubyVariable::new("foo", RubyVariableType::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test block scope
-        let result = RubyVariable::new("bar", RubyVariableType::Local(url.clone(), Vec::new()));
+        let result = RubyVariable::new("bar", RubyVariableType::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test top level scope
-        let result = RubyVariable::new("baz", RubyVariableType::Local(url, Vec::new()));
+        let result = RubyVariable::new("baz", RubyVariableType::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test explicit block local scope
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result = RubyVariable::new("qux", RubyVariableType::Local(url, Vec::new()));
+        let result = RubyVariable::new("qux", RubyVariableType::Local(scope_stack));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_with_underscore() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result = RubyVariable::new("_foo", RubyVariableType::Local(url, Vec::new()));
+        let scope_stack = LVScopeStack::new();
+        let result = RubyVariable::new("_foo", RubyVariableType::Local(scope_stack));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_invalid_uppercase() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result = RubyVariable::new("Foo", RubyVariableType::Local(url, Vec::new()));
+        let scope_stack = LVScopeStack::new();
+        let result = RubyVariable::new("Foo", RubyVariableType::Local(scope_stack));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_local_variable_invalid_empty() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result = RubyVariable::new("", RubyVariableType::Local(url, Vec::new()));
+        let scope_stack = LVScopeStack::new();
+        let result = RubyVariable::new("", RubyVariableType::Local(scope_stack));
         assert!(result.is_err());
     }
 
@@ -298,9 +294,8 @@ mod tests {
 
     #[test]
     fn test_try_from() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let result =
-            RubyVariable::try_from(("foo", RubyVariableType::Local(url.clone(), Vec::new())));
+        let scope_stack = LVScopeStack::new();
+        let result = RubyVariable::try_from(("foo", RubyVariableType::Local(scope_stack)));
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "foo");
@@ -313,8 +308,8 @@ mod tests {
 
     #[test]
     fn test_display() {
-        let url = Url::parse("file:///test.rb").unwrap();
-        let var = RubyVariable::new("foo", RubyVariableType::Local(url, Vec::new())).unwrap();
+        let scope_stack = LVScopeStack::new();
+        let var = RubyVariable::new("foo", RubyVariableType::Local(scope_stack)).unwrap();
         assert_eq!(format!("{}", var), "foo");
 
         let var = RubyVariable::new("@bar", RubyVariableType::Instance).unwrap();
