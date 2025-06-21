@@ -5,6 +5,7 @@ use crate::analyzer_prism::Identifier;
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_variable::RubyVariableType;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(
@@ -62,11 +63,14 @@ pub async fn find_references_at_position(
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
             let filtered_entries: Vec<Location> = match &identifier {
-                Identifier::RubyVariable(_) => entries
-                    .iter()
-                    .filter(|loc| loc.uri == *uri && loc.range.start >= position)
-                    .cloned()
-                    .collect(),
+                Identifier::RubyVariable(variable) => match variable.variable_type() {
+                    RubyVariableType::Local(_) => entries
+                        .iter()
+                        .filter(|loc| loc.uri == *uri && loc.range.start >= position)
+                        .cloned()
+                        .collect(),
+                    _ => entries.to_owned(),
+                },
                 _ => entries.to_owned(),
             };
 
