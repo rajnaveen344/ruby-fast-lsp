@@ -1,4 +1,4 @@
-use crate::capabilities::{definition, inlay_hints, references, semantic_tokens};
+use crate::capabilities::{completion, definition, inlay_hints, references, semantic_tokens};
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
 use lsp_types::*;
@@ -58,5 +58,14 @@ pub async fn handle_inlay_hints(
 ) -> LspResult<Option<Vec<InlayHint>>> {
     Ok(Some(
         inlay_hints::handle_inlay_hints(lang_server, params).await,
+    ))
+}
+
+pub async fn handle_completion(
+    lang_server: &RubyLanguageServer,
+    params: CompletionParams,
+) -> LspResult<Option<CompletionResponse>> {
+    Ok(Some(
+        completion::handle_completion(lang_server, params).await,
     ))
 }

@@ -5,10 +5,10 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams,
-    SemanticTokensResult, Url,
+    CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
+    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
+    SemanticTokensParams, SemanticTokensResult, Url,
 };
 use ruby_prism::Visit;
 use std::collections::HashMap;
@@ -182,6 +182,19 @@ impl LanguageServer for RubyLanguageServer {
         let result = request::handle_inlay_hints(self, params).await;
 
         info!("[PERF] Inlay hint completed in {:?}", start_time.elapsed());
+
+        result
+    }
+
+    async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
+        info!(
+            "Completion request received for {:?}",
+            params.text_document_position.text_document.uri.path()
+        );
+        let start_time = Instant::now();
+        let result = request::handle_completion(self, params).await;
+
+        info!("[PERF] Completion completed in {:?}", start_time.elapsed());
 
         result
     }

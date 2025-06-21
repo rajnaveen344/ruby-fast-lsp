@@ -40,6 +40,10 @@ pub async fn handle_initialize(
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             capabilities::semantic_tokens::get_semantic_tokens_options(),
         )),
+        completion_provider: Some(CompletionOptions {
+            resolve_provider: Some(true),
+            ..CompletionOptions::default()
+        }),
         ..ServerCapabilities::default()
     };
 
