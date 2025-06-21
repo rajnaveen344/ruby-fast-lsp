@@ -57,20 +57,11 @@ impl fmt::Display for Identifier {
 pub struct RubyPrismAnalyzer {
     pub uri: Url,
     pub code: String,
-    pub namespace_stack: Vec<RubyConstant>,
 }
 
 impl RubyPrismAnalyzer {
     pub fn new(uri: Url, code: String) -> Self {
-        Self {
-            uri,
-            code,
-            namespace_stack: Vec::new(),
-        }
-    }
-
-    pub fn get_namespace_stack(&self) -> Vec<RubyConstant> {
-        self.namespace_stack.clone()
+        Self { uri, code }
     }
 
     /// Returns the identifier and the ancestors stack at the time of the lookup.
