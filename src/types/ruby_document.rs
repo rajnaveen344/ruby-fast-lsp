@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::debug;
 use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 use ruby_prism::{Location as PrismLocation, Visit};
 use std::{cmp, collections::BTreeMap};
@@ -146,7 +146,7 @@ impl RubyDocument {
     }
 
     pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
-        info!("Adding local variable entry with scope id: {:?}", scope_id);
+        debug!("Adding local variable entry with scope id: {:?}", scope_id);
         self.lvars
             .entry(scope_id)
             .or_insert_with(Vec::new)
@@ -154,12 +154,12 @@ impl RubyDocument {
     }
 
     pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
-        info!(
+        debug!(
             "Total entries length: {}, keys: {:?}",
             self.lvars.len(),
             self.lvars.keys()
         );
-        info!("Searching with scope id: {}", scope_id);
+        debug!("Searching with scope id: {}", scope_id);
         self.lvars.get(&scope_id)
     }
 }

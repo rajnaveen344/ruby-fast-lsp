@@ -74,3 +74,14 @@ pub async fn handle_completion(
         completion::handle_completion(lang_server, uri, position).await,
     ))
 }
+
+pub async fn handle_completion_resolve(
+    _lang_server: &RubyLanguageServer,
+    params: CompletionItem,
+) -> LspResult<CompletionItem> {
+    info!(
+        "Completion item resolve request received for {}",
+        params.label
+    );
+    Ok(params)
+}
