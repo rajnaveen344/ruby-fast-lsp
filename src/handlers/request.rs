@@ -65,7 +65,23 @@ pub async fn handle_completion(
     lang_server: &RubyLanguageServer,
     params: CompletionParams,
 ) -> LspResult<Option<CompletionResponse>> {
+    let uri = params.text_document_position.text_document.uri.clone();
+    let position = params.text_document_position.position;
+
+    debug!("Completion request received with params {:?}", params);
+
     Ok(Some(
-        completion::handle_completion(lang_server, params).await,
+        completion::handle_completion(lang_server, uri, position).await,
     ))
+}
+
+pub async fn handle_completion_resolve(
+    _lang_server: &RubyLanguageServer,
+    params: CompletionItem,
+) -> LspResult<CompletionItem> {
+    info!(
+        "Completion item resolve request received for {}",
+        params.label
+    );
+    Ok(params)
 }

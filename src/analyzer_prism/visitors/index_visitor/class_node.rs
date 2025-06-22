@@ -38,7 +38,11 @@ impl IndexVisitor {
             utils::collect_namespaces(&path_node, &mut namespace_parts);
 
             self.push_ns_scopes(namespace_parts);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            self.push_lv_scope(
+                node.location().start_offset(),
+                body_loc,
+                LVScopeKind::Constant,
+            );
 
             let current_namespace = self.current_namespace();
 
@@ -46,7 +50,11 @@ impl IndexVisitor {
         } else {
             // For simple class definitions (not a constant path)
             self.push_ns_scope(namespace);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            self.push_lv_scope(
+                node.location().start_offset(),
+                body_loc,
+                LVScopeKind::Constant,
+            );
 
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)

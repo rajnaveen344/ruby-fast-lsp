@@ -37,13 +37,15 @@ impl IndexVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
 
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)
         } else {
             self.push_ns_scope(namespace);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
 
             let current_namespace = self.current_namespace();
             FullyQualifiedName::namespace(current_namespace)

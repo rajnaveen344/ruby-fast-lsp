@@ -1,8 +1,12 @@
+use log::debug;
 use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 use ruby_prism::{Location as PrismLocation, Visit};
-use std::cmp;
+use std::{cmp, collections::BTreeMap};
 
-use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
+use crate::{
+    analyzer_prism::visitors::inlay_visitor::InlayVisitor, indexer::entry::Entry,
+    types::scope::LVScopeId,
+};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -15,7 +19,12 @@ pub struct RubyDocument {
     ///     ^ -> 0   ^ -> 8         ^ -> 23
     ///     line_offsets = [0, 8, 23, 27]
     line_offsets: Vec<usize>,
+
+    /// Inlay hints in the document for modules, classes, methods, etc.
     inlay_hints: Vec<InlayHint>,
+
+    /// Local variables in the document
+    lvars: BTreeMap<LVScopeId, Vec<Entry>>,
 }
 
 impl RubyDocument {
@@ -27,6 +36,7 @@ impl RubyDocument {
             version,
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
+            lvars: BTreeMap::new(),
         };
         doc.compute_line_offsets();
         doc.compute_inlay_hints();
@@ -133,6 +143,24 @@ impl RubyDocument {
     /// Returns the computed inlay hints for the document
     pub fn get_inlay_hints(&self) -> Vec<InlayHint> {
         self.inlay_hints.clone()
+    }
+
+    pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
+        debug!("Adding local variable entry with scope id: {:?}", scope_id);
+        self.lvars
+            .entry(scope_id)
+            .or_insert_with(Vec::new)
+            .push(entry);
+    }
+
+    pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
+        debug!(
+            "Total entries length: {}, keys: {:?}",
+            self.lvars.len(),
+            self.lvars.keys()
+        );
+        debug!("Searching with scope id: {}", scope_id);
+        self.lvars.get(&scope_id)
     }
 }
 

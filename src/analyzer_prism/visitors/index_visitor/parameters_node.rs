@@ -87,7 +87,11 @@ impl IndexVisitor {
                 // Add the entry to the index
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock().unwrap();
-                    index.add_entry(entry);
+                    index.add_entry(entry.clone());
+                    self.document.add_local_var_entry(
+                        self.scope_stack.last().unwrap().scope_id(),
+                        entry.clone(),
+                    );
                     debug!("Added parameter entry: {:?}", variable);
                 } else {
                     error!("Error creating entry for parameter: {}", param_name);

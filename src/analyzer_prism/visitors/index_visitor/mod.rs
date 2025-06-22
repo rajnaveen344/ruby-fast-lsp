@@ -5,7 +5,7 @@ use ruby_prism::*;
 
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
-use crate::types::scope::{LVScope, LVScopeKind, LVScopeStack};
+use crate::types::scope::{LVScope, LVScopeId, LVScopeKind, LVScopeStack};
 use crate::types::{
     ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
 };
@@ -36,6 +36,7 @@ impl IndexVisitor {
     pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
         let document = server.docs.lock().unwrap().get(&uri).unwrap().clone();
         let lv_scope = LVScope::new(
+            0,
             LspLocation {
                 uri: uri.clone(),
                 range: Range::new(
@@ -77,8 +78,14 @@ impl IndexVisitor {
         self.namespace_stack.iter().flatten().cloned().collect()
     }
 
-    fn push_lv_scope(&mut self, location: lsp_types::Location, kind: LVScopeKind) {
-        self.scope_stack.push(LVScope::new(location, kind));
+    fn push_lv_scope(
+        &mut self,
+        scope_id: LVScopeId,
+        location: lsp_types::Location,
+        kind: LVScopeKind,
+    ) {
+        self.scope_stack
+            .push(LVScope::new(scope_id, location, kind));
     }
 
     fn pop_lv_scope(&mut self) -> Option<LVScope> {

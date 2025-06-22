@@ -19,7 +19,7 @@ pub async fn find_definition_at_position(
 ) -> Option<Vec<Location>> {
     let analyzer = RubyPrismAnalyzer::new(uri, content.to_string());
 
-    let (identifier, ancestors) = analyzer.get_identifier(position);
+    let (identifier, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
     if let None = identifier {
         info!("No identifier found at position {:?}", position);

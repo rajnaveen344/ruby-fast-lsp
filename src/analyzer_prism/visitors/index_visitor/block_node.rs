@@ -13,7 +13,8 @@ impl IndexVisitor {
             self.document
                 .prism_location_to_lsp_location(&node.location())
         };
-        self.push_lv_scope(body_loc, LVScopeKind::Block);
+        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Block);
     }
 
     pub fn process_block_node_exit(&mut self, _node: &BlockNode) {

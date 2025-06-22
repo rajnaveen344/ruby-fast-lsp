@@ -18,7 +18,7 @@ use crate::{
         ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
         ruby_variable::{RubyVariable, RubyVariableType},
-        scope::{LVScope, LVScopeKind, LVScopeStack},
+        scope::{LVScope, LVScopeId, LVScopeKind, LVScopeStack},
     },
 };
 
@@ -40,6 +40,7 @@ impl ReferenceVisitor {
     pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
         let document = server.get_doc(&uri).unwrap();
         let lv_scope = LVScope::new(
+            0,
             LspLocation {
                 uri: uri.clone(),
                 range: Range::new(
@@ -78,8 +79,9 @@ impl ReferenceVisitor {
         self.namespace_stack.pop()
     }
 
-    fn push_lv_scope(&mut self, location: LspLocation, kind: LVScopeKind) {
-        self.scope_stack.push(LVScope::new(location, kind));
+    fn push_lv_scope(&mut self, scope_id: LVScopeId, location: LspLocation, kind: LVScopeKind) {
+        self.scope_stack
+            .push(LVScope::new(scope_id, location, kind));
     }
 
     fn pop_lv_scope(&mut self) -> Option<LVScope> {
@@ -103,14 +105,16 @@ impl Visit<'_> for ReferenceVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
             visit_module_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
             visit_module_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
@@ -132,14 +136,16 @@ impl Visit<'_> for ReferenceVisitor {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.push_ns_scopes(namespace_parts);
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
             visit_class_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
             self.push_ns_scope(RubyConstant::new(&name).unwrap());
-            self.push_lv_scope(body_loc, LVScopeKind::Constant);
+            let scope_id = self.document.position_to_offset(body_loc.range.start);
+            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
             visit_class_node(self, node);
             self.pop_ns_scope();
             self.pop_lv_scope();
@@ -154,7 +160,8 @@ impl Visit<'_> for ReferenceVisitor {
             self.document
                 .prism_location_to_lsp_location(&node.location())
         };
-        self.push_lv_scope(body_loc, LVScopeKind::Method);
+        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Method);
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::try_from(name.as_str());
@@ -180,7 +187,8 @@ impl Visit<'_> for ReferenceVisitor {
             self.document
                 .prism_location_to_lsp_location(&node.location())
         };
-        self.push_lv_scope(body_loc, LVScopeKind::Block);
+        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Block);
         visit_block_node(self, node);
         self.pop_lv_scope();
     }

@@ -6,16 +6,22 @@ use std::{
 use lsp_types::Location;
 
 pub type LVScopeStack = Vec<LVScope>;
+pub type LVScopeId = usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LVScope {
+    id: LVScopeId,
     location: Location,
     kind: LVScopeKind,
 }
 
 impl LVScope {
-    pub fn new(location: Location, kind: LVScopeKind) -> Self {
-        Self { location, kind }
+    pub fn new(id: LVScopeId, location: Location, kind: LVScopeKind) -> Self {
+        Self { id, location, kind }
+    }
+
+    pub fn scope_id(&self) -> LVScopeId {
+        self.id
     }
 
     pub fn location(&self) -> &Location {
@@ -131,6 +137,12 @@ pub enum LVScopeKind {
     /// puts x  # => 1 (unchanged)
     /// ```
     ExplicitBlockLocal,
+}
+
+impl LVScopeKind {
+    pub fn is_hard_scope_boundary(&self) -> bool {
+        matches!(self, LVScopeKind::Method | LVScopeKind::Constant)
+    }
 }
 
 impl fmt::Display for LVScopeKind {
