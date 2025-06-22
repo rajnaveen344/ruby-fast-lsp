@@ -1,5 +1,8 @@
-use log::info;
-use lsp_types::{CompletionItemKind, CompletionResponse, Position, Url};
+use lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse, Position,
+    Url,
+};
+use std::collections::HashSet;
 
 use crate::{
     analyzer_prism::RubyPrismAnalyzer, indexer::entry::entry_kind::EntryKind,
@@ -13,40 +16,34 @@ pub async fn handle_completion(
 ) -> CompletionResponse {
     let document = server.get_doc(&uri).unwrap();
     let analyzer = RubyPrismAnalyzer::new(uri, document.content.clone());
-    let (_, _, scope_stack) = analyzer.get_identifier(position);
-
-    let scope_id = scope_stack.last().unwrap().scope_id();
-    let entries = document.get_local_var_entries(scope_id);
-
-    info!(
-        "Searching with scope id: {:?} and found entries {:?}",
-        scope_stack.last().unwrap().scope_id(),
-        entries
-    );
-
-    if let None = entries {
-        return CompletionResponse::Array(vec![]);
-    }
-
-    let entries = entries.unwrap();
-
-    info!(
-        "Found {} local variable entries, entries: {:#?}",
-        entries.len(),
-        entries
-    );
+    let scope_stack = analyzer.get_scope_stack(position);
 
     let mut completions = vec![];
-    for entry in entries {
-        match &entry.kind {
-            EntryKind::Variable { name } => {
-                completions.push(lsp_types::CompletionItem {
-                    label: name.name().to_string(),
-                    kind: Some(CompletionItemKind::VARIABLE),
-                    ..Default::default()
-                });
+    let mut seen_variables = HashSet::new();
+
+    for scope in scope_stack.iter().rev() {
+        let scope_id = scope.scope_id();
+        if let Some(entries) = document.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let EntryKind::Variable { name } = &entry.kind {
+                    let var_name = name.name().to_string();
+                    if seen_variables.insert(var_name.clone()) {
+                        completions.push(CompletionItem {
+                            label: var_name,
+                            label_details: Some(CompletionItemLabelDetails {
+                                detail: None,
+                                description: Some("local_variable".to_string()),
+                            }),
+                            kind: Some(CompletionItemKind::VARIABLE),
+                            ..Default::default()
+                        });
+                    }
+                }
             }
-            _ => {}
+        }
+
+        if scope.kind().is_hard_scope_boundary() {
+            break;
         }
     }
 

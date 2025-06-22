@@ -49,7 +49,7 @@ pub struct IdentifierVisitor {
     /// namespace_stack = [[A, B, C]]
     namespace_stack: Vec<Vec<RubyConstant>>,
     current_method: Option<RubyMethod>,
-    pub scope_stack: LVScopeStack,
+    scope_stack: LVScopeStack,
     pub ancestors: Vec<RubyConstant>,
     pub identifier: Option<Identifier>,
     pub identifier_type: IdentifierType,

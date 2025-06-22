@@ -139,6 +139,12 @@ pub enum LVScopeKind {
     ExplicitBlockLocal,
 }
 
+impl LVScopeKind {
+    pub fn is_hard_scope_boundary(&self) -> bool {
+        matches!(self, LVScopeKind::Method | LVScopeKind::Constant)
+    }
+}
+
 impl fmt::Display for LVScopeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

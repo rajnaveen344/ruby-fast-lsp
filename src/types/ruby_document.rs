@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 use ruby_prism::{Location as PrismLocation, Visit};
 use std::{cmp, collections::BTreeMap};
@@ -155,10 +155,11 @@ impl RubyDocument {
 
     pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
         info!(
-            "Total entries length: {}, all entries: {:#?}",
+            "Total entries length: {}, keys: {:?}",
             self.lvars.len(),
-            self.lvars
+            self.lvars.keys()
         );
+        info!("Searching with scope id: {}", scope_id);
         self.lvars.get(&scope_id)
     }
 }
