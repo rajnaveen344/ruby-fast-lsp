@@ -28,6 +28,7 @@ pub struct IndexVisitor {
     pub uri: Url,
     pub document: RubyDocument,
     pub namespace_stack: Vec<Vec<RubyConstant>>,
+    pub in_singleton_node: bool,
     pub current_method: Option<RubyMethod>,
     pub scope_stack: LVScopeStack,
 }
@@ -51,6 +52,7 @@ impl IndexVisitor {
             uri,
             document,
             namespace_stack: vec![],
+            in_singleton_node: false,
             scope_stack: vec![lv_scope],
             current_method: None,
         }
@@ -104,6 +106,12 @@ impl Visit<'_> for IndexVisitor {
         self.process_class_node_entry(node);
         visit_class_node(self, node);
         self.process_class_node_exit(node);
+    }
+
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
+        self.process_singleton_class_node_entry(node);
+        visit_singleton_class_node(self, node);
+        self.process_singleton_class_node_exit(node);
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {

@@ -25,6 +25,8 @@ impl IndexVisitor {
             } else if let Some(_) = receiver.as_constant_read_node() {
                 method_kind = MethodKind::Class;
             }
+        } else if self.in_singleton_node {
+            method_kind = MethodKind::Class;
         }
 
         let method = RubyMethod::new(method_name_str.as_ref(), method_kind);
