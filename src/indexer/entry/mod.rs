@@ -20,7 +20,7 @@ pub struct Entry {
     pub kind: EntryKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MethodKind {
     /// Instance method defined in a class/module.
     /// Called on instances: `obj.method`
@@ -31,17 +31,6 @@ pub enum MethodKind {
     /// Called on the class itself: `MyClass.method`
     /// Example: `def self.bar; end` or `class << self; def bar; end`
     Class,
-
-    /// Singleton method defined on a specific object's eigenclass.
-    /// Exists outside normal class hierarchy.
-    /// Example: `obj = MyClass.new; def obj.unique_method; end`
-    Singleton,
-
-    /// Module function created with `module_function`.
-    /// Has dual nature:
-    /// - Public class method on the module (`MyModule.method`)
-    /// - Private instance method when included in other classes
-    ModuleFunc,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -10,7 +10,7 @@ use ruby_prism::{
 
 use crate::{
     analyzer_prism::utils::{self, collect_namespaces},
-    indexer::index::RubyIndex,
+    indexer::{entry::MethodKind, index::RubyIndex},
     server::RubyLanguageServer,
     types::{
         fully_qualified_name::FullyQualifiedName,
@@ -163,8 +163,20 @@ impl Visit<'_> for ReferenceVisitor {
         let scope_id = self.document.position_to_offset(body_loc.range.start);
         self.push_lv_scope(scope_id, body_loc, LVScopeKind::Method);
 
+        let mut method_kind = MethodKind::Instance;
+
+        if let Some(receiver) = node.receiver() {
+            if let Some(_) = receiver.as_self_node() {
+                method_kind = MethodKind::Class;
+            } else if let Some(_) = receiver.as_constant_path_node() {
+                method_kind = MethodKind::Class;
+            } else if let Some(_) = receiver.as_constant_read_node() {
+                method_kind = MethodKind::Class;
+            }
+        }
+
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method = RubyMethod::try_from(name.as_str());
+        let method = RubyMethod::new(name.as_str(), method_kind);
 
         if let Err(_) = method {
             warn!("Skipping invalid method name: {}", name);

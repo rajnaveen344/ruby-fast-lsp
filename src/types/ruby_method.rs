@@ -1,11 +1,12 @@
-use std::convert::TryFrom;
 use std::fmt;
 
+use crate::indexer::entry::MethodKind;
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyMethod(String);
+pub struct RubyMethod(String, MethodKind);
 
 impl RubyMethod {
-    pub fn new(name: &str) -> Result<Self, &'static str> {
+    pub fn new(name: &str, kind: MethodKind) -> Result<Self, &'static str> {
         if name.is_empty() {
             return Err("Method name cannot be empty");
         }
@@ -39,15 +40,15 @@ impl RubyMethod {
         }
 
         // Use the original name with the suffix preserved
-        Ok(Self(original_name.to_string()))
+        Ok(Self(original_name.to_string(), kind))
     }
-}
 
-impl TryFrom<&str> for RubyMethod {
-    type Error = &'static str;
+    pub fn get_name(&self) -> String {
+        self.0.clone()
+    }
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        RubyMethod::new(value)
+    pub fn get_kind(&self) -> MethodKind {
+        self.1
     }
 }
 
@@ -60,89 +61,88 @@ impl fmt::Display for RubyMethod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryFrom;
 
     #[test]
     fn test_new() {
-        let method = RubyMethod::new("foo");
+        let method = RubyMethod::new("foo", MethodKind::Instance);
         assert_eq!(method.unwrap().to_string(), "foo");
     }
 
     #[test]
     fn test_from_string() {
-        let method = RubyMethod::try_from("foo").unwrap();
+        let method = RubyMethod::new("foo", MethodKind::Instance).unwrap();
         assert_eq!(method.to_string(), "foo");
     }
 
     #[test]
     fn test_from_str() {
-        let method_try_from = RubyMethod::try_from("foo").unwrap();
+        let method_try_from = RubyMethod::new("foo", MethodKind::Instance).unwrap();
         assert_eq!(method_try_from.to_string(), "foo");
     }
 
     #[test]
     fn test_display() {
-        let method = RubyMethod::try_from("foo").unwrap();
+        let method = RubyMethod::new("foo", MethodKind::Instance).unwrap();
         assert_eq!(method.to_string(), "foo");
     }
 
     #[test]
     fn test_try_from() {
-        let method = RubyMethod::try_from("foo");
-        assert_eq!(method.unwrap().to_string(), "foo");
+        let method = RubyMethod::new("foo", MethodKind::Instance).unwrap();
+        assert_eq!(method.to_string(), "foo");
     }
 
     #[test]
     fn test_try_from_invalid() {
-        let method = RubyMethod::try_from("Foo");
+        let method = RubyMethod::new("Foo", MethodKind::Instance);
         assert!(method.is_err());
     }
 
     #[test]
     fn test_try_from_empty() {
-        let method = RubyMethod::try_from("");
+        let method = RubyMethod::new("", MethodKind::Instance);
         assert!(method.is_err());
     }
 
     #[test]
     fn test_method_with_question_mark() {
-        let method = RubyMethod::try_from("empty?");
-        assert_eq!(method.unwrap().to_string(), "empty?");
+        let method = RubyMethod::new("empty?", MethodKind::Instance).unwrap();
+        assert_eq!(method.to_string(), "empty?");
     }
 
     #[test]
     fn test_method_with_exclamation_mark() {
-        let method = RubyMethod::try_from("save!");
-        assert_eq!(method.unwrap().to_string(), "save!");
+        let method = RubyMethod::new("save!", MethodKind::Instance).unwrap();
+        assert_eq!(method.to_string(), "save!");
     }
 
     #[test]
     fn test_method_with_equals() {
-        let method = RubyMethod::try_from("name=");
-        assert_eq!(method.unwrap().to_string(), "name=");
+        let method = RubyMethod::new("name=", MethodKind::Instance).unwrap();
+        assert_eq!(method.to_string(), "name=");
     }
 
     #[test]
     fn test_invalid_suffix_only() {
-        let method = RubyMethod::try_from("?");
+        let method = RubyMethod::new("?", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::try_from("!");
+        let method = RubyMethod::new("!", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::try_from("=");
+        let method = RubyMethod::new("=", MethodKind::Instance);
         assert!(method.is_err());
     }
 
     #[test]
     fn test_invalid_with_suffix() {
-        let method = RubyMethod::try_from("Invalid?");
+        let method = RubyMethod::new("Invalid?", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::try_from("Invalid!");
+        let method = RubyMethod::new("Invalid!", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::try_from("Invalid=");
+        let method = RubyMethod::new("Invalid=", MethodKind::Instance);
         assert!(method.is_err());
     }
 }

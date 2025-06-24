@@ -15,34 +15,45 @@ impl IndexVisitor {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
-        let method_name = RubyMethod::try_from(method_name_str.as_ref());
+        let mut method_kind = MethodKind::Instance;
 
-        if let Err(_) = method_name {
+        if let Some(receiver) = node.receiver() {
+            if let Some(_) = receiver.as_self_node() {
+                method_kind = MethodKind::Class;
+            } else if let Some(_) = receiver.as_constant_path_node() {
+                method_kind = MethodKind::Class;
+            } else if let Some(_) = receiver.as_constant_read_node() {
+                method_kind = MethodKind::Class;
+            }
+        }
+
+        let method = RubyMethod::new(method_name_str.as_ref(), method_kind);
+
+        if let Err(_) = method {
             warn!("Skipping invalid method name: {}", method_name_str);
             return;
         }
 
-        let method_name = method_name.unwrap();
+        let mut method = method.unwrap();
+
+        if method.get_name() == "initialize" {
+            method = RubyMethod::new("new", MethodKind::Class).unwrap();
+        }
+
         let name_location = node.name_loc();
         let location = self.prism_loc_to_lsp_loc(name_location);
         let current_namespace = self.current_namespace();
-        let fqn =
-            FullyQualifiedName::instance_method(current_namespace.clone(), method_name.clone());
+        let fqn = FullyQualifiedName::instance_method(current_namespace.clone(), method.clone());
 
         debug!("Visiting method definition: {}", fqn);
 
-        let owner_fqn = if current_namespace.is_empty() {
-            FullyQualifiedName::Constant(vec![])
-        } else {
-            FullyQualifiedName::Constant(current_namespace)
-        };
+        let owner_fqn = FullyQualifiedName::Constant(current_namespace);
 
         let entry = Entry {
             fqn: fqn.clone(),
             location,
             kind: EntryKind::Method {
-                name: method_name.clone().into(),
-                kind: MethodKind::Instance,
+                name: method.clone().into(),
                 parameters: vec![],
                 owner: owner_fqn,
                 visibility: MethodVisibility::Public,
@@ -55,7 +66,7 @@ impl IndexVisitor {
         index.add_entry(entry);
         debug!("Added method entry: {}", fqn);
 
-        self.current_method = Some(method_name.clone());
+        self.current_method = Some(method.clone());
 
         drop(index);
 

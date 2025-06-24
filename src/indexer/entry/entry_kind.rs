@@ -15,7 +15,6 @@ pub enum EntryKind {
     Module,
     Method {
         name: RubyMethod,
-        kind: MethodKind,
         parameters: Vec<String>,
         owner: FullyQualifiedName,
         visibility: MethodVisibility,
@@ -42,15 +41,13 @@ impl Display for EntryKind {
                 )
             }
             EntryKind::Module { .. } => write!(f, "Module"),
-            EntryKind::Method { name, kind, .. } => {
+            EntryKind::Method { name, .. } => {
                 write!(
                     f,
                     "Method{}: {}",
-                    match kind {
+                    match name.get_kind() {
                         MethodKind::Instance => " (Instance)",
                         MethodKind::Class => " (Class)",
-                        MethodKind::Singleton => " (Singleton)",
-                        MethodKind::ModuleFunc => " (ModuleFunc)",
                     },
                     name
                 )

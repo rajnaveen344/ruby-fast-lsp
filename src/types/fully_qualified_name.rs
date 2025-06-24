@@ -16,12 +16,6 @@ pub enum FullyQualifiedName {
     /// Class/singleton method, e.g., `Foo.bar` → `ClassMethod(vec!["Foo"], RubyMethod::new("bar"))`
     ClassMethod(Vec<RubyConstant>, RubyMethod),
 
-    /// Module function, e.g., `Foo::bar` → `ModuleMethod(vec!["Foo"], RubyMethod::new("bar"))`
-    /// These are methods created with `module_function` and have a dual nature:
-    /// - Public class method on the module
-    /// - Private instance method when included in other classes
-    ModuleMethod(Vec<RubyConstant>, RubyMethod),
-
     /// Local variable, e.g., `a = 1` → `LocalVariable("a")`
     Variable(RubyVariable),
 }
@@ -48,14 +42,8 @@ impl FullyQualifiedName {
             FullyQualifiedName::Constant(ns) => ns.clone(),
             FullyQualifiedName::InstanceMethod(ns, _) => ns.clone(),
             FullyQualifiedName::ClassMethod(ns, _) => ns.clone(),
-            FullyQualifiedName::ModuleMethod(ns, _) => ns.clone(),
             FullyQualifiedName::Variable(_) => vec![],
         }
-    }
-
-    // Constructor helper for module methods
-    pub fn module_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
-        FullyQualifiedName::ModuleMethod(namespace, method)
     }
 
     pub fn variable(variable: RubyVariable) -> Self {
@@ -92,7 +80,6 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::Constant(_) => write!(f, "{namespace}"),
             FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
             FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
-            FullyQualifiedName::ModuleMethod(_, method) => write!(f, "{namespace}::{method}"),
             FullyQualifiedName::Variable(variable) => {
                 write!(f, "{}", variable)
             }
@@ -102,6 +89,8 @@ impl Display for FullyQualifiedName {
 
 #[cfg(test)]
 mod tests {
+    use crate::indexer::entry::MethodKind;
+
     use super::*;
 
     #[test]
@@ -120,7 +109,7 @@ mod tests {
                 RubyConstant::new("Foo").unwrap(),
                 RubyConstant::new("Bar").unwrap(),
             ],
-            RubyMethod::new("baz").unwrap(),
+            RubyMethod::new("baz", MethodKind::Instance).unwrap(),
         );
         assert_eq!(fqn.to_string(), "Foo::Bar#baz");
     }
@@ -132,7 +121,7 @@ mod tests {
                 RubyConstant::new("Foo").unwrap(),
                 RubyConstant::new("Bar").unwrap(),
             ],
-            RubyMethod::new("baz").unwrap(),
+            RubyMethod::new("baz", MethodKind::Class).unwrap(),
         );
         assert_eq!(fqn.to_string(), "Foo::Bar.baz");
     }
@@ -152,17 +141,5 @@ mod tests {
         ]);
 
         assert_eq!(fqn.to_string(), "Foo::Bar");
-    }
-
-    #[test]
-    fn test_module_method() {
-        let fqn = FullyQualifiedName::module_method(
-            vec![
-                RubyConstant::new("Foo").unwrap(),
-                RubyConstant::new("Bar").unwrap(),
-            ],
-            RubyMethod::new("baz").unwrap(),
-        );
-        assert_eq!(fqn.to_string(), "Foo::Bar::baz");
     }
 }
