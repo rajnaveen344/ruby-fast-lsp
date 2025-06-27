@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::debug;
 use lsp_types::{Location, Url};
 
-use crate::indexer::entry::{entry_kind::EntryKind, Entry, Mixin};
+use crate::indexer::entry::{entry_kind::EntryKind, Entry};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 #[derive(Debug)]
@@ -24,9 +24,6 @@ pub struct RubyIndex {
     // References are the references to a fully qualified name.
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
 
-    // Mixins to support include, extend, and prepend helpers
-    pub mixin_relationships: HashMap<FullyQualifiedName, Vec<Mixin>>,
-
     // Temporarily used to find definitions by name until we have logic to determine the type of the receiver
     // For example, if we have a method Foo#bar, its method by name is bar.
     pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
@@ -39,7 +36,6 @@ impl RubyIndex {
             namespace_ancestors: HashMap::new(),
             definitions: HashMap::new(),
             references: HashMap::new(),
-            mixin_relationships: HashMap::new(),
             methods_by_name: HashMap::new(),
         }
     }
@@ -143,10 +139,12 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::Class {
-                superclass: None,
-                is_singleton: false,
-            })
+            .kind(EntryKind::new_class(
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ))
             .build()
             .unwrap();
         index.add_entry(entry);
@@ -166,10 +164,12 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::Class {
-                superclass: None,
-                is_singleton: false,
-            })
+            .kind(EntryKind::new_class(
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ))
             .build()
             .unwrap();
         index.add_entry(entry);

@@ -10,9 +10,15 @@ use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 pub enum EntryKind {
     Class {
         superclass: Option<FullyQualifiedName>,
-        is_singleton: bool,
+        includes: Vec<FullyQualifiedName>,
+        prepends: Vec<FullyQualifiedName>,
+        extends: Vec<FullyQualifiedName>,
     },
-    Module,
+    Module {
+        includes: Vec<FullyQualifiedName>,
+        prepends: Vec<FullyQualifiedName>,
+        extends: Vec<FullyQualifiedName>,
+    },
     Method {
         name: RubyMethod,
         parameters: Vec<String>,
@@ -30,16 +36,38 @@ pub enum EntryKind {
     },
 }
 
+impl EntryKind {
+    pub fn new_class(
+        superclass: Option<FullyQualifiedName>,
+        includes: Vec<FullyQualifiedName>,
+        prepends: Vec<FullyQualifiedName>,
+        extends: Vec<FullyQualifiedName>,
+    ) -> Self {
+        Self::Class {
+            superclass,
+            includes,
+            prepends,
+            extends,
+        }
+    }
+
+    pub fn new_module(
+        includes: Vec<FullyQualifiedName>,
+        prepends: Vec<FullyQualifiedName>,
+        extends: Vec<FullyQualifiedName>,
+    ) -> Self {
+        Self::Module {
+            includes,
+            prepends,
+            extends,
+        }
+    }
+}
+
 impl Display for EntryKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EntryKind::Class { is_singleton, .. } => {
-                write!(
-                    f,
-                    "Class{}",
-                    if *is_singleton { " (Singleton)" } else { "" }
-                )
-            }
+            EntryKind::Class { .. } => write!(f, "Class"),
             EntryKind::Module { .. } => write!(f, "Module"),
             EntryKind::Method { name, .. } => {
                 write!(
