@@ -16,12 +16,12 @@ pub async fn handle_completion(
 ) -> CompletionResponse {
     let document = server.get_doc(&uri).unwrap();
     let analyzer = RubyPrismAnalyzer::new(uri, document.content.clone());
-    let scope_stack = analyzer.get_scope_stack(position);
+    let (_, _, lv_scope) = analyzer.get_identifier(position);
 
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
-    for scope in scope_stack.iter().rev() {
+    for scope in lv_scope.iter().rev() {
         let scope_id = scope.scope_id();
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {

@@ -1,15 +1,16 @@
-use crate::analyzer_prism::utils;
-use crate::analyzer_prism::Identifier;
-use crate::indexer::entry::MethodKind;
-use crate::types::ruby_document::RubyDocument;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
-use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
-use crate::types::scope::LVScope;
-use crate::types::scope::LVScopeId;
-use crate::types::scope::LVScopeKind;
-use crate::types::scope::LVScopeStack;
-
+use crate::{
+    analyzer_prism::{utils, visitors::common::ScopeTracker, Identifier},
+    indexer::entry::MethodKind,
+    types::{
+        ruby_document::RubyDocument,
+        ruby_method::RubyMethod,
+        ruby_namespace::RubyConstant,
+        ruby_variable::{RubyVariable, RubyVariableType},
+        scope::LVScope,
+        scope::LVScopeKind,
+        scope::LVScopeStack,
+    },
+};
 use log::warn;
 use lsp_types::Range;
 use lsp_types::{Location as LSPLocation, Position};
@@ -40,17 +41,7 @@ pub enum IdentifierType {
 pub struct IdentifierVisitor {
     document: RubyDocument,
     position: Position,
-
-    /// Stack of namespaces for each scope
-    /// To support module/class definitions with ConstantPathNode
-    /// we store the namespace stack for each scope as Vec<Vec<RubyConstant>>
-    /// Eg. module A; end
-    /// namespace_stack = [[A]]
-    /// Eg. module A::B::C; end;
-    /// namespace_stack = [[A, B, C]]
-    namespace_stack: Vec<Vec<RubyConstant>>,
-    current_method: Option<RubyMethod>,
-    pub lv_scope_stack: LVScopeStack,
+    pub scope_tracker: ScopeTracker,
     pub ancestors: Vec<RubyConstant>,
     pub identifier: Option<Identifier>,
     pub identifier_type: IdentifierType,
@@ -58,6 +49,7 @@ pub struct IdentifierVisitor {
 
 impl IdentifierVisitor {
     pub fn new(document: RubyDocument, position: Position) -> Self {
+        let mut scope_tracker = ScopeTracker::default();
         let lv_scope = LVScope::new(
             0,
             LSPLocation {
@@ -69,13 +61,12 @@ impl IdentifierVisitor {
             },
             LVScopeKind::TopLevel,
         );
+        scope_tracker.push_lv_scope(lv_scope);
 
         Self {
             document,
             position,
-            namespace_stack: Vec::new(),
-            lv_scope_stack: vec![lv_scope],
-            current_method: None,
+            scope_tracker,
             ancestors: Vec::new(),
             identifier: None,
             identifier_type: IdentifierType::Call,
@@ -91,30 +82,16 @@ impl IdentifierVisitor {
         position_offset >= start_offset && position_offset < end_offset
     }
 
-    fn push_ns_scope(&mut self, namespace: RubyConstant) {
-        self.namespace_stack.push(vec![namespace]);
+    pub fn identifier(&self) -> Option<Identifier> {
+        self.identifier.clone()
     }
 
-    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        self.namespace_stack.push(namespaces);
+    pub fn ns_stack(&self) -> Vec<RubyConstant> {
+        self.scope_tracker.get_ns_stack()
     }
 
-    fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
-        self.namespace_stack.pop()
-    }
-
-    fn push_lv_scope(&mut self, scope_id: LVScopeId, location: LSPLocation, kind: LVScopeKind) {
-        self.lv_scope_stack
-            .push(LVScope::new(scope_id, location, kind));
-    }
-
-    fn pop_lv_scope(&mut self) -> Option<LVScope> {
-        self.lv_scope_stack.pop()
-    }
-
-    /// Returns a clone of the current LV scope stack collected while visiting the AST.
     pub fn lv_scope(&self) -> LVScopeStack {
-        self.lv_scope_stack.clone()
+        self.scope_tracker.get_lv_stack().clone()
     }
 }
 
@@ -140,7 +117,7 @@ impl Visit<'_> for IdentifierVisitor {
             }
             self.identifier_type = IdentifierType::ClassDef;
             // Flatten the namespace stack into a single vector of constants
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             return;
         }
 
@@ -156,23 +133,31 @@ impl Visit<'_> for IdentifierVisitor {
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
             utils::collect_namespaces(&constant_path_node, &mut namespaces);
-            self.push_ns_scopes(namespaces);
+            self.scope_tracker.push_ns_scopes(namespaces);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
             let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.push_ns_scope(namespace);
+            self.scope_tracker.push_ns_scope(namespace);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
         }
 
         // Visit the class body
         visit_class_node(self, &node);
 
         // Remove the class name from the namespace stack
-        self.pop_ns_scope();
-        self.pop_lv_scope();
+        self.scope_tracker.pop_ns_scope();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
@@ -196,7 +181,7 @@ impl Visit<'_> for IdentifierVisitor {
             }
             self.identifier_type = IdentifierType::ModuleDef;
             // Flatten the namespace stack into a single vector of constants
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.ns_stack();
             return;
         }
 
@@ -212,23 +197,31 @@ impl Visit<'_> for IdentifierVisitor {
         if let Some(constant_path_node) = constant_path.as_constant_path_node() {
             let mut namespaces = Vec::new();
             utils::collect_namespaces(&constant_path_node, &mut namespaces);
-            self.push_ns_scopes(namespaces);
+            self.scope_tracker.push_ns_scopes(namespaces);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
             let namespace = RubyConstant::new(&name.to_string()).unwrap();
-            self.push_ns_scope(namespace);
+            self.scope_tracker.push_ns_scope(namespace);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
         }
 
         // Visit the module body
         visit_module_node(self, &node);
 
         // Remove the module name from the namespace stack
-        self.pop_ns_scope();
-        self.pop_lv_scope();
+        self.scope_tracker.pop_ns_scope();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
@@ -265,9 +258,10 @@ impl Visit<'_> for IdentifierVisitor {
         };
 
         let method = method.unwrap();
-        self.current_method = Some(method.clone());
+        self.scope_tracker.enter_method(method.clone());
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Method);
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -278,8 +272,8 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         visit_def_node(self, node);
-        self.current_method = None;
-        self.pop_lv_scope();
+        self.scope_tracker.exit_method();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_block_node(&mut self, node: &BlockNode) {
@@ -291,9 +285,10 @@ impl Visit<'_> for IdentifierVisitor {
                 .prism_location_to_lsp_location(&node.location())
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Block);
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Block));
         visit_block_node(self, node);
-        self.pop_lv_scope();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_parameters_node(&mut self, node: &ParametersNode) {
@@ -307,11 +302,12 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(param) = required.as_required_parameter_node() {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                    let var_type = RubyVariableType::Local(self.lv_scope_stack.clone());
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                    self.ancestors = self.scope_tracker.get_ns_stack();
                 }
             }
         }
@@ -322,11 +318,12 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(param) = optional.as_optional_parameter_node() {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                    let var_type = RubyVariableType::Local(self.lv_scope_stack.clone());
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                    self.ancestors = self.scope_tracker.get_ns_stack();
                 }
             }
         }
@@ -337,11 +334,12 @@ impl Visit<'_> for IdentifierVisitor {
                 if let Some(name) = param.name() {
                     if self.is_position_in_location(&param.location()) {
                         let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                        let var_type = RubyVariableType::Local(self.lv_scope_stack.clone());
+                        let var_type =
+                            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                         let var = RubyVariable::new(&param_name, var_type).unwrap();
                         self.identifier = Some(Identifier::RubyVariable(var));
                         self.identifier_type = IdentifierType::LVarDef;
-                        self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                        self.ancestors = self.scope_tracker.get_ns_stack();
                     }
                 }
             }
@@ -352,11 +350,12 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(param) = post.as_required_parameter_node() {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                    let var_type = RubyVariableType::Local(self.lv_scope_stack.clone());
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.identifier = Some(Identifier::RubyVariable(var));
                     self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+                    self.ancestors = self.scope_tracker.get_ns_stack();
                 }
             }
         }
@@ -376,7 +375,7 @@ impl Visit<'_> for IdentifierVisitor {
         if self.is_position_in_location(&name_loc) {
             self.identifier = Some(Identifier::RubyConstant(vec![constant]));
             self.identifier_type = IdentifierType::ConstantDef;
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             return;
         }
 
@@ -424,7 +423,7 @@ impl Visit<'_> for IdentifierVisitor {
         if is_root_constant {
             self.ancestors = vec![];
         } else {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
         }
     }
 
@@ -442,7 +441,7 @@ impl Visit<'_> for IdentifierVisitor {
             self.identifier = Some(Identifier::RubyConstant(Vec::new()));
         }
 
-        self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+        self.ancestors = self.scope_tracker.get_ns_stack();
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
@@ -510,10 +509,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
@@ -530,10 +529,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier_type = IdentifierType::LVarDef;
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
@@ -550,10 +549,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier_type = IdentifierType::LVarDef;
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
@@ -570,10 +569,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier_type = IdentifierType::LVarDef;
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
@@ -590,10 +589,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier_type = IdentifierType::LVarDef;
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
@@ -610,10 +609,10 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.lv_scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier_type = IdentifierType::LVarDef;
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
@@ -629,7 +628,7 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
@@ -647,7 +646,7 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Instance);
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
@@ -662,7 +661,7 @@ impl Visit<'_> for IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Global);
         if let Ok(variable) = var {
-            self.ancestors = self.namespace_stack.iter().flatten().cloned().collect();
+            self.ancestors = self.scope_tracker.get_ns_stack();
             self.identifier = Some(Identifier::RubyVariable(variable));
         }
 
@@ -705,54 +704,6 @@ mod tests {
 
         // Get the identifier for further processing
         let identifier = visitor.identifier.as_ref().unwrap();
-
-        // Special case for root constants
-        if code.starts_with("::") {
-            match identifier {
-                Identifier::RubyConstant(parts) => {
-                    // For root constants, we expect an empty namespace vector
-                    if expected_parts.len() == 1 {
-                        // For direct root constants like ::GLOBAL_CONSTANT
-                        assert_eq!(
-                            parts.len(),
-                            0,
-                            "Expected empty namespace vector for root constant"
-                        );
-                        assert_eq!(
-                            parts[0].to_string(),
-                            expected_parts[0],
-                            "Expected constant name to match"
-                        );
-                    } else {
-                        // For nested root constants like ::Foo::Bar::CONSTANT
-                        assert_eq!(
-                            parts.len(),
-                            expected_parts.len() - 1,
-                            "Namespace parts count mismatch for root constant path"
-                        );
-                        for (i, expected_part) in expected_parts
-                            .iter()
-                            .take(expected_parts.len() - 1)
-                            .enumerate()
-                        {
-                            assert_eq!(
-                                parts[i].to_string(),
-                                *expected_part,
-                                "Namespace part at index {} mismatch",
-                                i
-                            );
-                        }
-                        assert_eq!(
-                            parts.last().unwrap().to_string(),
-                            expected_parts[expected_parts.len() - 1],
-                            "Expected constant name to match"
-                        );
-                    }
-                    return;
-                }
-                _ => {}
-            }
-        }
 
         // Get the parts from the identifier - could be either a namespace or a constant
         let parts = match identifier {
