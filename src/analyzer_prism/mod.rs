@@ -6,7 +6,7 @@ use crate::types::ruby_variable::RubyVariable;
 use crate::types::{ruby_document::RubyDocument, scope::LVScopeStack};
 use lsp_types::{Position, Url};
 use ruby_prism::Visit;
-use visitors::{identifier_visitor::IdentifierVisitor, scope_visitor::ScopeVisitor};
+use visitors::identifier_visitor::IdentifierVisitor;
 
 // Export the visitors module
 pub mod utils;
@@ -77,20 +77,18 @@ impl RubyPrismAnalyzer {
         let mut iden_visitor = IdentifierVisitor::new(document.clone(), position);
         iden_visitor.visit(&root_node);
 
-        (
-            iden_visitor.identifier,
-            iden_visitor.ns_stack_at_pos,
-            iden_visitor.lv_stack_at_pos,
-        )
+        let res = iden_visitor.get_result();
+        (res.0, res.2, res.3)
     }
 
     pub fn get_scope_stack(&self, position: Position) -> LVScopeStack {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
-        let mut visitor = ScopeVisitor::new(document, position);
+        let mut visitor = IdentifierVisitor::new(document, position);
         let root_node = parse_result.node();
         visitor.visit(&root_node);
-        visitor.scope_stack
+        let (_, _, _, lv_stack) = visitor.get_result();
+        lv_stack
     }
 }
 

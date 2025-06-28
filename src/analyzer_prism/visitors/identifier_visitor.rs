@@ -108,11 +108,25 @@ impl IdentifierVisitor {
         Vec<RubyConstant>,
         LVScopeStack,
     ) {
+        let ns_stack = match self.ns_stack_at_pos.len() {
+            // If ns_stack_at_pos is empty because no identifier was found,
+            // use the scope tracker's ns_stack
+            0 => self.scope_tracker.get_ns_stack(),
+            _ => self.ns_stack_at_pos.clone(),
+        };
+
+        let lv_stack = match self.lv_stack_at_pos.len() {
+            // If lv_stack_at_pos is empty because no identifier was found,
+            // use the scope tracker's lv_stack
+            0 => self.scope_tracker.get_lv_stack(),
+            _ => self.lv_stack_at_pos.clone(),
+        };
+
         (
             self.identifier.clone(),
             self.identifier_type.clone(),
-            self.ns_stack_at_pos.clone(),
-            self.lv_stack_at_pos.clone(),
+            ns_stack,
+            lv_stack,
         )
     }
 }
@@ -167,7 +181,7 @@ impl Visit<'_> for IdentifierVisitor {
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,
-                body_loc,
+                body_loc.clone(),
                 LVScopeKind::Constant,
             ));
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
@@ -177,7 +191,7 @@ impl Visit<'_> for IdentifierVisitor {
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,
-                body_loc,
+                body_loc.clone(),
                 LVScopeKind::Constant,
             ));
         }
@@ -185,9 +199,10 @@ impl Visit<'_> for IdentifierVisitor {
         // Visit the class body
         visit_class_node(self, &node);
 
-        // Remove the class name from the namespace stack
-        self.scope_tracker.pop_ns_scope();
-        self.scope_tracker.pop_lv_scope();
+        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
+        }
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
@@ -239,7 +254,7 @@ impl Visit<'_> for IdentifierVisitor {
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,
-                body_loc,
+                body_loc.clone(),
                 LVScopeKind::Constant,
             ));
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
@@ -249,7 +264,7 @@ impl Visit<'_> for IdentifierVisitor {
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,
-                body_loc,
+                body_loc.clone(),
                 LVScopeKind::Constant,
             ));
         }
@@ -257,9 +272,10 @@ impl Visit<'_> for IdentifierVisitor {
         // Visit the module body
         visit_module_node(self, &node);
 
-        // Remove the module name from the namespace stack
-        self.scope_tracker.pop_ns_scope();
-        self.scope_tracker.pop_lv_scope();
+        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
+        }
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
@@ -297,8 +313,11 @@ impl Visit<'_> for IdentifierVisitor {
 
         let method = method.unwrap();
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
+        self.scope_tracker.push_lv_scope(LVScope::new(
+            scope_id,
+            body_loc.clone(),
+            LVScopeKind::Method,
+        ));
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -312,7 +331,10 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         visit_def_node(self, node);
-        self.scope_tracker.pop_lv_scope();
+
+        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+            self.scope_tracker.pop_lv_scope();
+        }
     }
 
     fn visit_block_node(&mut self, node: &BlockNode) {
@@ -328,10 +350,16 @@ impl Visit<'_> for IdentifierVisitor {
                 .prism_location_to_lsp_location(&node.location())
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Block));
+        self.scope_tracker.push_lv_scope(LVScope::new(
+            scope_id,
+            body_loc.clone(),
+            LVScopeKind::Block,
+        ));
         visit_block_node(self, node);
-        self.scope_tracker.pop_lv_scope();
+
+        if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
+            self.scope_tracker.pop_lv_scope();
+        }
     }
 
     fn visit_parameters_node(&mut self, node: &ParametersNode) {

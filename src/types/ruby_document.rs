@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, info};
 use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 use ruby_prism::{Location as PrismLocation, Visit};
 use std::{cmp, collections::BTreeMap};
@@ -146,7 +146,7 @@ impl RubyDocument {
     }
 
     pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
-        debug!("Adding local variable entry with scope id: {:?}", scope_id);
+        info!("Adding local variable entry with scope id: {:?}", scope_id);
         self.lvars
             .entry(scope_id)
             .or_insert_with(Vec::new)
