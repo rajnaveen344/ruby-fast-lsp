@@ -16,7 +16,7 @@ pub struct RubyDocument {
     pub version: i32,
     /// Byte offset at the start of each line (last element is total content length)
     /// Eg. def foo\n  puts 'Hello'\nend\n
-    ///     ^ -> 0   ^ -> 8         ^ -> 23
+    ///     ^ -> 0   ^ -> 8          ^ -> 23
     ///     line_offsets = [0, 8, 23, 27]
     line_offsets: Vec<usize>,
 

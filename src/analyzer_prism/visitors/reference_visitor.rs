@@ -173,10 +173,7 @@ impl Visit<'_> for ReferenceVisitor {
             return;
         }
 
-        let method = method.unwrap();
-        self.scope_tracker.enter_method(method);
         visit_def_node(self, node);
-        self.scope_tracker.exit_method();
         self.scope_tracker.pop_lv_scope();
     }
 

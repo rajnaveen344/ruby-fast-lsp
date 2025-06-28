@@ -42,9 +42,7 @@ impl IndexVisitor {
         }
 
         let name_location = node.name_loc();
-        let location = self
-            .document
-            .prism_location_to_lsp_location(&name_location);
+        let location = self.document.prism_location_to_lsp_location(&name_location);
         let current_namespace = self.scope_tracker.get_ns_stack();
         let fqn = FullyQualifiedName::instance_method(current_namespace.clone(), method.clone());
 
@@ -69,8 +67,6 @@ impl IndexVisitor {
         index.add_entry(entry);
         debug!("Added method entry: {}", fqn);
 
-        self.scope_tracker.enter_method(method.clone());
-
         drop(index);
 
         let body_loc = if let Some(body) = node.body() {
@@ -82,15 +78,11 @@ impl IndexVisitor {
         };
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker.push_lv_scope(LVScope::new(
-            scope_id,
-            body_loc,
-            LVScopeKind::Method,
-        ));
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
-        self.scope_tracker.exit_method();
         self.scope_tracker.pop_lv_scope();
     }
 }
