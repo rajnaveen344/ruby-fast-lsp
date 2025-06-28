@@ -1,6 +1,9 @@
+use lsp_types::{Location as LspLocation, Range};
+
 use crate::types::{
+    ruby_document::RubyDocument,
     ruby_namespace::RubyConstant,
-    scope::{LVScope, LVScopeStack},
+    scope::{LVScope, LVScopeKind, LVScopeStack},
 };
 
 /// Mixed stack frame – either a namespace or a `class << self` marker
@@ -19,13 +22,33 @@ pub enum ScopeFrame {
     Singleton,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ScopeTracker {
     /// Ordered stack of namespace/singleton frames.
     frames: Vec<ScopeFrame>,
 
     /// Local-variable scopes (method/block/rescue/lambda)
     lv_stack: LVScopeStack,
+}
+
+impl ScopeTracker {
+    pub fn new(document: &RubyDocument) -> Self {
+        let frames = Vec::new();
+        let mut lv_stack = LVScopeStack::new();
+        let top_lv_scope = LVScope::new(
+            0,
+            LspLocation {
+                uri: document.uri.clone(),
+                range: Range::new(
+                    document.offset_to_position(0),
+                    document.offset_to_position(document.content.len()),
+                ),
+            },
+            LVScopeKind::TopLevel,
+        );
+        lv_stack.push(top_lv_scope);
+        Self { frames, lv_stack }
+    }
 }
 
 impl ScopeTracker {

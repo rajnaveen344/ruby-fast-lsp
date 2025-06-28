@@ -1,12 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use lsp_types::{Location as LspLocation, Range, Url};
+use lsp_types::Url;
 use ruby_prism::*;
 
 use crate::analyzer_prism::visitors::common::ScopeTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
-use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
@@ -30,28 +29,15 @@ pub struct IndexVisitor {
 
 impl IndexVisitor {
     pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
+        let index = server.index();
         let document = server.get_doc(&uri).unwrap();
-        let mut scope_tracker = ScopeTracker::default();
-        let lv_scope = LVScope::new(
-            0,
-            LspLocation {
-                uri,
-                range: Range::new(
-                    document.offset_to_position(0),
-                    document.offset_to_position(document.content.len()),
-                ),
-            },
-            LVScopeKind::TopLevel,
-        );
-        scope_tracker.push_lv_scope(lv_scope);
+        let scope_tracker = ScopeTracker::new(&document);
         Self {
-            index: server.index(),
+            index,
             document,
             scope_tracker,
         }
     }
-
-
 }
 
 impl Visit<'_> for IndexVisitor {

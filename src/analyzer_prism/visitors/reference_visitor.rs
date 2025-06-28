@@ -39,7 +39,7 @@ impl ReferenceVisitor {
 
     pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
         let document = server.get_doc(&uri).unwrap();
-        let mut scope_tracker = ScopeTracker::default();
+        let mut scope_tracker = ScopeTracker::new(&document);
         scope_tracker.push_lv_scope(LVScope::new(
             0,
             LspLocation {
