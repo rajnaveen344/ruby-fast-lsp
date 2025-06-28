@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use log::{debug, warn};
-use lsp_types::{Location as LspLocation, Range, Url};
+use lsp_types::Url;
 use ruby_prism::{
     visit_block_node, visit_class_node, visit_constant_path_node, visit_constant_read_node,
     visit_def_node, visit_local_variable_read_node, visit_module_node, BlockNode, ClassNode,
@@ -38,21 +38,11 @@ impl ReferenceVisitor {
     }
 
     pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
+        let index = server.index();
         let document = server.get_doc(&uri).unwrap();
-        let mut scope_tracker = ScopeTracker::new(&document);
-        scope_tracker.push_lv_scope(LVScope::new(
-            0,
-            LspLocation {
-                uri,
-                range: Range::new(
-                    document.offset_to_position(0),
-                    document.offset_to_position(document.content.len()),
-                ),
-            },
-            LVScopeKind::TopLevel,
-        ));
+        let scope_tracker = ScopeTracker::new(&document);
         Self {
-            index: server.index(),
+            index,
             document,
             scope_tracker,
             include_local_vars,
