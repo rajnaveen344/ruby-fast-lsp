@@ -77,18 +77,8 @@ impl RubyPrismAnalyzer {
         let mut iden_visitor = IdentifierVisitor::new(document.clone(), position);
         iden_visitor.visit(&root_node);
 
-        let res = iden_visitor.get_result();
-        (res.0, res.2, res.3)
-    }
-
-    pub fn get_scope_stack(&self, position: Position) -> LVScopeStack {
-        let parse_result = ruby_prism::parse(self.code.as_bytes());
-        let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
-        let mut visitor = IdentifierVisitor::new(document, position);
-        let root_node = parse_result.node();
-        visitor.visit(&root_node);
-        let (_, _, _, lv_stack) = visitor.get_result();
-        lv_stack
+        let (identifier, _, ns_stack_at_pos, lv_stack_at_pos) = iden_visitor.get_result();
+        (identifier, ns_stack_at_pos, lv_stack_at_pos)
     }
 }
 

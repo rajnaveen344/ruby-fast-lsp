@@ -1,4 +1,3 @@
-use log::info;
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse, Position,
     Url,
@@ -18,16 +17,12 @@ pub async fn handle_completion(
     let document = server.get_doc(&uri).unwrap();
     let analyzer = RubyPrismAnalyzer::new(uri, document.content.clone());
     let (_, _, lv_stack_at_pos) = analyzer.get_identifier(position);
-    // let lv_stack_at_pos = analyzer.get_scope_stack(position);
-
-    info!("lv_stack_at_pos: {:#?}", lv_stack_at_pos);
 
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
     for scope in lv_stack_at_pos.iter().rev() {
         let scope_id = scope.scope_id();
-        info!("Looking for local variables in scope id: {}", scope_id);
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
                 if let EntryKind::Variable { name } = &entry.kind {
