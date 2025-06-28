@@ -9,7 +9,10 @@ use ruby_prism::{
 };
 
 use crate::{
-    analyzer_prism::utils::{self, collect_namespaces},
+    analyzer_prism::{
+        utils::{self, collect_namespaces},
+        visitors::common::ScopeTracker,
+    },
     indexer::{entry::MethodKind, index::RubyIndex},
     server::RubyLanguageServer,
     types::{
@@ -18,17 +21,14 @@ use crate::{
         ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
         ruby_variable::{RubyVariable, RubyVariableType},
-        scope::{LVScope, LVScopeId, LVScopeKind, LVScopeStack},
+        scope::{LVScope, LVScopeKind},
     },
 };
 
 pub struct ReferenceVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
-    pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<Vec<RubyConstant>>,
-    pub scope_stack: LVScopeStack,
-    pub current_method: Option<RubyMethod>,
+    pub scope_tracker: ScopeTracker,
     pub include_local_vars: bool,
 }
 
@@ -39,53 +39,24 @@ impl ReferenceVisitor {
 
     pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
         let document = server.get_doc(&uri).unwrap();
-        let lv_scope = LVScope::new(
+        let mut scope_tracker = ScopeTracker::default();
+        scope_tracker.push_lv_scope(LVScope::new(
             0,
             LspLocation {
-                uri: uri.clone(),
+                uri,
                 range: Range::new(
                     document.offset_to_position(0),
                     document.offset_to_position(document.content.len()),
                 ),
             },
             LVScopeKind::TopLevel,
-        );
+        ));
         Self {
             index: server.index(),
-            uri,
             document,
-            namespace_stack: vec![],
-            scope_stack: vec![lv_scope],
-            current_method: None,
+            scope_tracker,
             include_local_vars,
         }
-    }
-
-    fn current_namespace(&self) -> Vec<RubyConstant> {
-        self.namespace_stack.iter().flatten().cloned().collect()
-    }
-
-    fn push_ns_scope(&mut self, namespace: RubyConstant) {
-        self.namespace_stack.push(vec![namespace]);
-    }
-
-    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        if !namespaces.is_empty() {
-            self.namespace_stack.push(namespaces);
-        }
-    }
-
-    fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
-        self.namespace_stack.pop()
-    }
-
-    fn push_lv_scope(&mut self, scope_id: LVScopeId, location: LspLocation, kind: LVScopeKind) {
-        self.scope_stack
-            .push(LVScope::new(scope_id, location, kind));
-    }
-
-    fn pop_lv_scope(&mut self) -> Option<LVScope> {
-        self.scope_stack.pop()
     }
 }
 
@@ -104,20 +75,29 @@ impl Visit<'_> for ReferenceVisitor {
         if let Some(path_node) = const_path.as_constant_path_node() {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
-            self.push_ns_scopes(namespace_parts);
+            self.scope_tracker.push_ns_scopes(namespace_parts);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
             visit_module_node(self, node);
-            self.pop_ns_scope();
-            self.pop_lv_scope();
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
-            self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            self.scope_tracker
+                .push_ns_scope(RubyConstant::new(&name).unwrap());
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
             visit_module_node(self, node);
-            self.pop_ns_scope();
-            self.pop_lv_scope();
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
         }
     }
 
@@ -135,20 +115,29 @@ impl Visit<'_> for ReferenceVisitor {
         if let Some(path_node) = const_path.as_constant_path_node() {
             let mut namespace_parts = Vec::new();
             utils::collect_namespaces(&path_node, &mut namespace_parts);
-            self.push_ns_scopes(namespace_parts);
+            self.scope_tracker.push_ns_scopes(namespace_parts);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
             visit_class_node(self, node);
-            self.pop_ns_scope();
-            self.pop_lv_scope();
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
-            self.push_ns_scope(RubyConstant::new(&name).unwrap());
+            self.scope_tracker
+                .push_ns_scope(RubyConstant::new(&name).unwrap());
             let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.push_lv_scope(scope_id, body_loc, LVScopeKind::Constant);
+            self.scope_tracker.push_lv_scope(LVScope::new(
+                scope_id,
+                body_loc,
+                LVScopeKind::Constant,
+            ));
             visit_class_node(self, node);
-            self.pop_ns_scope();
-            self.pop_lv_scope();
+            self.scope_tracker.pop_ns_scope();
+            self.scope_tracker.pop_lv_scope();
         }
     }
 
@@ -161,7 +150,8 @@ impl Visit<'_> for ReferenceVisitor {
                 .prism_location_to_lsp_location(&node.location())
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Method);
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
 
         let mut method_kind = MethodKind::Instance;
 
@@ -184,11 +174,10 @@ impl Visit<'_> for ReferenceVisitor {
         }
 
         let method = method.unwrap();
-        self.current_method = Some(method);
+        self.scope_tracker.enter_method(method);
         visit_def_node(self, node);
-        self.current_method = None;
-
-        self.pop_lv_scope();
+        self.scope_tracker.exit_method();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_block_node(&mut self, node: &BlockNode) {
@@ -200,9 +189,10 @@ impl Visit<'_> for ReferenceVisitor {
                 .prism_location_to_lsp_location(&node.location())
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Block);
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Block));
         visit_block_node(self, node);
-        self.pop_lv_scope();
+        self.scope_tracker.pop_lv_scope();
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
@@ -229,7 +219,7 @@ impl Visit<'_> for ReferenceVisitor {
         // Core::Platform::API::Users
         //
         // If not found, ignore
-        let current_namespace = self.current_namespace();
+        let current_namespace = self.scope_tracker.get_ns_stack();
         let mut namespaces = Vec::new();
         collect_namespaces(node, &mut namespaces);
 
@@ -269,7 +259,7 @@ impl Visit<'_> for ReferenceVisitor {
     }
 
     fn visit_constant_read_node(&mut self, node: &ruby_prism::ConstantReadNode<'_>) {
-        let current_namespace = self.current_namespace();
+        let current_namespace = self.scope_tracker.get_ns_stack();
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let constant = RubyConstant::new(&name).unwrap();
 
@@ -322,9 +312,10 @@ impl Visit<'_> for ReferenceVisitor {
         let mut index = self.index.lock().unwrap();
 
         // Search through scope stack from innermost to outermost scope
-        for i in (0..self.scope_stack.len()).rev() {
+        let lv_stack = self.scope_tracker.get_lv_stack();
+        for i in (0..lv_stack.len()).rev() {
             // Take all scopes up to the current level
-            let scopes = self.scope_stack[0..=i].to_vec();
+            let scopes = lv_stack[0..=i].to_vec();
             let var_type = RubyVariableType::Local(scopes);
 
             if let Ok(variable) = RubyVariable::new(&variable_name, var_type) {
