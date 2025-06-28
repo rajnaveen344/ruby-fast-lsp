@@ -1,5 +1,4 @@
 use crate::types::{
-    ruby_method::RubyMethod,
     ruby_namespace::RubyConstant,
     scope::{LVScope, LVScopeStack},
 };
@@ -27,9 +26,6 @@ pub struct ScopeTracker {
 
     /// Local-variable scopes (method/block/rescue/lambda)
     lv_stack: LVScopeStack,
-
-    /// Current Ruby method we are inside (used by Identifier / Index visitors)
-    current_method: Option<RubyMethod>,
 }
 
 impl ScopeTracker {
@@ -74,19 +70,6 @@ impl ScopeTracker {
 
     pub fn get_lv_stack(&self) -> LVScopeStack {
         self.lv_stack.clone()
-    }
-
-    // ---------- method helpers ----------
-    pub fn enter_method(&mut self, m: RubyMethod) {
-        self.current_method = Some(m);
-    }
-
-    pub fn exit_method(&mut self) {
-        self.current_method = None;
-    }
-
-    pub fn current_method(&self) -> Option<&RubyMethod> {
-        self.current_method.as_ref()
     }
 
     // ---------- singleton helpers ----------

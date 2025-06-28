@@ -296,7 +296,6 @@ impl Visit<'_> for IdentifierVisitor {
         };
 
         let method = method.unwrap();
-        self.scope_tracker.enter_method(method.clone());
         let scope_id = self.document.position_to_offset(body_loc.range.start);
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
@@ -313,7 +312,6 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         visit_def_node(self, node);
-        self.scope_tracker.exit_method();
         self.scope_tracker.pop_lv_scope();
     }
 
