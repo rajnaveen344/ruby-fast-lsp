@@ -7,7 +7,16 @@ use crate::types::{
 /// Mixed stack frame – either a namespace or a `class << self` marker
 #[derive(Debug, Clone)]
 pub enum ScopeFrame {
+    /// Stack of namespaces for each scope
+    /// To support module/class definitions with ConstantPathNode
+    /// we store the namespace stack for each scope as Vec<RubyConstant>
+    /// Eg. module A; end
+    /// namespace_stack = [A]
+    /// Eg. module A::B::C; end;
+    /// namespace_stack = [A, B, C]
     Namespace(Vec<RubyConstant>),
+
+    /// Singleton frame for `class << self`
     Singleton,
 }
 
