@@ -72,8 +72,8 @@ impl ScopeTracker {
         self.lv_stack.last()
     }
 
-    pub fn get_lv_stack(&self) -> &LVScopeStack {
-        &self.lv_stack
+    pub fn get_lv_stack(&self) -> LVScopeStack {
+        self.lv_stack.clone()
     }
 
     // ---------- method helpers ----------

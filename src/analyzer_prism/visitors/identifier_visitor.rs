@@ -1,38 +1,37 @@
-use crate::analyzer_prism::utils;
-use crate::analyzer_prism::visitors::common::ScopeTracker;
-use crate::analyzer_prism::Identifier;
-use crate::indexer::entry::MethodKind;
-use crate::types::ruby_document::RubyDocument;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
-use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
-use crate::types::scope::LVScope;
-use crate::types::scope::LVScopeKind;
+use crate::{
+    analyzer_prism::{utils, visitors::common::ScopeTracker, Identifier},
+    indexer::entry::MethodKind,
+    types::{
+        ruby_document::RubyDocument,
+        ruby_method::RubyMethod,
+        ruby_namespace::RubyConstant,
+        ruby_variable::{RubyVariable, RubyVariableType},
+        scope::LVScopeKind,
+        scope::{LVScope, LVScopeStack},
+    },
+};
 
 use log::warn;
 use lsp_types::Range;
 use lsp_types::{Location as LSPLocation, Position};
 use ruby_prism::ParametersNode;
-use ruby_prism::{
-    visit_arguments_node, visit_block_node, visit_call_node, visit_class_node,
-    visit_class_variable_read_node, visit_constant_path_node, visit_constant_write_node,
-    visit_def_node, visit_global_variable_read_node, visit_instance_variable_read_node,
-    visit_local_variable_and_write_node, visit_local_variable_operator_write_node,
-    visit_local_variable_or_write_node, visit_local_variable_read_node,
-    visit_local_variable_target_node, visit_local_variable_write_node, visit_module_node,
-    BlockNode, CallNode, ClassNode, ConstantPathNode, ConstantReadNode, DefNode,
-    GlobalVariableReadNode, LocalVariableAndWriteNode, LocalVariableOperatorWriteNode,
-    LocalVariableOrWriteNode, LocalVariableReadNode, LocalVariableTargetNode,
-    LocalVariableWriteNode, Location, ModuleNode, Visit,
-};
+use ruby_prism::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentifierType {
     ModuleDef,
     ClassDef,
     ConstantDef,
     MethodDef,
+    MethodCall,
     LVarDef,
-    Call,
+    LVarRead,
+    CVarDef,
+    CVarRead,
+    IVarDef,
+    IVarRead,
+    GVarDef,
+    GVarRead,
 }
 
 /// Visitor for finding identifiers at a specific position
@@ -42,9 +41,10 @@ pub struct IdentifierVisitor {
     scope_tracker: ScopeTracker,
 
     // Output
-    pub ancestors: Vec<RubyConstant>,
+    pub ns_stack_at_pos: Vec<RubyConstant>,
+    pub lv_stack_at_pos: LVScopeStack,
     pub identifier: Option<Identifier>,
-    pub identifier_type: IdentifierType,
+    pub identifier_type: Option<IdentifierType>,
 }
 
 impl IdentifierVisitor {
@@ -67,9 +67,10 @@ impl IdentifierVisitor {
             document,
             position,
             scope_tracker,
-            ancestors: Vec::new(),
+            ns_stack_at_pos: Vec::new(),
+            lv_stack_at_pos: Vec::new(),
             identifier: None,
-            identifier_type: IdentifierType::Call,
+            identifier_type: None,
         }
     }
 
@@ -81,11 +82,44 @@ impl IdentifierVisitor {
 
         position_offset >= start_offset && position_offset < end_offset
     }
+
+    fn set_result(
+        &mut self,
+        identifier: Option<Identifier>,
+        identifier_type: Option<IdentifierType>,
+        ns_stack_at_pos: Vec<RubyConstant>,
+        lv_stack_at_pos: LVScopeStack,
+    ) {
+        self.identifier = identifier;
+        self.identifier_type = identifier_type;
+        self.ns_stack_at_pos = ns_stack_at_pos;
+        self.lv_stack_at_pos = lv_stack_at_pos;
+    }
+
+    fn is_result_set(&self) -> bool {
+        self.identifier.is_some() && self.identifier_type.is_some()
+    }
+
+    pub fn get_result(
+        &self,
+    ) -> (
+        Option<Identifier>,
+        Option<IdentifierType>,
+        Vec<RubyConstant>,
+        LVScopeStack,
+    ) {
+        (
+            self.identifier.clone(),
+            self.identifier_type.clone(),
+            self.ns_stack_at_pos.clone(),
+            self.lv_stack_at_pos.clone(),
+        )
+    }
 }
 
 impl Visit<'_> for IdentifierVisitor {
     fn visit_class_node(&mut self, node: &ClassNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -97,15 +131,23 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(constant_path_node) = constant_path.as_constant_path_node() {
                 let mut namespaces = Vec::new();
                 utils::collect_namespaces(&constant_path_node, &mut namespaces);
-                self.identifier = Some(Identifier::RubyConstant(namespaces));
+                self.set_result(
+                    Some(Identifier::RubyConstant(namespaces)),
+                    Some(IdentifierType::ClassDef),
+                    self.scope_tracker.get_ns_stack(),
+                    self.scope_tracker.get_lv_stack(),
+                );
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
                 let namespace = RubyConstant::new(&name.to_string()).unwrap();
-                self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+                self.set_result(
+                    Some(Identifier::RubyConstant(vec![namespace])),
+                    Some(IdentifierType::ClassDef),
+                    self.scope_tracker.get_ns_stack(),
+                    self.scope_tracker.get_lv_stack(),
+                );
             }
-            self.identifier_type = IdentifierType::ClassDef;
-            // Flatten the namespace stack into a single vector of constants
-            self.ancestors = self.scope_tracker.get_ns_stack();
+
             return;
         }
 
@@ -149,7 +191,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_module_node(&mut self, node: &ModuleNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -161,15 +203,23 @@ impl Visit<'_> for IdentifierVisitor {
             if let Some(constant_path_node) = constant_path.as_constant_path_node() {
                 let mut namespaces = Vec::new();
                 utils::collect_namespaces(&constant_path_node, &mut namespaces);
-                self.identifier = Some(Identifier::RubyConstant(namespaces));
+                self.set_result(
+                    Some(Identifier::RubyConstant(namespaces)),
+                    Some(IdentifierType::ModuleDef),
+                    self.scope_tracker.get_ns_stack(),
+                    self.scope_tracker.get_lv_stack(),
+                );
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
                 let namespace = RubyConstant::new(&name.to_string()).unwrap();
-                self.identifier = Some(Identifier::RubyConstant(vec![namespace]));
+                self.set_result(
+                    Some(Identifier::RubyConstant(vec![namespace])),
+                    Some(IdentifierType::ModuleDef),
+                    self.scope_tracker.get_ns_stack(),
+                    self.scope_tracker.get_lv_stack(),
+                );
             }
-            self.identifier_type = IdentifierType::ModuleDef;
-            // Flatten the namespace stack into a single vector of constants
-            self.ancestors = self.scope_tracker.get_ns_stack();
+
             return;
         }
 
@@ -213,7 +263,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_def_node(&mut self, node: &DefNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -254,9 +304,12 @@ impl Visit<'_> for IdentifierVisitor {
         // Is position on method name
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
-            self.identifier = Some(Identifier::RubyMethod(vec![], method));
-            self.identifier_type = IdentifierType::MethodDef;
-            self.ancestors = self.scope_tracker.get_ns_stack();
+            self.set_result(
+                Some(Identifier::RubyMethod(vec![], method)),
+                Some(IdentifierType::MethodDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_def_node(self, node);
@@ -265,6 +318,10 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_block_node(&mut self, node: &BlockNode) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
         let body_loc = if let Some(body) = node.body() {
             self.document
                 .prism_location_to_lsp_location(&body.location())
@@ -280,7 +337,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_parameters_node(&mut self, node: &ParametersNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -293,9 +350,12 @@ impl Visit<'_> for IdentifierVisitor {
                     let var_type =
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier = Some(Identifier::RubyVariable(var));
-                    self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.scope_tracker.get_ns_stack();
+                    self.set_result(
+                        Some(Identifier::RubyVariable(var)),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
                 }
             }
         }
@@ -309,9 +369,12 @@ impl Visit<'_> for IdentifierVisitor {
                     let var_type =
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier = Some(Identifier::RubyVariable(var));
-                    self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.scope_tracker.get_ns_stack();
+                    self.set_result(
+                        Some(Identifier::RubyVariable(var)),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
                 }
             }
         }
@@ -325,9 +388,12 @@ impl Visit<'_> for IdentifierVisitor {
                         let var_type =
                             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                         let var = RubyVariable::new(&param_name, var_type).unwrap();
-                        self.identifier = Some(Identifier::RubyVariable(var));
-                        self.identifier_type = IdentifierType::LVarDef;
-                        self.ancestors = self.scope_tracker.get_ns_stack();
+                        self.set_result(
+                            Some(Identifier::RubyVariable(var)),
+                            Some(IdentifierType::LVarDef),
+                            self.scope_tracker.get_ns_stack(),
+                            self.scope_tracker.get_lv_stack(),
+                        );
                     }
                 }
             }
@@ -341,9 +407,12 @@ impl Visit<'_> for IdentifierVisitor {
                     let var_type =
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
-                    self.identifier = Some(Identifier::RubyVariable(var));
-                    self.identifier_type = IdentifierType::LVarDef;
-                    self.ancestors = self.scope_tracker.get_ns_stack();
+                    self.set_result(
+                        Some(Identifier::RubyVariable(var)),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
                 }
             }
         }
@@ -352,7 +421,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'_>) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -361,9 +430,12 @@ impl Visit<'_> for IdentifierVisitor {
 
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
-            self.identifier = Some(Identifier::RubyConstant(vec![constant]));
-            self.identifier_type = IdentifierType::ConstantDef;
-            self.ancestors = self.scope_tracker.get_ns_stack();
+            self.set_result(
+                Some(Identifier::RubyConstant(vec![constant])),
+                Some(IdentifierType::ConstantDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
             return;
         }
 
@@ -371,7 +443,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_constant_path_node(&mut self, node: &ConstantPathNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -404,19 +476,26 @@ impl Visit<'_> for IdentifierVisitor {
 
         // Process the namespace
         if !namespaces.is_empty() {
-            self.identifier = Some(Identifier::RubyConstant(namespaces));
+            self.set_result(
+                Some(Identifier::RubyConstant(namespaces)),
+                Some(IdentifierType::ConstantDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         // Set ancestors based on whether it's a root constant
         if is_root_constant {
-            self.ancestors = vec![];
+            self.ns_stack_at_pos = vec![];
+            self.lv_stack_at_pos = self.scope_tracker.get_lv_stack();
         } else {
-            self.ancestors = self.scope_tracker.get_ns_stack();
+            self.ns_stack_at_pos = self.scope_tracker.get_ns_stack();
+            self.lv_stack_at_pos = self.scope_tracker.get_lv_stack();
         }
     }
 
     fn visit_constant_read_node(&mut self, node: &ConstantReadNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -424,16 +503,24 @@ impl Visit<'_> for IdentifierVisitor {
 
         // Create a RubyConstant from the constant name
         if let Ok(constant) = RubyConstant::new(&constant_name) {
-            self.identifier = Some(Identifier::RubyConstant(vec![constant]));
+            self.set_result(
+                Some(Identifier::RubyConstant(vec![constant])),
+                Some(IdentifierType::ConstantDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         } else {
-            self.identifier = Some(Identifier::RubyConstant(Vec::new()));
+            self.set_result(
+                Some(Identifier::RubyConstant(Vec::new())),
+                Some(IdentifierType::ConstantDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
-
-        self.ancestors = self.scope_tracker.get_ns_stack();
     }
 
     fn visit_call_node(&mut self, node: &CallNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -482,15 +569,19 @@ impl Visit<'_> for IdentifierVisitor {
         }
 
         if let Ok(method_name) = RubyMethod::new(method_name_str.as_ref(), method_kind) {
-            self.identifier = Some(Identifier::RubyMethod(namespace, method_name));
-            self.ancestors = vec![];
+            self.set_result(
+                Some(Identifier::RubyMethod(namespace, method_name)),
+                Some(IdentifierType::MethodCall),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_call_node(self, node);
     }
 
     fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
@@ -500,8 +591,12 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarRead),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         // Continue visiting the node
@@ -509,7 +604,7 @@ impl Visit<'_> for IdentifierVisitor {
     }
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.name_loc()) {
             visit_local_variable_write_node(self, node);
             return;
         }
@@ -520,16 +615,19 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_local_variable_write_node(self, node);
     }
 
     fn visit_local_variable_and_write_node(&mut self, node: &LocalVariableAndWriteNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.name_loc()) {
             visit_local_variable_and_write_node(self, node);
             return;
         }
@@ -540,16 +638,19 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_local_variable_and_write_node(self, node);
     }
 
     fn visit_local_variable_or_write_node(&mut self, node: &LocalVariableOrWriteNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.name_loc()) {
             visit_local_variable_or_write_node(self, node);
             return;
         }
@@ -560,16 +661,19 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_local_variable_or_write_node(self, node);
     }
 
     fn visit_local_variable_operator_write_node(&mut self, node: &LocalVariableOperatorWriteNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.name_loc()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.name_loc()) {
             visit_local_variable_operator_write_node(self, node);
             return;
         }
@@ -580,16 +684,19 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_local_variable_operator_write_node(self, node);
     }
 
     fn visit_local_variable_target_node(&mut self, node: &LocalVariableTargetNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             visit_local_variable_target_node(self, node);
             return;
         }
@@ -600,24 +707,31 @@ impl Visit<'_> for IdentifierVisitor {
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
         );
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier_type = IdentifierType::LVarDef;
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::LVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_local_variable_target_node(self, node);
     }
 
     fn visit_class_variable_read_node(&mut self, node: &ruby_prism::ClassVariableReadNode<'_>) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::CVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_class_variable_read_node(self, node);
@@ -627,30 +741,38 @@ impl Visit<'_> for IdentifierVisitor {
         &mut self,
         node: &ruby_prism::InstanceVariableReadNode<'_>,
     ) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Instance);
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::IVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_instance_variable_read_node(self, node);
     }
 
     fn visit_global_variable_read_node(&mut self, node: &GlobalVariableReadNode) {
-        if self.identifier.is_some() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
 
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let var = RubyVariable::new(&variable_name, RubyVariableType::Global);
         if let Ok(variable) = var {
-            self.ancestors = self.scope_tracker.get_ns_stack();
-            self.identifier = Some(Identifier::RubyVariable(variable));
+            self.set_result(
+                Some(Identifier::RubyVariable(variable)),
+                Some(IdentifierType::GVarDef),
+                self.scope_tracker.get_ns_stack(),
+                self.scope_tracker.get_lv_stack(),
+            );
         }
 
         visit_global_variable_read_node(self, node);
@@ -676,7 +798,7 @@ mod tests {
         // we expect identifier to be None
         if expected_parts.is_empty() {
             assert!(
-                visitor.identifier.is_none(),
+                visitor.is_result_set(),
                 "Expected identifier to be None at position {:?}",
                 position
             );
@@ -685,7 +807,7 @@ mod tests {
 
         // Otherwise, check the identifier was found
         assert!(
-            visitor.identifier.is_some(),
+            visitor.is_result_set(),
             "Expected to find an identifier at position {:?}",
             position
         );

@@ -77,13 +77,10 @@ impl RubyPrismAnalyzer {
         let mut iden_visitor = IdentifierVisitor::new(document.clone(), position);
         iden_visitor.visit(&root_node);
 
-        let mut scope_visitor = ScopeVisitor::new(document.clone(), position);
-        scope_visitor.visit(&root_node);
-
         (
             iden_visitor.identifier,
-            iden_visitor.ancestors,
-            scope_visitor.scope_stack,
+            iden_visitor.ns_stack_at_pos,
+            iden_visitor.lv_stack_at_pos,
         )
     }
 
