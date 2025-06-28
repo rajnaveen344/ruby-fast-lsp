@@ -4,7 +4,7 @@ use ruby_prism::DefNode;
 use crate::indexer::entry::{
     entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
-use crate::types::scope::LVScopeKind;
+use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 use super::IndexVisitor;
@@ -18,14 +18,13 @@ impl IndexVisitor {
         let mut method_kind = MethodKind::Instance;
 
         if let Some(receiver) = node.receiver() {
-            if let Some(_) = receiver.as_self_node() {
-                method_kind = MethodKind::Class;
-            } else if let Some(_) = receiver.as_constant_path_node() {
-                method_kind = MethodKind::Class;
-            } else if let Some(_) = receiver.as_constant_read_node() {
+            if receiver.as_self_node().is_some()
+                || receiver.as_constant_path_node().is_some()
+                || receiver.as_constant_read_node().is_some()
+            {
                 method_kind = MethodKind::Class;
             }
-        } else if self.in_singleton_node {
+        } else if self.scope_tracker.in_singleton() {
             method_kind = MethodKind::Class;
         }
 
@@ -43,8 +42,10 @@ impl IndexVisitor {
         }
 
         let name_location = node.name_loc();
-        let location = self.prism_loc_to_lsp_loc(name_location);
-        let current_namespace = self.current_namespace();
+        let location = self
+            .document
+            .prism_location_to_lsp_location(&name_location);
+        let current_namespace = self.scope_tracker.get_ns_stack();
         let fqn = FullyQualifiedName::instance_method(current_namespace.clone(), method.clone());
 
         debug!("Visiting method definition: {}", fqn);
@@ -68,7 +69,7 @@ impl IndexVisitor {
         index.add_entry(entry);
         debug!("Added method entry: {}", fqn);
 
-        self.current_method = Some(method.clone());
+        self.scope_tracker.enter_method(method.clone());
 
         drop(index);
 
@@ -81,11 +82,15 @@ impl IndexVisitor {
         };
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.push_lv_scope(scope_id, body_loc, LVScopeKind::Method);
+        self.scope_tracker.push_lv_scope(LVScope::new(
+            scope_id,
+            body_loc,
+            LVScopeKind::Method,
+        ));
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
-        self.current_method = None;
-        self.pop_lv_scope();
+        self.scope_tracker.exit_method();
+        self.scope_tracker.pop_lv_scope();
     }
 }

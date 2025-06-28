@@ -3,12 +3,11 @@ use std::sync::{Arc, Mutex};
 use lsp_types::{Location as LspLocation, Range, Url};
 use ruby_prism::*;
 
+use crate::analyzer_prism::visitors::common::ScopeTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
-use crate::types::scope::{LVScope, LVScopeId, LVScopeKind, LVScopeStack};
-use crate::types::{
-    ruby_document::RubyDocument, ruby_method::RubyMethod, ruby_namespace::RubyConstant,
-};
+use crate::types::scope::{LVScope, LVScopeKind};
+use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
 mod class_node;
@@ -25,21 +24,18 @@ mod singleton_class_node;
 
 pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
-    pub uri: Url,
     pub document: RubyDocument,
-    pub namespace_stack: Vec<Vec<RubyConstant>>,
-    pub in_singleton_node: bool,
-    pub current_method: Option<RubyMethod>,
-    pub scope_stack: LVScopeStack,
+    pub scope_tracker: ScopeTracker,
 }
 
 impl IndexVisitor {
     pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
-        let document = server.docs.lock().unwrap().get(&uri).unwrap().clone();
+        let document = server.get_doc(&uri).unwrap();
+        let mut scope_tracker = ScopeTracker::default();
         let lv_scope = LVScope::new(
             0,
             LspLocation {
-                uri: uri.clone(),
+                uri,
                 range: Range::new(
                     document.offset_to_position(0),
                     document.offset_to_position(document.content.len()),
@@ -47,52 +43,15 @@ impl IndexVisitor {
             },
             LVScopeKind::TopLevel,
         );
+        scope_tracker.push_lv_scope(lv_scope);
         Self {
             index: server.index(),
-            uri,
             document,
-            namespace_stack: vec![],
-            in_singleton_node: false,
-            scope_stack: vec![lv_scope],
-            current_method: None,
+            scope_tracker,
         }
     }
 
-    pub fn prism_loc_to_lsp_loc(&self, loc: ruby_prism::Location) -> LspLocation {
-        let uri = self.uri.clone();
-        let range = self.document.prism_location_to_lsp_range(&loc);
-        LspLocation::new(uri, range)
-    }
 
-    pub fn push_ns_scope(&mut self, namespace: RubyConstant) {
-        self.namespace_stack.push(vec![namespace]);
-    }
-
-    fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
-        self.namespace_stack.push(namespaces);
-    }
-
-    pub fn pop_ns_scope(&mut self) -> Option<Vec<RubyConstant>> {
-        self.namespace_stack.pop()
-    }
-
-    pub fn current_namespace(&self) -> Vec<RubyConstant> {
-        self.namespace_stack.iter().flatten().cloned().collect()
-    }
-
-    fn push_lv_scope(
-        &mut self,
-        scope_id: LVScopeId,
-        location: lsp_types::Location,
-        kind: LVScopeKind,
-    ) {
-        self.scope_stack
-            .push(LVScope::new(scope_id, location, kind));
-    }
-
-    fn pop_lv_scope(&mut self) -> Option<LVScope> {
-        self.scope_stack.pop()
-    }
 }
 
 impl Visit<'_> for IndexVisitor {

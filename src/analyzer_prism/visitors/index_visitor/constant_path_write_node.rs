@@ -37,17 +37,20 @@ impl IndexVisitor {
         utils::collect_namespaces(&constant_path, &mut namespace_parts);
 
         // Get the current namespace and add the collected parts
-        let mut current_namespace = self.current_namespace();
-        current_namespace.extend(namespace_parts);
-        current_namespace.push(constant);
+        let mut fqn_parts = self.scope_tracker.get_ns_stack();
+        fqn_parts.extend(namespace_parts);
+        fqn_parts.push(constant);
 
         // Create a FullyQualifiedName using the combined namespace parts
-        let fqn = FullyQualifiedName::namespace(current_namespace);
+        let fqn = FullyQualifiedName::namespace(fqn_parts);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()
             .fqn(fqn)
-            .location(self.prism_loc_to_lsp_loc(node.location()))
+            .location(
+                self.document
+                    .prism_location_to_lsp_location(&node.location()),
+            )
             .kind(EntryKind::Constant {
                 value: None,      // We could extract the value here if needed
                 visibility: None, // Default to public
