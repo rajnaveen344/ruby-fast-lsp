@@ -11,6 +11,7 @@ use crate::types::{
 };
 
 mod block_node;
+mod call_node;
 mod class_node;
 mod class_variable_write_node;
 mod constant_path_write_node;
@@ -96,6 +97,12 @@ impl IndexVisitor {
 }
 
 impl Visit<'_> for IndexVisitor {
+    fn visit_call_node(&mut self, node: &CallNode) {
+        self.process_call_node_entry(node);
+        visit_call_node(self, node);
+        self.process_call_node_exit(node);
+    }
+
     fn visit_module_node(&mut self, node: &ModuleNode) {
         self.process_module_node_entry(node);
         visit_module_node(self, node);

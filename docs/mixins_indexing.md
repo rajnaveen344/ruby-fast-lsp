@@ -1,3 +1,150 @@
+# Indexing Ruby Mixins (include / prepend / extend)
+
+Ruby-fast-LSP must understand Ruby’s mixin mechanism so that features such as *Go to Definition* and *Find References* can jump to methods that live in modules pulled in via `include`, `prepend`, or `extend` – even across files.
+
+This guide explains **what information the index stores**, **how it is collected in one CST walk**, and **how on-demand resolution turns that information into an ancestor chain that matches Ruby’s runtime lookup**.
+
+---
+
+## 1  Runtime refresher – where does Ruby look?
+
+Given a receiver `obj` and message `:foo`, MRI searches:
+
+1. `obj`’s **singleton class** (this is where `extend` adds modules for that *instance*).
+2. Modules **prepended** to `obj.class` (newest first – *last* `prepend` wins).
+3. `obj.class` itself.
+4. Modules **included** in the class (search order is declaration order – *first* `include` wins).
+5. The **superclass**, repeating steps 2-4 until `BasicObject`.
+
+`extend` inside a *class/module* body is sugar for:
+
+```ruby
+class << self
+  include M      # affects class methods
+end
+```
+
+---
+
+## 2  What the index stores per class / module
+
+| Field                         | Purpose                                                      |
+| ----------------------------- | ------------------------------------------------------------ |
+| `superclass` (optional FQN)   | Builds classic inheritance chain                             |
+| `prepends: Vec<MixinRef>`     | Highest precedence after `extend`                            |
+| `includes: Vec<MixinRef>`     | Normal mixins for instance methods                           |
+| `extends:  Vec<MixinRef>`     | Mixins that affect *class* methods                           |
+
+Where **`MixinRef`** is a *purely textual* reference that does **not** require the module to be indexed yet:
+
+```rust
+struct MixinRef {
+    parts: Vec<RubyConstant>, // ["Foo", "Bar"]
+    absolute: bool,           // true for ::Foo::Bar
+}
+```
+
+---
+
+## 3  Single-pass indexing workflow
+
+1. **Walk the Prism CST once.**  When inside a `class` / `module` body hit by `IndexVisitor`:
+   * Build an `Entry` for the class/module and push it to `RubyIndex`.
+
+2. **During the same walk**, whenever you encounter a call node that matches
+
+   ```ruby
+   (receiver == nil) && name in {include, prepend, extend}
+   ```
+
+   – **and** each argument is a `ConstantReadNode` or `ConstantPathNode` –
+   convert every argument to a `MixinRef` and push it into the *current* entry’s `includes / prepends / extends` vector.
+
+That is **all** the work the indexer does.  No second traversal, no validation at this stage.
+
+> ❓ *Why not resolve now?*  Because the module may be defined **after** the mixin call or in another file that has not been parsed yet.  Deferring keeps the indexer one-pass and incremental-friendly.
+
+---
+
+## 4  On-demand resolution (ancestor chain)
+
+When a capability needs to know "where would Ruby look for method `foo` on `SomeClass`?" we call:
+
+```rust
+get_ancestor_chain(&index, &receiver_fqn, is_class_method)
+```
+
+Inside that helper we process each `MixinRef` as follows:
+
+```
+if ref.absolute {
+    probe([parts])
+    probe([parts[1..]])
+    …
+} else {
+    // lexical fallback: prepend nesting then pop one segment at a time
+    candidate = current_namespace + parts
+    while candidate not empty {
+        probe(candidate)
+        pop_left(candidate)
+    }
+    // finally treat as absolute
+    probe(parts)
+    pop_left(parts) …
+}
+```
+
+`probe(vec)` means: convert the vector to `FullyQualifiedName::Constant(vec)` and look it up in `index.definitions`.  The **first** match wins; if nothing matches the reference is ignored for this query.
+
+### Example – nested module include
+
+```ruby
+module Outer
+  module Inner
+    include Mixin   # ← constant without ::
+  end
+end
+```
+
+At index time we store `MixinRef {parts:["Mixin"], absolute:false}`.
+
+During resolution for `Outer::Inner` the namespace stack is `[Outer, Inner]` and the probe sequence is:
+
+1. `[Outer, Inner, Mixin]` – not found
+2. `[Outer, Mixin]` – not found
+3. `[Mixin]` – found ⇒ stop
+
+If the workspace later gains `Outer::Inner::Mixin`, step 1 will succeed without code changes.
+
+---
+
+## 5  Why not a dedicated meta-programming pass?
+
+*   **Extra cost** – every save would run two sweeps or complex dependency invalidation.
+*   **Cycles / forward refs** – still need lazy handling.
+*   **Interactive latency** – single pass keeps indexing snappy.
+
+That said, a future optimisation could cache resolved `MixinRef → FQN` bindings or run a targeted fix-up pass when new definitions enter the index.
+
+---
+
+## 6  Edge cases & current limitations
+
+*   Only `ConstantReadNode` / `ConstantPathNode` arguments are supported.  Dynamic includes (`include const_get(x)`) are ignored.
+*   Mixins inside `class << self` bodies are **already** captured because the visitor treats that as a `Module` entry for the singleton class.
+*   Refinements and `using` are out of scope for now.
+*   `extend self` is treated as `extend <current module>`; it affects class methods and works with the same mechanism.
+
+---
+
+## 7  Implementation checklist (quick reference)
+
+1. `EntryKind::{Class, Module}` owns `includes / prepends / extends: Vec<MixinRef>`.
+2. `IndexVisitor::process_call_node_entry` builds `MixinRef`s.
+3. `get_ancestor_chain` resolves refs with fallback algorithm above.
+4. Capabilities query the ancestor chain; first match wins.
+
+With this design Ruby-fast-LSP resolves methods through mixins accurately, across files, and with minimal indexing overhead.
 # Indexing Ruby Mixins (`include`, `extend`, `prepend`)
 
 This document outlines how the Ruby-fast-LSP indexer should understand Ruby’s mixin mechanisms so that navigation features such as *Go to Definition* produce accurate results across files.
@@ -128,5 +275,36 @@ By explicitly modelling the three mixin calls and reproducing Ruby’s method lo
 6. **Cleanup**  
    Remove deprecated `Mixin` edge logic and update docs/changelog.
 
+---
+
+## 9. Single-Pass vs Two-Pass Meta-Programming Indexing
+
+There are two viable strategies for capturing meta-programming constructs such as `include`, `extend`, and `prepend`:
+
+### 9.1 Single-Pass with **On-Demand** Lazy Resolution (current approach)
+*   **Indexer walk (pass 1)** → for every `include / extend / prepend` argument build a `MixinRef` structure:
+    ```rust
+    struct MixinRef {
+      parts: Vec<RubyConstant>,   // constant tokens, e.g. ["Foo","Bar"]
+      absolute: bool,             // true if path began with ::
+    }
+    ```
+    This is pushed into the current class/module’s `includes | prepends | extends` vector – no lookup is attempted yet.
+*   **Nothing else happens at the end of indexing.** We deliberately *do not* run a second sweep.
+*   **On-demand resolution** – when a feature such as *Go to Definition* calls `get_ancestor_chain` we resolve each `MixinRef` in that moment:
+    1. If `absolute == true` probe the exact path, then progressively drop the left-most namespace segment.
+    2. If `absolute == false` first prepend the caller’s current namespace stack, probe, then drop from the left (lexical fallback), finally treat as absolute.
+    3. Use the first match that has an `Entry` in `index.definitions`; unresolved refs are ignored for this query.
+*   **Pros**: single traversal, zero extra work on every file save, incremental by nature. The ancestor chain is always consistent with the latest workspace state.
+*   **Cons**: ancestor-chain helper contains the fallback algorithm; the very first lookup after a new definition lands may spend extra microseconds resolving pending edges.
+
+### 9.2 Separate Meta-Programming Pass
+*   **Pass 1** – structural definitions (classes, modules, methods, constants).
+*   **Pass 2** – meta-programming calls; with the index now fully populated every mixin argument can be validated immediately.
+*   **Pros**: simpler ancestor-chain logic, easier to surface "unknown constant in include" diagnostics.
+*   **Cons**: extra traversal, more complex incremental updates (both passes must be re-run for affected files, plus any files whose mixins point to them), cycles/forward references still need deferred handling, performance overhead.
+
+### 9.3 Recommendation
+For an interactive LSP the single-pass + lazy resolution strikes the best balance between accuracy, performance, and incremental simplicity. A second pass can be introduced later as an optimisation layer if profiling shows repeated ancestor-chain resolution is a bottleneck.
 
 By explicitly modelling the three mixin calls and reproducing Ruby’s method lookup order in the indexer we enable *Go to Definition* to jump from a method call to the correct definition, whether it lives in the class itself, an included module, a prepended concern, or a superclass – even across different files in the workspace.

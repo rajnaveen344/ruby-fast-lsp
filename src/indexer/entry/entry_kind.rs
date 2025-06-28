@@ -3,6 +3,7 @@ use std::fmt::Display;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
 };
+use super::mixin_ref::MixinRef;
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -10,14 +11,14 @@ use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 pub enum EntryKind {
     Class {
         superclass: Option<FullyQualifiedName>,
-        includes: Vec<FullyQualifiedName>,
-        prepends: Vec<FullyQualifiedName>,
-        extends: Vec<FullyQualifiedName>,
+        includes: Vec<MixinRef>,
+        prepends: Vec<MixinRef>,
+        extends: Vec<MixinRef>,
     },
     Module {
-        includes: Vec<FullyQualifiedName>,
-        prepends: Vec<FullyQualifiedName>,
-        extends: Vec<FullyQualifiedName>,
+        includes: Vec<MixinRef>,
+        prepends: Vec<MixinRef>,
+        extends: Vec<MixinRef>,
     },
     Method {
         name: RubyMethod,
@@ -37,29 +38,61 @@ pub enum EntryKind {
 }
 
 impl EntryKind {
-    pub fn new_class(
-        superclass: Option<FullyQualifiedName>,
-        includes: Vec<FullyQualifiedName>,
-        prepends: Vec<FullyQualifiedName>,
-        extends: Vec<FullyQualifiedName>,
-    ) -> Self {
-        Self::Class {
-            superclass,
-            includes,
-            prepends,
-            extends,
+    pub fn add_includes(&mut self, fqns: Vec<MixinRef>) {
+        match self {
+            EntryKind::Class { includes, .. } => {
+                includes.extend(fqns);
+            }
+            EntryKind::Module { includes, .. } => {
+                includes.extend(fqns);
+            }
+            _ => {
+                panic!("Cannot add includes to non-class/module entry");
+            }
         }
     }
 
-    pub fn new_module(
-        includes: Vec<FullyQualifiedName>,
-        prepends: Vec<FullyQualifiedName>,
-        extends: Vec<FullyQualifiedName>,
-    ) -> Self {
+    pub fn add_extends(&mut self, fqns: Vec<MixinRef>) {
+        match self {
+            EntryKind::Class { extends, .. } => {
+                extends.extend(fqns);
+            }
+            EntryKind::Module { extends, .. } => {
+                extends.extend(fqns);
+            }
+            _ => {
+                panic!("Cannot add extends to non-class/module entry");
+            }
+        }
+    }
+
+    pub fn add_prepends(&mut self, fqns: Vec<MixinRef>) {
+        match self {
+            EntryKind::Class { prepends, .. } => {
+                prepends.extend(fqns);
+            }
+            EntryKind::Module { prepends, .. } => {
+                prepends.extend(fqns);
+            }
+            _ => {
+                panic!("Cannot add prepends to non-class/module entry");
+            }
+        }
+    }
+    pub fn new_class(superclass: Option<FullyQualifiedName>) -> Self {
+        Self::Class {
+            superclass,
+            includes: Vec::new(),
+            prepends: Vec::new(),
+            extends: Vec::new(),
+        }
+    }
+
+    pub fn new_module() -> Self {
         Self::Module {
-            includes,
-            prepends,
-            extends,
+            includes: Vec::new(),
+            prepends: Vec::new(),
+            extends: Vec::new(),
         }
     }
 }

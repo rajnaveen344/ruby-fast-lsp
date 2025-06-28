@@ -56,7 +56,7 @@ impl IndexVisitor {
         let entry = EntryBuilder::new()
             .fqn(fqn)
             .location(self.prism_loc_to_lsp_loc(node.location()))
-            .kind(EntryKind::new_module(Vec::new(), Vec::new(), Vec::new()))
+            .kind(EntryKind::new_module())
             .build();
 
         if let Err(e) = entry {

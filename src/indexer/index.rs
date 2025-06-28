@@ -113,6 +113,14 @@ impl RubyIndex {
         }
     }
 
+    pub fn get(&self, fqn: &FullyQualifiedName) -> Option<&Vec<Entry>> {
+        self.definitions.get(fqn)
+    }
+
+    pub fn get_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Vec<Entry>> {
+        self.definitions.get_mut(fqn)
+    }
+
     pub fn remove_references_for_uri(&mut self, uri: &Url) {
         for refs in self.references.values_mut() {
             refs.retain(|loc| loc.uri != *uri);
@@ -139,12 +147,7 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::new_class(
-                None,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            ))
+            .kind(EntryKind::new_class(None))
             .build()
             .unwrap();
         index.add_entry(entry);
@@ -164,12 +167,7 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::new_class(
-                None,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            ))
+            .kind(EntryKind::new_class(None))
             .build()
             .unwrap();
         index.add_entry(entry);

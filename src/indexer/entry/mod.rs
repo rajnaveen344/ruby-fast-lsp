@@ -1,11 +1,13 @@
 pub mod entry_builder;
 pub mod entry_kind;
+pub mod mixin_ref;
 
 use std::cmp::PartialEq;
 
 use entry_kind::EntryKind;
 use lsp_types::Location;
 
+use crate::indexer::entry::mixin_ref::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 #[derive(Debug, Clone)]
@@ -18,6 +20,20 @@ pub struct Entry {
 
     /// Type-specific metadata
     pub kind: EntryKind,
+}
+
+impl Entry {
+    pub fn add_includes(&mut self, fqns: Vec<MixinRef>) {
+        self.kind.add_includes(fqns);
+    }
+
+    pub fn add_extends(&mut self, fqns: Vec<MixinRef>) {
+        self.kind.add_extends(fqns);
+    }
+
+    pub fn add_prepends(&mut self, fqns: Vec<MixinRef>) {
+        self.kind.add_prepends(fqns);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

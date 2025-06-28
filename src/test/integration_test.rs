@@ -199,6 +199,99 @@ async fn test_goto_definition_method() {
     }
 }
 
+#[tokio::test]
+async fn test_goto_definition_with_mixins() {
+    let fixture_file = "mixin_definition.rb";
+    let server = init_and_open_file(fixture_file).await;
+
+    // 1. Test `include` - `log` method
+    let res_include = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 17, // `log("Action performed")`
+                    character: 4, // on `log`
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res_include.is_ok());
+    let definition_include = res_include.unwrap();
+    assert!(definition_include.is_some(), "Expected definition for included method 'log'");
+    match definition_include.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.range.start.line, 1, "Expected 'log' definition on line 2");
+        }
+        _ => panic!("Expected a single location for 'log' definition"),
+    }
+
+    // 2. Test `extend` - `tag` method
+    let res_extend = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 21, // `MyService.tag("important")`
+                    character: 10, // on `tag`
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res_extend.is_ok());
+    let definition_extend = res_extend.unwrap();
+    assert!(definition_extend.is_some(), "Expected definition for extended method 'tag'");
+    match definition_extend.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.range.start.line, 7, "Expected 'tag' definition on line 8");
+        }
+        _ => panic!("Expected a single location for 'tag' definition"),
+    }
+
+    // 3. Test `prepend` - `greet` method
+    let res_prepend = request::handle_goto_definition(
+        &server,
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: fixture_uri(fixture_file),
+                },
+                position: Position {
+                    line: 38, // `g.greet`
+                    character: 6, // on `greet`
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await;
+
+    assert!(res_prepend.is_ok());
+    let definition_prepend = res_prepend.unwrap();
+    assert!(definition_prepend.is_some(), "Expected definition for prepended method 'greet'");
+    match definition_prepend.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.range.start.line, 25, "Expected 'greet' definition in Prependable module on line 26");
+        }
+        _ => panic!("Expected a single location for 'greet' definition"),
+    }
+}
+
 /// Test find references functionality for a method
 #[tokio::test]
 async fn test_find_references_method() {

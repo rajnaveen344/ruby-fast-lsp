@@ -3,7 +3,7 @@ use std::fmt;
 use crate::indexer::entry::MethodKind;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyMethod(String, MethodKind);
+pub struct RubyMethod(pub String, pub MethodKind);
 
 impl RubyMethod {
     pub fn new(name: &str, kind: MethodKind) -> Result<Self, &'static str> {

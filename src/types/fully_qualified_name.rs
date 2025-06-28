@@ -49,6 +49,15 @@ impl FullyQualifiedName {
     pub fn variable(variable: RubyVariable) -> Self {
         FullyQualifiedName::Variable(variable)
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FullyQualifiedName::Constant(ns) => ns.is_empty(),
+            FullyQualifiedName::InstanceMethod(ns, _) => ns.is_empty(),
+            FullyQualifiedName::ClassMethod(ns, _) => ns.is_empty(),
+            FullyQualifiedName::Variable(_) => true, // Variables are not namespaced
+        }
+    }
 }
 
 impl From<Identifier> for FullyQualifiedName {

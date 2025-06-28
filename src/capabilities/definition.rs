@@ -2,7 +2,9 @@ use log::{debug, info};
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
+use crate::indexer::ancestor_chain::get_ancestor_chain;
+
+use crate::indexer::entry::MethodKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
@@ -77,61 +79,60 @@ pub async fn find_definition_at_position(
             }
         }
         Identifier::RubyMethod(ns, method) => {
-            let iden = Identifier::RubyMethod(ns.clone(), method.clone());
-            debug!("Searching for method with identifier: {:?}", iden.clone());
+            let receiver_fqn = if ns.is_empty() {
+                // Receiver-less call, use lexical scope as the receiver
+                FullyQualifiedName::Constant(ancestors.clone())
+            } else {
+                // Call with explicit receiver
+                FullyQualifiedName::Constant(ns.clone())
+            };
 
-            // First try to search by definitions using ancestors
-            let mut search_namespaces = ancestors.clone();
-            while !search_namespaces.is_empty() {
-                let mut combined_ns = search_namespaces.clone();
-                combined_ns.extend(ns.iter().cloned());
+            // For receiver-less calls, we might need to check for both instance and class methods
+            // as we don't know the context of `self`. For calls with an explicit receiver, the
+            // identifier visitor can determine the kind.
+            let kinds_to_check = if ns.is_empty() {
+                vec![MethodKind::Instance, MethodKind::Class]
+            } else {
+                vec![method.1.clone()]
+            };
 
-                let search_fqn = Identifier::RubyMethod(combined_ns, method.clone());
+            for kind in kinds_to_check {
+                let is_class_method = kind == MethodKind::Class;
+                let ancestor_chain = get_ancestor_chain(&index, &receiver_fqn, is_class_method);
 
-                if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
-                    if !entries.is_empty() {
-                        // Add all locations to our result
-                        for entry in entries {
-                            found_locations.push(entry.location.clone());
+                debug!(
+                    "Searching for {} method {:?} in ancestor chain: {:?}",
+                    if is_class_method { "class" } else { "instance" },
+                    &method.0,
+                    ancestor_chain
+                        .iter()
+                        .map(|fqn| fqn.to_string())
+                        .collect::<Vec<_>>(),
+                );
+
+                for ancestor_fqn in ancestor_chain {
+                    let method_fqn = if is_class_method {
+                        FullyQualifiedName::class_method(
+                            ancestor_fqn.namespace_parts(),
+                            method.clone(),
+                        )
+                    } else {
+                        FullyQualifiedName::instance_method(
+                            ancestor_fqn.namespace_parts(),
+                            method.clone(),
+                        )
+                    };
+
+                    if let Some(entries) = index.definitions.get(&method_fqn.into()) {
+                        if !entries.is_empty() {
+                            found_locations.extend(entries.iter().map(|e| e.location.clone()));
                         }
-                        return Some(found_locations);
                     }
                 }
-
-                // Pop the last namespace and try again
-                search_namespaces.pop();
             }
 
-            // Top level namespace
-            let top_level_fqn = Identifier::RubyMethod(ns.clone(), method.clone());
-            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
-                if !entries.is_empty() {
-                    // Add all locations to our result
-                    for entry in entries {
-                        found_locations.push(entry.location.clone());
-                    }
-                    return Some(found_locations);
-                }
-            }
-
-            // Try to find the method with the exact namespace
-            if let Some(entries) = index.methods_by_name.get(&method) {
-                if !entries.is_empty() {
-                    // Include all methods with Direct origin
-                    for entry in entries {
-                        if let EntryKind::Method { origin, .. } = &entry.kind {
-                            debug!("Checking method entry: origin={:?}", origin);
-                            if matches!(origin, MethodOrigin::Direct) {
-                                debug!("Adding location: {:?}", entry.location);
-                                found_locations.push(entry.location.clone());
-                            }
-                        }
-                    }
-
-                    if !found_locations.is_empty() {
-                        return Some(found_locations);
-                    }
-                }
+            if !found_locations.is_empty() {
+                return Some(found_locations);
             }
         }
         Identifier::RubyVariable(variable) => {
