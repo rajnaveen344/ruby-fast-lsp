@@ -111,18 +111,12 @@ impl ScopeTracker {
     /// Returns true if the tracker is currently inside a singleton scope (i.e., a
     /// `class << self` block).
     pub fn in_singleton(&self) -> bool {
-        self.frames
-            .iter()
-            .any(|frame| matches!(frame, ScopeFrame::Singleton))
+        matches!(self.frames.last(), Some(ScopeFrame::Singleton))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // NOTE: These tests are currently placeholders that outline the required test
-    // scenarios for `ScopeTracker`.  We will fill in the assertions and sample
-    // documents in subsequent commits.
-
     use super::*;
     use crate::types::ruby_document::RubyDocument;
 
@@ -329,12 +323,12 @@ mod tests {
         tracker.enter_singleton();
         assert!(tracker.in_singleton());
 
-        // Push a namespace, should still be in singleton
+        // Push a namespace, should not be in singleton as new class/module is not a singleton by default
         let const_a = RubyConstant::new("A").unwrap();
         tracker.push_ns_scope(const_a.clone());
-        assert!(tracker.in_singleton());
+        assert!(!tracker.in_singleton());
 
-        // Pop the namespace, should still be in singleton
+        // Pop the namespace, should be in singleton
         tracker.pop_ns_scope();
         assert!(tracker.in_singleton());
 
