@@ -111,9 +111,10 @@ mod tests {
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
 
-        assert!(
-            ancestors.is_empty(),
-            "Namespace stack should be empty for top-level constant"
+        assert_eq!(
+            ancestors.len(),
+            1,
+            "Namespace stack should have one entry for top-level constant"
         );
     }
 
@@ -136,20 +137,15 @@ end
         match identifier {
             Identifier::RubyConstant(ns) => {
                 assert_eq!(ns.last().unwrap().to_string(), "CONST_B");
-                assert_eq!(
-                    ns.len(),
-                    2,
-                    "Namespace should have two entries: Outer and CONST_B"
-                );
-                assert_eq!(ns[0].to_string(), "Outer");
-                assert_eq!(ns[1].to_string(), "CONST_B");
+                assert_eq!(ns.len(), 1, "Identifier should have one entry: CONST_B");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
 
         // There should be one namespace in the stack (Outer) as we're inside it
-        assert_eq!(ancestors.len(), 1);
-        assert_eq!(ancestors[0].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 2);
+        assert_eq!(ancestors[0].to_string(), "Object");
+        assert_eq!(ancestors[1].to_string(), "Outer");
     }
 
     #[test]
@@ -187,8 +183,9 @@ end
         }
 
         // Ancestor stack should be [Outer] because the lookup Inner::CONST_A happens within Outer
-        assert_eq!(ancestors.len(), 1);
-        assert_eq!(ancestors[0].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 2);
+        assert_eq!(ancestors[0].to_string(), "Object");
+        assert_eq!(ancestors[1].to_string(), "Outer");
     }
 
     #[test]
@@ -211,23 +208,17 @@ end
 
         match identifier {
             Identifier::RubyConstant(ns) => {
-                assert_eq!(ns.last().unwrap().to_string(), "CONST_C");
-                assert_eq!(
-                    ns.len(),
-                    3,
-                    "Namespace should have three entries: Outer, Inner, CONST_C"
-                );
-                assert_eq!(ns[0].to_string(), "Outer");
-                assert_eq!(ns[1].to_string(), "Inner");
-                assert_eq!(ns[2].to_string(), "CONST_C");
+                assert_eq!(ns[0].to_string(), "CONST_C");
+                assert_eq!(ns.len(), 1, "Identifier should have one entry: CONST_C");
             }
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
 
         // Namespace stack should be [Outer, Inner]
-        assert_eq!(ancestors.len(), 2);
-        assert_eq!(ancestors[0].to_string(), "Outer");
-        assert_eq!(ancestors[1].to_string(), "Inner");
+        assert_eq!(ancestors.len(), 3);
+        assert_eq!(ancestors[0].to_string(), "Object");
+        assert_eq!(ancestors[1].to_string(), "Outer");
+        assert_eq!(ancestors[2].to_string(), "Inner");
     }
 
     #[test]
@@ -261,9 +252,10 @@ val = ::Outer::Inner::CONST_A
             _ => panic!("Expected RubyConstant, got {:?}", identifier),
         }
 
-        assert!(
-            ancestors.is_empty(),
-            "Namespace stack should be empty for absolute reference at global scope"
+        assert_eq!(
+            ancestors.len(),
+            1,
+            "Namespace stack should have one entry for absolute reference at global scope"
         );
 
         // Test position at "Inner" in the "::Outer::Inner::CONST_A" reference
@@ -282,9 +274,10 @@ val = ::Outer::Inner::CONST_A
             _ => panic!("Expected RubyNamespace, got {:?}", identifier),
         }
 
-        assert!(
-            ancestors.is_empty(),
-            "Namespace stack should be empty for absolute reference at global scope"
+        assert_eq!(
+            ancestors.len(),
+            1,
+            "Namespace stack should have one entry for absolute reference at global scope"
         );
 
         // Test position at "Outer" in the "::Outer::Inner::CONST_A" reference
@@ -302,9 +295,10 @@ val = ::Outer::Inner::CONST_A
             _ => panic!("Expected RubyNamespace, got {:?}", identifier),
         }
 
-        assert!(
-            ancestors.is_empty(),
-            "Namespace stack should be empty for absolute reference at global scope"
+        assert_eq!(
+            ancestors.len(),
+            1,
+            "Namespace stack should have one entry for absolute reference at global scope"
         );
     }
 
@@ -338,7 +332,8 @@ end
         }
 
         // There should be one namespace in the stack (Outer) as we're inside it
-        assert_eq!(ancestors.len(), 1);
-        assert_eq!(ancestors[0].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 2);
+        assert_eq!(ancestors[0].to_string(), "Object");
+        assert_eq!(ancestors[1].to_string(), "Outer");
     }
 }
