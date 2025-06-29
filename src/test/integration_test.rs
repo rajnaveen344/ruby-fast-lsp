@@ -20,7 +20,7 @@ fn init_logger() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         // Respect RUST_LOG env var but default to info for the test binary.
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
             .is_test(true)
             .init();
     });
@@ -142,13 +142,92 @@ macro_rules! assert_goto {
         .expect("no definition found");
 
         match res {
+            GotoDefinitionResponse::Array(locations) => {
+                assert_eq!(locations.len(), 1, "Expected exactly one location");
+                let location = &locations[0];
+                assert_eq!(location.uri, path_to_uri(&fixture_root().join($exp_file)));
+                assert_eq!(location.range.start.line, $exp_line);
+            }
             GotoDefinitionResponse::Scalar(location) => {
+                // Fallback for unexpected scalar behaviour.
                 assert_eq!(location.uri, path_to_uri(&fixture_root().join($exp_file)));
                 assert_eq!(location.range.start.line, $exp_line);
             }
             other => panic!("Unexpected goto definition response: {:?}", other),
         }
     }};
+}
+
+/*----------------------------------------------------------------------
+ Snapshot helpers
+----------------------------------------------------------------------*/
+
+/// Capture the definition locations at (`file`, `line`, `char`) and snapshot
+/// the JSON array so it is easy to review when behaviour changes.
+async fn snapshot_definitions(
+    harness: &TestHarness,
+    file: &str,
+    line: u32,
+    character: u32,
+    snapshot_name: &str,
+) {
+    use crate::handlers::request;
+    use lsp_types::{
+        GotoDefinitionParams, PartialResultParams, Position, TextDocumentIdentifier,
+        TextDocumentPositionParams, WorkDoneProgressParams,
+    };
+
+    let uri = path_to_uri(&fixture_root().join(file));
+    let res = request::handle_goto_definition(
+        harness.server(),
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    )
+    .await
+    .expect("goto definition failed")
+    .expect("no definition found");
+
+    use serde_json::Value;
+    let mut value: Value = match res {
+        lsp_types::GotoDefinitionResponse::Array(loc) => serde_json::to_value(&loc).unwrap(),
+        lsp_types::GotoDefinitionResponse::Scalar(l) => serde_json::to_value(&vec![l]).unwrap(),
+        lsp_types::GotoDefinitionResponse::Link(ls) => serde_json::to_value(&ls).unwrap(),
+    };
+
+    // Replace absolute URIs with project-relative ones so snapshots are machine-independent
+    fn normalize_uris(v: &mut Value, root_uri_prefix: &str) {
+        match v {
+            Value::Object(map) => {
+                if let Some(Value::String(s)) = map.get_mut("uri") {
+                    if s.starts_with(root_uri_prefix) {
+                        let rel = &s[root_uri_prefix.len()..];
+                        *s = format!("file://$PROJECT_ROOT/{}", rel);
+                    }
+                }
+                for val in map.values_mut() {
+                    normalize_uris(val, root_uri_prefix);
+                }
+            }
+            Value::Array(arr) => {
+                for val in arr {
+                    normalize_uris(val, root_uri_prefix);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let project_root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let root_uri_prefix = format!("file://{}/", project_root);
+    normalize_uris(&mut value, &root_uri_prefix.replace("\\", "/"));
+
+    insta::assert_json_snapshot!(snapshot_name, value);
 }
 
 /*----------------------------------------------------------------------
@@ -170,5 +249,52 @@ mod tests {
         }
         // If we reached here, the harness is functional.
         assert!(true);
+    }
+
+    /// Validate definitions for module, class and constant in def_ref/single_file fixture.
+    #[tokio::test]
+    async fn def_ref_single_file_defs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("def_ref/single_file").await;
+
+        // MyMod::Foo reference → class definition
+        snapshot_definitions(
+            &harness,
+            "def_ref/single_file/single.rb",
+            12,
+            14,
+            "foo_class_defs",
+        )
+        .await;
+
+        // include MyMod → module definition
+        snapshot_definitions(
+            &harness,
+            "def_ref/single_file/single.rb",
+            10,
+            8,
+            "module_defs",
+        )
+        .await;
+
+        // VALUE constant usage inside method → constant definition
+        snapshot_definitions(
+            &harness,
+            "def_ref/single_file/single.rb",
+            5,
+            6,
+            "value_constant_defs",
+        )
+        .await;
+
+        // puts MyMod::VALUE constant usage at top level
+        snapshot_definitions(
+            &harness,
+            "def_ref/single_file/single.rb",
+            13,
+            12,
+            "value_constant_defs_top",
+        )
+        .await;
     }
 }
