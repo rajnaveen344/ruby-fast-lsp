@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 use lsp_types::{DidOpenTextDocumentParams, InitializeParams, TextDocumentItem, Url};
+use serde_json::Value;
 use tower_lsp::LanguageServer;
 
 use crate::server::RubyLanguageServer;
@@ -66,13 +67,48 @@ impl TestHarness {
         Self { server }
     }
 
-    /// Opens **all** `*.rb` files located under `fixtures/<scenario>` so that
-    /// the server indexes them as a workspace.
+    /// Opens `*.rb` files located under `fixtures/<scenario>` so that the
+    /// server indexes them as a workspace.
+    ///
+    /// If `scenario` refers to a single Ruby file (e.g. `some_dir/foo.rb`) that
+    /// file alone is opened instead of scanning a directory. This makes it
+    /// possible to test language-server behaviour when only one document is
+    /// open.
     pub async fn open_fixture_dir(&self, scenario: &str) {
-        let root = fixture_root().join(scenario);
-        assert!(root.exists(), "Unknown fixture scenario: {}", scenario);
+        let root_path = fixture_root().join(scenario);
+        assert!(root_path.exists(), "Unknown fixture scenario: {}", scenario);
 
-        let mut stack = vec![root];
+        // -------------------------------------------------------------
+        // Single-file mode – open the requested file and return early
+        // -------------------------------------------------------------
+        if root_path.is_file() {
+            assert!(
+                root_path.extension().and_then(|ext| ext.to_str()) == Some("rb"),
+                "Expected a .rb file"
+            );
+
+            let uri = path_to_uri(&root_path);
+            let contents = std::fs::read_to_string(&root_path)
+                .unwrap_or_else(|_| panic!("Failed to read {:?}", root_path));
+
+            let params = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri,
+                    language_id: "ruby".into(),
+                    version: 1,
+                    text: contents,
+                },
+            };
+
+            // Fire-and-await so the document is fully indexed before continuing.
+            self.server.did_open(params).await;
+            return;
+        }
+
+        // -------------------------------------------------------------
+        // Directory mode – recursively open every Ruby file we find
+        // -------------------------------------------------------------
+        let mut stack = vec![root_path];
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(&dir).expect("read_dir failed") {
                 let entry = entry.expect("DirEntry failed");
@@ -104,58 +140,6 @@ impl TestHarness {
     pub fn server(&self) -> &RubyLanguageServer {
         &self.server
     }
-}
-
-/*----------------------------------------------------------------------
- Assertion helpers (macros)
-----------------------------------------------------------------------*/
-
-/// Assert that a *goto definition* request at (`file`, `line`, `char`) resolves
-/// to (`exp_file`, `exp_line`).
-#[macro_export]
-macro_rules! assert_goto {
-    ($harness:expr, $file:expr, $line:expr, $char:expr,
-     $exp_file:expr, $exp_line:expr $(,)?) => {{
-        use lsp_types::{
-            GotoDefinitionParams, GotoDefinitionResponse, PartialResultParams, Position,
-            TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
-        };
-        use $crate::handlers::request;
-
-        let uri = path_to_uri(&fixture_root().join($file));
-        let res = request::handle_goto_definition(
-            $harness.server(),
-            GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position {
-                        line: $line,
-                        character: $char,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            },
-        )
-        .await
-        .expect("goto definition request failed")
-        .expect("no definition found");
-
-        match res {
-            GotoDefinitionResponse::Array(locations) => {
-                assert_eq!(locations.len(), 1, "Expected exactly one location");
-                let location = &locations[0];
-                assert_eq!(location.uri, path_to_uri(&fixture_root().join($exp_file)));
-                assert_eq!(location.range.start.line, $exp_line);
-            }
-            GotoDefinitionResponse::Scalar(location) => {
-                // Fallback for unexpected scalar behaviour.
-                assert_eq!(location.uri, path_to_uri(&fixture_root().join($exp_file)));
-                assert_eq!(location.range.start.line, $exp_line);
-            }
-            other => panic!("Unexpected goto definition response: {:?}", other),
-        }
-    }};
 }
 
 /*----------------------------------------------------------------------
@@ -193,41 +177,45 @@ async fn snapshot_definitions(
     .expect("goto definition failed")
     .expect("no definition found");
 
-    use serde_json::Value;
-    let mut value: Value = match res {
+    let mut value = match res {
         lsp_types::GotoDefinitionResponse::Array(loc) => serde_json::to_value(&loc).unwrap(),
         lsp_types::GotoDefinitionResponse::Scalar(l) => serde_json::to_value(&vec![l]).unwrap(),
         lsp_types::GotoDefinitionResponse::Link(ls) => serde_json::to_value(&ls).unwrap(),
     };
 
-    // Replace absolute URIs with project-relative ones so snapshots are machine-independent
-    fn normalize_uris(v: &mut Value, root_uri_prefix: &str) {
+    let project_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    relativize_uris(&mut value, &project_root);
+
+    insta::assert_json_snapshot!(snapshot_name, value);
+}
+
+/// Replace absolute `file://` URIs inside `value` with a `$PROJECT_ROOT` placeholder so
+/// that Insta snapshots are stable across machines.
+///
+/// * `value` – JSON value that will be mutated in-place.
+/// * `project_root` – absolute path to the crate root (usually `env!("CARGO_MANIFEST_DIR")`).
+fn relativize_uris(value: &mut Value, project_root: &Path) {
+    // Build a canonical `file://` prefix using forward slashes so the check works on all OSes.
+    let mut prefix = String::from("file://");
+    prefix.push_str(&project_root.display().to_string().replace('\\', "/"));
+    if !prefix.ends_with('/') {
+        prefix.push('/');
+    }
+
+    // Recursive helper – kept private to the function.
+    fn walk(v: &mut Value, prefix: &str) {
         match v {
-            Value::Object(map) => {
-                if let Some(Value::String(s)) = map.get_mut("uri") {
-                    if s.starts_with(root_uri_prefix) {
-                        let rel = &s[root_uri_prefix.len()..];
-                        *s = format!("file://$PROJECT_ROOT/{}", rel);
-                    }
-                }
-                for val in map.values_mut() {
-                    normalize_uris(val, root_uri_prefix);
-                }
+            Value::String(s) if s.starts_with(prefix) => {
+                let rel = &s[prefix.len()..];
+                *s = format!("file://$PROJECT_ROOT/{}", rel);
             }
-            Value::Array(arr) => {
-                for val in arr {
-                    normalize_uris(val, root_uri_prefix);
-                }
-            }
+            Value::Array(arr) => arr.iter_mut().for_each(|child| walk(child, prefix)),
+            Value::Object(map) => map.values_mut().for_each(|child| walk(child, prefix)),
             _ => {}
         }
     }
 
-    let project_root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let root_uri_prefix = format!("file://{}/", project_root);
-    normalize_uris(&mut value, &root_uri_prefix.replace("\\", "/"));
-
-    insta::assert_json_snapshot!(snapshot_name, value);
+    walk(value, &prefix);
 }
 
 /*----------------------------------------------------------------------
@@ -244,8 +232,8 @@ mod tests {
         let harness = TestHarness::new().await;
         // The `def_ref/` folder will be created in a follow-up commit.
         // For now fall back to an empty dir if it doesn't exist to keep CI green.
-        if fixture_root().join("def_ref").exists() {
-            harness.open_fixture_dir("def_ref").await;
+        if fixture_root().join("goto").exists() {
+            harness.open_fixture_dir("goto").await;
         }
         // If we reached here, the harness is functional.
         assert!(true);
@@ -253,47 +241,26 @@ mod tests {
 
     /// Validate definitions for module, class and constant in def_ref/single_file fixture.
     #[tokio::test]
-    async fn def_ref_single_file_defs() {
+    async fn goto_single_file_defs() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("def_ref/single_file").await;
+        harness.open_fixture_dir("goto/const_single.rb").await;
 
         // MyMod::Foo reference → class definition
-        snapshot_definitions(
-            &harness,
-            "def_ref/single_file/single.rb",
-            12,
-            14,
-            "foo_class_defs",
-        )
-        .await;
+        snapshot_definitions(&harness, "goto/const_single.rb", 12, 14, "foo_class_def").await;
 
         // include MyMod → module definition
-        snapshot_definitions(
-            &harness,
-            "def_ref/single_file/single.rb",
-            10,
-            8,
-            "module_defs",
-        )
-        .await;
+        snapshot_definitions(&harness, "goto/const_single.rb", 10, 8, "module_def").await;
 
         // VALUE constant usage inside method → constant definition
-        snapshot_definitions(
-            &harness,
-            "def_ref/single_file/single.rb",
-            5,
-            6,
-            "value_constant_defs",
-        )
-        .await;
+        snapshot_definitions(&harness, "goto/const_single.rb", 5, 6, "value_const_def").await;
 
         // puts MyMod::VALUE constant usage at top level
         snapshot_definitions(
             &harness,
-            "def_ref/single_file/single.rb",
+            "goto/const_single.rb",
             13,
             12,
-            "value_constant_defs_top",
+            "value_const_def_top",
         )
         .await;
     }

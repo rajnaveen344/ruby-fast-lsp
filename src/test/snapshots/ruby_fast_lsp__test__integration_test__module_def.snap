@@ -14,6 +14,6 @@ expression: value
         "line": 0
       }
     },
-    "uri": "file://$PROJECT_ROOT/src/test/fixtures/def_ref/single_file/single.rb"
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/goto/const_single.rb"
   }
 ]
