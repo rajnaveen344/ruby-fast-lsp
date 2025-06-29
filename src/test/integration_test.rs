@@ -162,7 +162,7 @@ async fn snapshot_definitions(
     };
 
     let uri = path_to_uri(&fixture_root().join(file));
-    let res = request::handle_goto_definition(
+    let res_opt = request::handle_goto_definition(
         harness.server(),
         GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -174,13 +174,16 @@ async fn snapshot_definitions(
         },
     )
     .await
-    .expect("goto definition failed")
-    .expect("no definition found");
+    .expect("goto definition failed");
 
-    let mut value = match res {
-        lsp_types::GotoDefinitionResponse::Array(loc) => serde_json::to_value(&loc).unwrap(),
-        lsp_types::GotoDefinitionResponse::Scalar(l) => serde_json::to_value(&vec![l]).unwrap(),
-        lsp_types::GotoDefinitionResponse::Link(ls) => serde_json::to_value(&ls).unwrap(),
+    // Convert the LSP response (if any) into a JSON value so it can be snapshotted.
+    // If there is **no** definition then we snapshot an empty JSON array so callers can
+    // assert on the absence of definitions without causing a test failure.
+    let mut value = match res_opt {
+        Some(lsp_types::GotoDefinitionResponse::Array(loc)) => serde_json::to_value(&loc).unwrap(),
+        Some(lsp_types::GotoDefinitionResponse::Scalar(l)) => serde_json::to_value(&vec![l]).unwrap(),
+        Some(lsp_types::GotoDefinitionResponse::Link(ls)) => serde_json::to_value(&ls).unwrap(),
+        None => serde_json::json!([]),
     };
 
     let project_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -261,6 +264,54 @@ mod tests {
             13,
             12,
             "value_const_def_top",
+        )
+        .await;
+    }
+
+    /// Validate definitions for nested constant paths in goto/const_single.rb fixture.
+    #[tokio::test]
+    async fn goto_nested_const_defs() {
+        let harness = TestHarness::new().await;
+        harness
+            .open_fixture_dir("goto/nested_const_single.rb")
+            .await;
+
+        // Alpha::Beta::Gamma::Foo reference → class definition
+        snapshot_definitions(
+            &harness,
+            "goto/nested_const_single.rb",
+            11,
+            20,
+            "nested_foo_class_def",
+        )
+        .await;
+
+        // ABC constant usage inside method → constant definition
+        snapshot_definitions(
+            &harness,
+            "goto/nested_const_single.rb",
+            5,
+            8,
+            "abc_const_def",
+        )
+        .await;
+
+        // Alpha constant usage at top level - No definition found
+        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 0, "alpha_top").await;
+
+        // Alpha::Beta constant usage at top level - No definition found
+        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 7, "beta_top").await;
+
+        // Alpha::Beta::Gamma constant usage at top level
+        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 13, "gamma_top").await;
+
+        // Alpha::Beta::Gamma::ABC constant usage at top level
+        snapshot_definitions(
+            &harness,
+            "goto/nested_const_single.rb",
+            10,
+            20,
+            "abc_const_def_top",
         )
         .await;
     }
