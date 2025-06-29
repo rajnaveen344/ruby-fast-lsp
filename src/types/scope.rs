@@ -46,22 +46,6 @@ impl Hash for LVScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LVScopeKind {
-    /// Top-level scope for variables defined outside any class or method.
-    ///
-    /// # Examples
-    /// ```ruby
-    /// x = 1  # Top-level variable
-    ///
-    /// def some_method
-    ///   puts x  # NameError: undefined local variable or method `x'
-    /// end
-    ///
-    /// class SomeClass
-    ///   puts x  # NameError: undefined local variable or method `x'
-    /// end
-    /// ```
-    TopLevel,
-
     /// Scope for local variables defined in class/module bodies.
     ///
     /// # Examples
@@ -148,7 +132,6 @@ impl LVScopeKind {
 impl fmt::Display for LVScopeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LVScopeKind::TopLevel => write!(f, "TopLevel"),
             LVScopeKind::Constant => write!(f, "Constant"),
             LVScopeKind::Method => write!(f, "Method"),
             LVScopeKind::Block => write!(f, "Block"),

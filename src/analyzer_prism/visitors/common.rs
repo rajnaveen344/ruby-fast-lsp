@@ -33,7 +33,9 @@ pub struct ScopeTracker {
 
 impl ScopeTracker {
     pub fn new(document: &RubyDocument) -> Self {
-        let frames = Vec::new();
+        let mut frames = Vec::new();
+        let top_namespace = vec![RubyConstant::new("Object").unwrap()];
+        frames.push(ScopeFrame::Namespace(top_namespace));
         let mut lv_stack = LVScopeStack::new();
         let top_lv_scope = LVScope::new(
             0,
@@ -44,7 +46,7 @@ impl ScopeTracker {
                     document.offset_to_position(document.content.len()),
                 ),
             },
-            LVScopeKind::TopLevel,
+            LVScopeKind::Constant,
         );
         lv_stack.push(top_lv_scope);
         Self { frames, lv_stack }

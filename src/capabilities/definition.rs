@@ -2,7 +2,8 @@ use log::{debug, info};
 use lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::{entry_kind::EntryKind, MethodOrigin};
+use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::MethodOrigin;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
@@ -64,17 +65,6 @@ pub async fn find_definition_at_position(
                 // Pop the last namespace and try again
                 search_namespaces.pop();
             }
-
-            // Try at the top level
-            let top_level_fqn = Identifier::RubyConstant(ns.clone());
-            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
-                if !entries.is_empty() {
-                    for entry in entries {
-                        found_locations.push(entry.location.clone());
-                    }
-                    return Some(found_locations);
-                }
-            }
         }
         Identifier::RubyMethod(ns, method) => {
             let iden = Identifier::RubyMethod(ns.clone(), method.clone());
@@ -100,18 +90,6 @@ pub async fn find_definition_at_position(
 
                 // Pop the last namespace and try again
                 search_namespaces.pop();
-            }
-
-            // Top level namespace
-            let top_level_fqn = Identifier::RubyMethod(ns.clone(), method.clone());
-            if let Some(entries) = index.definitions.get(&top_level_fqn.clone().into()) {
-                if !entries.is_empty() {
-                    // Add all locations to our result
-                    for entry in entries {
-                        found_locations.push(entry.location.clone());
-                    }
-                    return Some(found_locations);
-                }
             }
 
             // Try to find the method with the exact namespace
