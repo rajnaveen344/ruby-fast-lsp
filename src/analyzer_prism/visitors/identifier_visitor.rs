@@ -1,13 +1,12 @@
 use crate::{
-    analyzer_prism::{utils, visitors::common::ScopeTracker, Identifier},
+    analyzer_prism::{scope_tracker::ScopeTracker, utils, Identifier},
     indexer::entry::MethodKind,
     types::{
         ruby_document::RubyDocument,
         ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
         ruby_variable::{RubyVariable, RubyVariableType},
-        scope::LVScopeKind,
-        scope::{LVScope, LVScopeStack},
+        scope::{LVScope, LVScopeKind, LVScopeStack},
     },
 };
 

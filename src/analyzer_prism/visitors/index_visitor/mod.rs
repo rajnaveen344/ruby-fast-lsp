@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use lsp_types::Url;
 use ruby_prism::*;
 
-use crate::analyzer_prism::visitors::common::ScopeTracker;
+use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;

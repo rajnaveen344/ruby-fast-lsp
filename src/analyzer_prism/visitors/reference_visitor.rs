@@ -10,8 +10,8 @@ use ruby_prism::{
 
 use crate::{
     analyzer_prism::{
+        scope_tracker::ScopeTracker,
         utils::{self, collect_namespaces},
-        visitors::common::ScopeTracker,
     },
     indexer::{entry::MethodKind, index::RubyIndex},
     server::RubyLanguageServer,
