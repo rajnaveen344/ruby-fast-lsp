@@ -146,6 +146,50 @@ impl TestHarness {
  Snapshot helpers
 ----------------------------------------------------------------------*/
 
+/// Capture the reference locations at (`file`, `line`, `char`) and snapshot
+/// the JSON array so it is easy to review when behaviour changes.
+async fn snapshot_references(
+    harness: &TestHarness,
+    file: &str,
+    line: u32,
+    character: u32,
+    snapshot_name: &str,
+) {
+    use crate::handlers::request;
+    use lsp_types::{
+        PartialResultParams, Position, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
+        TextDocumentPositionParams, WorkDoneProgressParams,
+    };
+
+    let uri = path_to_uri(&fixture_root().join(file));
+    let res_opt = request::handle_references(
+        harness.server(),
+        ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        },
+    )
+    .await
+    .expect("goto references failed");
+
+    let mut value = match res_opt {
+        Some(locations) => serde_json::to_value(&locations).unwrap(),
+        None => serde_json::json!([]),
+    };
+
+    let project_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    relativize_uris(&mut value, &project_root);
+
+    insta::assert_json_snapshot!(snapshot_name, value);
+}
+
 /// Capture the definition locations at (`file`, `line`, `char`) and snapshot
 /// the JSON array so it is easy to review when behaviour changes.
 async fn snapshot_definitions(
@@ -181,7 +225,9 @@ async fn snapshot_definitions(
     // assert on the absence of definitions without causing a test failure.
     let mut value = match res_opt {
         Some(lsp_types::GotoDefinitionResponse::Array(loc)) => serde_json::to_value(&loc).unwrap(),
-        Some(lsp_types::GotoDefinitionResponse::Scalar(l)) => serde_json::to_value(&vec![l]).unwrap(),
+        Some(lsp_types::GotoDefinitionResponse::Scalar(l)) => {
+            serde_json::to_value(&vec![l]).unwrap()
+        }
         Some(lsp_types::GotoDefinitionResponse::Link(ls)) => serde_json::to_value(&ls).unwrap(),
         None => serde_json::json!([]),
     };
@@ -314,5 +360,20 @@ mod tests {
             "abc_const_def_top",
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn goto_const_refs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/const_single.rb").await;
+
+        // MyMod definition → module references
+        snapshot_references(&harness, "goto/const_single.rb", 0, 7, "my_mod_ref").await;
+
+        // VALUE constant definition → constant references
+        snapshot_references(&harness, "goto/const_single.rb", 1, 2, "value_const_ref").await;
+
+        // MyMod::Foo definition → class references
+        snapshot_references(&harness, "goto/const_single.rb", 3, 8, "foo_class_ref").await;
     }
 }
