@@ -25,4 +25,10 @@ Greeter.hello
 Greeter.new.hello
 
 test.hello
+
+def top_method
+    puts 'top_method'
+end
+
+top_method
   

@@ -466,5 +466,8 @@ mod tests {
             "hello_instance_method_def",
         )
         .await;
+
+        // `top_method` call at top level → method definition
+        snapshot_definitions(&harness, "goto/method_single.rb", 32, 0, "top_method_def").await;
     }
 }
