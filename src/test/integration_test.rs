@@ -421,4 +421,50 @@ mod tests {
         // MyMod::Foo definition → class references
         snapshot_references(&harness, "goto/const_single.rb", 3, 8, "foo_class_ref").await;
     }
+
+    /*----------------------------------------------------------------------
+     Method fixtures – Greeter#greet (no receiver) and Utils.process (constant
+     receiver)
+    ----------------------------------------------------------------------*/
+
+    /// Validate definitions for methods without an explicit receiver (i.e.
+    /// plain method calls inside the same class).
+    #[tokio::test]
+    async fn goto_method_defs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/method_single.rb").await;
+
+        // `greet` call inside `run` → method definition
+        snapshot_definitions(&harness, "goto/method_single.rb", 18, 8, "greet_method_def").await;
+
+        // `hello` call on `Greeter` class → self method definition
+        snapshot_definitions(
+            &harness,
+            "goto/method_single.rb",
+            22,
+            8,
+            "hello_class_method_def",
+        )
+        .await;
+
+        // `new` call on `Greeter` class → constructor method definition
+        snapshot_definitions(
+            &harness,
+            "goto/method_single.rb",
+            24,
+            8,
+            "constructor_method_def",
+        )
+        .await;
+
+        // `hello` call on `Greeter` instance → instance method definition
+        snapshot_definitions(
+            &harness,
+            "goto/method_single.rb",
+            24,
+            12,
+            "hello_instance_method_def",
+        )
+        .await;
+    }
 }
