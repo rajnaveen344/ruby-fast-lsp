@@ -9,12 +9,15 @@
 
 ## 2  Current State
 
-* Tests live in `src/test/integration_test.rs` (≈ 370 LOC).
-* Fixtures in `src/test/fixtures` (23 Ruby snippets) exercise:
+* Tests are split across dedicated modules in `src/test/`:
+  * `integration_test.rs` – shared `TestHarness` utilities and a basic smoke-test
+  * `definitions.rs` – all `goto definition` tests
+  * `references.rs` – all `find references` tests
+* Fixtures in `src/test/fixtures` (≈ 23 Ruby snippets) exercise:
   * `goto definition` for classes, methods & modules
   * `find references`
   * **Gap**: hover, completion, document symbols, workspace symbols, diagnostics, formatting, semantic tokens, rename, folding-range, etc.
-* All tests open a single file – **no workspace-level scenarios** (multiple related files).
+* Workspace-level scenarios are covered – the harness can open every Ruby file in a fixture sub-directory to simulate a project workspace.
 
 ## 3  Coverage Matrix – Requests × Language Entities
 
@@ -67,7 +70,7 @@ Notes:
    * Macro `assert_goto!(file, line, char, exp_file, exp_line)` etc. for brevity.
 
 3. **Parameterized Tests**
-   * Use `trybuild`‐style or `#[rstest]` to generate the same test logic over many fixtures.
+   * Use `insta` snapshots (e.g. `insta::assert_json_snapshot!`) together with small helper macros to apply the same test logic across many fixtures.
    * Descriptive JSON per fixture: what request to send and expected result. Example:
      ```jsonc
      {
@@ -124,6 +127,5 @@ Notes:
 ### Appendix A – Useful crates
 
 * `tower-lsp` test utilities
-* `expect-test` for snapshot-style assertions
 * `insta` for quick diffing of JSON responses
 * `serde_json` for fixture descriptors
