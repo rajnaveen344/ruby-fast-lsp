@@ -148,7 +148,7 @@ impl TestHarness {
 
 /// Capture the reference locations at (`file`, `line`, `char`) and snapshot
 /// the JSON array so it is easy to review when behaviour changes.
-async fn snapshot_references(
+pub async fn snapshot_references(
     harness: &TestHarness,
     file: &str,
     line: u32,
@@ -192,7 +192,7 @@ async fn snapshot_references(
 
 /// Capture the definition locations at (`file`, `line`, `char`) and snapshot
 /// the JSON array so it is easy to review when behaviour changes.
-async fn snapshot_definitions(
+pub async fn snapshot_definitions(
     harness: &TestHarness,
     file: &str,
     line: u32,
@@ -275,199 +275,7 @@ mod tests {
     #[tokio::test]
     async fn harness_smoke() {
         let harness = TestHarness::new().await;
-        // The `def_ref/` folder will be created in a follow-up commit.
-        // For now fall back to an empty dir if it doesn't exist to keep CI green.
-        if fixture_root().join("goto").exists() {
-            harness.open_fixture_dir("goto").await;
-        }
-        // If we reached here, the harness is functional.
+        harness.open_fixture_dir("goto").await;
         assert!(true);
-    }
-
-    /// Validate definitions for module, class and constant in def_ref/single_file fixture.
-    #[tokio::test]
-    async fn goto_single_file_defs() {
-        let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/const_single.rb").await;
-
-        // MyMod::Foo reference → class definition
-        snapshot_definitions(&harness, "goto/const_single.rb", 12, 14, "foo_class_def").await;
-
-        // include MyMod → module definition
-        snapshot_definitions(&harness, "goto/const_single.rb", 10, 8, "module_def").await;
-
-        // VALUE constant usage inside method → constant definition
-        snapshot_definitions(&harness, "goto/const_single.rb", 5, 6, "value_const_def").await;
-
-        // puts MyMod::VALUE constant usage at top level
-        snapshot_definitions(
-            &harness,
-            "goto/const_single.rb",
-            13,
-            12,
-            "value_const_def_top",
-        )
-        .await;
-    }
-
-    /// Validate definitions for nested constant paths in goto/const_single.rb fixture.
-    #[tokio::test]
-    async fn goto_nested_const_defs() {
-        let harness = TestHarness::new().await;
-        harness
-            .open_fixture_dir("goto/nested_const_single.rb")
-            .await;
-
-        // Alpha::Beta::Gamma::Foo reference → class definition
-        snapshot_definitions(
-            &harness,
-            "goto/nested_const_single.rb",
-            11,
-            20,
-            "nested_foo_class_def",
-        )
-        .await;
-
-        // ABC constant usage inside method → constant definition
-        snapshot_definitions(
-            &harness,
-            "goto/nested_const_single.rb",
-            5,
-            8,
-            "abc_const_def",
-        )
-        .await;
-
-        // Alpha constant usage at top level - No definition found
-        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 0, "alpha_top").await;
-
-        // Alpha::Beta constant usage at top level - No definition found
-        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 7, "beta_top").await;
-
-        // Alpha::Beta::Gamma constant usage at top level
-        snapshot_definitions(&harness, "goto/nested_const_single.rb", 10, 13, "gamma_top").await;
-
-        // Alpha::Beta::Gamma::ABC constant usage at top level
-        snapshot_definitions(
-            &harness,
-            "goto/nested_const_single.rb",
-            10,
-            20,
-            "abc_const_def_top",
-        )
-        .await;
-    }
-
-    /// Validate references for nested constant paths in goto/nested_const_single.rb fixture.
-    #[tokio::test]
-    async fn goto_nested_const_refs() {
-        let harness = TestHarness::new().await;
-        harness
-            .open_fixture_dir("goto/nested_const_single.rb")
-            .await;
-
-        // ABC constant definition → constant references
-        snapshot_references(
-            &harness,
-            "goto/nested_const_single.rb",
-            1,
-            4,
-            "abc_const_ref",
-        )
-        .await;
-
-        // Alpha::Beta::Gamma::Foo definition → class references
-        snapshot_references(
-            &harness,
-            "goto/nested_const_single.rb",
-            3,
-            10,
-            "nested_foo_class_ref",
-        )
-        .await;
-
-        // Alpha namespace in Gamma module definition – expect references assuming defined elsewhere
-        snapshot_references(
-            &harness,
-            "goto/nested_const_single.rb",
-            0,
-            7,
-            "alpha_namespace_ref",
-        )
-        .await;
-
-        // Beta namespace in Gamma module definition – expect references assuming defined elsewhere
-        snapshot_references(
-            &harness,
-            "goto/nested_const_single.rb",
-            0,
-            14,
-            "beta_namespace_ref",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn goto_const_refs() {
-        let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/const_single.rb").await;
-
-        // MyMod definition → module references
-        snapshot_references(&harness, "goto/const_single.rb", 0, 7, "my_mod_ref").await;
-
-        // VALUE constant definition → constant references
-        snapshot_references(&harness, "goto/const_single.rb", 1, 2, "value_const_ref").await;
-
-        // MyMod::Foo definition → class references
-        snapshot_references(&harness, "goto/const_single.rb", 3, 8, "foo_class_ref").await;
-    }
-
-    /*----------------------------------------------------------------------
-     Method fixtures – Greeter#greet (no receiver) and Utils.process (constant
-     receiver)
-    ----------------------------------------------------------------------*/
-
-    /// Validate definitions for methods without an explicit receiver (i.e.
-    /// plain method calls inside the same class).
-    #[tokio::test]
-    async fn goto_method_defs() {
-        let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/method_single.rb").await;
-
-        // `greet` call inside `run` → method definition
-        snapshot_definitions(&harness, "goto/method_single.rb", 18, 8, "greet_method_def").await;
-
-        // `hello` call on `Greeter` class → self method definition
-        snapshot_definitions(
-            &harness,
-            "goto/method_single.rb",
-            22,
-            8,
-            "hello_class_method_def",
-        )
-        .await;
-
-        // `new` call on `Greeter` class → constructor method definition
-        snapshot_definitions(
-            &harness,
-            "goto/method_single.rb",
-            24,
-            8,
-            "constructor_method_def",
-        )
-        .await;
-
-        // `hello` call on `Greeter` instance → instance method definition
-        snapshot_definitions(
-            &harness,
-            "goto/method_single.rb",
-            24,
-            12,
-            "hello_instance_method_def",
-        )
-        .await;
-
-        // `top_method` call at top level → method definition
-        snapshot_definitions(&harness, "goto/method_single.rb", 32, 0, "top_method_def").await;
     }
 }
