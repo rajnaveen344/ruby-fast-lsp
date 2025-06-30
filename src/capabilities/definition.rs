@@ -4,8 +4,8 @@ use lsp_types::{Location, Position, Url};
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::ancestor_chain::get_ancestor_chain;
 
-use crate::indexer::entry::MethodKind;
 use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::MethodKind;
 use crate::indexer::entry::MethodOrigin;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -156,7 +156,8 @@ pub async fn find_definition_at_position(
                             }
                         }
                     }
-
+                }
+            }
             if !found_locations.is_empty() {
                 return Some(found_locations);
             }

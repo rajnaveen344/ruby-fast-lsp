@@ -23,7 +23,7 @@ impl IndexVisitor {
                 .filter_map(|arg| self.resolve_mixin_ref(&arg))
                 .collect();
 
-            let current_fqn = FullyQualifiedName::namespace(self.current_namespace());
+            let current_fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
             if current_fqn.is_empty() {
                 // Cannot apply mixin to top-level
                 return;

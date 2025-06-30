@@ -32,11 +32,8 @@ impl IndexVisitor {
         }
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker.push_lv_scope(LVScope::new(
-            scope_id,
-            body_loc,
-            LVScopeKind::Constant,
-        ));
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Constant));
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
