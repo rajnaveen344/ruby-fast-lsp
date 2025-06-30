@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 14,
+        "line": 28
+      },
+      "start": {
+        "character": 4,
+        "line": 28
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/goto/method_single.rb"
+  }
+]

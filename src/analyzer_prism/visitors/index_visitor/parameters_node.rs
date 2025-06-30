@@ -65,7 +65,7 @@ impl IndexVisitor {
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
         let var = RubyVariable::new(
             param_name,
-            RubyVariableType::Local(self.scope_stack.clone()),
+            RubyVariableType::Local(self.scope_tracker.get_lv_stack().to_vec()),
         );
 
         match var {
@@ -78,7 +78,7 @@ impl IndexVisitor {
                 // Create an entry with EntryKind::Variable
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
-                    .location(self.prism_loc_to_lsp_loc(location))
+                    .location(self.document.prism_location_to_lsp_location(&location))
                     .kind(EntryKind::Variable {
                         name: variable.clone(),
                     })
@@ -89,7 +89,7 @@ impl IndexVisitor {
                     let mut index = self.index.lock().unwrap();
                     index.add_entry(entry.clone());
                     self.document.add_local_var_entry(
-                        self.scope_stack.last().unwrap().scope_id(),
+                        self.scope_tracker.current_lv_scope().unwrap().scope_id(),
                         entry.clone(),
                     );
                     debug!("Added parameter entry: {:?}", variable);

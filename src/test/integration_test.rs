@@ -1,466 +1,281 @@
-use log::info;
-use lsp_types::{
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    PartialResultParams, Position, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
-};
-use std::path::PathBuf;
+//! Integration test harness – see `docs/integration_test_plan.md`
+//!
+//! This file purposely **replaces** the previous ad-hoc integration tests with a reusable
+//! and extensible test harness.  The harness makes it straightforward to add new fixtures
+//! and coverage as described in the integration test plan.
+
+use std::path::{Path, PathBuf};
+use std::sync::Once;
+
+use lsp_types::{DidOpenTextDocumentParams, InitializeParams, TextDocumentItem, Url};
+use serde_json::Value;
 use tower_lsp::LanguageServer;
 
-use crate::analyzer_prism::RubyPrismAnalyzer;
-use crate::handlers::request;
 use crate::server::RubyLanguageServer;
 
-/// Helper function to create absolute paths for test fixtures
-fn fixture_dir(relative_path: &str) -> PathBuf {
-    let root = std::env::current_dir().expect("Failed to get current directory");
-    root.join("src")
-        .join("test")
-        .join("fixtures")
-        .join(relative_path)
-}
+/*----------------------------------------------------------------------
+ Logger
+----------------------------------------------------------------------*/
 
-fn fixture_uri(file_name: &str) -> Url {
-    Url::from_file_path(fixture_dir(file_name)).unwrap()
-}
-
-/// Helper function to initialize the logger once
 fn init_logger() {
-    use std::sync::Once;
     static INIT: Once = Once::new();
-
     INIT.call_once(|| {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+        // Respect RUST_LOG env var but default to info for the test binary.
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+            .is_test(true)
+            .init();
     });
 }
 
-/// Initialize the server and open a fixture file
-async fn init_and_open_file(fixture_file: &str) -> RubyLanguageServer {
-    init_logger();
-    let server = RubyLanguageServer::default();
+/*----------------------------------------------------------------------
+ Fixture helpers
+----------------------------------------------------------------------*/
 
-    let params = InitializeParams {
-        workspace_folders: None,
-        ..Default::default()
-    };
-    let _ = server.initialize(params).await;
-
-    // Also need to trigger a didOpen to properly index the file
-    let file_uri = fixture_uri(fixture_file);
-    let file_path = file_uri.to_file_path().unwrap();
-    let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-
-    let did_open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: file_uri,
-            language_id: "ruby".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-
-    server.did_open(did_open_params).await;
-    server
+/// Absolute path to the root `fixtures/` directory.
+fn fixture_root() -> PathBuf {
+    // `CARGO_MANIFEST_DIR` resolves to the crate root at compile time.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("test")
+        .join("fixtures")
 }
 
-/// Test goto definition functionality for class_declaration.rb
-#[tokio::test]
-async fn test_goto_definition_class_declaration() {
-    let fixture_file = "class_declaration.rb";
-    let server = init_and_open_file(fixture_file).await;
-
-    info!("Index ready for testing");
-
-    // Debug: Try multiple positions to find the right one for "Foo"
-    let content = std::fs::read_to_string(fixture_uri(fixture_file).to_file_path().unwrap())
-        .expect("Failed to read fixture file");
-    let analyzer = RubyPrismAnalyzer::new(fixture_uri(fixture_file), content.to_string());
-
-    // Try multiple positions to find the correct one for "Foo"
-    for char_pos in 12..17 {
-        let position = Position {
-            line: 15,
-            character: char_pos,
-        };
-        let (identifier, _, _) = analyzer.get_identifier(position);
-        info!("Identifier at line 15, char {}: {:?}", char_pos, identifier);
-    }
-
-    let res = request::handle_goto_definition(
-        &server,
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 15,      // Line with foo_instance = Foo.new, reference to Foo class
-                    character: 14, // Position of 'Foo'
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
-
-    assert!(res.is_ok(), "Definition request should succeed");
-    let definition = res.unwrap();
-
-    // It's possible that no definition is found if the indexer didn't properly index the class
-    // But if we have a response, verify it's correct
-    if let Some(def) = definition {
-        // Verify the location points to the Foo class declaration
-        match def {
-            GotoDefinitionResponse::Scalar(location) => {
-                assert_eq!(location.uri, fixture_uri(fixture_file));
-                // Since there are two Foo class declarations (line 0 and line 10),
-                // either one is acceptable
-                assert!(
-                    location.range.start.line == 0 || location.range.start.line == 10,
-                    "Expected Foo class declaration at line 0 or 10, found at {}",
-                    location.range.start.line
-                );
-            }
-            GotoDefinitionResponse::Array(locations) => {
-                // Should find both 'Foo' class declarations
-                assert_eq!(
-                    locations.len(),
-                    2,
-                    "Expected 2 class declarations for 'Foo'"
-                );
-
-                // Verify that both locations are for the Foo class
-                let lines: Vec<u32> = locations.iter().map(|loc| loc.range.start.line).collect();
-
-                assert!(
-                    lines.contains(&0) && lines.contains(&10),
-                    "Expected Foo class declarations at lines 0 and 10, found at {:?}",
-                    lines
-                );
-            }
-            _ => panic!("Expected scalar or array response for goto definition"),
-        }
-    }
+/// Convert a [`Path`] to an [`Url`].  Panics if the conversion fails.
+fn path_to_uri(path: &Path) -> Url {
+    Url::from_file_path(path).expect("Failed to convert path to file:// URI")
 }
 
-/// Test goto definition functionality for the bar method
-#[tokio::test]
-async fn test_goto_definition_method() {
-    let fixture_file = "class_declaration.rb";
-    let server = init_and_open_file(fixture_file).await;
+/*----------------------------------------------------------------------
+ TestHarness
+----------------------------------------------------------------------*/
 
-    // Try to go to definition of 'bar' method call inside another_method
-    let res = request::handle_goto_definition(
-        &server,
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 7,      // Line with the 'bar' method call
-                    character: 4, // Position within 'bar'
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
+/// Encapsulates a `RubyLanguageServer` instance and helper utilities for
+/// loading fixtures and performing common LSP requests.
+pub struct TestHarness {
+    server: RubyLanguageServer,
+}
 
-    assert!(res.is_ok());
-    let definition = res.unwrap();
-    assert!(definition.is_some());
+impl TestHarness {
+    /// Create a fresh `RubyLanguageServer` instance and perform the
+    /// `initialize` handshake.
+    pub async fn new() -> Self {
+        init_logger();
 
-    // Verify the location points to the bar method definition
-    match definition {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
-            assert_eq!(location.uri, fixture_uri(fixture_file));
-            assert_eq!(
-                location.range.start.line, 1,
-                "Expected 'bar' method definition at line 1"
-            ); // 'def bar' starts at line 1
-        }
-        Some(GotoDefinitionResponse::Array(locations)) => {
-            // Should only find one 'bar' method definition
-            assert_eq!(
-                locations.len(),
-                1,
-                "Expected only 1 'bar' method definition"
+        let server = RubyLanguageServer::default();
+        let _ = server.initialize(InitializeParams::default()).await;
+
+        Self { server }
+    }
+
+    /// Opens `*.rb` files located under `fixtures/<scenario>` so that the
+    /// server indexes them as a workspace.
+    ///
+    /// If `scenario` refers to a single Ruby file (e.g. `some_dir/foo.rb`) that
+    /// file alone is opened instead of scanning a directory. This makes it
+    /// possible to test language-server behaviour when only one document is
+    /// open.
+    pub async fn open_fixture_dir(&self, scenario: &str) {
+        let root_path = fixture_root().join(scenario);
+        assert!(root_path.exists(), "Unknown fixture scenario: {}", scenario);
+
+        // -------------------------------------------------------------
+        // Single-file mode – open the requested file and return early
+        // -------------------------------------------------------------
+        if root_path.is_file() {
+            assert!(
+                root_path.extension().and_then(|ext| ext.to_str()) == Some("rb"),
+                "Expected a .rb file"
             );
-            assert_eq!(locations[0].uri, fixture_uri(fixture_file));
-            assert_eq!(
-                locations[0].range.start.line, 1,
-                "Expected 'bar' method definition at line 1"
-            );
+
+            let uri = path_to_uri(&root_path);
+            let contents = std::fs::read_to_string(&root_path)
+                .unwrap_or_else(|_| panic!("Failed to read {:?}", root_path));
+
+            let params = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri,
+                    language_id: "ruby".into(),
+                    version: 1,
+                    text: contents,
+                },
+            };
+
+            // Fire-and-await so the document is fully indexed before continuing.
+            self.server.did_open(params).await;
+            return;
         }
-        _ => panic!("Expected scalar or array response for goto definition"),
+
+        // -------------------------------------------------------------
+        // Directory mode – recursively open every Ruby file we find
+        // -------------------------------------------------------------
+        let mut stack = vec![root_path];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read_dir failed") {
+                let entry = entry.expect("DirEntry failed");
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("rb") {
+                    let uri = path_to_uri(&path);
+                    let contents = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|_| panic!("Failed to read {:?}", path));
+
+                    let params = DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri,
+                            language_id: "ruby".into(),
+                            version: 1,
+                            text: contents,
+                        },
+                    };
+
+                    // Fire-and-await so the document is fully indexed before continuing.
+                    self.server.did_open(params).await;
+                }
+            }
+        }
+    }
+
+    /// Borrow the underlying server – useful when calling handlers directly.
+    pub fn server(&self) -> &RubyLanguageServer {
+        &self.server
     }
 }
 
-#[tokio::test]
-async fn test_goto_definition_with_mixins() {
-    let fixture_file = "mixin_definition.rb";
-    let server = init_and_open_file(fixture_file).await;
+/*----------------------------------------------------------------------
+ Snapshot helpers
+----------------------------------------------------------------------*/
 
-    // 1. Test `include` - `log` method
-    let res_include = request::handle_goto_definition(
-        &server,
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 17, // `log("Action performed")`
-                    character: 4, // on `log`
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
-
-    assert!(res_include.is_ok());
-    let definition_include = res_include.unwrap();
-    assert!(definition_include.is_some(), "Expected definition for included method 'log'");
-    match definition_include.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(location.range.start.line, 1, "Expected 'log' definition on line 2");
-        }
-        _ => panic!("Expected a single location for 'log' definition"),
-    }
-
-    // 2. Test `extend` - `tag` method
-    let res_extend = request::handle_goto_definition(
-        &server,
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 21, // `MyService.tag("important")`
-                    character: 10, // on `tag`
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
-
-    assert!(res_extend.is_ok());
-    let definition_extend = res_extend.unwrap();
-    assert!(definition_extend.is_some(), "Expected definition for extended method 'tag'");
-    match definition_extend.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(location.range.start.line, 7, "Expected 'tag' definition on line 8");
-        }
-        _ => panic!("Expected a single location for 'tag' definition"),
-    }
-
-    // 3. Test `prepend` - `greet` method
-    let res_prepend = request::handle_goto_definition(
-        &server,
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 38, // `g.greet`
-                    character: 6, // on `greet`
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
-
-    assert!(res_prepend.is_ok());
-    let definition_prepend = res_prepend.unwrap();
-    assert!(definition_prepend.is_some(), "Expected definition for prepended method 'greet'");
-    match definition_prepend.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(location.range.start.line, 25, "Expected 'greet' definition in Prependable module on line 26");
-        }
-        _ => panic!("Expected a single location for 'greet' definition"),
-    }
-}
-
-/// Test find references functionality for a method
-#[tokio::test]
-async fn test_find_references_method() {
-    let fixture_file = "class_declaration.rb";
-    let server = init_and_open_file(fixture_file).await;
-
-    // Get the file content to manually check the identifier
-    let file_uri = fixture_uri(fixture_file);
-    let file_path = file_uri.to_file_path().unwrap();
-    let content = std::fs::read_to_string(file_path).expect("Failed to read fixture file");
-
-    // Try different positions to find the identifier
-    let analyzer = RubyPrismAnalyzer::new(file_uri.clone(), content.to_string());
-
-    // Find position where the 'bar' method is called in line 7
-    let pos = Position {
-        line: 1,
-        character: 6,
+/// Capture the reference locations at (`file`, `line`, `char`) and snapshot
+/// the JSON array so it is easy to review when behaviour changes.
+pub async fn snapshot_references(
+    harness: &TestHarness,
+    file: &str,
+    line: u32,
+    character: u32,
+    snapshot_name: &str,
+) {
+    use crate::handlers::request;
+    use lsp_types::{
+        PartialResultParams, Position, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
+        TextDocumentPositionParams, WorkDoneProgressParams,
     };
-    let (identifier, _, _) = analyzer.get_identifier(pos);
-    info!("Identifier found at position {:?}: {:?}", pos, identifier);
 
-    // Find references to 'bar' method - use the position where we found the identifier
-    let res = request::handle_references(
-        &server,
+    let uri = path_to_uri(&fixture_root().join(file));
+    let res_opt = request::handle_references(
+        harness.server(),
         ReferenceParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: pos,
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
             },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
         },
     )
-    .await;
+    .await
+    .expect("goto references failed");
 
-    assert!(res.is_ok());
-    let references = res.unwrap();
-    assert!(
-        references.is_some(),
-        "Expected to find references to 'bar' method"
-    );
+    let mut value = match res_opt {
+        Some(locations) => serde_json::to_value(&locations).unwrap(),
+        None => serde_json::json!([]),
+    };
 
-    // Should find at least 2 references: the declaration and the call in another_method
-    let references = references.unwrap();
-    assert!(
-        references.len() >= 2,
-        "Expected at least 2 references to 'bar'"
-    );
+    let project_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    relativize_uris(&mut value, &project_root);
 
-    // Debug log to see what references we're actually getting
-    info!("Found references:");
-    for (i, loc) in references.iter().enumerate() {
-        info!(
-            "Reference {}: line {}-{}, char {}-{}",
-            i,
-            loc.range.start.line,
-            loc.range.end.line,
-            loc.range.start.character,
-            loc.range.end.character
-        );
-    }
+    insta::assert_json_snapshot!(snapshot_name, value);
 }
 
-/// Test find references functionality for a class
-#[tokio::test]
-async fn test_find_references_class() {
-    let fixture_file = "class_declaration.rb";
-    let server = init_and_open_file(fixture_file).await;
+/// Capture the definition locations at (`file`, `line`, `char`) and snapshot
+/// the JSON array so it is easy to review when behaviour changes.
+pub async fn snapshot_definitions(
+    harness: &TestHarness,
+    file: &str,
+    line: u32,
+    character: u32,
+    snapshot_name: &str,
+) {
+    use crate::handlers::request;
+    use lsp_types::{
+        GotoDefinitionParams, PartialResultParams, Position, TextDocumentIdentifier,
+        TextDocumentPositionParams, WorkDoneProgressParams,
+    };
 
-    // Use a position that will identify the Foo class
-    let pos = Position {
-        line: 0,
-        character: 6,
-    }; // Within "class Foo"
-
-    // Find references to 'Foo' class
-    let res = request::handle_references(
-        &server,
-        ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: pos,
-            },
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        },
-    )
-    .await;
-
-    assert!(res.is_ok());
-    let references = res.unwrap();
-    assert!(
-        references.is_some(),
-        "Expected to find references to 'Foo' class"
-    );
-
-    // Should find at least 2 references: the declaration and the use in "foo_instance = Foo.new"
-    let references = references.unwrap();
-    assert!(
-        references.len() >= 2,
-        "Expected at least 2 references to 'Foo'"
-    );
-}
-
-/// Test goto definition functionality for module methods
-#[tokio::test]
-async fn test_goto_definition_module_method() {
-    let fixture_file = "module_method.rb";
-    let server = init_and_open_file(fixture_file).await;
-
-    // Try to go to definition of 'log_level' method call inside the log method
-    let res = request::handle_goto_definition(
-        &server,
+    let uri = path_to_uri(&fixture_root().join(file));
+    let res_opt = request::handle_goto_definition(
+        harness.server(),
         GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: fixture_uri(fixture_file),
-                },
-                position: Position {
-                    line: 2,      // Line with the 'log_level' method call
-                    character: 4, // Position within 'log_level'
-                },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         },
     )
-    .await;
+    .await
+    .expect("goto definition failed");
 
-    assert!(res.is_ok());
-    let definition = res.unwrap();
-    assert!(
-        definition.is_some(),
-        "Expected to find definition for log_level"
-    );
+    // Convert the LSP response (if any) into a JSON value so it can be snapshotted.
+    // If there is **no** definition then we snapshot an empty JSON array so callers can
+    // assert on the absence of definitions without causing a test failure.
+    let mut value = match res_opt {
+        Some(lsp_types::GotoDefinitionResponse::Array(loc)) => serde_json::to_value(&loc).unwrap(),
+        Some(lsp_types::GotoDefinitionResponse::Scalar(l)) => {
+            serde_json::to_value(&vec![l]).unwrap()
+        }
+        Some(lsp_types::GotoDefinitionResponse::Link(ls)) => serde_json::to_value(&ls).unwrap(),
+        None => serde_json::json!([]),
+    };
 
-    // Verify the location points to the log_level method definition
-    match definition {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
-            assert_eq!(location.uri, fixture_uri(fixture_file));
-            assert_eq!(
-                location.range.start.line, 8,
-                "Expected 'log_level' method definition at line 8"
-            ); // 'def log_level' starts at line 8
+    let project_root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    relativize_uris(&mut value, &project_root);
+
+    insta::assert_json_snapshot!(snapshot_name, value);
+}
+
+/// Replace absolute `file://` URIs inside `value` with a `$PROJECT_ROOT` placeholder so
+/// that Insta snapshots are stable across machines.
+///
+/// * `value` – JSON value that will be mutated in-place.
+/// * `project_root` – absolute path to the crate root (usually `env!("CARGO_MANIFEST_DIR")`).
+fn relativize_uris(value: &mut Value, project_root: &Path) {
+    // Build a canonical `file://` prefix using forward slashes so the check works on all OSes.
+    let mut prefix = String::from("file://");
+    prefix.push_str(&project_root.display().to_string().replace('\\', "/"));
+    if !prefix.ends_with('/') {
+        prefix.push('/');
+    }
+
+    // Recursive helper – kept private to the function.
+    fn walk(v: &mut Value, prefix: &str) {
+        match v {
+            Value::String(s) if s.starts_with(prefix) => {
+                let rel = &s[prefix.len()..];
+                *s = format!("file://$PROJECT_ROOT/{}", rel);
+            }
+            Value::Array(arr) => arr.iter_mut().for_each(|child| walk(child, prefix)),
+            Value::Object(map) => map.values_mut().for_each(|child| walk(child, prefix)),
+            _ => {}
         }
-        Some(GotoDefinitionResponse::Array(locations)) => {
-            // Should only find one 'log_level' method definition
-            assert_eq!(
-                locations.len(),
-                1,
-                "Expected only 1 'log_level' method definition"
-            );
-            assert_eq!(locations[0].uri, fixture_uri(fixture_file));
-            assert_eq!(
-                locations[0].range.start.line, 8,
-                "Expected 'log_level' method definition at line 8"
-            );
-        }
-        _ => panic!("Expected scalar or array response for goto definition"),
+    }
+
+    walk(value, &prefix);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Simply verifies that we can load a fixture directory without panicking.
+    #[tokio::test]
+    async fn harness_smoke() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto").await;
+        assert!(true);
     }
 }

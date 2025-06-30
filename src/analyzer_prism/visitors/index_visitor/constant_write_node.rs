@@ -22,14 +22,14 @@ impl IndexVisitor {
 
         // Create a FullyQualifiedName using the current namespace stack and the constant
         // First get the current flattened namespace, then add the new constant
-        let mut namespace = self.current_namespace();
+        let mut namespace = self.scope_tracker.get_ns_stack();
         namespace.push(constant);
         let fqn = FullyQualifiedName::namespace(namespace);
 
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()
             .fqn(fqn)
-            .location(self.prism_loc_to_lsp_loc(node.location()))
+            .location(self.document.prism_location_to_lsp_location(&node.location()))
             .kind(EntryKind::Constant {
                 value: None,      // We could extract the value here if needed
                 visibility: None, // Default to public
