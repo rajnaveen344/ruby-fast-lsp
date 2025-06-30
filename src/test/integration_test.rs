@@ -267,10 +267,6 @@ fn relativize_uris(value: &mut Value, project_root: &Path) {
     walk(value, &prefix);
 }
 
-/*----------------------------------------------------------------------
- Smoke test – validates that the harness itself works.
-----------------------------------------------------------------------*/
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +354,55 @@ mod tests {
             10,
             20,
             "abc_const_def_top",
+        )
+        .await;
+    }
+
+    /// Validate references for nested constant paths in goto/nested_const_single.rb fixture.
+    #[tokio::test]
+    async fn goto_nested_const_refs() {
+        let harness = TestHarness::new().await;
+        harness
+            .open_fixture_dir("goto/nested_const_single.rb")
+            .await;
+
+        // ABC constant definition → constant references
+        snapshot_references(
+            &harness,
+            "goto/nested_const_single.rb",
+            1,
+            4,
+            "abc_const_ref",
+        )
+        .await;
+
+        // Alpha::Beta::Gamma::Foo definition → class references
+        snapshot_references(
+            &harness,
+            "goto/nested_const_single.rb",
+            3,
+            10,
+            "nested_foo_class_ref",
+        )
+        .await;
+
+        // Alpha namespace in Gamma module definition – expect references assuming defined elsewhere
+        snapshot_references(
+            &harness,
+            "goto/nested_const_single.rb",
+            0,
+            7,
+            "alpha_namespace_ref",
+        )
+        .await;
+
+        // Beta namespace in Gamma module definition – expect references assuming defined elsewhere
+        snapshot_references(
+            &harness,
+            "goto/nested_const_single.rb",
+            0,
+            14,
+            "beta_namespace_ref",
         )
         .await;
     }
