@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 12,
+        "line": 1
+      },
+      "start": {
+        "character": 4,
+        "line": 1
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/goto/nested_const_single.rb"
+  }
+]
