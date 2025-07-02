@@ -1,6 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use lsp_types::Url;
+use parking_lot::Mutex;
 use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;

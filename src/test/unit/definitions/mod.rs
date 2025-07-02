@@ -7,17 +7,18 @@
 //! parser, runs the `IndexVisitor`, and then inspects the resulting `RubyIndex`
 //! and `ScopeTracker` state.
 
-use lsp_types::Url;
-use ruby_prism::Visit;
-
 use crate::{
     analyzer_prism::visitors::index_visitor::IndexVisitor, server::RubyLanguageServer,
     types::ruby_document::RubyDocument,
 };
+use lsp_types::Url;
+use parking_lot::RwLock;
+use ruby_prism::Visit;
+use std::sync::Arc;
 
 mod class_node_test;
-mod module_node_test;
 mod def_node_test;
+mod module_node_test;
 
 /// Helper that parses `code`, runs the full `IndexVisitor`, and returns the
 /// visitor so that callers can inspect its public fields (index & scope).
@@ -30,7 +31,10 @@ pub fn visit_code(code: &str) -> IndexVisitor {
 
     // Insert a `RubyDocument` so that `IndexVisitor::new` can retrieve it.
     let doc = RubyDocument::new(uri.clone(), code.to_string(), 0);
-    server.docs.lock().unwrap().insert(uri.clone(), doc.clone());
+    server
+        .docs
+        .lock()
+        .insert(uri.clone(), Arc::new(RwLock::new(doc.clone())));
 
     // Parse with Prism and run the visitor.
     let parse_result = ruby_prism::parse(code.as_bytes());

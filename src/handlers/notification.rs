@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::capabilities;
 use crate::handlers::helpers::{
     init_workspace, process_file_for_definitions, process_file_for_references,
@@ -6,6 +8,7 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, info, warn};
 use lsp_types::*;
+use parking_lot::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
 
 pub async fn handle_initialize(
@@ -59,11 +62,15 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
 
-    lang_server.docs.lock().unwrap().insert(
+    lang_server.docs.lock().insert(
         uri.clone(),
-        RubyDocument::new(uri.clone(), content.clone(), params.text_document.version),
+        Arc::new(RwLock::new(RubyDocument::new(
+            uri.clone(),
+            content.clone(),
+            params.text_document.version,
+        ))),
     );
-    debug!("Doc cache size: {}", lang_server.docs.lock().unwrap().len());
+    debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
     let _ = process_file_for_definitions(lang_server, uri.clone());
     let _ = process_file_for_references(lang_server, uri.clone(), true);
@@ -79,7 +86,10 @@ pub async fn handle_did_change(
         let content = change.text.clone();
         let doc = RubyDocument::new(uri.clone(), content.clone(), params.text_document.version);
 
-        lang_server.docs.lock().unwrap().insert(uri.clone(), doc);
+        lang_server
+            .docs
+            .lock()
+            .insert(uri.clone(), Arc::new(RwLock::new(doc)));
 
         let _ = process_file_for_definitions(lang_server, uri.clone());
         let _ = process_file_for_references(lang_server, uri.clone(), true);
@@ -91,8 +101,8 @@ pub async fn handle_did_close(
     params: DidCloseTextDocumentParams,
 ) {
     let uri = params.text_document.uri.clone();
-    lang_server.docs.lock().unwrap().remove(&uri);
-    debug!("Doc cache size: {}", lang_server.docs.lock().unwrap().len());
+    lang_server.docs.lock().remove(&uri);
+    debug!("Doc cache size: {}", lang_server.docs.lock().len());
 }
 
 pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {

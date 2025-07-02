@@ -25,7 +25,7 @@ fn def_node_instance_method() {
         method,
     );
 
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("bar method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
@@ -48,7 +48,7 @@ fn def_node_class_method_self() {
         method,
     );
 
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("baz method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
@@ -71,7 +71,7 @@ fn def_node_initialize_as_new() {
         method,
     );
 
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("new method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
@@ -94,7 +94,7 @@ fn def_node_singleton_class_method() {
         method,
     );
 
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("qux method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
@@ -116,7 +116,7 @@ fn def_node_constant_receiver_class_method() {
         ],
         method,
     );
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     assert!(defs.get(&fqn).is_none());
 }
 
@@ -137,7 +137,7 @@ fn def_node_namespaced_constant_receiver_class_method() {
         ],
         method,
     );
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     assert!(defs.get(&fqn).is_none());
 }
 
@@ -150,7 +150,7 @@ fn def_node_invalid_method_name() {
     let visitor = visit_code(code);
 
     // Index should have no method entries for InvalidName
-    let defs = &visitor.index.lock().unwrap().definitions;
+    let defs = &visitor.index.lock().definitions;
     // Ensure none of the FQNs contain InvalidName
     assert!(defs
         .keys()

@@ -58,7 +58,7 @@ impl IndexVisitor {
 
         debug!("Adding class entry: {}", entry.clone().unwrap().fqn);
 
-        self.index.lock().unwrap().add_entry(entry.unwrap());
+        self.index.lock().add_entry(entry.unwrap());
     }
 
     pub fn process_class_node_exit(&mut self, _node: &ClassNode) {

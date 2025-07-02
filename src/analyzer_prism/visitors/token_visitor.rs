@@ -9,14 +9,14 @@ use ruby_prism::{
     visit_local_variable_write_node, CallNode, Location, Visit,
 };
 
-pub struct TokenVisitor {
-    document: RubyDocument,
+pub struct TokenVisitor<'a> {
+    document: &'a RubyDocument,
     pub tokens: Vec<SemanticToken>,
     current_position: (u32, u32),
 }
 
-impl TokenVisitor {
-    pub fn new(document: RubyDocument) -> Self {
+impl<'a> TokenVisitor<'a> {
+    pub fn new(document: &'a RubyDocument) -> Self {
         Self {
             document,
             tokens: Vec::new(),
@@ -288,7 +288,7 @@ impl TokenVisitor {
     }
 }
 
-impl Visit<'_> for TokenVisitor {
+impl Visit<'_> for TokenVisitor<'_> {
     fn visit_call_node(&mut self, node: &CallNode) {
         if let Some(receiver) = node.receiver() {
             self.visit(&receiver);

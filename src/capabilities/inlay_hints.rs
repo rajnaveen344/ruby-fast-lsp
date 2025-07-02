@@ -17,6 +17,11 @@ pub async fn handle_inlay_hints(
     params: InlayHintParams,
 ) -> Vec<InlayHint> {
     let uri = params.text_document.uri;
-    let docs = server.docs.lock().unwrap();
-    docs.get(&uri).unwrap().get_inlay_hints()
+    server
+        .docs
+        .lock()
+        .get(&uri)
+        .unwrap()
+        .read()
+        .get_inlay_hints()
 }

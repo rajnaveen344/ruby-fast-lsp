@@ -29,7 +29,10 @@ impl IndexVisitor {
         // Create an Entry with EntryKind::Constant
         let entry = EntryBuilder::new()
             .fqn(fqn)
-            .location(self.document.prism_location_to_lsp_location(&node.location()))
+            .location(
+                self.document
+                    .prism_location_to_lsp_location(&node.location()),
+            )
             .kind(EntryKind::Constant {
                 value: None,      // We could extract the value here if needed
                 visibility: None, // Default to public
@@ -38,7 +41,7 @@ impl IndexVisitor {
 
         // Add the entry to the index
         if let Ok(entry) = entry {
-            let mut index = self.index.lock().unwrap();
+            let mut index = self.index.lock();
             index.add_entry(entry);
         } else {
             error!("Error creating entry for constant: {}", constant_name);

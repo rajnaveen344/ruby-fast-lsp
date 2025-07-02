@@ -10,9 +10,10 @@ use lsp_types::{
     GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, InlayHintParams,
     Location, ReferenceParams, SemanticTokensParams, SemanticTokensResult, Url,
 };
+use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::{Client, LanguageServer};
@@ -21,7 +22,7 @@ use tower_lsp::{Client, LanguageServer};
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
     pub index: Arc<Mutex<RubyIndex>>,
-    pub docs: Arc<Mutex<HashMap<Url, RubyDocument>>>,
+    pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
 }
 
 impl RubyLanguageServer {
@@ -39,15 +40,20 @@ impl RubyLanguageServer {
     }
 
     pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
-        self.docs.lock().unwrap().get(uri).cloned()
+        self.docs
+            .lock()
+            .get(uri)
+            .map(|doc_arc| doc_arc.read().clone())
     }
 
     pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {
-        self.index.lock().unwrap().remove_entries_for_uri(&uri);
+        self.index.lock().remove_entries_for_uri(&uri);
 
         // Create or update document in the docs HashMap
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        self.docs.lock().unwrap().insert(uri.clone(), document);
+        self.docs
+            .lock()
+            .insert(uri.clone(), Arc::new(RwLock::new(document)));
 
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
@@ -58,10 +64,10 @@ impl RubyLanguageServer {
         // Persist mutations made by the visitor back to the server's document store
         // TODO: This is a temporary fix. We should be able to mutate the document in place
         //       using docs: Arc<Mutex<HashMap<Url, Arc<Mutex<RubyDocument>>>>>
-        self.docs
-            .lock()
-            .unwrap()
-            .insert(uri.clone(), visitor.document.clone());
+        // self.docs
+        //     .lock()
+        //     .unwrap()
+        //     .insert(uri.clone(), Arc::new(RwLock::new(visitor.document.clone())));
 
         debug!("Processed file: {}", uri);
         Ok(())

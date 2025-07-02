@@ -19,7 +19,7 @@ fn class_node_with_body() {
     ]);
 
     // The `RubyIndex` stores definitions keyed by FQN → Vec<Entry>.
-    let index_lock = visitor.index.lock().unwrap();
+    let index_lock = visitor.index.lock();
     let defs = &index_lock.definitions;
     let entries = defs.get(&expected_fqn).expect("Foo class entry missing");
 
@@ -46,7 +46,7 @@ fn class_node_namespaced_constant_path_with_body() {
         RubyConstant::try_from("B").unwrap(),
     ]);
 
-    let index_lock = visitor.index.lock().unwrap();
+    let index_lock = visitor.index.lock();
     let entries = index_lock
         .definitions
         .get(&expected_fqn)
@@ -74,7 +74,7 @@ fn class_node_deep_namespaced_constant_path() {
         RubyConstant::try_from("C").unwrap(),
     ]);
 
-    let index_lock = visitor.index.lock().unwrap();
+    let index_lock = visitor.index.lock();
     let entries = index_lock
         .definitions
         .get(&expected_fqn)
@@ -97,7 +97,7 @@ fn class_node_without_body() {
         RubyConstant::new("Object").unwrap(),
         RubyConstant::try_from("Foo").unwrap(),
     ]);
-    let index_lock = visitor.index.lock().unwrap();
+    let index_lock = visitor.index.lock();
 
     let entries = index_lock
         .definitions

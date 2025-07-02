@@ -58,7 +58,7 @@ pub async fn find_references_at_position(
 
     debug!("Looking for references to: {:?}", fqn);
 
-    let index = server.index.lock().unwrap();
+    let index = server.index.lock();
 
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
