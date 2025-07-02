@@ -48,7 +48,7 @@ pub async fn find_references_at_position(
             // For methods, combine ancestors with the namespace parts
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(ns.clone());
-            fqn = FullyQualifiedName::instance_method(combined_ns, method.clone());
+            fqn = FullyQualifiedName::method(combined_ns, method.clone());
         }
         Identifier::RubyVariable(variable) => {
             // For variables, use ancestors as the namespace

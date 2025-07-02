@@ -17,7 +17,7 @@ fn def_node_instance_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("bar", MethodKind::Instance).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("Foo").unwrap(),
@@ -40,7 +40,7 @@ fn def_node_class_method_self() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("baz", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("Foo").unwrap(),
@@ -63,7 +63,7 @@ fn def_node_initialize_as_new() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("new", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("Foo").unwrap(),
@@ -86,7 +86,7 @@ fn def_node_singleton_class_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("qux", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("Foo").unwrap(),
@@ -109,7 +109,7 @@ fn def_node_constant_receiver_class_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("bar", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("Foo").unwrap(),
@@ -129,7 +129,7 @@ fn def_node_namespaced_constant_receiver_class_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("baz", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::instance_method(
+    let fqn = FullyQualifiedName::method(
         vec![
             RubyConstant::new("Object").unwrap(),
             RubyConstant::try_from("A").unwrap(),

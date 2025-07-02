@@ -18,7 +18,6 @@ impl IndexVisitor {
         // Determine method kind based on receiver and scope. Only support:
         //   * `def self.foo`            (receiver: self)
         //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
-        
         // Otherwise skip indexing.
         let mut method_kind = MethodKind::Instance;
         let mut skip_method = false;
@@ -72,7 +71,7 @@ impl IndexVisitor {
 
         let namespace_parts = self.scope_tracker.get_ns_stack();
 
-        let fqn = FullyQualifiedName::instance_method(namespace_parts.clone(), method.clone());
+        let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
         debug!("Visiting method definition: {}", fqn);
 

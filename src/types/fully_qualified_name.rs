@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::analyzer_prism::Identifier;
+use crate::{analyzer_prism::Identifier, indexer::entry::MethodKind};
 
 use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant, ruby_variable::RubyVariable};
 
@@ -10,11 +10,9 @@ pub enum FullyQualifiedName {
     /// Example: `Foo::Bar` → `Namespace(vec!["Foo", "Bar"])`
     Constant(Vec<RubyConstant>),
 
-    /// Instance method, e.g., `Foo#bar` → `InstanceMethod(vec!["Foo"], RubyMethod::new("bar"))`
-    InstanceMethod(Vec<RubyConstant>, RubyMethod),
-
-    /// Class/singleton method, e.g., `Foo.bar` → `ClassMethod(vec!["Foo"], RubyMethod::new("bar"))`
-    ClassMethod(Vec<RubyConstant>, RubyMethod),
+    /// Represents a method
+    /// Example: `Foo::Bar#baz` → `Method(vec!["Foo", "Bar"], RubyMethod::new("baz"))`
+    Method(Vec<RubyConstant>, RubyMethod),
 
     /// Local variable, e.g., `a = 1` → `LocalVariable("a")`
     Variable(RubyVariable),
@@ -26,28 +24,21 @@ impl FullyQualifiedName {
         FullyQualifiedName::Constant(namespace)
     }
 
-    // Eg. a = Foo.new; a.bar
-    pub fn instance_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
-        FullyQualifiedName::InstanceMethod(namespace, method)
+    pub fn method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
+        FullyQualifiedName::Method(namespace, method)
     }
 
-    // Eg. Foo.bar
-    pub fn class_method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
-        FullyQualifiedName::ClassMethod(namespace, method)
+    pub fn variable(variable: RubyVariable) -> Self {
+        FullyQualifiedName::Variable(variable)
     }
 
     // Common accessor for namespace parts
     pub fn namespace_parts(&self) -> Vec<RubyConstant> {
         match self {
             FullyQualifiedName::Constant(ns) => ns.clone(),
-            FullyQualifiedName::InstanceMethod(ns, _) => ns.clone(),
-            FullyQualifiedName::ClassMethod(ns, _) => ns.clone(),
+            FullyQualifiedName::Method(ns, _) => ns.clone(),
             FullyQualifiedName::Variable(_) => vec![],
         }
-    }
-
-    pub fn variable(variable: RubyVariable) -> Self {
-        FullyQualifiedName::Variable(variable)
     }
 }
 
@@ -55,7 +46,7 @@ impl From<Identifier> for FullyQualifiedName {
     fn from(value: Identifier) -> Self {
         match value {
             Identifier::RubyConstant(ns) => FullyQualifiedName::Constant(ns),
-            Identifier::RubyMethod(ns, method) => FullyQualifiedName::InstanceMethod(ns, method),
+            Identifier::RubyMethod(ns, method) => FullyQualifiedName::Method(ns, method),
             _ => panic!("Unsupported identifier type for conversion to FullyQualifiedName"),
         }
     }
@@ -78,8 +69,10 @@ impl Display for FullyQualifiedName {
 
         match self {
             FullyQualifiedName::Constant(_) => write!(f, "{namespace}"),
-            FullyQualifiedName::InstanceMethod(_, method) => write!(f, "{namespace}#{method}"),
-            FullyQualifiedName::ClassMethod(_, method) => write!(f, "{namespace}.{method}"),
+            FullyQualifiedName::Method(_, method) => match method.get_kind() {
+                MethodKind::Instance => write!(f, "{namespace}#{method}"),
+                MethodKind::Class => write!(f, "{namespace}.{method}"),
+            },
             FullyQualifiedName::Variable(variable) => {
                 write!(f, "{}", variable)
             }
@@ -104,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_instance_method() {
-        let fqn = FullyQualifiedName::instance_method(
+        let fqn = FullyQualifiedName::method(
             vec![
                 RubyConstant::new("Foo").unwrap(),
                 RubyConstant::new("Bar").unwrap(),
@@ -116,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_class_method() {
-        let fqn = FullyQualifiedName::class_method(
+        let fqn = FullyQualifiedName::method(
             vec![
                 RubyConstant::new("Foo").unwrap(),
                 RubyConstant::new("Bar").unwrap(),
