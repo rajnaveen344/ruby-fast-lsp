@@ -1,9 +1,9 @@
 use std::fmt::Display;
 
+use crate::indexer::entry::MixinRef;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
 };
-use super::mixin_ref::MixinRef;
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -38,13 +38,13 @@ pub enum EntryKind {
 }
 
 impl EntryKind {
-    pub fn add_includes(&mut self, fqns: Vec<MixinRef>) {
+    pub fn add_includes(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
             EntryKind::Class { includes, .. } => {
-                includes.extend(fqns);
+                includes.extend(mixin_refs);
             }
             EntryKind::Module { includes, .. } => {
-                includes.extend(fqns);
+                includes.extend(mixin_refs);
             }
             _ => {
                 panic!("Cannot add includes to non-class/module entry");
@@ -52,13 +52,13 @@ impl EntryKind {
         }
     }
 
-    pub fn add_extends(&mut self, fqns: Vec<MixinRef>) {
+    pub fn add_extends(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
             EntryKind::Class { extends, .. } => {
-                extends.extend(fqns);
+                extends.extend(mixin_refs);
             }
             EntryKind::Module { extends, .. } => {
-                extends.extend(fqns);
+                extends.extend(mixin_refs);
             }
             _ => {
                 panic!("Cannot add extends to non-class/module entry");
@@ -66,13 +66,13 @@ impl EntryKind {
         }
     }
 
-    pub fn add_prepends(&mut self, fqns: Vec<MixinRef>) {
+    pub fn add_prepends(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
             EntryKind::Class { prepends, .. } => {
-                prepends.extend(fqns);
+                prepends.extend(mixin_refs);
             }
             EntryKind::Module { prepends, .. } => {
-                prepends.extend(fqns);
+                prepends.extend(mixin_refs);
             }
             _ => {
                 panic!("Cannot add prepends to non-class/module entry");

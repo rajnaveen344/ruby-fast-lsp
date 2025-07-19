@@ -1,6 +1,6 @@
 use super::index::RubyIndex;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::mixin_ref::MixinRef;
+use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use std::collections::HashSet;

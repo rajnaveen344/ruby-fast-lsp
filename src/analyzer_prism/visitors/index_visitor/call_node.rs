@@ -1,6 +1,6 @@
 use ruby_prism::{CallNode, Node};
 
-use crate::indexer::entry::mixin_ref::MixinRef;
+use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;

@@ -84,7 +84,7 @@ pub async fn find_definition_at_position(
             let kinds_to_check = if ns.is_empty() {
                 vec![MethodKind::Instance, MethodKind::Class]
             } else {
-                vec![method.1.clone()]
+                vec![method.get_kind()]
             };
 
             for kind in kinds_to_check {
@@ -94,7 +94,7 @@ pub async fn find_definition_at_position(
                 debug!(
                     "Searching for {} method {:?} in ancestor chain: {:?}",
                     if is_class_method { "class" } else { "instance" },
-                    &method.0,
+                    &method.get_name(),
                     ancestor_chain
                         .iter()
                         .map(|fqn| fqn.to_string())

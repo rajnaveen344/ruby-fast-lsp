@@ -1,14 +1,13 @@
 pub mod entry_builder;
 pub mod entry_kind;
-pub mod mixin_ref;
 
 use std::cmp::PartialEq;
 
 use entry_kind::EntryKind;
 use lsp_types::Location;
 
-use crate::indexer::entry::mixin_ref::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_namespace::RubyConstant;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -23,16 +22,16 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn add_includes(&mut self, fqns: Vec<MixinRef>) {
-        self.kind.add_includes(fqns);
+    pub fn add_includes(&mut self, mixin_refs: Vec<MixinRef>) {
+        self.kind.add_includes(mixin_refs);
     }
 
-    pub fn add_extends(&mut self, fqns: Vec<MixinRef>) {
-        self.kind.add_extends(fqns);
+    pub fn add_extends(&mut self, mixin_refs: Vec<MixinRef>) {
+        self.kind.add_extends(mixin_refs);
     }
 
-    pub fn add_prepends(&mut self, fqns: Vec<MixinRef>) {
-        self.kind.add_prepends(fqns);
+    pub fn add_prepends(&mut self, mixin_refs: Vec<MixinRef>) {
+        self.kind.add_prepends(mixin_refs);
     }
 }
 
@@ -63,13 +62,6 @@ pub enum MethodOrigin {
     Prepended(FullyQualifiedName),
 }
 
-#[derive(Debug)]
-pub enum Mixin {
-    Include(FullyQualifiedName), // Module being included
-    Extend(FullyQualifiedName),  // Module being extended
-    Prepend(FullyQualifiedName),
-}
-
 /// Method visibility in Ruby
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MethodVisibility {
@@ -83,4 +75,15 @@ pub enum MethodVisibility {
 pub enum ConstVisibility {
     Public,
     Private,
+}
+
+/// A purely textual reference to a mixin constant, captured before it is resolved.
+/// This allows the indexer to remain single-pass and resolve the constant later,
+/// during an on-demand query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MixinRef {
+    /// The constant parts of the name, e.g., `["Foo", "Bar"]` for `Foo::Bar`.
+    pub parts: Vec<RubyConstant>,
+    /// True if the constant path began with `::`, indicating it's an absolute path.
+    pub absolute: bool,
 }

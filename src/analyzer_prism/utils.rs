@@ -1,5 +1,5 @@
+use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::indexer::entry::mixin_ref::MixinRef;
 use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::{ConstantPathNode, Node};
 
@@ -58,7 +58,10 @@ pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
     }
 }
 
-pub fn fqn_from_node(node: &Node, current_namespace: &[RubyConstant]) -> Option<FullyQualifiedName> {
+pub fn fqn_from_node(
+    node: &Node,
+    current_namespace: &[RubyConstant],
+) -> Option<FullyQualifiedName> {
     if let Some(n) = node.as_constant_read_node() {
         let name = String::from_utf8_lossy(n.name().as_slice()).to_string();
         let mut fqn_parts = current_namespace.to_vec();

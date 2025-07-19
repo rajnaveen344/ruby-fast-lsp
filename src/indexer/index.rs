@@ -12,11 +12,6 @@ pub struct RubyIndex {
     // Eg. file:///test.rb => [Entry1, Entry2, ...]
     pub file_entries: HashMap<Url, Vec<Entry>>,
 
-    // Namespace ancestors are the ancestors of a namespace.
-    // For example, if we have a namespace Foo::Bar, its ancestors are [Foo].
-    // Eg. Foo::Bar.ancestors = [Foo], Foo.ancestors = [], Foo::Bar::Baz.ancestors = [Foo::Bar, Foo]
-    pub namespace_ancestors: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
-
     // Definitions are the definitions of a fully qualified name.
     // For example, if we have a method Foo#bar, its definition is the method definition.
     pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
@@ -33,7 +28,6 @@ impl RubyIndex {
     pub fn new() -> Self {
         RubyIndex {
             file_entries: HashMap::new(),
-            namespace_ancestors: HashMap::new(),
             definitions: HashMap::new(),
             references: HashMap::new(),
             methods_by_name: HashMap::new(),
