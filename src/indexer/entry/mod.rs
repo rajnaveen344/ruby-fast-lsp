@@ -46,6 +46,12 @@ pub enum MethodKind {
     /// Called on the class itself: `MyClass.method`
     /// Example: `def self.bar; end` or `class << self; def bar; end`
     Class,
+
+    /// Unknown method kind - could be either instance or class method.
+    /// Used when the identifier visitor cannot determine the method kind
+    /// and the definition handler should search for both.
+    /// Example: `(some_expr).method` could be either class or instance method
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq)]

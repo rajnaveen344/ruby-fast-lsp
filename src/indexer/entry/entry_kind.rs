@@ -109,6 +109,7 @@ impl Display for EntryKind {
                     match name.get_kind() {
                         MethodKind::Instance => " (Instance)",
                         MethodKind::Class => " (Class)",
+                        MethodKind::Unknown => " (Unknown)",
                     },
                     name
                 )

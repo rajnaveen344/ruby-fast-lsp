@@ -560,17 +560,19 @@ impl Visit<'_> for IdentifierVisitor {
         let method_name_bytes = node.name().as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
 
-        let mut method_kind = MethodKind::Instance;
+        let mut method_kind = MethodKind::Unknown;
         let mut namespace = vec![];
 
         if let Some(receiver) = node.receiver() {
             if let Some(const_path_node) = receiver.as_constant_path_node() {
+                // Constant receiver could be either class or instance method
                 method_kind = MethodKind::Class;
 
                 let mut namespaces = vec![];
                 utils::collect_namespaces(&const_path_node, &mut namespaces);
                 namespace = namespaces;
             } else if let Some(const_read_node) = receiver.as_constant_read_node() {
+                // Constant receiver could be either class or instance method
                 method_kind = MethodKind::Class;
 
                 let name = String::from_utf8_lossy(const_read_node.name().as_slice()).to_string();

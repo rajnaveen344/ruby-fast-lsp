@@ -79,9 +79,9 @@ pub async fn find_definition_at_position(
             };
 
             // For receiver-less calls, we might need to check for both instance and class methods
-            // as we don't know the context of `self`. For calls with an explicit receiver, the
-            // identifier visitor can determine the kind.
-            let kinds_to_check = if ns.is_empty() {
+            // as we don't know the context of `self`. For calls with an explicit receiver that are
+            // ambiguous (MethodKind::Unknown), we also check both kinds.
+            let kinds_to_check = if ns.is_empty() || method.get_kind() == MethodKind::Unknown {
                 vec![MethodKind::Instance, MethodKind::Class]
             } else {
                 vec![method.get_kind()]
