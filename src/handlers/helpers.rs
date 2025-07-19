@@ -5,6 +5,7 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, error, info};
 use lsp_types::*;
+use parking_lot::RwLock;
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -140,8 +141,7 @@ pub async fn process_files_parallel(
             server_task
                 .docs
                 .lock()
-                .unwrap()
-                .insert(uri.clone(), document);
+                .insert(uri.clone(), Arc::new(RwLock::new(document)));
 
             let result = match mode {
                 ProcessingMode::Definitions => {
@@ -161,7 +161,7 @@ pub async fn process_files_parallel(
                 }
             };
 
-            server_task.docs.lock().unwrap().remove(&uri);
+            server_task.docs.lock().remove(&uri);
 
             result
         });
@@ -245,10 +245,10 @@ pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
     // Remove any existing entries for this URI
-    server.index().lock().unwrap().remove_entries_for_uri(&uri);
+    server.index().lock().remove_entries_for_uri(&uri);
 
     // Get the document from the server's docs HashMap
-    let document = match server.docs.lock().unwrap().get(&uri) {
+    let document = match server.docs.lock().get(&uri) {
         Some(doc) => doc.clone(),
         None => {
             return Err(format!("Document not found for URI: {}", uri));
@@ -256,7 +256,8 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
     };
 
     // Parse the file
-    let parse_result = parse(document.content.as_bytes());
+    let doc_guard = document.read();
+    let parse_result = parse(doc_guard.content.as_bytes());
     let node = parse_result.node();
 
     // Create a visitor and process the AST
@@ -269,8 +270,7 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
     server
         .docs
         .lock()
-        .unwrap()
-        .insert(uri.clone(), visitor.document.clone());
+        .insert(uri.clone(), Arc::new(RwLock::new(visitor.document.clone())));
 
     debug!("Indexed file: {}", uri);
     Ok(())
@@ -283,14 +283,10 @@ pub fn process_file_for_references(
     include_local_vars: bool,
 ) -> Result<(), String> {
     // Remove any existing references for this URI
-    server
-        .index()
-        .lock()
-        .unwrap()
-        .remove_references_for_uri(&uri);
+    server.index().lock().remove_references_for_uri(&uri);
 
     // Get the document from the server's docs HashMap
-    let document = match server.docs.lock().unwrap().get(&uri) {
+    let document = match server.docs.lock().get(&uri) {
         Some(doc) => doc.clone(),
         None => {
             return Err(format!("Document not found for URI: {}", uri));
@@ -298,7 +294,8 @@ pub fn process_file_for_references(
     };
 
     // Parse the file
-    let parse_result = parse(document.content.as_bytes());
+    let doc_guard = document.read();
+    let parse_result = parse(doc_guard.content.as_bytes());
     let node = parse_result.node();
 
     // Create a reference visitor and process the AST

@@ -15,17 +15,42 @@ impl IndexVisitor {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
+        // Determine method kind based on receiver and scope. Only support:
+        //   * `def self.foo`            (receiver: self)
+        //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
+        // Otherwise skip indexing.
         let mut method_kind = MethodKind::Instance;
+        let mut skip_method = false;
 
         if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some()
-                || receiver.as_constant_path_node().is_some()
-                || receiver.as_constant_read_node().is_some()
-            {
+            if receiver.as_self_node().is_some() {
                 method_kind = MethodKind::Class;
+            } else if let Some(read_node) = receiver.as_constant_read_node() {
+                let recv_name = String::from_utf8_lossy(read_node.name().as_slice()).to_string();
+                // Current namespace last element (if any) should match receiver constant
+                let ns_stack = self.scope_tracker.get_ns_stack();
+                let last_ns = ns_stack.last();
+                if let Some(last) = last_ns {
+                    if last.to_string() == recv_name {
+                        method_kind = MethodKind::Class;
+                    } else {
+                        skip_method = true;
+                    }
+                } else {
+                    // No enclosing namespace -> unsupported
+                    skip_method = true;
+                }
+            } else {
+                // ConstantPathNode or other receiver types not supported
+                skip_method = true;
             }
         } else if self.scope_tracker.in_singleton() {
             method_kind = MethodKind::Class;
+        }
+
+        if skip_method {
+            warn!("Skipping method with unsupported receiver");
+            return;
         }
 
         let method = RubyMethod::new(method_name_str.as_ref(), method_kind);
@@ -43,12 +68,14 @@ impl IndexVisitor {
 
         let name_location = node.name_loc();
         let location = self.document.prism_location_to_lsp_location(&name_location);
-        let current_namespace = self.scope_tracker.get_ns_stack();
-        let fqn = FullyQualifiedName::instance_method(current_namespace.clone(), method.clone());
+
+        let namespace_parts = self.scope_tracker.get_ns_stack();
+
+        let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
         debug!("Visiting method definition: {}", fqn);
 
-        let owner_fqn = FullyQualifiedName::Constant(current_namespace);
+        let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
 
         let entry = Entry {
             fqn: fqn.clone(),
@@ -63,7 +90,7 @@ impl IndexVisitor {
             },
         };
 
-        let mut index = self.index.lock().unwrap();
+        let mut index = self.index.lock();
         index.add_entry(entry);
         debug!("Added method entry: {}", fqn);
 

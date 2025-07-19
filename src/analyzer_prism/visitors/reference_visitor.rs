@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use log::{debug, warn};
 use lsp_types::Url;
+use parking_lot::Mutex;
 use ruby_prism::{
     visit_block_node, visit_class_node, visit_constant_path_node, visit_constant_read_node,
     visit_def_node, visit_local_variable_read_node, visit_module_node, BlockNode, ClassNode,
@@ -217,7 +218,7 @@ impl Visit<'_> for ReferenceVisitor {
             combined_ns.extend(namespaces.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let mut index = self.index.lock().unwrap();
+            let mut index = self.index.lock();
             let entries = index.definitions.get(&fqn);
             if let Some(_) = entries {
                 let location = self
@@ -231,7 +232,7 @@ impl Visit<'_> for ReferenceVisitor {
 
         // Check from root namespace
         let fqn = FullyQualifiedName::namespace(namespaces);
-        let mut index = self.index.lock().unwrap();
+        let mut index = self.index.lock();
         let entries = index.definitions.get(&fqn);
         if let Some(_) = entries {
             let location = self
@@ -257,7 +258,7 @@ impl Visit<'_> for ReferenceVisitor {
             combined_ns.push(constant.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let mut index = self.index.lock().unwrap();
+            let mut index = self.index.lock();
             if index.definitions.contains_key(&fqn) {
                 let location = self
                     .document
@@ -273,7 +274,7 @@ impl Visit<'_> for ReferenceVisitor {
 
         // Check in root namespace
         let fqn = FullyQualifiedName::namespace(vec![constant]);
-        let mut index = self.index.lock().unwrap();
+        let mut index = self.index.lock();
         if index.definitions.contains_key(&fqn) {
             let location = self
                 .document
@@ -296,7 +297,7 @@ impl Visit<'_> for ReferenceVisitor {
         let location = self
             .document
             .prism_location_to_lsp_location(&node.location());
-        let mut index = self.index.lock().unwrap();
+        let mut index = self.index.lock();
 
         // Search through scope stack from innermost to outermost scope
         let lv_stack = self.scope_tracker.get_lv_stack();
@@ -338,11 +339,14 @@ impl Visit<'_> for ReferenceVisitor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::capabilities::references;
     use crate::handlers::helpers::{process_file_for_definitions, process_file_for_references};
     use crate::server::RubyLanguageServer;
     use crate::types::ruby_document::RubyDocument;
     use lsp_types::*;
+    use parking_lot::RwLock;
 
     fn create_server() -> RubyLanguageServer {
         RubyLanguageServer::default()
@@ -362,8 +366,7 @@ mod tests {
         server
             .docs
             .lock()
-            .unwrap()
-            .insert(uri.clone(), document.clone());
+            .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
         let _ = process_file_for_definitions(server, uri.clone());
         let _ = process_file_for_references(server, uri.clone(), include_local_vars);
         document
@@ -423,7 +426,7 @@ my_method
         // First test with local vars enabled
         open_file_with_options(&server, code, &uri, true);
         let index = server.index();
-        let index_guard = index.lock().unwrap();
+        let index_guard = index.lock();
 
         // Should find local variable references
         let local_var_refs: Vec<_> = index_guard
@@ -441,7 +444,7 @@ my_method
         let server = create_server();
         open_file_with_options(&server, code, &uri, false);
         let index = server.index();
-        let index_guard = index.lock().unwrap();
+        let index_guard = index.lock();
 
         // Should not find any local variable references
         let local_var_refs: Vec<_> = index_guard

@@ -35,7 +35,7 @@ impl IndexVisitor {
                     .build();
 
                 if let Ok(entry) = entry {
-                    let mut index = self.index.lock().unwrap();
+                    let mut index = self.index.lock();
                     index.add_entry(entry);
                     debug!("Added global variable entry: {:?}", variable);
                 } else {

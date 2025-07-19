@@ -59,7 +59,7 @@ impl IndexVisitor {
 
         // Add the entry to the index
         if let Ok(entry) = entry {
-            let mut index = self.index.lock().unwrap();
+            let mut index = self.index.lock();
             index.add_entry(entry);
         } else {
             error!("Error creating entry for constant path: {}", constant_name);

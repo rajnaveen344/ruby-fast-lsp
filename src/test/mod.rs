@@ -3,5 +3,7 @@ pub mod definitions;
 pub mod integration_test;
 pub mod references;
 
+mod unit;
+
 // This module contains integration tests for the Ruby Fast LSP
 // It tests the fixtures, parsing capabilities, and LSP functionality

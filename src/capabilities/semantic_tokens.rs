@@ -87,7 +87,7 @@ pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> Semant
     let start_time = Instant::now();
 
     // Get the document from server cache
-    let document = match server.docs.lock().unwrap().get(&uri) {
+    let document = match server.docs.lock().get(&uri) {
         Some(doc) => doc.clone(), // Clone the document to avoid holding the lock
         None => {
             info!("Document not found in cache for URI: {}", uri);
@@ -98,13 +98,13 @@ pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> Semant
         }
     };
 
-    let content = document.content.clone();
-    let parse_result = ruby_prism::parse(content.as_bytes());
+    let doc_guard = document.read();
+    let parse_result = ruby_prism::parse(doc_guard.content.as_bytes());
     let parse_time = start_time.elapsed();
     debug!("[PERF] parse took {:?}", parse_time);
 
     // Pass the document to the visitor
-    let mut visitor = TokenVisitor::new(document);
+    let mut visitor = TokenVisitor::new(&doc_guard);
     let root_node = parse_result.node();
     visitor.visit(&root_node);
     let visit_time = start_time.elapsed() - parse_time;

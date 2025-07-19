@@ -37,7 +37,7 @@ pub async fn find_definition_at_position(
     );
 
     // Get the index and search for the definition
-    let index = server.index.lock().unwrap();
+    let index = server.index.lock();
     let identifier = identifier.unwrap();
     let mut found_locations = Vec::new();
 

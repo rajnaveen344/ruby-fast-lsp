@@ -37,7 +37,7 @@ impl IndexVisitor {
                     .build();
 
                 if let Ok(entry) = entry {
-                    let mut index = self.index.lock().unwrap();
+                    let mut index = self.index.lock();
                     index.add_entry(entry.clone());
                     self.document.add_local_var_entry(
                         self.scope_tracker.current_lv_scope().unwrap().scope_id(),
