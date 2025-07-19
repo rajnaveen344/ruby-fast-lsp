@@ -102,17 +102,8 @@ pub async fn find_definition_at_position(
                 );
 
                 for ancestor_fqn in ancestor_chain {
-                    let method_fqn = if is_class_method {
-                        FullyQualifiedName::class_method(
-                            ancestor_fqn.namespace_parts(),
-                            method.clone(),
-                        )
-                    } else {
-                        FullyQualifiedName::instance_method(
-                            ancestor_fqn.namespace_parts(),
-                            method.clone(),
-                        )
-                    };
+                    let method_fqn =
+                        FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
 
                     if let Some(entries) = index.definitions.get(&method_fqn.into()) {
                         if !entries.is_empty() {

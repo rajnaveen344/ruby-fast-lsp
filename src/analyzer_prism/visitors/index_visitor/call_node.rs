@@ -29,7 +29,7 @@ impl IndexVisitor {
                 return;
             }
 
-            let mut index = self.index.lock().unwrap();
+            let mut index = self.index.lock();
             if let Some(entries) = index.get_mut(&current_fqn) {
                 if let Some(entry) = entries.last_mut() {
                     match mixin_kind.as_str() {
