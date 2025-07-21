@@ -1,6 +1,7 @@
 use log::debug;
 use lsp_types::Location;
 
+use crate::analyzer_prism::ReceiverKind;
 use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{MethodKind, MethodOrigin};
@@ -11,15 +12,27 @@ use crate::types::ruby_namespace::RubyConstant;
 
 /// Find definitions for a Ruby method
 pub fn find_method_definitions(
-    ns: &[RubyConstant],
+    _ns: &[RubyConstant],
+    receiver_kind: &ReceiverKind,
+    receiver: &Option<Vec<RubyConstant>>,
     method: &RubyMethod,
     index: &RubyIndex,
     ancestors: &[RubyConstant],
 ) -> Option<Vec<Location>> {
-    if !ns.is_empty() {
-        find_method_with_receiver(ns, method, index)
-    } else {
-        find_method_without_receiver(method, index, ancestors)
+    match receiver_kind {
+        ReceiverKind::Constant => {
+            if let Some(receiver_ns) = receiver {
+                // For constant receivers, we need to resolve the receiver in the current namespace context
+                let mut full_receiver_ns = ancestors.to_vec();
+                full_receiver_ns.extend(receiver_ns.clone());
+                find_method_with_receiver(&full_receiver_ns, method, index)
+            } else {
+                find_method_without_receiver(method, index, ancestors)
+            }
+        }
+        ReceiverKind::None => find_method_without_receiver(method, index, ancestors),
+        ReceiverKind::SelfReceiver => find_method_without_receiver(method, index, ancestors),
+        ReceiverKind::Expr => search_by_name(method, index),
     }
 }
 
@@ -48,19 +61,13 @@ fn find_method_without_receiver(
     let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
 
     // Search current module and its mixins/inheritance chain
-    // Check both instance and class methods
-    let mut found_locations = Vec::new();
+    // For methods without receivers, only search for the method kind that matches the method
+    let method_kind = method.get_kind();
 
-    for kind in [MethodKind::Instance, MethodKind::Class] {
-        if let Some(locations) = search_in_ancestor_chain(&receiver_fqn, method, index, kind) {
-            found_locations.extend(locations);
-        }
-    }
-
-    if found_locations.is_empty() {
-        None
+    if let Some(locations) = search_in_ancestor_chain(&receiver_fqn, method, index, method_kind) {
+        Some(locations)
     } else {
-        Some(found_locations)
+        None
     }
 }
 

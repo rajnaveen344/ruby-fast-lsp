@@ -35,12 +35,24 @@ pub async fn find_definition_at_position(
     let index = server.index.lock();
 
     let result = match &identifier {
-        Identifier::RubyConstant(ns) => constant::find_constant_definitions(ns, &index, &ancestors),
-        Identifier::RubyMethod(ns, method) => {
-            method::find_method_definitions(ns, method, &index, &ancestors)
+        Identifier::RubyConstant { namespace: _, iden } => {
+            constant::find_constant_definitions(iden, &index, &ancestors)
         }
-        Identifier::RubyVariable(variable) => {
-            variable::find_variable_definitions_at_position(variable, &index, &ancestors, position)
+        Identifier::RubyMethod {
+            namespace,
+            receiver_kind,
+            receiver,
+            iden,
+        } => method::find_method_definitions(
+            namespace,
+            receiver_kind,
+            receiver,
+            iden,
+            &index,
+            &ancestors,
+        ),
+        Identifier::RubyVariable { iden } => {
+            variable::find_variable_definitions_at_position(iden, &index, &ancestors, position)
         }
     };
 

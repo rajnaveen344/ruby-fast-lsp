@@ -1,5 +1,5 @@
-use lsp_types::Location;
 use log::debug;
+use lsp_types::Location;
 
 use crate::analyzer_prism::Identifier;
 use crate::indexer::index::RubyIndex;
@@ -12,7 +12,7 @@ pub fn find_constant_definitions(
     ancestors: &[RubyConstant],
 ) -> Option<Vec<Location>> {
     let mut found_locations = Vec::new();
-    
+
     // Start with the current namespace and ancestors
     let mut search_namespaces = ancestors.to_vec();
 
@@ -22,7 +22,10 @@ pub fn find_constant_definitions(
         let mut combined_ns = search_namespaces.clone();
         combined_ns.extend(ns.iter().cloned());
 
-        let search_fqn = Identifier::RubyConstant(combined_ns);
+        let search_fqn = Identifier::RubyConstant {
+            namespace: vec![],
+            iden: combined_ns,
+        };
 
         debug!("Searching for constant: {:?}", search_fqn);
 

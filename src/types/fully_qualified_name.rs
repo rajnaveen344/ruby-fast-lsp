@@ -53,9 +53,14 @@ impl FullyQualifiedName {
 impl From<Identifier> for FullyQualifiedName {
     fn from(value: Identifier) -> Self {
         match value {
-            Identifier::RubyConstant(ns) => FullyQualifiedName::Constant(ns),
-            Identifier::RubyMethod(ns, method) => FullyQualifiedName::Method(ns, method),
-            _ => panic!("Unsupported identifier type for conversion to FullyQualifiedName"),
+            Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::Constant(iden),
+            Identifier::RubyMethod {
+                namespace,
+                receiver_kind: _,
+                receiver: _,
+                iden,
+            } => FullyQualifiedName::Method(namespace, iden),
+            Identifier::RubyVariable { iden } => FullyQualifiedName::Variable(iden),
         }
     }
 }
