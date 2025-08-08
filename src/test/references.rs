@@ -325,4 +325,44 @@ mod tests {
         )
         .await;
     }
+
+
+
+    /// Test method references for qualified method calls
+    #[tokio::test]
+    async fn qualified_method_call_references() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("qualified_method_call.rb").await;
+
+        // Test references to 'service' method called with qualified receiver
+        // Platform::PlatformServices.service
+        snapshot_references(
+            &harness,
+            "qualified_method_call.rb",
+            20, // Line 21 in 0-indexed (Platform::PlatformServices.service call in services method)
+            35, // Position of 'service' method call
+            "qualified_service_refs",
+        )
+        .await;
+
+        // Test references to 'service' method from direct qualified call
+        snapshot_references(
+            &harness,
+            "qualified_method_call.rb",
+            45, // Line 46 in 0-indexed (GoshPosh::Platform::PlatformServices.service)
+            45, // Position of 'service' method call
+            "direct_qualified_service_refs",
+        )
+        .await;
+
+        // Test references to 'service' method from assignment
+        snapshot_references(
+            &harness,
+            "qualified_method_call.rb",
+            49, // Line 50 in 0-indexed (service_instance = GoshPosh::Platform::PlatformServices.service)
+            60, // Position of 'service' method call
+            "assignment_qualified_service_refs",
+        )
+        .await;
+    }
 }

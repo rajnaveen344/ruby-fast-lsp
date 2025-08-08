@@ -23,8 +23,23 @@ pub fn find_method_definitions(
         ReceiverKind::Constant => {
             if let Some(receiver_ns) = receiver {
                 // For constant receivers, we need to resolve the receiver in the current namespace context
-                let mut full_receiver_ns = ancestors.to_vec();
-                full_receiver_ns.extend(receiver_ns.clone());
+                // Check if the first part of the receiver matches any part in the ancestors
+                let full_receiver_ns = if let Some(first_receiver_part) = receiver_ns.first() {
+                    if let Some(pos) = ancestors.iter().position(|ancestor| ancestor == first_receiver_part) {
+                        // Found the receiver's first part in ancestors, resolve from that position
+                        let mut resolved_ns = ancestors[..=pos].to_vec();
+                        resolved_ns.extend(receiver_ns[1..].iter().cloned());
+                        resolved_ns
+                    } else {
+                        // Receiver not found in ancestors, extend the current ancestors
+                        let mut full_ns = ancestors.to_vec();
+                        full_ns.extend(receiver_ns.clone());
+                        full_ns
+                    }
+                } else {
+                    // Empty receiver namespace, use ancestors as-is
+                    ancestors.to_vec()
+                };
                 find_method_with_receiver(&full_receiver_ns, method, index)
             } else {
                 find_method_without_receiver(method, index, ancestors)

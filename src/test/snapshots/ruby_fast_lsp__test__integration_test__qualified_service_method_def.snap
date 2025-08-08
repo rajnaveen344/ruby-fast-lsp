@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 22,
+        "line": 30
+      },
+      "start": {
+        "character": 15,
+        "line": 30
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/qualified_method_call.rb"
+  }
+]

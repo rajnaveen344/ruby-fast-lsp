@@ -234,4 +234,62 @@ mod tests {
         )
         .await;
     }
+
+    /// Validate definitions for qualified method calls with constant receivers.
+    /// Tests the scenario where a method is called with a qualified constant receiver
+    /// from within a nested namespace context.
+    #[tokio::test]
+    async fn goto_qualified_method_call_defs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("qualified_method_call.rb").await;
+
+        // `service` call inside SpecHelpers → method definition in PlatformServices
+        snapshot_definitions(
+            &harness,
+            "qualified_method_call.rb",
+            20,
+            35,
+            "qualified_service_method_def",
+        )
+        .await;
+
+        // `another_service` call inside SpecHelpers → method definition in PlatformServices
+        snapshot_definitions(
+            &harness,
+            "qualified_method_call.rb",
+            24,
+            35,
+            "qualified_another_service_method_def",
+        )
+        .await;
+    }
+
+    /// Validate definitions for methods from included/prepended modules.
+    /// Tests the scenario where a method is called from within a class that includes
+    /// or prepends modules, and the definition should be found in the module.
+    #[tokio::test]
+    async fn goto_mixin_method_defs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("mixin_definition.rb").await;
+
+        // Test finding method from included module
+        snapshot_definitions(
+            &harness,
+            "mixin_definition.rb",
+            18,
+            4,
+            "mixin_log_method_def",
+        )
+        .await;
+
+        // Test finding method from prepended module
+        snapshot_definitions(
+            &harness,
+            "mixin_definition.rb",
+            41,
+            6,
+            "mixin_greet_method_def",
+        )
+        .await;
+    }
 }

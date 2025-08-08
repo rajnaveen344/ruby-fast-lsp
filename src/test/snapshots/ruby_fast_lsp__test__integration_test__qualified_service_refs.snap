@@ -1,0 +1,45 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 42,
+        "line": 20
+      },
+      "start": {
+        "character": 8,
+        "line": 20
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/qualified_method_call.rb"
+  },
+  {
+    "range": {
+      "end": {
+        "character": 44,
+        "line": 46
+      },
+      "start": {
+        "character": 0,
+        "line": 46
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/qualified_method_call.rb"
+  },
+  {
+    "range": {
+      "end": {
+        "character": 0,
+        "line": 50
+      },
+      "start": {
+        "character": 19,
+        "line": 49
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/qualified_method_call.rb"
+  }
+]

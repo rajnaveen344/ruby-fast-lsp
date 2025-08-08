@@ -38,6 +38,8 @@ pub async fn find_references_at_position(
 
     let index = server.index.lock();
 
+
+
     match &identifier {
         Identifier::RubyConstant { namespace: _, iden } => {
             // For namespaces, combine ancestors with the namespace parts
@@ -120,13 +122,39 @@ fn find_method_references(
 ) -> Option<Vec<Location>> {
     let mut all_references = Vec::new();
 
+
+
     match receiver_kind {
         ReceiverKind::Constant => {
             if let Some(receiver_ns) = receiver {
-                // For constant receivers, find references in the specific receiver context
-                let mut full_receiver_ns = ancestors.to_vec();
-                full_receiver_ns.extend(receiver_ns.clone());
-                let receiver_fqn = FullyQualifiedName::Constant(full_receiver_ns);
+                // For constant receivers, we need to resolve the receiver namespace
+                // For Platform::PlatformServices from GoshPosh::Platform::SpecHelpers,
+                // this should resolve to GoshPosh::Platform::PlatformServices
+                let receiver_fqn = if receiver_ns.len() > 0 && ancestors.len() > 0 {
+                    // Try to resolve relative to the current namespace
+                    // Look for the first part of receiver_ns in ancestors
+                    let first_receiver_part = &receiver_ns[0];
+                    
+                    // Find where this constant appears in ancestors
+                    if let Some(pos) = ancestors.iter().position(|c| c == first_receiver_part) {
+                        // Build FQN up to that position + the receiver namespace
+                        let mut resolved_ns = ancestors[..=pos].to_vec();
+                        resolved_ns.extend(receiver_ns[1..].iter().cloned());
+                        FullyQualifiedName::Constant(resolved_ns)
+                    } else {
+                        // Not found in ancestors, treat as absolute from Object
+                        let mut full_ns = vec![ancestors[0].clone()]; // Object
+                        full_ns.extend(receiver_ns.clone());
+                        FullyQualifiedName::Constant(full_ns)
+                    }
+                } else {
+                    // Simple case: prepend ancestors
+                    let mut full_ns = ancestors.to_vec();
+                    full_ns.extend(receiver_ns.clone());
+                    FullyQualifiedName::Constant(full_ns)
+                };
+
+
 
                 if let Some(refs) =
                     find_method_references_with_receiver(&receiver_fqn, method, index)
