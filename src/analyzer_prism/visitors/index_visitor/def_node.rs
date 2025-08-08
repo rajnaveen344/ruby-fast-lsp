@@ -55,14 +55,13 @@ impl IndexVisitor {
             return;
         }
 
-        let method = RubyMethod::new(method_name_str.as_ref(), method_kind);
-
-        if let Err(_) = method {
+        // Validate method name using centralized validation
+        if !RubyMethod::is_valid_ruby_method_name(method_name_str.as_ref()) {
             warn!("Skipping invalid method name: {}", method_name_str);
             return;
         }
 
-        let mut method = method.unwrap();
+        let mut method = RubyMethod::new(method_name_str.as_ref(), method_kind).unwrap();
 
         if method.get_name() == "initialize" {
             method = RubyMethod::new("new", MethodKind::Class).unwrap();

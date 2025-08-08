@@ -146,14 +146,89 @@ fn def_node_namespaced_constant_receiver_class_method() {
 // ---------------------------------------------------------------------------
 #[test]
 fn def_node_invalid_method_name() {
-    let code = "def InvalidName; end"; // starts with uppercase, invalid
+    let code = "def 123invalid; end"; // starts with number, truly invalid
     let visitor = visit_code(code);
 
-    // Index should have no method entries for InvalidName
+    // Index should have no method entries for 123invalid
     let defs = &visitor.index.lock().definitions;
-    // Ensure none of the FQNs contain InvalidName
+    // Ensure none of the FQNs contain 123invalid
     assert!(defs
         .keys()
         .into_iter()
-        .all(|fqn| !fqn.to_string().contains("InvalidName")));
+        .all(|fqn| !fqn.to_string().contains("123invalid")));
+}
+
+// ---------------------------------------------------------------------------
+//  def_node – uppercase method names should be supported (though unconventional)
+// ---------------------------------------------------------------------------
+#[test]
+fn def_node_uppercase_method_name() {
+    let code = "class Foo\n  def UppercaseMethod; end\nend";
+    let visitor = visit_code(code);
+
+    let method = RubyMethod::new("UppercaseMethod", MethodKind::Instance).unwrap();
+    let fqn = FullyQualifiedName::method(
+        vec![
+            RubyConstant::new("Object").unwrap(),
+            RubyConstant::try_from("Foo").unwrap(),
+        ],
+        method,
+    );
+
+    let defs = &visitor.index.lock().definitions;
+    let entries = defs.get(&fqn).expect("UppercaseMethod entry missing");
+    assert_eq!(entries.len(), 1);
+    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+}
+
+// ---------------------------------------------------------------------------
+//  def_node – Ruby special method names should be supported
+// ---------------------------------------------------------------------------
+#[test]
+fn def_node_special_method_names() {
+    let code = r#"
+        class TestClass
+          def []
+            "array access"
+          end
+
+          def ^
+            "xor operator"
+          end
+
+          def ==
+            "equality operator"
+          end
+
+          def +@
+            "unary plus"
+          end
+
+          def -@
+            "unary minus"
+          end
+
+          def <=>
+            "spaceship operator"
+          end
+
+          def []=(index, value)
+            "array assignment"
+          end
+        end
+    "#;
+    let visitor = visit_code(code);
+
+    let index_lock = visitor.index.lock();
+    let defs = &index_lock.definitions;
+
+    // Check that all special methods are indexed
+    let special_methods = ["[]", "^", "==", "+@", "-@", "<=>", "[]="];
+    
+    for method_name in special_methods {
+        let found = defs.iter().any(|(fqn, _)| {
+            fqn.to_string().contains(&format!("TestClass#{}", method_name))
+        });
+        assert!(found, "Special method '{}' should be indexed", method_name);
+    }
 }

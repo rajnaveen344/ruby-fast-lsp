@@ -23,6 +23,11 @@ impl IdentifierVisitor {
             if self.is_position_in_location(&message_loc) {
                 let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
+                // Skip method names that don't follow Ruby method naming conventions
+                if !RubyMethod::is_valid_ruby_method_name(&method_name) {
+                    return;
+                }
+
                 // Determine receiver kind and receiver information
                 let (receiver_kind, receiver, method_kind) = if let Some(receiver_node) = node.receiver() {
                     if let Some(_) = receiver_node.as_self_node() {

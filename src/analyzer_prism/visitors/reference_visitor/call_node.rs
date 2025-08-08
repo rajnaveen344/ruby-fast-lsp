@@ -27,8 +27,7 @@ impl ReferenceVisitor {
         }
 
         // Skip method names that don't follow Ruby method naming conventions
-        // (method names should start with lowercase letter or underscore)
-        if !method_name.chars().next().map_or(false, |c| c.is_lowercase() || c == '_') {
+        if !RubyMethod::is_valid_ruby_method_name(&method_name) {
             debug!("Skipping method call with invalid name: {}", method_name);
             return;
         }

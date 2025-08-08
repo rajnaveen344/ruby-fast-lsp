@@ -11,7 +11,47 @@ impl RubyMethod {
             return Err("Method name cannot be empty");
         }
 
-        let original_name = name;
+        // Check if it's a valid Ruby method name
+        if Self::is_valid_ruby_method_name(name) {
+            Ok(Self(name.to_string(), kind))
+        } else {
+            Err("Invalid Ruby method name")
+        }
+    }
+
+    /// Validates if a given string is a valid Ruby method name.
+    /// This includes regular method names, operator methods, and special method names.
+    /// 
+    /// # Arguments
+    /// * `name` - The method name to validate
+    /// 
+    /// # Returns
+    /// * `true` if the name is a valid Ruby method name, `false` otherwise
+    pub fn is_valid_ruby_method_name(name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+
+        // Ruby operator methods (binary operators)
+        let binary_operators = [
+            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=",
+            "<=>", "===", "=~", "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
+        ];
+
+        // Ruby unary operators (with @ suffix)
+        let unary_operators = ["+@", "-@", "~@", "!@"];
+
+        // Check if it's a binary operator
+        if binary_operators.contains(&name) {
+            return true;
+        }
+
+        // Check if it's a unary operator
+        if unary_operators.contains(&name) {
+            return true;
+        }
+
+        // Handle regular method names with optional suffixes
         let mut name_for_validation = name;
 
         // Handle valid suffixes: ?, !, =
@@ -21,26 +61,23 @@ impl RubyMethod {
             }
         }
 
-        // If name is empty after removing suffix, it's invalid
+        // If name is empty after removing suffix, check if it's just a suffix operator
         if name_for_validation.is_empty() {
-            return Err("Method name cannot be just a suffix");
+            // Allow standalone operators like "!", "?", "=" only if they're not in our operator list
+            return false;
         }
 
         let mut chars = name_for_validation.chars();
         let first = chars.next().unwrap();
 
-        // Start with lowercase or _
-        if !(first.is_lowercase() || first == '_') {
-            return Err("Method name must start with lowercase or _");
+        // Start with letter (uppercase or lowercase) or underscore
+        // Ruby allows method names to start with uppercase letters, though it's unconventional
+        if !(first.is_alphabetic() || first == '_') {
+            return false;
         }
 
         // Remaining chars must be XID_continue or _
-        if !chars.all(|c| unicode_ident::is_xid_continue(c) || c == '_') {
-            return Err("Invalid character in method name");
-        }
-
-        // Use the original name with the suffix preserved
-        Ok(Self(original_name.to_string(), kind))
+        chars.all(|c| unicode_ident::is_xid_continue(c) || c == '_')
     }
 
     pub fn get_name(&self) -> String {
@@ -93,9 +130,11 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_invalid() {
+    fn test_uppercase_method_names() {
+        // Uppercase method names are technically valid in Ruby, though unconventional
         let method = RubyMethod::new("Foo", MethodKind::Instance);
-        assert!(method.is_err());
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "Foo");
     }
 
     #[test]
@@ -136,13 +175,104 @@ mod tests {
 
     #[test]
     fn test_invalid_with_suffix() {
-        let method = RubyMethod::new("Invalid?", MethodKind::Instance);
+        // Method names starting with numbers should be invalid even with suffixes
+        let method = RubyMethod::new("123invalid?", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::new("Invalid!", MethodKind::Instance);
+        let method = RubyMethod::new("456invalid!", MethodKind::Instance);
         assert!(method.is_err());
 
-        let method = RubyMethod::new("Invalid=", MethodKind::Instance);
+        let method = RubyMethod::new("789invalid=", MethodKind::Instance);
+        assert!(method.is_err());
+    }
+
+    #[test]
+    fn test_ruby_binary_operators() {
+        let operators = [
+            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=",
+            "<=>", "===", "=~", "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
+        ];
+
+        for op in operators {
+            let method = RubyMethod::new(op, MethodKind::Instance);
+            assert!(method.is_ok(), "Operator '{}' should be valid", op);
+            assert_eq!(method.unwrap().to_string(), op);
+        }
+    }
+
+    #[test]
+    fn test_ruby_unary_operators() {
+        let operators = ["+@", "-@", "~@", "!@"];
+
+        for op in operators {
+            let method = RubyMethod::new(op, MethodKind::Instance);
+            assert!(method.is_ok(), "Unary operator '{}' should be valid", op);
+            assert_eq!(method.unwrap().to_string(), op);
+        }
+    }
+
+    #[test]
+    fn test_special_method_names() {
+        // Test some common special method names
+        let special_methods = ["call", "to_s", "to_i", "to_a", "to_h", "inspect"];
+
+        for method_name in special_methods {
+            let method = RubyMethod::new(method_name, MethodKind::Instance);
+            assert!(method.is_ok(), "Method '{}' should be valid", method_name);
+            assert_eq!(method.unwrap().to_string(), method_name);
+        }
+    }
+
+    #[test]
+    fn test_invalid_standalone_suffixes() {
+        // These should be invalid as they're just suffixes
+        let invalid = ["?", "!", "="];
+
+        for suffix in invalid {
+            let method = RubyMethod::new(suffix, MethodKind::Instance);
+            assert!(method.is_err(), "Standalone suffix '{}' should be invalid", suffix);
+        }
+    }
+
+    #[test]
+    fn test_uppercase_with_suffixes() {
+        // Uppercase method names with valid suffixes
+        let method = RubyMethod::new("Valid?", MethodKind::Instance);
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "Valid?");
+
+        let method = RubyMethod::new("Save!", MethodKind::Instance);
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "Save!");
+
+        let method = RubyMethod::new("Name=", MethodKind::Instance);
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "Name=");
+    }
+
+    #[test]
+    fn test_mixed_case_method_names() {
+        // Mixed case method names
+        let method = RubyMethod::new("CamelCase", MethodKind::Instance);
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "CamelCase");
+
+        let method = RubyMethod::new("XMLParser", MethodKind::Instance);
+        assert!(method.is_ok());
+        assert_eq!(method.unwrap().to_string(), "XMLParser");
+    }
+
+    #[test]
+    fn test_invalid_method_names() {
+        // Method names starting with numbers should be invalid
+        let method = RubyMethod::new("123invalid", MethodKind::Instance);
+        assert!(method.is_err());
+
+        // Method names with invalid characters should be invalid
+        let method = RubyMethod::new("invalid-name", MethodKind::Instance);
+        assert!(method.is_err());
+
+        let method = RubyMethod::new("invalid.name", MethodKind::Instance);
         assert!(method.is_err());
     }
 }
