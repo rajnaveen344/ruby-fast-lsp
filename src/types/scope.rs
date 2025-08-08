@@ -68,7 +68,7 @@ pub enum LVScopeKind {
     /// ```
     Constant,
 
-    /// Scope for local variables in method definitions.
+    /// Scope for local variables in instance method definitions.
     ///
     /// # Examples
     /// ```ruby
@@ -80,7 +80,18 @@ pub enum LVScopeKind {
     ///   puts y  # => 2 (accessible in entire method)
     /// end
     /// ```
-    Method,
+    InstanceMethod,
+
+    /// Scope for local variables in class method definitions.
+    ///
+    /// # Examples
+    /// ```ruby
+    /// def self.example
+    ///   x = 1  # Class method local
+    ///   helper_method  # This would be a class method call
+    /// end
+    /// ```
+    ClassMethod,
 
     /// Scope for blocks, procs, and lambdas.
     ///
@@ -125,7 +136,7 @@ pub enum LVScopeKind {
 
 impl LVScopeKind {
     pub fn is_hard_scope_boundary(&self) -> bool {
-        matches!(self, LVScopeKind::Method | LVScopeKind::Constant)
+        matches!(self, LVScopeKind::InstanceMethod | LVScopeKind::ClassMethod | LVScopeKind::Constant)
     }
 }
 
@@ -133,7 +144,8 @@ impl fmt::Display for LVScopeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LVScopeKind::Constant => write!(f, "Constant"),
-            LVScopeKind::Method => write!(f, "Method"),
+            LVScopeKind::InstanceMethod => write!(f, "InstanceMethod"),
+            LVScopeKind::ClassMethod => write!(f, "ClassMethod"),
             LVScopeKind::Block => write!(f, "Block"),
             LVScopeKind::Rescue => write!(f, "Rescue"),
             LVScopeKind::ExplicitBlockLocal => write!(f, "ExplicitBlockLocal"),

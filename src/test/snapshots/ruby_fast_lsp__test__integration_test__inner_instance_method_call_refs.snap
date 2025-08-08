@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 15,
+        "line": 69
+      },
+      "start": {
+        "character": 4,
+        "line": 69
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/method_context_resolution.rb"
+  }
+]

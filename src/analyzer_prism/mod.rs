@@ -884,7 +884,7 @@ end
                         // Should have at least one method scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::Method
+                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!(
@@ -942,7 +942,7 @@ end
                         // Should have method scope and potentially block scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::Method
+                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),
@@ -988,7 +988,7 @@ end
                         // Should have method scope and explicit block local scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::Method
+                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),
@@ -1033,7 +1033,7 @@ end
                         // Should have method scope and potentially rescue scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::Method
+                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),

@@ -45,10 +45,15 @@ impl IdentifierVisitor {
 
         let method = method.unwrap();
         let scope_id = self.document.position_to_offset(body_loc.range.start);
+        let scope_kind = match method_kind {
+            MethodKind::Class => LVScopeKind::ClassMethod,
+            MethodKind::Instance => LVScopeKind::InstanceMethod,
+            MethodKind::Unknown => LVScopeKind::InstanceMethod, // Default to instance method
+        };
         self.scope_tracker.push_lv_scope(LVScope::new(
             scope_id,
             body_loc.clone(),
-            LVScopeKind::Method,
+            scope_kind,
         ));
 
         // Is position on method name

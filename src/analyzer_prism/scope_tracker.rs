@@ -113,6 +113,30 @@ impl ScopeTracker {
     pub fn in_singleton(&self) -> bool {
         matches!(self.frames.last(), Some(ScopeFrame::Singleton))
     }
+
+    /// Returns the current method context based on the local variable scope stack.
+    /// This helps determine whether bare method calls should be treated as instance or class methods.
+    pub fn current_method_context(&self) -> Option<crate::indexer::entry::MethodKind> {
+        use crate::types::scope::LVScopeKind;
+        use crate::indexer::entry::MethodKind;
+
+        // Look for the most recent method scope in the LV stack
+        for scope in self.lv_stack.iter().rev() {
+            match scope.kind() {
+                LVScopeKind::InstanceMethod => return Some(MethodKind::Instance),
+                LVScopeKind::ClassMethod => return Some(MethodKind::Class),
+                LVScopeKind::Constant => break, // Hard scope boundary
+                _ => continue,
+            }
+        }
+
+        // If we're in a singleton context, default to class methods
+        if self.in_singleton() {
+            return Some(MethodKind::Class);
+        }
+
+        None
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +277,7 @@ mod tests {
         let method_scope = LVScope::new(
             1,
             LspLocation::new(doc.uri.clone(), Range::default()),
-            LVScopeKind::Method,
+            LVScopeKind::InstanceMethod,
         );
         tracker.push_lv_scope(method_scope.clone());
         assert_eq!(tracker.get_lv_stack().len(), 2);

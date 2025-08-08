@@ -365,4 +365,253 @@ mod tests {
         )
         .await;
     }
+
+    /// Test method context resolution for bare method calls in different scopes
+    /// This tests the improved handle_no_receiver function that distinguishes
+    /// between instance and class method contexts, including singleton frames
+    #[tokio::test]
+    async fn method_context_resolution() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("method_context_resolution.rb").await;
+
+        // Test bare method call in class body - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            5,  // Line 6 in 0-indexed (helper_method in class body)
+            2,  // Position of 'helper_method' call
+            "class_body_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside instance method - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            9,  // Line 10 in 0-indexed (some_method in instance_method)
+            4,  // Position of 'some_method' call
+            "instance_method_some_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside instance method - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            10, // Line 11 in 0-indexed (helper_method in instance_method)
+            4,  // Position of 'helper_method' call
+            "instance_method_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside class method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            15, // Line 16 in 0-indexed (some_method in class_method)
+            4,  // Position of 'some_method' call
+            "class_method_some_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside class method - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            16, // Line 17 in 0-indexed (helper_method in class_method)
+            4,  // Position of 'helper_method' call
+            "class_method_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call in singleton context (class << self) - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            21, // Line 22 in 0-indexed (some_method in singleton context)
+            4,  // Position of 'some_method' call
+            "singleton_context_some_method_refs",
+        )
+        .await;
+
+        // Test bare method call in singleton context - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            22, // Line 23 in 0-indexed (helper_method in singleton context)
+            4,  // Position of 'helper_method' call
+            "singleton_context_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside singleton method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            26, // Line 27 in 0-indexed (some_method in singleton_method)
+            6,  // Position of 'some_method' call
+            "singleton_method_some_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside singleton method - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            27, // Line 28 in 0-indexed (helper_method in singleton_method)
+            6,  // Position of 'helper_method' call
+            "singleton_method_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside another singleton method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            31, // Line 32 in 0-indexed (nested_call in another_singleton)
+            6,  // Position of 'nested_call' call
+            "another_singleton_nested_call_refs",
+        )
+        .await;
+
+        // Test bare method call at top-level - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            52, // Line 53 in 0-indexed (top_level_call)
+            0,  // Position of 'top_level_call' call
+            "top_level_call_refs",
+        )
+        .await;
+
+        // Test bare method call at top-level - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            53, // Line 54 in 0-indexed (helper_method at top-level)
+            0,  // Position of 'helper_method' call
+            "top_level_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside top-level method - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            57, // Line 58 in 0-indexed (some_method in top_level_method)
+            2,  // Position of 'some_method' call
+            "top_level_method_some_method_refs",
+        )
+        .await;
+
+        // Test bare method call inside top-level method - helper_method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            58, // Line 59 in 0-indexed (helper_method in top_level_method)
+            2,  // Position of 'helper_method' call
+            "top_level_method_helper_method_refs",
+        )
+        .await;
+
+        // Test bare method call in nested class body - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            63, // Line 64 in 0-indexed (inner_call in OuterClass)
+            2,  // Position of 'inner_call' call
+            "outer_class_inner_call_refs",
+        )
+        .await;
+
+        // Test bare method call in inner class body - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            66, // Line 67 in 0-indexed (nested_call in InnerClass)
+            4,  // Position of 'nested_call' call
+            "inner_class_nested_call_refs",
+        )
+        .await;
+
+        // Test bare method call inside inner instance method - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            69, // Line 70 in 0-indexed (method_call in inner_instance_method)
+            6,  // Position of 'method_call' call
+            "inner_instance_method_call_refs",
+        )
+        .await;
+
+        // Test bare method call inside inner class method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            73, // Line 74 in 0-indexed (method_call in inner_class_method)
+            6,  // Position of 'method_call' call
+            "inner_class_method_call_refs",
+        )
+        .await;
+
+        // Test bare method call in inner singleton context - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            77, // Line 78 in 0-indexed (singleton_call in inner singleton context)
+            6,  // Position of 'singleton_call' call
+            "inner_singleton_context_call_refs",
+        )
+        .await;
+
+        // Test bare method call inside inner singleton method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            80, // Line 81 in 0-indexed (deep_call in inner_singleton_method)
+            8,  // Position of 'deep_call' call
+            "inner_singleton_method_deep_call_refs",
+        )
+        .await;
+
+        // Test bare method call in module body - should resolve as instance method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            87, // Line 88 in 0-indexed (module_call in TestModule)
+            2,  // Position of 'module_call' call
+            "module_body_call_refs",
+        )
+        .await;
+
+        // Test bare method call inside module class method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            90, // Line 91 in 0-indexed (module_helper in module_method)
+            4,  // Position of 'module_helper' call
+            "module_class_method_helper_refs",
+        )
+        .await;
+
+        // Test bare method call in module singleton context - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            94, // Line 95 in 0-indexed (singleton_module_call in module singleton context)
+            4,  // Position of 'singleton_module_call' call
+            "module_singleton_context_call_refs",
+        )
+        .await;
+
+        // Test bare method call inside module singleton method - should resolve as class method
+        snapshot_references(
+            &harness,
+            "method_context_resolution.rb",
+            97, // Line 98 in 0-indexed (deep_module_call in module_singleton_method)
+            6,  // Position of 'deep_module_call' call
+            "module_singleton_method_deep_call_refs",
+        )
+        .await;
+    }
 }

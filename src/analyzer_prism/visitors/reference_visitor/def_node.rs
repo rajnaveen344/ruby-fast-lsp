@@ -16,20 +16,25 @@ impl ReferenceVisitor {
                 .prism_location_to_lsp_location(&node.location())
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Method));
 
         let mut method_kind = MethodKind::Instance;
+        let mut scope_kind = LVScopeKind::InstanceMethod;
 
         if let Some(receiver) = node.receiver() {
             if let Some(_) = receiver.as_self_node() {
                 method_kind = MethodKind::Class;
+                scope_kind = LVScopeKind::ClassMethod;
             } else if let Some(_) = receiver.as_constant_path_node() {
                 method_kind = MethodKind::Class;
+                scope_kind = LVScopeKind::ClassMethod;
             } else if let Some(_) = receiver.as_constant_read_node() {
                 method_kind = MethodKind::Class;
+                scope_kind = LVScopeKind::ClassMethod;
             }
         }
+
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str(), method_kind);

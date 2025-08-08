@@ -65,8 +65,26 @@ impl ReferenceVisitor {
 
     /// Handle method calls without a receiver (e.g., `method_name`)
     fn handle_no_receiver(&self, current_namespace: &Vec<RubyConstant>) -> (Vec<RubyConstant>, MethodKind) {
-        // No receiver - instance method call in current namespace
-        (current_namespace.clone(), MethodKind::Instance)
+        // Determine method kind based on current method context
+        let method_kind = match self.scope_tracker.current_method_context() {
+            Some(context_kind) => {
+                // We're inside a method definition, use the same kind for bare calls
+                context_kind
+            }
+            None => {
+                // We're not inside a method definition (e.g., class body, top-level)
+                // Check if we're in a singleton context
+                if self.scope_tracker.in_singleton() {
+                    MethodKind::Class
+                } else {
+                    // Default to instance method for most cases
+                    // This covers class body and top-level calls
+                    MethodKind::Instance
+                }
+            }
+        };
+
+        (current_namespace.clone(), method_kind)
     }
 
     /// Handle method calls with a receiver node
