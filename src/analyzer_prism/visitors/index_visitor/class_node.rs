@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::error;
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
@@ -11,7 +11,7 @@ use super::IndexVisitor;
 impl IndexVisitor {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) {
         let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        debug!("Visiting class node: {}", name_str);
+
 
         let body_loc = if let Some(body) = node.body() {
             self.document
@@ -37,7 +37,7 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
-        debug!("Adding class entry: {:?}", fqn);
+
 
         let entry = EntryBuilder::new()
             .fqn(fqn)
@@ -53,7 +53,7 @@ impl IndexVisitor {
             return;
         }
 
-        debug!("Adding class entry: {}", entry.clone().unwrap().fqn);
+
 
         self.index.lock().add_entry(entry.unwrap());
     }

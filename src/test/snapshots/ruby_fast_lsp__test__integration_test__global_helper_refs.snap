@@ -1,0 +1,32 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 13,
+        "line": 8
+      },
+      "start": {
+        "character": 0,
+        "line": 8
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/basic_method_refs.rb"
+  },
+  {
+    "range": {
+      "end": {
+        "character": 0,
+        "line": 117
+      },
+      "start": {
+        "character": 0,
+        "line": 116
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/basic_method_refs.rb"
+  }
+]

@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::error;
 use ruby_prism::ParametersNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
@@ -19,7 +19,7 @@ impl IndexVisitor {
     /// 6. Keyword rest parameters
     /// 7. Block parameter
     pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
-        debug!("Visiting parameters node");
+
 
         // Process required parameters
         let requireds = node.requireds();
@@ -73,7 +73,7 @@ impl IndexVisitor {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(variable.clone());
 
-                debug!("Adding local variable entry: {:?}", fqn);
+
 
                 // Create an entry with EntryKind::Variable
                 let entry = EntryBuilder::new()
@@ -92,7 +92,7 @@ impl IndexVisitor {
                         self.scope_tracker.current_lv_scope().unwrap().scope_id(),
                         entry.clone(),
                     );
-                    debug!("Added parameter entry: {:?}", variable);
+    
                 } else {
                     error!("Error creating entry for parameter: {}", param_name);
                 }

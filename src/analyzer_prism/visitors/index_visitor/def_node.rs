@@ -1,4 +1,4 @@
-use log::{debug, warn};
+use log::warn;
 use ruby_prism::DefNode;
 
 use crate::indexer::entry::{
@@ -14,6 +14,8 @@ impl IndexVisitor {
         let method_name_id = node.name();
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
+        
+
 
         // Determine method kind based on receiver and scope. Only support:
         //   * `def self.foo`            (receiver: self)
@@ -73,7 +75,7 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
-        debug!("Visiting method definition: {}", fqn);
+
 
         let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
 
@@ -92,7 +94,7 @@ impl IndexVisitor {
 
         let mut index = self.index.lock();
         index.add_entry(entry);
-        debug!("Added method entry: {}", fqn);
+
 
         drop(index);
 

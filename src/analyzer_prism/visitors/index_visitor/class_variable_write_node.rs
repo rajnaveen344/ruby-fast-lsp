@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::error;
 use ruby_prism::{
     ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
     ClassVariableTargetNode, ClassVariableWriteNode,
@@ -15,7 +15,7 @@ use super::IndexVisitor;
 impl IndexVisitor {
     fn process_class_variable_write(&mut self, name: &[u8], name_loc: ruby_prism::Location) {
         let variable_name = String::from_utf8_lossy(name).to_string();
-        debug!("Processing class variable: {}", variable_name);
+
 
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
 
@@ -24,7 +24,7 @@ impl IndexVisitor {
                 // Class variables are associated with the class/module, not with methods
                 let fqn = FullyQualifiedName::variable(variable.clone());
 
-                debug!("Adding class variable entry: {:?}", fqn);
+
 
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
@@ -37,7 +37,7 @@ impl IndexVisitor {
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock();
                     index.add_entry(entry);
-                    debug!("Added class variable entry: {:?}", variable);
+    
                 } else {
                     error!("Error creating entry for class variable: {}", variable_name);
                 }

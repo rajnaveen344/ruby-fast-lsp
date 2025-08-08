@@ -1,8 +1,11 @@
-use log::{debug, info};
+use log::info;
 use lsp_types::{Location, Position, Url};
 
-use crate::analyzer_prism::Identifier;
 use crate::analyzer_prism::RubyPrismAnalyzer;
+use crate::analyzer_prism::{Identifier, ReceiverKind};
+use crate::indexer::ancestor_chain::get_ancestor_chain;
+use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::MethodKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_variable::RubyVariableType;
@@ -28,64 +31,321 @@ pub async fn find_references_at_position(
     let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
     if let None = identifier_opt {
-        info!("No identifier found at position {:?}", position);
         return None;
     }
 
     let identifier = identifier_opt.unwrap();
 
-    // Create FQN from identifier, incorporating ancestors if needed
-    let fqn: FullyQualifiedName;
+    let index = server.index.lock();
 
     match &identifier {
         Identifier::RubyConstant { namespace: _, iden } => {
             // For namespaces, combine ancestors with the namespace parts
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(iden.clone());
-            fqn = FullyQualifiedName::namespace(combined_ns);
+            let fqn = FullyQualifiedName::namespace(combined_ns);
+            find_constant_references(&fqn, &index)
         }
         Identifier::RubyMethod {
             namespace,
-            receiver_kind: _,
-            receiver: _,
+            receiver_kind,
+            receiver,
             iden,
-        } => {
-            // For methods, combine ancestors with the namespace parts
-            let mut combined_ns = ancestors.clone();
-            combined_ns.extend(namespace.clone());
-            fqn = FullyQualifiedName::method(combined_ns, iden.clone());
-        }
+        } => find_method_references(namespace, receiver_kind, receiver, iden, &index, &ancestors),
         Identifier::RubyVariable { iden } => {
-            // For variables, use ancestors as the namespace
-            fqn = FullyQualifiedName::variable(iden.clone());
+            let fqn = FullyQualifiedName::variable(iden.clone());
+            find_variable_references(&fqn, &index, uri, position, iden)
+        }
+    }
+}
+
+/// Find references to a constant
+fn find_constant_references(
+    fqn: &FullyQualifiedName,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    if let Some(entries) = index.references.get(fqn) {
+        if !entries.is_empty() {
+            info!("Found {} constant references to: {}", entries.len(), fqn);
+            return Some(entries.clone());
         }
     }
 
-    debug!("Looking for references to: {:?}", fqn);
+    info!("No constant references found for {}", fqn);
+    None
+}
 
-    let index = server.index.lock();
-
-    if let Some(entries) = index.references.get(&fqn) {
+/// Find references to a variable with local variable filtering
+fn find_variable_references(
+    fqn: &FullyQualifiedName,
+    index: &crate::indexer::index::RubyIndex,
+    uri: &Url,
+    position: Position,
+    iden: &crate::types::ruby_variable::RubyVariable,
+) -> Option<Vec<Location>> {
+    if let Some(entries) = index.references.get(fqn) {
         if !entries.is_empty() {
-            let filtered_entries: Vec<Location> = match &identifier {
-                Identifier::RubyVariable { iden } => match iden.variable_type() {
-                    RubyVariableType::Local(_) => entries
-                        .iter()
-                        .filter(|loc| loc.uri == *uri && loc.range.start >= position)
-                        .cloned()
-                        .collect(),
-                    _ => entries.to_owned(),
-                },
-                _ => entries.to_owned(),
+            let filtered_entries: Vec<Location> = match iden.variable_type() {
+                RubyVariableType::Local(_) => entries
+                    .iter()
+                    .filter(|loc| loc.uri == *uri && loc.range.start >= position)
+                    .cloned()
+                    .collect(),
+                _ => entries.clone(),
             };
 
             if !filtered_entries.is_empty() {
-                info!("Found {} references to: {}", filtered_entries.len(), fqn);
+                info!(
+                    "Found {} variable references to: {}",
+                    filtered_entries.len(),
+                    fqn
+                );
                 return Some(filtered_entries);
             }
         }
     }
 
-    info!("No references found for {}", fqn);
+    info!("No variable references found for {}", fqn);
     None
+}
+
+/// Find references to a method, including mixin-aware references
+fn find_method_references(
+    _namespace: &[crate::types::ruby_namespace::RubyConstant],
+    receiver_kind: &ReceiverKind,
+    receiver: &Option<Vec<crate::types::ruby_namespace::RubyConstant>>,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+    ancestors: &[crate::types::ruby_namespace::RubyConstant],
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+
+    match receiver_kind {
+        ReceiverKind::Constant => {
+            if let Some(receiver_ns) = receiver {
+                // For constant receivers, find references in the specific receiver context
+                let mut full_receiver_ns = ancestors.to_vec();
+                full_receiver_ns.extend(receiver_ns.clone());
+                let receiver_fqn = FullyQualifiedName::Constant(full_receiver_ns);
+
+                if let Some(refs) =
+                    find_method_references_with_receiver(&receiver_fqn, method, index)
+                {
+                    all_references.extend(refs);
+                }
+            } else {
+                // No specific receiver, search in current context
+                let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+                if let Some(refs) =
+                    find_method_references_without_receiver(&receiver_fqn, method, index)
+                {
+                    all_references.extend(refs);
+                }
+            }
+        }
+        ReceiverKind::None | ReceiverKind::SelfReceiver => {
+            // No receiver, search in current context and mixins
+            let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+            if let Some(refs) =
+                find_method_references_without_receiver(&receiver_fqn, method, index)
+            {
+                all_references.extend(refs);
+            }
+        }
+        ReceiverKind::Expr => {
+            // Expression receiver, search by method name across all contexts
+            if let Some(refs) = find_method_references_by_name(method, index) {
+                all_references.extend(refs);
+            }
+        }
+    }
+
+    if all_references.is_empty() {
+        info!("No method references found for {:?}", method);
+        None
+    } else {
+        info!(
+            "Found {} method references to: {:?}",
+            all_references.len(),
+            method
+        );
+        Some(all_references)
+    }
+}
+
+/// Find method references when called with a specific receiver
+fn find_method_references_with_receiver(
+    receiver_fqn: &FullyQualifiedName,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+
+    // Determine which method kinds to search for
+    let kinds_to_check = if method.get_kind() == MethodKind::Unknown {
+        vec![MethodKind::Instance, MethodKind::Class]
+    } else {
+        vec![method.get_kind()]
+    };
+
+    for kind in kinds_to_check {
+        // Search in the receiver's ancestor chain
+        if let Some(refs) =
+            find_method_references_in_ancestor_chain(receiver_fqn, method, index, kind)
+        {
+            all_references.extend(refs);
+        }
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
+}
+
+/// Find method references when called without a receiver
+fn find_method_references_without_receiver(
+    context_fqn: &FullyQualifiedName,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+    let method_kind = method.get_kind();
+
+    // Search in current context and its ancestor chain
+    if let Some(refs) =
+        find_method_references_in_ancestor_chain(context_fqn, method, index, method_kind)
+    {
+        all_references.extend(refs);
+    }
+
+    // If we're in a module, also search in classes that include this module
+    if let Some(refs) =
+        find_method_references_in_sibling_modules(context_fqn, method, index, method_kind)
+    {
+        all_references.extend(refs);
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
+}
+
+/// Find method references by searching the ancestor chain
+fn find_method_references_in_ancestor_chain(
+    context_fqn: &FullyQualifiedName,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+    kind: MethodKind,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+    let is_class_method = kind == MethodKind::Class;
+    let ancestor_chain = get_ancestor_chain(index, context_fqn, is_class_method);
+
+    for ancestor_fqn in ancestor_chain {
+        let method_fqn = FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
+
+        // Find direct references to this method FQN
+        if let Some(refs) = index.references.get(&method_fqn) {
+            all_references.extend(refs.clone());
+        }
+
+        // Also find references where this method might be called from classes that include the ancestor
+        if let Some(refs) =
+            find_method_references_in_including_classes(&ancestor_fqn, method, index)
+        {
+            all_references.extend(refs);
+        }
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
+}
+
+/// Find method references in sibling modules (modules included in the same classes)
+fn find_method_references_in_sibling_modules(
+    module_fqn: &FullyQualifiedName,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+    kind: MethodKind,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+
+    // Get all classes/modules that include this module
+    let including_classes = index.get_including_classes(module_fqn);
+
+    // For each including class, search in its complete ancestor chain
+    for including_class_fqn in including_classes {
+        if let Some(refs) =
+            find_method_references_in_ancestor_chain(&including_class_fqn, method, index, kind)
+        {
+            all_references.extend(refs);
+        }
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
+}
+
+/// Find method references in classes that include a specific module
+fn find_method_references_in_including_classes(
+    module_fqn: &FullyQualifiedName,
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+
+    // Get all classes that include this module
+    let including_classes = index.get_including_classes(module_fqn);
+
+    for including_class_fqn in including_classes {
+        // Look for references to the method in the context of the including class
+        let method_fqn =
+            FullyQualifiedName::method(including_class_fqn.namespace_parts(), method.clone());
+
+        if let Some(refs) = index.references.get(&method_fqn) {
+            all_references.extend(refs.clone());
+        }
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
+}
+
+/// Find method references by name (fallback for expression receivers)
+fn find_method_references_by_name(
+    method: &crate::types::ruby_method::RubyMethod,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    let mut all_references = Vec::new();
+
+    // Search through all method definitions to find references
+    if let Some(entries) = index.methods_by_name.get(method) {
+        for entry in entries {
+            if let EntryKind::Method { .. } = &entry.kind {
+                // For each method definition, find its FQN and look for references
+                if let Some(refs) = index.references.get(&entry.fqn) {
+                    all_references.extend(refs.clone());
+                }
+            }
+        }
+    }
+
+    if all_references.is_empty() {
+        None
+    } else {
+        Some(all_references)
+    }
 }

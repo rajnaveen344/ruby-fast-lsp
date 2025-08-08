@@ -10,6 +10,7 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
+mod call_node;
 mod class_node;
 mod constant_path_node;
 mod constant_read_node;
@@ -86,5 +87,11 @@ impl Visit<'_> for ReferenceVisitor {
         self.process_local_variable_read_node_entry(node);
         visit_local_variable_read_node(self, node);
         self.process_local_variable_read_node_exit(node);
+    }
+
+    fn visit_call_node(&mut self, node: &CallNode) {
+        self.process_call_node_entry(node);
+        visit_call_node(self, node);
+        self.process_call_node_exit(node);
     }
 }

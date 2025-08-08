@@ -15,7 +15,7 @@ use super::IndexVisitor;
 impl IndexVisitor {
     fn process_local_variable_write(&mut self, name: &[u8], name_loc: Location) {
         let variable_name = String::from_utf8_lossy(name).to_string();
-        debug!("Processing local variable: {}", variable_name);
+
 
         let var = RubyVariable::new(
             &variable_name,
@@ -26,7 +26,7 @@ impl IndexVisitor {
             Ok(variable) => {
                 let fqn = FullyQualifiedName::variable(variable.clone());
 
-                debug!("Adding local variable entry: {:?}", fqn);
+        
 
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
