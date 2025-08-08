@@ -1,0 +1,98 @@
+use ruby_prism::ParametersNode;
+
+use crate::{
+    analyzer_prism::Identifier,
+    types::ruby_variable::{RubyVariable, RubyVariableType},
+};
+
+use super::{IdentifierVisitor, IdentifierType};
+
+impl IdentifierVisitor {
+    pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        // Required parameters
+        let requireds = node.requireds();
+        for required in requireds.iter() {
+            if let Some(param) = required.as_required_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.set_result(
+                        Some(Identifier::RubyVariable { iden: var }),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
+                }
+            }
+        }
+
+        // Optional parameters
+        let optionals = node.optionals();
+        for optional in optionals.iter() {
+            if let Some(param) = optional.as_optional_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.set_result(
+                        Some(Identifier::RubyVariable { iden: var }),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
+                }
+            }
+        }
+
+        // Rest parameters
+        if let Some(rest) = node.rest() {
+            if let Some(param) = rest.as_rest_parameter_node() {
+                if let Some(name) = param.name() {
+                    if self.is_position_in_location(&param.location()) {
+                        let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                        let var_type =
+                            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                        let var = RubyVariable::new(&param_name, var_type).unwrap();
+                        self.set_result(
+                            Some(Identifier::RubyVariable { iden: var }),
+                            Some(IdentifierType::LVarDef),
+                            self.scope_tracker.get_ns_stack(),
+                            self.scope_tracker.get_lv_stack(),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Post parameters
+        for post in node.posts().iter() {
+            if let Some(param) = post.as_required_parameter_node() {
+                if self.is_position_in_location(&param.location()) {
+                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let var_type =
+                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                    let var = RubyVariable::new(&param_name, var_type).unwrap();
+                    self.set_result(
+                        Some(Identifier::RubyVariable { iden: var }),
+                        Some(IdentifierType::LVarDef),
+                        self.scope_tracker.get_ns_stack(),
+                        self.scope_tracker.get_lv_stack(),
+                    );
+                }
+            }
+        }
+
+        // TODO: keywords, keyword_rest, block
+    }
+
+    pub fn process_parameters_node_exit(&mut self, _node: &ParametersNode) {
+        // No cleanup needed for parameters
+    }
+}

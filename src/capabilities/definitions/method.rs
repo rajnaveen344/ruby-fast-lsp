@@ -65,10 +65,16 @@ fn find_method_without_receiver(
     let method_kind = method.get_kind();
 
     if let Some(locations) = search_in_ancestor_chain(&receiver_fqn, method, index, method_kind) {
-        Some(locations)
-    } else {
-        None
+        return Some(locations);
     }
+
+    // If we're in a module and didn't find the method, search in all classes/modules that include this module
+    // This handles the case where a method in ModuleA calls a method from ModuleB, and both are included in a class
+    if let Some(including_classes) = search_in_sibling_modules(&receiver_fqn, method, index, method_kind) {
+        return Some(including_classes);
+    }
+
+    None
 }
 
 /// Check if the receiver is a constant path/read node
@@ -154,6 +160,46 @@ fn search_in_ancestor_chain(
 
         if let Some(entries) = index.definitions.get(&method_fqn.into()) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
+        }
+    }
+
+    if found_locations.is_empty() {
+        None
+    } else {
+        Some(found_locations)
+    }
+}
+
+/// Search for method definitions in sibling modules
+/// When we're in a module and looking for a method, we should also search in all classes/modules
+/// that include this module, and then search in their sibling modules (other included modules)
+fn search_in_sibling_modules(
+    module_fqn: &FullyQualifiedName,
+    method: &RubyMethod,
+    index: &RubyIndex,
+    kind: MethodKind,
+) -> Option<Vec<Location>> {
+    let mut found_locations = Vec::new();
+    
+    debug!(
+        "Searching for {} method {:?} in sibling modules of {:?}",
+        if kind == MethodKind::Class { "class" } else { "instance" },
+        method.get_name(),
+        module_fqn.to_string(),
+    );
+
+    // Get all classes/modules that include this module
+    let including_classes = index.get_including_classes(module_fqn);
+    
+    debug!(
+        "Found including classes: {:?}",
+        including_classes.iter().map(|fqn| fqn.to_string()).collect::<Vec<_>>()
+    );
+
+    // For each including class, search in its complete ancestor chain
+    for including_class_fqn in including_classes {
+        if let Some(locations) = search_in_ancestor_chain(&including_class_fqn, method, index, kind) {
+            found_locations.extend(locations);
         }
     }
 

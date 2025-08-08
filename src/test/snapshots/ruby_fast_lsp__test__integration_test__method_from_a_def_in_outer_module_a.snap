@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 21,
+        "line": 2
+      },
+      "start": {
+        "character": 8,
+        "line": 2
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/goto/nested_namespace_include.rb"
+  }
+]

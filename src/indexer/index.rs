@@ -22,6 +22,10 @@ pub struct RubyIndex {
     // Temporarily used to find definitions by name until we have logic to determine the type of the receiver
     // For example, if we have a method Foo#bar, its method by name is bar.
     pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
+
+    // Reverse mixin tracking: module/class FQN -> list of classes/modules that include/extend/prepend it
+    // For example, if class Foo includes module Bar, then reverse_mixins[Bar] contains Foo
+    pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
 }
 
 impl RubyIndex {
@@ -31,6 +35,7 @@ impl RubyIndex {
             definitions: HashMap::new(),
             references: HashMap::new(),
             methods_by_name: HashMap::new(),
+            reverse_mixins: HashMap::new(),
         }
     }
 
@@ -58,6 +63,9 @@ impl RubyIndex {
                 .or_insert_with(Vec::new);
             method_entries.push(entry.clone());
         }
+
+        // Update reverse mixin tracking for classes and modules with mixins
+        self.update_reverse_mixins(&entry);
     }
 
     pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
@@ -121,6 +129,50 @@ impl RubyIndex {
         }
 
         self.references.retain(|_, refs| !refs.is_empty());
+    }
+
+    /// Update reverse mixin tracking when an entry with mixins is added
+    pub fn update_reverse_mixins(&mut self, entry: &Entry) {
+        use crate::indexer::entry::entry_kind::EntryKind;
+        use crate::indexer::ancestor_chain::resolve_mixin_ref;
+
+        match &entry.kind {
+            EntryKind::Class { includes, extends, prepends, .. } | 
+            EntryKind::Module { includes, extends, prepends, .. } => {
+                debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
+                // Process includes, extends, and prepends
+                for mixin_refs in [includes, extends, prepends] {
+                    for mixin_ref in mixin_refs {
+                        debug!("Processing mixin ref: {:?}", mixin_ref);
+                        if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
+                            debug!("Resolved mixin ref {:?} to {:?}, adding reverse mapping: {:?} -> {:?}", 
+                                   mixin_ref, resolved_fqn, resolved_fqn, entry.fqn);
+                            let including_classes = self.reverse_mixins
+                                .entry(resolved_fqn)
+                                .or_insert_with(Vec::new);
+                            
+                            // Avoid duplicates
+                            if !including_classes.contains(&entry.fqn) {
+                                including_classes.push(entry.fqn.clone());
+                            }
+                        } else {
+                            debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Get all classes/modules that include the given module
+    pub fn get_including_classes(&self, module_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        let result = self.reverse_mixins
+            .get(module_fqn)
+            .map(|classes| classes.clone())
+            .unwrap_or_default();
+        debug!("get_including_classes for {:?}: {:?}", module_fqn, result);
+        result
     }
 }
 

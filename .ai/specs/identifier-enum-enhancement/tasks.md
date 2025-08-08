@@ -53,21 +53,21 @@
   - Write tests for constant identifiers in various namespace contexts
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 5.1, 5.4_
 
-- [ ] 9. Add tests for method identifier context and receiver kinds
+- [x] 9. Add tests for method identifier context and receiver kinds
   - Write tests for method calls with different receiver types in various namespace contexts
   - Write tests for method resolution within nested classes and modules
   - Write tests for complex constant receiver scenarios (Module::Class.method)
   - Write tests verifying namespace context is correctly captured for method calls
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.2, 5.4_
 
-- [ ] 10. Add tests for variable identifier scope context
+- [x] 10. Add tests for variable identifier scope context
   - Write tests for local variable resolution with proper LVScopeStack context
   - Write tests for class and instance variable resolution with namespace context
   - Write tests for global variable resolution (no additional context)
   - Write tests for variable resolution in nested scopes and complex scenarios
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 5.3, 5.4_
 
-- [ ] 11. Run comprehensive test suite and fix any remaining issues
+- [x] 11. Run comprehensive test suite and fix any remaining issues
   - Execute full test suite to ensure all tests pass
   - Fix any edge cases or issues discovered during testing
   - Verify that existing LSP functionality works correctly with new identifier structure

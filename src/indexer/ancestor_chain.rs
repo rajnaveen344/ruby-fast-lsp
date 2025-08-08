@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 // Resolve a MixinRef to a FullyQualifiedName by searching the index
 // according to Ruby's constant lookup rules.
-fn resolve_mixin_ref(
+pub fn resolve_mixin_ref(
     index: &RubyIndex,
     mixin_ref: &MixinRef,
     current_fqn: &FullyQualifiedName,
