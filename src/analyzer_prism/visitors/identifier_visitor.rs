@@ -1,5 +1,5 @@
 use crate::{
-    analyzer_prism::{scope_tracker::ScopeTracker, utils, Identifier},
+    analyzer_prism::{scope_tracker::ScopeTracker, utils, Identifier, ReceiverKind},
     indexer::entry::MethodKind,
     types::{
         ruby_document::RubyDocument,
@@ -132,7 +132,10 @@ impl Visit<'_> for IdentifierVisitor {
                 let mut namespaces = Vec::new();
                 utils::collect_namespaces(&constant_path_node, &mut namespaces);
                 self.set_result(
-                    Some(Identifier::RubyConstant(namespaces)),
+                    Some(Identifier::RubyConstant {
+                        namespace: self.scope_tracker.get_ns_stack(),
+                        iden: namespaces,
+                    }),
                     Some(IdentifierType::ClassDef),
                     self.scope_tracker.get_ns_stack(),
                     self.scope_tracker.get_lv_stack(),
@@ -141,7 +144,10 @@ impl Visit<'_> for IdentifierVisitor {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
                 let namespace = RubyConstant::new(&name.to_string()).unwrap();
                 self.set_result(
-                    Some(Identifier::RubyConstant(vec![namespace])),
+                    Some(Identifier::RubyConstant {
+                        namespace: self.scope_tracker.get_ns_stack(),
+                        iden: vec![namespace],
+                    }),
                     Some(IdentifierType::ClassDef),
                     self.scope_tracker.get_ns_stack(),
                     self.scope_tracker.get_lv_stack(),
@@ -205,7 +211,10 @@ impl Visit<'_> for IdentifierVisitor {
                 let mut namespaces = Vec::new();
                 utils::collect_namespaces(&constant_path_node, &mut namespaces);
                 self.set_result(
-                    Some(Identifier::RubyConstant(namespaces)),
+                    Some(Identifier::RubyConstant {
+                        namespace: self.scope_tracker.get_ns_stack(),
+                        iden: namespaces,
+                    }),
                     Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
                     self.scope_tracker.get_lv_stack(),
@@ -214,7 +223,10 @@ impl Visit<'_> for IdentifierVisitor {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
                 let namespace = RubyConstant::new(&name.to_string()).unwrap();
                 self.set_result(
-                    Some(Identifier::RubyConstant(vec![namespace])),
+                    Some(Identifier::RubyConstant {
+                        namespace: self.scope_tracker.get_ns_stack(),
+                        iden: vec![namespace],
+                    }),
                     Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
                     self.scope_tracker.get_lv_stack(),
@@ -308,8 +320,20 @@ impl Visit<'_> for IdentifierVisitor {
         // Is position on method name
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
+            // Determine receiver kind for method definition
+            let receiver_kind = if node.receiver().is_some() {
+                ReceiverKind::SelfReceiver // Method definitions with receivers are typically self methods
+            } else {
+                ReceiverKind::None // Instance methods have no receiver in definition
+            };
+
             self.set_result(
-                Some(Identifier::RubyMethod(vec![], method)),
+                Some(Identifier::RubyMethod {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    receiver_kind,
+                    receiver: None, // Method definitions don't have receiver information
+                    iden: method,
+                }),
                 Some(IdentifierType::MethodDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -363,7 +387,7 @@ impl Visit<'_> for IdentifierVisitor {
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
-                        Some(Identifier::RubyVariable(var)),
+                        Some(Identifier::RubyVariable { iden: var }),
                         Some(IdentifierType::LVarDef),
                         self.scope_tracker.get_ns_stack(),
                         self.scope_tracker.get_lv_stack(),
@@ -382,7 +406,7 @@ impl Visit<'_> for IdentifierVisitor {
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
-                        Some(Identifier::RubyVariable(var)),
+                        Some(Identifier::RubyVariable { iden: var }),
                         Some(IdentifierType::LVarDef),
                         self.scope_tracker.get_ns_stack(),
                         self.scope_tracker.get_lv_stack(),
@@ -401,7 +425,7 @@ impl Visit<'_> for IdentifierVisitor {
                             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                         let var = RubyVariable::new(&param_name, var_type).unwrap();
                         self.set_result(
-                            Some(Identifier::RubyVariable(var)),
+                            Some(Identifier::RubyVariable { iden: var }),
                             Some(IdentifierType::LVarDef),
                             self.scope_tracker.get_ns_stack(),
                             self.scope_tracker.get_lv_stack(),
@@ -420,7 +444,7 @@ impl Visit<'_> for IdentifierVisitor {
                         RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
-                        Some(Identifier::RubyVariable(var)),
+                        Some(Identifier::RubyVariable { iden: var }),
                         Some(IdentifierType::LVarDef),
                         self.scope_tracker.get_ns_stack(),
                         self.scope_tracker.get_lv_stack(),
@@ -443,7 +467,10 @@ impl Visit<'_> for IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             self.set_result(
-                Some(Identifier::RubyConstant(vec![constant])),
+                Some(Identifier::RubyConstant {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    iden: vec![constant],
+                }),
                 Some(IdentifierType::ConstantDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -488,8 +515,18 @@ impl Visit<'_> for IdentifierVisitor {
 
         // Process the namespace
         if !namespaces.is_empty() {
+            // Determine the namespace context based on whether it's a root constant
+            let namespace_context = if is_root_constant {
+                vec![] // Root constants have empty namespace context
+            } else {
+                self.scope_tracker.get_ns_stack()
+            };
+
             self.set_result(
-                Some(Identifier::RubyConstant(namespaces)),
+                Some(Identifier::RubyConstant {
+                    namespace: namespace_context,
+                    iden: namespaces,
+                }),
                 Some(IdentifierType::ConstantDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -516,14 +553,20 @@ impl Visit<'_> for IdentifierVisitor {
         // Create a RubyConstant from the constant name
         if let Ok(constant) = RubyConstant::new(&constant_name) {
             self.set_result(
-                Some(Identifier::RubyConstant(vec![constant])),
+                Some(Identifier::RubyConstant {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    iden: vec![constant],
+                }),
                 Some(IdentifierType::ConstantDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
             );
         } else {
             self.set_result(
-                Some(Identifier::RubyConstant(Vec::new())),
+                Some(Identifier::RubyConstant {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    iden: Vec::new(),
+                }),
                 Some(IdentifierType::ConstantDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -560,29 +603,63 @@ impl Visit<'_> for IdentifierVisitor {
         let method_name_bytes = node.name().as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes).to_string();
 
-        let mut method_kind = MethodKind::Instance;
-        let mut namespace = vec![];
-
-        if let Some(receiver) = node.receiver() {
-            if let Some(const_path_node) = receiver.as_constant_path_node() {
-                method_kind = MethodKind::Class;
-
-                let mut namespaces = vec![];
-                utils::collect_namespaces(&const_path_node, &mut namespaces);
-                namespace = namespaces;
-            } else if let Some(const_read_node) = receiver.as_constant_read_node() {
-                method_kind = MethodKind::Class;
-
-                let name = String::from_utf8_lossy(const_read_node.name().as_slice()).to_string();
-                if let Ok(ns) = RubyConstant::new(&name) {
-                    namespace.push(ns);
+        // Determine receiver kind and method kind based on the receiver
+        let receiver_kind = match node.receiver() {
+            None => ReceiverKind::None,
+            Some(receiver) => {
+                if receiver.as_self_node().is_some() {
+                    ReceiverKind::SelfReceiver
+                } else if receiver.as_constant_path_node().is_some()
+                    || receiver.as_constant_read_node().is_some()
+                {
+                    ReceiverKind::Constant
+                } else {
+                    ReceiverKind::Expr
                 }
             }
-        }
+        };
+
+        // Determine method kind based on receiver kind
+        let method_kind = match receiver_kind {
+            ReceiverKind::None => MethodKind::Instance, // No receiver typically means instance method
+            ReceiverKind::SelfReceiver => MethodKind::Class, // self.method is typically a class method
+            ReceiverKind::Constant => MethodKind::Class, // Class.method is typically a class method
+            ReceiverKind::Expr => MethodKind::Instance, // variable.method is typically an instance method
+        };
+
+        // Extract receiver information for constant receivers
+        let receiver = match receiver_kind {
+            ReceiverKind::Constant => {
+                if let Some(receiver_node) = node.receiver() {
+                    if let Some(constant_read_node) = receiver_node.as_constant_read_node() {
+                        let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
+                        if let Ok(constant) = RubyConstant::new(&name.to_string()) {
+                            Some(vec![constant])
+                        } else {
+                            None
+                        }
+                    } else if let Some(constant_path_node) = receiver_node.as_constant_path_node() {
+                        let mut namespaces = Vec::new();
+                        utils::collect_namespaces(&constant_path_node, &mut namespaces);
+                        Some(namespaces)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
 
         if let Ok(method_name) = RubyMethod::new(method_name_str.as_ref(), method_kind) {
             self.set_result(
-                Some(Identifier::RubyMethod(namespace, method_name)),
+                Some(Identifier::RubyMethod {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    receiver_kind,
+                    receiver,
+                    iden: method_name,
+                }),
                 Some(IdentifierType::MethodCall),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -604,7 +681,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarRead),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -628,7 +705,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -651,7 +728,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -674,7 +751,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -697,7 +774,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -720,7 +797,7 @@ impl Visit<'_> for IdentifierVisitor {
         );
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -739,7 +816,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::CVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -761,7 +838,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Instance);
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::IVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -780,7 +857,7 @@ impl Visit<'_> for IdentifierVisitor {
         let var = RubyVariable::new(&variable_name, RubyVariableType::Global);
         if let Ok(variable) = var {
             self.set_result(
-                Some(Identifier::RubyVariable(variable)),
+                Some(Identifier::RubyVariable { iden: variable }),
                 Some(IdentifierType::GVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -830,35 +907,20 @@ mod tests {
         // Special case for root constants
         if code.starts_with("::") {
             match identifier {
-                Identifier::RubyConstant(parts) => {
-                    // For root constants, we expect an empty namespace vector
-                    if expected_parts.len() == 1 {
-                        // For direct root constants like ::GLOBAL_CONSTANT
+                Identifier::RubyConstant { namespace: _, iden } => {
+                    // For root constants, we expect the identifier path to match expected_parts
+                    assert_eq!(
+                        iden.len(),
+                        expected_parts.len(),
+                        "Identifier parts count mismatch for root constant path"
+                    );
+                    for (i, expected_part) in expected_parts.iter().enumerate() {
                         assert_eq!(
-                            parts.len(),
-                            1,
-                            "Expected empty namespace vector for root constant"
+                            iden[i].to_string(),
+                            *expected_part,
+                            "Identifier part at index {} mismatch",
+                            i
                         );
-                        assert_eq!(
-                            parts[0].to_string(),
-                            expected_parts[0],
-                            "Expected constant name to match"
-                        );
-                    } else {
-                        // For nested root constants like ::Foo::Bar::CONSTANT
-                        assert_eq!(
-                            parts.len(),
-                            expected_parts.len(),
-                            "Namespace parts count mismatch for root constant path"
-                        );
-                        for (i, expected_part) in expected_parts.iter().enumerate() {
-                            assert_eq!(
-                                parts[i].to_string(),
-                                *expected_part,
-                                "Namespace part at index {} mismatch",
-                                i
-                            );
-                        }
                     }
                     return;
                 }
@@ -868,7 +930,7 @@ mod tests {
 
         // Get the parts from the identifier - could be either a namespace or a constant
         let parts = match identifier {
-            Identifier::RubyConstant(parts) => parts.clone(),
+            Identifier::RubyConstant { namespace: _, iden } => iden.clone(),
             // This line is no longer needed with the combined RubyConstant type
             _ => panic!("Expected a Namespace or Constant FQN"),
         };
@@ -966,7 +1028,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 1);
                 assert_eq!(parts[0].to_string(), "Foo");
             }
@@ -987,7 +1052,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -1009,10 +1077,23 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyMethod(parts, method) => {
-                assert_eq!(parts.len(), 2);
-                assert_eq!(parts[0].to_string(), "Foo");
-                assert_eq!(parts[1].to_string(), "Bar");
+            Identifier::RubyMethod {
+                namespace: parts,
+                receiver_kind,
+                receiver,
+                iden: method,
+            } => {
+                // The namespace should contain the current location (top-level = [Object])
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].to_string(), "Object");
+                // The receiver kind should be Constant since we have Foo::Bar.baz
+                assert_eq!(receiver_kind, ReceiverKind::Constant);
+                // The receiver should contain [Foo, Bar]
+                assert!(receiver.is_some());
+                let receiver_parts = receiver.as_ref().unwrap();
+                assert_eq!(receiver_parts.len(), 2);
+                assert_eq!(receiver_parts[0].to_string(), "Foo");
+                assert_eq!(receiver_parts[1].to_string(), "Bar");
                 assert_eq!(method.to_string(), "baz");
             }
             _ => panic!("Expected Method identifier, got {:?}", identifier),
@@ -1034,7 +1115,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -1058,7 +1142,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 4);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -1084,7 +1171,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 2);
                 assert_eq!(parts[0].to_string(), "Foo");
                 assert_eq!(parts[1].to_string(), "Bar");
@@ -1106,7 +1196,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "A");
                 assert_eq!(parts[1].to_string(), "B");
@@ -1131,7 +1224,12 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyMethod(_, method) => {
+            Identifier::RubyMethod {
+                namespace: _,
+                receiver_kind: _,
+                receiver: _,
+                iden: method,
+            } => {
                 assert_eq!(method.to_string(), "a");
             }
             _ => panic!("Expected InstanceMethod FQN, got {:?}", identifier),
@@ -1153,7 +1251,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
@@ -1186,7 +1287,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
@@ -1208,7 +1312,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 5);
                 assert_eq!(parts[0].to_string(), "RubyLSP");
                 assert_eq!(parts[1].to_string(), "Core");
@@ -1247,7 +1354,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Messages");
@@ -1267,7 +1377,10 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyConstant(parts) => {
+            Identifier::RubyConstant {
+                namespace: _,
+                iden: parts,
+            } => {
                 assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].to_string(), "Error");
                 assert_eq!(parts[1].to_string(), "Codes");

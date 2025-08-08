@@ -40,14 +40,27 @@ impl FullyQualifiedName {
             FullyQualifiedName::Variable(_) => vec![],
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FullyQualifiedName::Constant(ns) => ns.is_empty(),
+            FullyQualifiedName::Method(ns, _) => ns.is_empty(),
+            FullyQualifiedName::Variable(_) => true, // Variables are not namespaced
+        }
+    }
 }
 
 impl From<Identifier> for FullyQualifiedName {
     fn from(value: Identifier) -> Self {
         match value {
-            Identifier::RubyConstant(ns) => FullyQualifiedName::Constant(ns),
-            Identifier::RubyMethod(ns, method) => FullyQualifiedName::Method(ns, method),
-            _ => panic!("Unsupported identifier type for conversion to FullyQualifiedName"),
+            Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::Constant(iden),
+            Identifier::RubyMethod {
+                namespace,
+                receiver_kind: _,
+                receiver: _,
+                iden,
+            } => FullyQualifiedName::Method(namespace, iden),
+            Identifier::RubyVariable { iden } => FullyQualifiedName::Variable(iden),
         }
     }
 }
@@ -72,6 +85,7 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::Method(_, method) => match method.get_kind() {
                 MethodKind::Instance => write!(f, "{namespace}#{method}"),
                 MethodKind::Class => write!(f, "{namespace}.{method}"),
+                MethodKind::Unknown => write!(f, "{namespace}?{method}"),
             },
             FullyQualifiedName::Variable(variable) => {
                 write!(f, "{}", variable)

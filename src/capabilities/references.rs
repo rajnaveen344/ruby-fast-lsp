@@ -38,21 +38,26 @@ pub async fn find_references_at_position(
     let fqn: FullyQualifiedName;
 
     match &identifier {
-        Identifier::RubyConstant(ns) => {
+        Identifier::RubyConstant { namespace: _, iden } => {
             // For namespaces, combine ancestors with the namespace parts
             let mut combined_ns = ancestors.clone();
-            combined_ns.extend(ns.clone());
+            combined_ns.extend(iden.clone());
             fqn = FullyQualifiedName::namespace(combined_ns);
         }
-        Identifier::RubyMethod(ns, method) => {
+        Identifier::RubyMethod {
+            namespace,
+            receiver_kind: _,
+            receiver: _,
+            iden,
+        } => {
             // For methods, combine ancestors with the namespace parts
             let mut combined_ns = ancestors.clone();
-            combined_ns.extend(ns.clone());
-            fqn = FullyQualifiedName::method(combined_ns, method.clone());
+            combined_ns.extend(namespace.clone());
+            fqn = FullyQualifiedName::method(combined_ns, iden.clone());
         }
-        Identifier::RubyVariable(variable) => {
+        Identifier::RubyVariable { iden } => {
             // For variables, use ancestors as the namespace
-            fqn = FullyQualifiedName::variable(variable.clone());
+            fqn = FullyQualifiedName::variable(iden.clone());
         }
     }
 
@@ -63,7 +68,7 @@ pub async fn find_references_at_position(
     if let Some(entries) = index.references.get(&fqn) {
         if !entries.is_empty() {
             let filtered_entries: Vec<Location> = match &identifier {
-                Identifier::RubyVariable(variable) => match variable.variable_type() {
+                Identifier::RubyVariable { iden } => match iden.variable_type() {
                     RubyVariableType::Local(_) => entries
                         .iter()
                         .filter(|loc| loc.uri == *uri && loc.range.start >= position)

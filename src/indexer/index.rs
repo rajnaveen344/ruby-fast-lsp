@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::debug;
 use lsp_types::{Location, Url};
 
-use crate::indexer::entry::{entry_kind::EntryKind, Entry, Mixin};
+use crate::indexer::entry::{entry_kind::EntryKind, Entry};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 #[derive(Debug)]
@@ -12,20 +12,12 @@ pub struct RubyIndex {
     // Eg. file:///test.rb => [Entry1, Entry2, ...]
     pub file_entries: HashMap<Url, Vec<Entry>>,
 
-    // Namespace ancestors are the ancestors of a namespace.
-    // For example, if we have a namespace Foo::Bar, its ancestors are [Foo].
-    // Eg. Foo::Bar.ancestors = [Foo], Foo.ancestors = [], Foo::Bar::Baz.ancestors = [Foo::Bar, Foo]
-    pub namespace_ancestors: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
-
     // Definitions are the definitions of a fully qualified name.
     // For example, if we have a method Foo#bar, its definition is the method definition.
     pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
 
     // References are the references to a fully qualified name.
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
-
-    // Mixins to support include, extend, and prepend helpers
-    pub mixin_relationships: HashMap<FullyQualifiedName, Vec<Mixin>>,
 
     // Temporarily used to find definitions by name until we have logic to determine the type of the receiver
     // For example, if we have a method Foo#bar, its method by name is bar.
@@ -36,10 +28,8 @@ impl RubyIndex {
     pub fn new() -> Self {
         RubyIndex {
             file_entries: HashMap::new(),
-            namespace_ancestors: HashMap::new(),
             definitions: HashMap::new(),
             references: HashMap::new(),
-            mixin_relationships: HashMap::new(),
             methods_by_name: HashMap::new(),
         }
     }
@@ -117,6 +107,14 @@ impl RubyIndex {
         }
     }
 
+    pub fn get(&self, fqn: &FullyQualifiedName) -> Option<&Vec<Entry>> {
+        self.definitions.get(fqn)
+    }
+
+    pub fn get_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Vec<Entry>> {
+        self.definitions.get_mut(fqn)
+    }
+
     pub fn remove_references_for_uri(&mut self, uri: &Url) {
         for refs in self.references.values_mut() {
             refs.retain(|loc| loc.uri != *uri);
@@ -143,10 +141,7 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::Class {
-                superclass: None,
-                is_singleton: false,
-            })
+            .kind(EntryKind::new_class(None))
             .build()
             .unwrap();
         index.add_entry(entry);
@@ -166,10 +161,7 @@ mod tests {
                 uri: uri.clone(),
                 range: Default::default(),
             })
-            .kind(EntryKind::Class {
-                superclass: None,
-                is_singleton: false,
-            })
+            .kind(EntryKind::new_class(None))
             .build()
             .unwrap();
         index.add_entry(entry);

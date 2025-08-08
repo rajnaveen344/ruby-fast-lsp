@@ -45,7 +45,7 @@ impl IndexVisitor {
                 self.document
                     .prism_location_to_lsp_location(&node.location()),
             )
-            .kind(EntryKind::Module)
+            .kind(EntryKind::new_module())
             .build();
 
         if let Err(e) = entry {
