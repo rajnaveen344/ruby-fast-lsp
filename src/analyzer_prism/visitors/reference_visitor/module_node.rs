@@ -29,8 +29,13 @@ impl ReferenceVisitor {
             ));
         } else {
             let name = String::from_utf8_lossy(node.name().as_slice());
-            self.scope_tracker
-                .push_ns_scope(RubyConstant::new(&name).unwrap());
+            match RubyConstant::new(&name) {
+                Ok(constant) => self.scope_tracker.push_ns_scope(constant),
+                Err(_) => {
+                    // Skip invalid module names - don't push to namespace stack
+                    return;
+                }
+            }
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,

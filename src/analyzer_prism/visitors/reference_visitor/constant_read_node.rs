@@ -9,7 +9,13 @@ impl ReferenceVisitor {
     pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let constant = RubyConstant::new(&name).unwrap();
+        let constant = match RubyConstant::new(&name) {
+            Ok(c) => c,
+            Err(_) => {
+                debug!("Skipping invalid constant name: {}", name);
+                return;
+            }
+        };
 
         // Check from current namespace to root namespace
         let mut ancestors = current_namespace;

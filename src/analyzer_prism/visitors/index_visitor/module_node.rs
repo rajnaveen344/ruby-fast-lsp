@@ -27,8 +27,13 @@ impl IndexVisitor {
             utils::collect_namespaces(&path_node, &mut namespace_parts);
             self.scope_tracker.push_ns_scopes(namespace_parts);
         } else {
-            let namespace = RubyConstant::new(&name_str).unwrap();
-            self.scope_tracker.push_ns_scope(namespace);
+            match RubyConstant::new(&name_str) {
+                Ok(namespace) => self.scope_tracker.push_ns_scope(namespace),
+                Err(e) => {
+                    error!("Error creating namespace: {}", e);
+                    return;
+                }
+            }
         }
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);

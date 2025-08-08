@@ -105,12 +105,19 @@ fn module_node_without_body() {
 }
 
 // ---------------------------------------------------------------------------
-//  module_node – invalid constant name should panic (EntryBuilder error path)
+//  module_node – invalid constant name should be handled gracefully
 // ---------------------------------------------------------------------------
 #[test]
-#[should_panic]
 fn module_node_invalid_constant() {
-    // lowercase module name is invalid and will cause unwrap panic
+    // lowercase module name is invalid and should be handled gracefully
     let code = "module foo; end";
-    let _visitor = visit_code(code);
+    let visitor = visit_code(code);
+    
+    // The visitor should complete without panicking
+    // No entries should be created for invalid module names
+    let index_lock = visitor.index.lock();
+    let defs = &index_lock.definitions;
+    
+    // Should not contain any entries for invalid module names
+    assert!(defs.is_empty() || !defs.iter().any(|(fqn, _)| fqn.to_string().contains("foo")));
 }
