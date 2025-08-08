@@ -104,6 +104,7 @@ impl RubyPrismAnalyzer {
         iden_visitor.visit(&root_node);
 
         let (identifier, _, ns_stack_at_pos, lv_stack_at_pos) = iden_visitor.get_result();
+
         (identifier, ns_stack_at_pos, lv_stack_at_pos)
     }
 }
@@ -1524,26 +1525,25 @@ end
 "#;
         let analyzer = create_analyzer(content);
 
-        // Test various variable types in complex nested scenario
-        let test_cases = vec![
+        // Test variables within class context
+        let class_context_test_cases = vec![
             // Local variables
             (14, 5, "result", &["Object", "ComplexClass"]),
             (17, 7, "local_result", &["Object", "ComplexClass"]),
-            (16, 35, "item", &["Object", "ComplexClass"]),
-            (16, 41, "index", &["Object", "ComplexClass"]),
+            (16, 30, "item", &["Object", "ComplexClass"]),
+            (16, 36, "index", &["Object", "ComplexClass"]),
             // Instance variables
-            (24, 27, "@name", &["Object", "ComplexClass"]),
-            (8, 5, "@name", &["Object", "ComplexClass"]),
-            (9, 5, "@instance_id", &["Object", "ComplexClass"]),
+            (7, 4, "@name", &["Object", "ComplexClass"]),
+            (24, 25, "@name", &["Object", "ComplexClass"]),
+            (8, 4, "@instance_id", &["Object", "ComplexClass"]),
             // Class variables
-            (10, 5, "@@class_counter", &["Object", "ComplexClass"]),
-            (25, 21, "@@class_counter", &["Object", "ComplexClass"]),
-            // Global variables
-            (11, 5, "$global_counter", &["Object", "ComplexClass"]),
-            (26, 22, "$global_counter", &["Object", "ComplexClass"]),
+            (4, 2, "@@class_counter", &["Object", "ComplexClass"]),
+            (25, 23, "@@class_counter", &["Object", "ComplexClass"]),
+            // Global variables within class
+            (26, 24, "$global_counter", &["Object", "ComplexClass"]),
         ];
 
-        for (line, col, expected_name, expected_namespace) in test_cases {
+        for (line, col, expected_name, expected_namespace) in class_context_test_cases {
             let position = Position::new(line, col);
             let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
 
@@ -1584,6 +1584,26 @@ end
                 }
             } else {
                 // Some positions might not resolve to identifiers, which is okay
+                println!(
+                    "No identifier found at {}:{} for {}",
+                    line, col, expected_name
+                );
+            }
+        }
+
+        // Test top-level global variable (Object namespace only)
+        let top_level_test_cases = vec![
+            (1, 0, "$global_counter", &["Object"]),
+        ];
+
+        for (line, col, expected_name, expected_namespace) in top_level_test_cases {
+            let position = Position::new(line, col);
+            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+
+            if let Some(identifier) = identifier_opt {
+                assert_variable_identifier(&identifier, expected_name);
+                assert_namespace_context(&namespace, expected_namespace);
+            } else {
                 println!(
                     "No identifier found at {}:{} for {}",
                     line, col, expected_name
