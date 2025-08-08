@@ -1,0 +1,51 @@
+use log::debug;
+use ruby_prism::ConstantReadNode;
+
+use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
+
+use super::ReferenceVisitor;
+
+impl ReferenceVisitor {
+    pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
+        let current_namespace = self.scope_tracker.get_ns_stack();
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let constant = RubyConstant::new(&name).unwrap();
+
+        // Check from current namespace to root namespace
+        let mut ancestors = current_namespace;
+        while !ancestors.is_empty() {
+            let mut combined_ns = ancestors.clone();
+            combined_ns.push(constant.clone());
+
+            let fqn = FullyQualifiedName::namespace(combined_ns);
+            let mut index = self.index.lock();
+            if index.definitions.contains_key(&fqn) {
+                let location = self
+                    .document
+                    .prism_location_to_lsp_location(&node.location());
+                debug!("Adding reference: {}", fqn);
+                index.add_reference(fqn, location);
+                drop(index);
+                return;
+            }
+            drop(index);
+            ancestors.pop();
+        }
+
+        // Check in root namespace
+        let fqn = FullyQualifiedName::namespace(vec![constant]);
+        let mut index = self.index.lock();
+        if index.definitions.contains_key(&fqn) {
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            debug!("Adding reference: {}", fqn);
+            index.add_reference(fqn, location);
+        }
+        drop(index);
+    }
+
+    pub fn process_constant_read_node_exit(&mut self, _node: &ConstantReadNode) {
+        // No cleanup needed
+    }
+}
