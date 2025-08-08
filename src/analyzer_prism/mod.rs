@@ -1376,7 +1376,6 @@ puts $global_var
     }
 
     #[test]
-    #[ignore] // Temporarily disabled due to parsing issues with special global variables
     fn test_global_variable_special_variables() {
         let content = r#"
 def test_method
@@ -1413,6 +1412,93 @@ end
                     match iden.variable_type() {
                         crate::types::ruby_variable::RubyVariableType::Global => {
                             // Special global variables are still global
+                        }
+                        _ => panic!("Expected Global variable type for {}", expected_name),
+                    }
+                }
+                _ => panic!("Expected RubyVariable identifier for {}", expected_name),
+            }
+        }
+    }
+
+    #[test]
+    fn test_debug_special_global_parsing() {
+        let content = r#"
+def test_method
+  puts $&   # Last match
+  puts $~   # Last match info
+  puts $*   # Command line arguments
+  puts $0   # Program name
+end
+"#;
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        println!("Parse result: {:#?}", parse_result);
+        
+        let analyzer = create_analyzer(content);
+        
+        let test_cases = vec![
+            (2, 8, "$&"),  // Last match
+            (3, 8, "$~"),  // Last match info
+            (4, 8, "$*"), // Command line arguments
+            (5, 8, "$0"), // Program name
+        ];
+
+        for (line, col, expected_name) in test_cases {
+            let position = Position::new(line, col);
+            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+            println!("Position ({}, {}): Expected {}, Found: {:?}", line, col, expected_name, identifier_opt);
+        }
+    }
+
+    #[test]
+    fn test_global_variable_comprehensive_special_variables() {
+        let content = r#"
+def test_method
+  puts $1   # Numbered reference
+  puts $2   # Numbered reference
+  puts $_   # Last input line
+  puts $!   # Last exception
+  puts $$   # Process ID
+  puts $?   # Exit status
+  puts $&   # Last match
+  puts $~   # Last match info
+  puts $*   # Command line arguments
+  puts $0   # Program name
+end
+"#;
+        let analyzer = create_analyzer(content);
+
+        // Test comprehensive set of special global variables
+        let test_cases = vec![
+            (2, 8, "$1"),  // Numbered reference
+            (3, 8, "$2"),  // Numbered reference
+            (4, 8, "$_"),  // Last input line
+            (5, 8, "$!"),  // Last exception
+            (6, 8, "$$"),  // Process ID
+            (7, 8, "$?"),  // Exit status
+            (8, 8, "$&"),  // Last match
+            (9, 8, "$~"),  // Last match info
+            (10, 8, "$*"), // Command line arguments
+            (11, 8, "$0"), // Program name
+        ];
+
+        for (line, col, expected_name) in test_cases {
+            let position = Position::new(line, col);
+            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+
+            let identifier = identifier_opt.expect(&format!(
+                "Expected to find variable identifier for {}",
+                expected_name
+            ));
+            assert_variable_identifier(&identifier, expected_name);
+            assert_namespace_context(&namespace, &["Object"]);
+
+            // Verify it has proper global variable type
+            match identifier {
+                Identifier::RubyVariable { iden } => {
+                    match iden.variable_type() {
+                        crate::types::ruby_variable::RubyVariableType::Global => {
+                            // All special global variables should be Global type
                         }
                         _ => panic!("Expected Global variable type for {}", expected_name),
                     }

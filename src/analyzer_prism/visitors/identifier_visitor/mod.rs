@@ -6,6 +6,7 @@ use crate::{
 use lsp_types::Position;
 use ruby_prism::*;
 
+mod back_reference_read_node;
 mod block_node;
 mod call_node;
 mod class_node;
@@ -14,6 +15,7 @@ mod constant_write_node;
 mod def_node;
 mod local_variable_read_node;
 mod module_node;
+mod numbered_reference_read_node;
 mod parameters_node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +221,18 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_global_variable_write_node_entry(node);
         visit_global_variable_write_node(self, node);
         self.process_global_variable_write_node_exit(node);
+    }
+
+    fn visit_numbered_reference_read_node(&mut self, node: &NumberedReferenceReadNode) {
+        self.process_numbered_reference_read_node_entry(node);
+        visit_numbered_reference_read_node(self, node);
+        self.process_numbered_reference_read_node_exit(node);
+    }
+
+    fn visit_back_reference_read_node(&mut self, node: &BackReferenceReadNode) {
+        self.process_back_reference_read_node_entry(node);
+        visit_back_reference_read_node(self, node);
+        self.process_back_reference_read_node_exit(node);
     }
 }
 

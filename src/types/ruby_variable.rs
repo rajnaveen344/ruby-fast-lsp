@@ -273,10 +273,31 @@ mod tests {
 
     #[test]
     fn test_global_variable_special_valid() {
+        // Numbered references
         let result = RubyVariable::new("$1", RubyVariableType::Global);
         assert!(result.is_ok());
+        
+        let result = RubyVariable::new("$2", RubyVariableType::Global);
+        assert!(result.is_ok());
 
+        // Special global variables
         let result = RubyVariable::new("$_", RubyVariableType::Global);
+        assert!(result.is_ok());
+        
+        let result = RubyVariable::new("$!", RubyVariableType::Global);
+        assert!(result.is_ok());
+        
+        let result = RubyVariable::new("$$", RubyVariableType::Global);
+        assert!(result.is_ok());
+        
+        // Other common special globals
+        let result = RubyVariable::new("$?", RubyVariableType::Global);
+        assert!(result.is_ok());
+        
+        let result = RubyVariable::new("$&", RubyVariableType::Global);
+        assert!(result.is_ok());
+        
+        let result = RubyVariable::new("$~", RubyVariableType::Global);
         assert!(result.is_ok());
     }
 
