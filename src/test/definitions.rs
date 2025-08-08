@@ -126,4 +126,112 @@ mod tests {
         // `top_method` call at top level → method definition
         snapshot_definitions(&harness, "goto/method_single.rb", 32, 0, "top_method_def").await;
     }
+
+    /// Validate method definitions across modules when both modules are included in a class.
+    /// Tests the scenario where a method in module A calls a method in module B.
+    #[tokio::test]
+    async fn goto_module_method_cross_ref() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/module_method_cross_ref.rb").await;
+
+        // `method_from_b` call inside ModuleA's method_from_a → method definition in ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            3,
+            4,
+            "method_from_b_def_in_module_b",
+        )
+        .await;
+
+        // `method_from_a` call in TestClass → method definition in ModuleA
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            26,
+            4,
+            "method_from_a_def_in_module_a",
+        )
+        .await;
+
+        // `method_from_b` call in TestClass → method definition in ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            27,
+            4,
+            "method_from_b_def_in_module_b_from_class",
+        )
+        .await;
+
+        // `helper_method` call in TestClass → method definition in ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            31,
+            4,
+            "helper_method_def_in_module_b",
+        )
+        .await;
+
+        // `method_from_a` call on instance → method definition in ModuleA
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            38,
+            14,
+            "method_from_a_def_instance_call",
+        )
+        .await;
+
+        // `method_from_b` call on instance → method definition in ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/module_method_cross_ref.rb",
+            39,
+            14,
+            "method_from_b_def_instance_call",
+        )
+        .await;
+    }
+
+    /// Validate method definitions across modules with partially qualified includes in nested namespaces.
+    /// Tests the scenario where modules are included using partially qualified names within a namespace.
+    #[tokio::test]
+    async fn goto_nested_namespace_include() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/nested_namespace_include.rb").await;
+
+
+
+        // `method_from_b` call inside Outer::ModuleA's method_from_a → method definition in Outer::ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/nested_namespace_include.rb",
+            4,
+            6,
+            "method_from_b_def_in_outer_module_b",
+        )
+        .await;
+
+        // `method_from_a` call in Outer::TestClass → method definition in Outer::ModuleA
+        snapshot_definitions(
+            &harness,
+            "goto/nested_namespace_include.rb",
+            19,
+            6,
+            "method_from_a_def_in_outer_module_a",
+        )
+        .await;
+
+        // `method_from_b` call in Outer::TestClass → method definition in Outer::ModuleB
+        snapshot_definitions(
+            &harness,
+            "goto/nested_namespace_include.rb",
+            20,
+            6,
+            "method_from_b_def_in_outer_module_b_from_class",
+        )
+        .await;
+    }
 }

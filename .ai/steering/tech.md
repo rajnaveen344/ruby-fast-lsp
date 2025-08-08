@@ -72,6 +72,29 @@ cross build --release --target x86_64-unknown-linux-gnu
 ./create_vsix.sh --rebuild
 ```
 
+## Critical Implementation Notes
+
+### LSP Position Handling
+- **⚠️ CRITICAL**: LSP uses **0-indexed** line and character positions
+- **Common Bug**: Test definitions often use 1-indexed positions by mistake
+- **Position Structure**: `Position { line: 0, character: 0 }` = first line, first character
+- **Range Structure**: `Range { start: Position, end: Position }` where end is exclusive
+- **Debugging**: Always verify line numbers match between test expectations and actual AST positions
+
+### LSP Tools MCP Integration
+- **MCP Server**: Integrated LSP Tools MCP for enhanced development capabilities
+- **Available Tools**: 
+  - `mcp_LSP_Tools_find_regex_position`: Find regex matches with precise positions
+  - `mcp_LSP_Tools_list_allowed_directories`: List accessible directories
+- **Position Format**: All MCP tools return 0-indexed positions consistent with LSP protocol
+- **Usage**: Useful for debugging position-related issues and validating AST node locations
+
+### Testing Best Practices
+- **Snapshot Testing**: Use `cargo insta review` to accept/reject test changes
+- **Position Verification**: Always use `cat -n` to verify actual line numbers in test files
+- **Debug Output**: Add temporary debug prints to trace position calculations
+- **Line Counting**: Remember that blank lines and comment lines count in line numbering
+
 ## Build Configuration
 
 - **Release Profile**: Optimized for size (`opt-level = "z"`) with debug symbols stripped

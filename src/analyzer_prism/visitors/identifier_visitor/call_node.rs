@@ -10,7 +10,11 @@ use super::{IdentifierVisitor, IdentifierType};
 
 impl IdentifierVisitor {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
-        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
+        if self.is_result_set() {
+            return;
+        }
+        
+        if !self.is_position_in_location(&node.location()) {
             return;
         }
 
