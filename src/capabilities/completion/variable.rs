@@ -24,8 +24,8 @@ pub fn find_variable_completions(
                         completions.push(CompletionItem {
                             label: var_name,
                             label_details: Some(CompletionItemLabelDetails {
-                                detail: None,
-                                description: Some("local_variable".to_string()),
+                                detail: Some(" local_variable".to_string()),
+                                description: None,
                             }),
                             kind: Some(CompletionItemKind::VARIABLE),
                             ..Default::default()

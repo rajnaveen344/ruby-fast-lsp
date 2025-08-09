@@ -131,17 +131,17 @@ impl ConstantCompletionItem {
         match &entry.kind {
             EntryKind::Class { superclass, .. } => {
                 if let Some(parent) = superclass {
-                    Some(format!("< {}", parent))
+                    Some(format!(" < {}", parent))
                 } else {
-                    Some("class".to_string())
+                    Some(" class".to_string())
                 }
             }
-            EntryKind::Module { .. } => Some("module".to_string()),
+            EntryKind::Module { .. } => Some(" module".to_string()),
             EntryKind::Constant { value, .. } => {
                 if let Some(val) = value {
-                    Some(format!("= {}", val))
+                    Some(format!(" = {}", val))
                 } else {
-                    Some("constant".to_string())
+                    Some(" constant".to_string())
                 }
             }
             _ => None,
