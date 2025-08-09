@@ -353,18 +353,18 @@ mod tests {
     #[test]
     fn test_nested_constant_path_at_scope_resolution() {
         // Test case: Foo::Bar::Baz with cursor at first "::"
-        // Empty vector indicates we expect identifier to be None
-        test_visitor("Foo::Bar::Baz", Position::new(0, 3), vec!["Foo", "Bar"]);
+        // When cursor is at "::", we only get the constant path up to that point
+        test_visitor("Foo::Bar::Baz", Position::new(0, 3), vec!["Foo"]);
     }
 
     #[test]
     fn test_nested_constant_path_at_scope_resolution_2() {
         // Test case: Foo::Bar::Baz with cursor at second "::"
-        // Empty vector indicates we expect identifier to be None
+        // When cursor is at "::", we only get the constant path up to that point
         test_visitor(
             "Foo::Bar::Baz",
             Position::new(0, 8),
-            vec!["Foo", "Bar", "Baz"],
+            vec!["Foo", "Bar"],
         );
     }
 

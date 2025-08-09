@@ -250,15 +250,21 @@ impl ConstantCompletionEngine {
         context: &ConstantCompletionContext,
     ) -> Vec<ConstantCompletionItem> {
         let mut candidates = Vec::new();
+        let mut seen_fqns = std::collections::HashSet::new();
 
         // Search through all definitions in the index
         for (fqn, entries) in &index.definitions {
-            for entry in entries {
-                // Only consider constant-like entries
-                if !self.is_constant_entry(entry) {
-                    continue;
-                }
+            // Skip if we've already processed this FQN
+            if seen_fqns.contains(fqn) {
+                continue;
+            }
 
+            // Find the best entry for this FQN (prefer the first constant-like entry)
+            let best_entry = entries
+                .iter()
+                .find(|entry| self.is_constant_entry(entry));
+
+            if let Some(entry) = best_entry {
                 // Apply namespace filtering if qualified
                 if let Some(namespace_prefix) = &context.namespace_prefix {
                     if !fqn.starts_with(namespace_prefix) {
@@ -269,6 +275,7 @@ impl ConstantCompletionEngine {
                 // Check if the name matches the partial input
                 if self.matcher.matches(entry, &context.partial_name) {
                     candidates.push(ConstantCompletionItem::new(entry.clone(), context));
+                    seen_fqns.insert(fqn.clone());
                 }
             }
         }

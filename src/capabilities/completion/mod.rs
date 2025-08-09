@@ -321,4 +321,118 @@ end
             _ => panic!("Expected array response"),
         }
     }
+
+    #[tokio::test]
+    async fn test_find_completion_no_duplicate_constants() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+class TestClass
+  MY_CONSTANT = 42
+  
+  # Same constant defined again (could happen in real code)
+  MY_CONSTANT = 100
+  
+  # Another context where the same constant might be referenced
+  def some_method
+    MY_CONSTANT = 200  # Local redefinition
+  end
+  
+  MY
+end
+"#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Manually add multiple entries for the same constant to simulate the duplicate issue
+         {
+             let index_arc = server.index();
+             let mut index_guard = index_arc.lock();
+
+             // Use the same FQN structure as the indexed constant (Object::TestClass::MY_CONSTANT)
+             let fqn = FullyQualifiedName::try_from("Object::TestClass::MY_CONSTANT").unwrap();
+             
+             // Add the same constant multiple times (simulating multiple definitions)
+              let entry1 = Entry {
+                  fqn: fqn.clone(),
+                  kind: EntryKind::Constant { 
+                      value: Some("42".to_string()),
+                      visibility: None,
+                  },
+                  location: Location {
+                      uri: uri.clone(),
+                      range: Range {
+                          start: Position { line: 1, character: 2 },
+                          end: Position { line: 1, character: 15 },
+                      },
+                  },
+              };
+
+              let entry2 = Entry {
+                  fqn: fqn.clone(),
+                  kind: EntryKind::Constant { 
+                      value: Some("42".to_string()),
+                      visibility: None,
+                  },
+                  location: Location {
+                      uri: uri.clone(),
+                      range: Range {
+                          start: Position { line: 1, character: 2 },
+                          end: Position { line: 1, character: 15 },
+                      },
+                  },
+              };
+
+             // Add both entries to create duplicates
+             index_guard.add_entry(entry1);
+             index_guard.add_entry(entry2);
+         }
+
+        // At this point, the index should contain multiple entries for MY_CONSTANT:
+        // - 3 from the source code (multiple definitions)
+        // - 2 from manually added duplicates
+        // The deduplication logic should ensure only 1 completion item is returned
+
+        // Test completion at position where "MY" is typed
+        let position = Position {
+            line: 11,
+            character: 4,
+        }; // After "MY"
+        let response = find_completion_at_position(&server, uri, position).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // Filter for MY_CONSTANT completions
+                let my_constant_completions: Vec<_> = completions
+                    .iter()
+                    .filter(|c| c.label == "MY_CONSTANT")
+                    .collect();
+
+
+
+                // Should have exactly one MY_CONSTANT completion, not duplicates
+                assert_eq!(
+                    my_constant_completions.len(),
+                    1,
+                    "Should have exactly one MY_CONSTANT completion, found: {}",
+                    my_constant_completions.len()
+                );
+
+                if let Some(completion) = my_constant_completions.first() {
+                    assert_eq!(completion.kind, Some(CompletionItemKind::CONSTANT));
+                    assert_eq!(completion.label, "MY_CONSTANT");
+                }
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
 }
