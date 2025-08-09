@@ -359,10 +359,9 @@ end
         let response = find_completion_at_position(&server, uri, position, None).await;
 
         match response {
-            CompletionResponse::Array(completions) => {
+            CompletionResponse::Array(_) => {
                 // Should still provide completions (local variables, constants, etc.)
                 // The exact behavior depends on the implementation, but it shouldn't crash
-                assert!(completions.len() >= 0); // Just ensure it doesn't crash
             }
             _ => panic!("Expected array response"),
         }

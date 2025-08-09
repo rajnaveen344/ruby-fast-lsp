@@ -57,16 +57,6 @@ impl CompletionRanker {
         // Boost for shorter names (prefer simpler constants)
         score += 1.0 / (candidate.name.len() as f64).max(1.0);
 
-        // Boost for common patterns
-        if self.is_common_constant(&candidate.name) {
-            score += 1.0;
-        }
-
-        // Boost for Ruby built-in constants
-        if self.is_builtin_constant(&candidate.name) {
-            score += 0.5;
-        }
-
         // Penalty for very long names
         if candidate.name.len() > 20 {
             score -= 0.5;
@@ -80,7 +70,7 @@ impl CompletionRanker {
         score
     }
 
-    fn namespace_proximity_score(&self, fqn: &FullyQualifiedName, scope_stack: &[Scope]) -> f64 {
+    fn namespace_proximity_score(&self, fqn: &FullyQualifiedName, _scope_stack: &[Scope]) -> f64 {
         // Calculate how "close" this constant is to the current scope
         // Higher score for constants in the same or nearby namespaces
 
@@ -90,53 +80,6 @@ impl CompletionRanker {
         } else {
             0.0
         }
-    }
-
-    fn is_common_constant(&self, name: &str) -> bool {
-        // Boost common Ruby constants
-        matches!(
-            name,
-            "String"
-                | "Array"
-                | "Hash"
-                | "Integer"
-                | "Float"
-                | "Object"
-                | "Class"
-                | "Module"
-                | "Numeric"
-                | "Enumerable"
-                | "Comparable"
-                | "Kernel"
-                | "BasicObject"
-        )
-    }
-
-    fn is_builtin_constant(&self, name: &str) -> bool {
-        // Boost Ruby built-in constants and common library constants
-        matches!(
-            name,
-            "File"
-                | "Dir"
-                | "Time"
-                | "Date"
-                | "DateTime"
-                | "Regexp"
-                | "Range"
-                | "Proc"
-                | "Method"
-                | "Symbol"
-                | "Thread"
-                | "Mutex"
-                | "IO"
-                | "STDOUT"
-                | "STDERR"
-                | "STDIN"
-                | "ENV"
-                | "ARGV"
-                | "RUBY_VERSION"
-                | "RUBY_PLATFORM"
-        )
     }
 
     /// Calculate relevance based on fuzzy match quality
@@ -163,7 +106,7 @@ impl CompletionRanker {
         let mut last_match_pos = 0;
         let mut consecutive_matches = 0;
 
-        for (i, ch) in partial_lower.chars().enumerate() {
+        for (_, ch) in partial_lower.chars().enumerate() {
             if let Some(pos) = name_lower[last_match_pos..].find(ch) {
                 let actual_pos = last_match_pos + pos;
 
@@ -287,7 +230,7 @@ mod tests {
         indexer::entry::{entry_kind::EntryKind, Entry},
         types::fully_qualified_name::FullyQualifiedName,
     };
-    use tower_lsp::lsp_types::{Position, Location, Url};
+    use tower_lsp::lsp_types::{Location, Position, Url};
 
     fn create_test_item(name: &str, kind: EntryKind) -> ConstantCompletionItem {
         let entry = Entry {
@@ -302,24 +245,6 @@ mod tests {
         let context = ConstantCompletionContext::new(Position::new(0, 0), vec![], "".to_string());
 
         ConstantCompletionItem::new(entry, &context)
-    }
-
-    #[test]
-    fn test_common_constant_boost() {
-        let ranker = CompletionRanker::new();
-
-        assert!(ranker.is_common_constant("String"));
-        assert!(ranker.is_common_constant("Array"));
-        assert!(!ranker.is_common_constant("MyCustomClass"));
-    }
-
-    #[test]
-    fn test_builtin_constant_boost() {
-        let ranker = CompletionRanker::new();
-
-        assert!(ranker.is_builtin_constant("File"));
-        assert!(ranker.is_builtin_constant("STDOUT"));
-        assert!(!ranker.is_builtin_constant("MyConstant"));
     }
 
     #[test]
