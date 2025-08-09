@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_write_node, visit_def_node,
-    visit_module_node, CallNode, ClassNode, ConstantWriteNode, DefNode, ModuleNode, Visit,
+    visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode, ModuleNode, SingletonClassNode, Visit,
 };
 use tower_lsp::lsp_types::SymbolKind;
 
@@ -248,9 +248,23 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         self.pop_visibility_scope();
     }
 
+    fn process_singleton_class_node_entry(&mut self, _node: &SingletonClassNode) {
+        self.scope_tracker.enter_singleton();
+        // Push new visibility scope for singleton class (starts with public visibility)
+        self.push_visibility_scope();
+    }
+
+    fn process_singleton_class_node_exit(&mut self, _node: &SingletonClassNode) {
+        self.scope_tracker.exit_singleton();
+        // Pop visibility scope when exiting singleton class
+        self.pop_visibility_scope();
+    }
+
     fn process_def_node_entry(&mut self, node: &DefNode) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method_kind = if node.receiver().is_some() {
+            Some(MethodKind::Class)
+        } else if self.scope_tracker.in_singleton() {
             Some(MethodKind::Class)
         } else {
             Some(MethodKind::Instance)
@@ -265,7 +279,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             .document
             .prism_location_to_lsp_location(&node.location());
         let scope_id = self.document.position_to_offset(method_loc.range.start);
-        let scope_kind = if node.receiver().is_some() {
+        let scope_kind = if node.receiver().is_some() || self.scope_tracker.in_singleton() {
             crate::types::scope::LVScopeKind::ClassMethod
         } else {
             crate::types::scope::LVScopeKind::InstanceMethod
@@ -620,10 +634,210 @@ end
         let class_symbol = symbols.iter().find(|s| s.name == "MyClass").unwrap();
         assert_eq!(class_symbol.kind, SymbolKind::CLASS);
 
-        // Singleton method might not be extracted yet - that's ok for now
-        if let Some(singleton_method) = symbols.iter().find(|s| s.name == "singleton_method") {
-            assert_eq!(singleton_method.kind, SymbolKind::METHOD);
-        }
+        // Should find the singleton method and it should be a class method
+        let singleton_method = symbols.iter().find(|s| s.name == "singleton_method").unwrap();
+        assert_eq!(singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
+    }
+
+    #[test]
+    fn test_module_with_singleton_class_methods() {
+        let content = r#"
+module A
+  class << self
+    def hello
+    end
+  end
+
+  private
+
+  def helloa
+  end
+
+  def self.hellob
+  end
+end
+"#;
+        let symbols = extract_symbols_from_content(content);
+
+        // Should find the module
+        let module_symbol = symbols.iter().find(|s| s.name == "A").unwrap();
+        assert_eq!(module_symbol.kind, SymbolKind::MODULE);
+
+        // Should find hello method inside singleton class - should be class method
+        let hello_method = symbols.iter().find(|s| s.name == "hello").unwrap();
+        assert_eq!(hello_method.kind, SymbolKind::METHOD);
+        assert_eq!(hello_method.method_kind, Some(MethodKind::Class));
+
+        // Should find helloa method - should be instance method with private visibility
+        let helloa_method = symbols.iter().find(|s| s.name == "helloa").unwrap();
+        assert_eq!(helloa_method.kind, SymbolKind::METHOD);
+        assert_eq!(helloa_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(helloa_method.visibility, Some(MethodVisibility::Private));
+
+        // Should find hellob method with self receiver - should be class method
+        let hellob_method = symbols.iter().find(|s| s.name == "hellob").unwrap();
+        assert_eq!(hellob_method.kind, SymbolKind::METHOD);
+        assert_eq!(hellob_method.method_kind, Some(MethodKind::Class));
+    }
+
+    #[test]
+    fn test_protected_and_private_singleton_methods() {
+        let content = r#"
+class TestClass
+  class << self
+    def public_singleton_method
+    end
+
+    protected
+
+    def protected_singleton_method
+    end
+
+    private
+
+    def private_singleton_method
+    end
+
+    public
+
+    def another_public_singleton_method
+    end
+  end
+
+  def instance_method
+  end
+
+  def self.class_method_with_self
+  end
+
+  protected
+
+  def protected_instance_method
+  end
+
+  private
+
+  def private_instance_method
+  end
+end
+"#;
+        let symbols = extract_symbols_from_content(content);
+
+        // Should find the class
+        let class_symbol = symbols.iter().find(|s| s.name == "TestClass").unwrap();
+        assert_eq!(class_symbol.kind, SymbolKind::CLASS);
+
+        // Should find public_singleton_method - should be class method with public visibility
+        let public_singleton_method = symbols.iter().find(|s| s.name == "public_singleton_method").unwrap();
+        assert_eq!(public_singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(public_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(public_singleton_method.visibility, Some(MethodVisibility::Public));
+
+        // Should find protected_singleton_method - should be class method with protected visibility
+        let protected_singleton_method = symbols.iter().find(|s| s.name == "protected_singleton_method").unwrap();
+        assert_eq!(protected_singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(protected_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(protected_singleton_method.visibility, Some(MethodVisibility::Protected));
+
+        // Should find private_singleton_method - should be class method with private visibility
+        let private_singleton_method = symbols.iter().find(|s| s.name == "private_singleton_method").unwrap();
+        assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(private_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(private_singleton_method.visibility, Some(MethodVisibility::Private));
+
+        // Should find another_public_singleton_method - should be class method with public visibility
+        let another_public_singleton_method = symbols.iter().find(|s| s.name == "another_public_singleton_method").unwrap();
+        assert_eq!(another_public_singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(another_public_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(another_public_singleton_method.visibility, Some(MethodVisibility::Public));
+
+        // Should find instance_method - should be instance method with public visibility
+        let instance_method = symbols.iter().find(|s| s.name == "instance_method").unwrap();
+        assert_eq!(instance_method.kind, SymbolKind::METHOD);
+        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
+
+        // Should find class_method_with_self - should be class method with public visibility
+        let class_method_with_self = symbols.iter().find(|s| s.name == "class_method_with_self").unwrap();
+        assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
+        assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
+        assert_eq!(class_method_with_self.visibility, Some(MethodVisibility::Public));
+
+        // Should find protected_instance_method - should be instance method with protected visibility
+        let protected_instance_method = symbols.iter().find(|s| s.name == "protected_instance_method").unwrap();
+        assert_eq!(protected_instance_method.kind, SymbolKind::METHOD);
+        assert_eq!(protected_instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(protected_instance_method.visibility, Some(MethodVisibility::Protected));
+
+        // Should find private_instance_method - should be instance method with private visibility
+        let private_instance_method = symbols.iter().find(|s| s.name == "private_instance_method").unwrap();
+        assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
+        assert_eq!(private_instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(private_instance_method.visibility, Some(MethodVisibility::Private));
+    }
+
+    #[test]
+    fn test_private_singleton_methods() {
+        let content = r#"
+class TestClass
+  class << self
+    def singleton_method
+    end
+
+    private
+
+    def private_singleton_method
+    end
+  end
+
+  def instance_method
+  end
+
+  def self.class_method_with_self
+  end
+
+  private
+
+  def private_instance_method
+  end
+end
+"#;
+        let symbols = extract_symbols_from_content(content);
+
+        // Should find the class
+        let class_symbol = symbols.iter().find(|s| s.name == "TestClass").unwrap();
+        assert_eq!(class_symbol.kind, SymbolKind::CLASS);
+
+        // Should find singleton_method - should be class method with public visibility
+        let singleton_method = symbols.iter().find(|s| s.name == "singleton_method").unwrap();
+        assert_eq!(singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(singleton_method.visibility, Some(MethodVisibility::Public));
+
+        // Should find private_singleton_method - should be class method with private visibility
+        let private_singleton_method = symbols.iter().find(|s| s.name == "private_singleton_method").unwrap();
+        assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
+        assert_eq!(private_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(private_singleton_method.visibility, Some(MethodVisibility::Private));
+
+        // Should find instance_method - should be instance method with public visibility
+        let instance_method = symbols.iter().find(|s| s.name == "instance_method").unwrap();
+        assert_eq!(instance_method.kind, SymbolKind::METHOD);
+        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
+
+        // Should find class_method_with_self - should be class method with public visibility
+        let class_method_with_self = symbols.iter().find(|s| s.name == "class_method_with_self").unwrap();
+        assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
+        assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
+        assert_eq!(class_method_with_self.visibility, Some(MethodVisibility::Public));
+
+        // Should find private_instance_method - should be instance method with private visibility
+        let private_instance_method = symbols.iter().find(|s| s.name == "private_instance_method").unwrap();
+        assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
+        assert_eq!(private_instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(private_instance_method.visibility, Some(MethodVisibility::Private));
     }
 
     #[test]
@@ -893,5 +1107,11 @@ impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
     fn visit_call_node(&mut self, node: &CallNode<'a>) {
         self.process_call_node_entry(node);
         visit_call_node(self, node);
+    }
+
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'a>) {
+        self.process_singleton_class_node_entry(node);
+        visit_singleton_class_node(self, node);
+        self.process_singleton_class_node_exit(node);
     }
 }
