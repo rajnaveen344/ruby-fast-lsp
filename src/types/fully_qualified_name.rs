@@ -48,6 +48,31 @@ impl FullyQualifiedName {
             FullyQualifiedName::Variable(_) => true, // Variables are not namespaced
         }
     }
+
+    /// Get the final name component (last part of the fully qualified name)
+    pub fn name(&self) -> String {
+        match self {
+            FullyQualifiedName::Constant(ns) => {
+                ns.last().map(|c| c.to_string()).unwrap_or_default()
+            }
+            FullyQualifiedName::Method(_, method) => method.to_string(),
+            FullyQualifiedName::Variable(variable) => variable.to_string(),
+        }
+    }
+
+    /// Check if this FQN starts with the given prefix
+    pub fn starts_with(&self, prefix: &FullyQualifiedName) -> bool {
+        let self_parts = self.namespace_parts();
+        let prefix_parts = prefix.namespace_parts();
+        
+        if prefix_parts.len() > self_parts.len() {
+            return false;
+        }
+        
+        self_parts.iter()
+            .zip(prefix_parts.iter())
+            .all(|(a, b)| a == b)
+    }
 }
 
 impl From<Identifier> for FullyQualifiedName {
@@ -68,6 +93,28 @@ impl From<Identifier> for FullyQualifiedName {
 impl From<Vec<RubyConstant>> for FullyQualifiedName {
     fn from(value: Vec<RubyConstant>) -> Self {
         FullyQualifiedName::namespace(value)
+    }
+}
+
+impl TryFrom<&str> for FullyQualifiedName {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            return Err("Empty string cannot be converted to FullyQualifiedName".to_string());
+        }
+
+        let parts: Vec<&str> = value.split("::").collect();
+        let mut constants = Vec::new();
+
+        for part in parts {
+            match RubyConstant::new(part) {
+                Ok(constant) => constants.push(constant),
+                Err(e) => return Err(format!("Invalid constant '{}': {}", part, e)),
+            }
+        }
+
+        Ok(FullyQualifiedName::namespace(constants))
     }
 }
 

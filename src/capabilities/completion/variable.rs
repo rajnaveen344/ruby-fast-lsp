@@ -1,27 +1,20 @@
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse, Position,
-    Url,
-};
 use std::collections::HashSet;
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionItemLabelDetails};
 
 use crate::{
-    analyzer_prism::RubyPrismAnalyzer, indexer::entry::entry_kind::EntryKind,
-    server::RubyLanguageServer,
+    indexer::entry::entry_kind::EntryKind,
+    types::{ruby_document::RubyDocument, scope::LVScope as Scope},
 };
 
-pub async fn handle_completion(
-    server: &RubyLanguageServer,
-    uri: Url,
-    position: Position,
-) -> CompletionResponse {
-    let document = server.get_doc(&uri).unwrap();
-    let analyzer = RubyPrismAnalyzer::new(uri, document.content.clone());
-    let (_, _, lv_stack_at_pos) = analyzer.get_identifier(position);
-
+pub fn find_variable_completions(
+    document: &RubyDocument,
+    scope_stack: &[Scope],
+) -> Vec<CompletionItem> {
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
-    for scope in lv_stack_at_pos.iter().rev() {
+    // Add local variable completions
+    for scope in scope_stack.iter().rev() {
         let scope_id = scope.scope_id();
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
@@ -47,5 +40,5 @@ pub async fn handle_completion(
         }
     }
 
-    CompletionResponse::Array(completions)
+    completions
 }

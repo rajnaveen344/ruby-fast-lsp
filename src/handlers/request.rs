@@ -1,8 +1,11 @@
-use crate::capabilities::{completion, definitions, document_symbols, inlay_hints, references, semantic_tokens, workspace_symbols};
+use crate::capabilities::{
+    completion, definitions, document_symbols, inlay_hints, references, semantic_tokens,
+    workspace_symbols,
+};
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
-use tower_lsp::lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::*;
 
 pub async fn handle_goto_definition(
     lang_server: &RubyLanguageServer,
@@ -71,7 +74,7 @@ pub async fn handle_completion(
     debug!("Completion request received with params {:?}", params);
 
     Ok(Some(
-        completion::handle_completion(lang_server, uri, position).await,
+        completion::find_completion_at_position(lang_server, uri, position).await,
     ))
 }
 

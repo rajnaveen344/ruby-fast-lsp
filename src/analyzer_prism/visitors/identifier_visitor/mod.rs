@@ -69,7 +69,8 @@ impl IdentifierVisitor {
         let start_offset = location.start_offset();
         let end_offset = location.end_offset();
 
-        position_offset >= start_offset && position_offset < end_offset
+        // Include the end position for completion support (when cursor is right after an identifier)
+        position_offset >= start_offset && position_offset <= end_offset
     }
 
     pub fn set_result(
