@@ -97,15 +97,20 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
         detail_parts.push(existing_detail.clone());
     }
     
-    // Add visibility information for methods
+    // Add visibility information only for instance methods
+    // Class methods don't follow the same visibility rules in Ruby
     if let Some(visibility) = &ruby_symbol.visibility {
-        match visibility {
-            MethodVisibility::Private => detail_parts.push("private".to_string()),
-            MethodVisibility::Protected => detail_parts.push("protected".to_string()),
-            MethodVisibility::Public => {
-                // Only show "public" explicitly for methods to distinguish from default
-                if matches!(ruby_symbol.kind, tower_lsp::lsp_types::SymbolKind::METHOD | tower_lsp::lsp_types::SymbolKind::FUNCTION) {
-                    detail_parts.push("public".to_string());
+        let is_class_method = matches!(ruby_symbol.method_kind, Some(MethodKind::Class));
+        
+        if !is_class_method {
+            match visibility {
+                MethodVisibility::Private => detail_parts.push("private".to_string()),
+                MethodVisibility::Protected => detail_parts.push("protected".to_string()),
+                MethodVisibility::Public => {
+                    // Only show "public" explicitly for methods to distinguish from default
+                    if matches!(ruby_symbol.kind, tower_lsp::lsp_types::SymbolKind::METHOD | tower_lsp::lsp_types::SymbolKind::FUNCTION) {
+                        detail_parts.push("public".to_string());
+                    }
                 }
             }
         }
@@ -180,9 +185,9 @@ mod tests {
         assert_eq!(doc_symbol.name, "private_method");
         assert_eq!(doc_symbol.detail, Some("private • instance method".to_string()));
 
-        // Test protected method
-        let protected_method = RubySymbolContext {
-            name: "protected_method".to_string(),
+        // Test class method (should not include visibility)
+        let class_method = RubySymbolContext {
+            name: "class_method".to_string(),
             kind: SymbolKind::METHOD,
             detail: None,
             range: create_test_range(),
@@ -192,9 +197,9 @@ mod tests {
             method_kind: Some(MethodKind::Class),
         };
 
-        let doc_symbol = convert_to_document_symbol(protected_method);
-        assert_eq!(doc_symbol.name, "protected_method");
-        assert_eq!(doc_symbol.detail, Some("protected • class method".to_string()));
+        let doc_symbol = convert_to_document_symbol(class_method);
+        assert_eq!(doc_symbol.name, "class_method");
+        assert_eq!(doc_symbol.detail, Some("class method".to_string()));
 
         // Test public method
         let public_method = RubySymbolContext {
@@ -211,6 +216,22 @@ mod tests {
         let doc_symbol = convert_to_document_symbol(public_method);
         assert_eq!(doc_symbol.name, "public_method");
         assert_eq!(doc_symbol.detail, Some("public • instance method".to_string()));
+
+        // Test protected instance method
+        let protected_instance_method = RubySymbolContext {
+            name: "protected_instance_method".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Protected),
+            method_kind: Some(MethodKind::Instance),
+        };
+
+        let doc_symbol = convert_to_document_symbol(protected_instance_method);
+        assert_eq!(doc_symbol.name, "protected_instance_method");
+        assert_eq!(doc_symbol.detail, Some("protected • instance method".to_string()));
     }
 
     #[test]
