@@ -11,7 +11,7 @@ use crate::{
     analyzer_prism::visitors::index_visitor::IndexVisitor, server::RubyLanguageServer,
     types::ruby_document::RubyDocument,
 };
-use lsp_types::Url;
+use tower_lsp::lsp_types::Url;
 use parking_lot::RwLock;
 use ruby_prism::Visit;
 use std::sync::Arc;

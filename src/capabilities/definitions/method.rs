@@ -1,5 +1,5 @@
 use log::debug;
-use lsp_types::Location;
+use tower_lsp::lsp_types::Location;
 
 use crate::analyzer_prism::ReceiverKind;
 use crate::indexer::ancestor_chain::get_ancestor_chain;

@@ -4,7 +4,7 @@ use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::ruby_variable::RubyVariable;
 use crate::types::{ruby_document::RubyDocument, scope::LVScopeStack};
-use lsp_types::{Position, Url};
+use tower_lsp::lsp_types::{Position, Url};
 use ruby_prism::Visit;
 use visitors::identifier_visitor::IdentifierVisitor;
 

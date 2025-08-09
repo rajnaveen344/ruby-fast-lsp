@@ -3,7 +3,7 @@ use crate::{
     types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeStack},
 };
 
-use lsp_types::Position;
+use tower_lsp::lsp_types::Position;
 use ruby_prism::*;
 
 mod back_reference_read_node;
@@ -241,7 +241,7 @@ mod tests {
     use crate::analyzer_prism::ReceiverKind;
 
     use super::*;
-    use lsp_types::{Position, Url};
+    use tower_lsp::lsp_types::{Position, Url};
 
     // Helper function to test the full visitor behavior
     fn test_visitor(code: &str, position: Position, expected_parts: Vec<&str>) {

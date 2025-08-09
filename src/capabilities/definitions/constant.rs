@@ -1,5 +1,5 @@
 use log::debug;
-use lsp_types::Location;
+use tower_lsp::lsp_types::Location;
 
 use crate::analyzer_prism::Identifier;
 use crate::indexer::index::RubyIndex;

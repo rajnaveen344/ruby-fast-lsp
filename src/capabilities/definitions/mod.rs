@@ -3,7 +3,7 @@ pub mod method;
 pub mod variable;
 
 use log::info;
-use lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::server::RubyLanguageServer;

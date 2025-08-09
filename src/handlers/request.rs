@@ -1,7 +1,7 @@
 use crate::capabilities::{completion, definitions, inlay_hints, references, semantic_tokens};
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
-use lsp_types::*;
+use tower_lsp::lsp_types::*;
 use tower_lsp::jsonrpc::Result as LspResult;
 
 pub async fn handle_goto_definition(

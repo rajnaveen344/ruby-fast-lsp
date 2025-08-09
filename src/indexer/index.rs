@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use log::debug;
-use lsp_types::{Location, Url};
+use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};

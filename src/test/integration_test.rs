@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
-use lsp_types::{DidOpenTextDocumentParams, InitializeParams, TextDocumentItem, Url};
+use tower_lsp::lsp_types::{DidOpenTextDocumentParams, InitializeParams, TextDocumentItem, Url};
 use serde_json::Value;
 use tower_lsp::LanguageServer;
 
@@ -156,7 +156,7 @@ pub async fn snapshot_references(
     snapshot_name: &str,
 ) {
     use crate::handlers::request;
-    use lsp_types::{
+    use tower_lsp::lsp_types::{
         PartialResultParams, Position, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
         TextDocumentPositionParams, WorkDoneProgressParams,
     };
@@ -200,7 +200,7 @@ pub async fn snapshot_definitions(
     snapshot_name: &str,
 ) {
     use crate::handlers::request;
-    use lsp_types::{
+    use tower_lsp::lsp_types::{
         GotoDefinitionParams, PartialResultParams, Position, TextDocumentIdentifier,
         TextDocumentPositionParams, WorkDoneProgressParams,
     };
@@ -224,11 +224,11 @@ pub async fn snapshot_definitions(
     // If there is **no** definition then we snapshot an empty JSON array so callers can
     // assert on the absence of definitions without causing a test failure.
     let mut value = match res_opt {
-        Some(lsp_types::GotoDefinitionResponse::Array(loc)) => serde_json::to_value(&loc).unwrap(),
-        Some(lsp_types::GotoDefinitionResponse::Scalar(l)) => {
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Array(loc)) => serde_json::to_value(&loc).unwrap(),
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Scalar(l)) => {
             serde_json::to_value(&vec![l]).unwrap()
         }
-        Some(lsp_types::GotoDefinitionResponse::Link(ls)) => serde_json::to_value(&ls).unwrap(),
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Link(ls)) => serde_json::to_value(&ls).unwrap(),
         None => serde_json::json!([]),
     };
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lsp_types::Url;
+use tower_lsp::lsp_types::Url;
 use parking_lot::Mutex;
 use ruby_prism::*;
 

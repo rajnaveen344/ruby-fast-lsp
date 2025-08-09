@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use log::{debug, info};
-use lsp_types::{
+use tower_lsp::lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, Url,
     WorkDoneProgressOptions,

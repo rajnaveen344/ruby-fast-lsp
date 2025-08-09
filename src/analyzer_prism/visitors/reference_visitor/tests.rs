@@ -4,7 +4,7 @@ use crate::capabilities::references;
 use crate::handlers::helpers::{process_file_for_definitions, process_file_for_references};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use lsp_types::*;
+use tower_lsp::lsp_types::*;
 use parking_lot::RwLock;
 
 fn create_server() -> RubyLanguageServer {

@@ -7,7 +7,7 @@ use crate::handlers::helpers::{
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, info, warn};
-use lsp_types::*;
+use tower_lsp::lsp_types::*;
 use parking_lot::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
 

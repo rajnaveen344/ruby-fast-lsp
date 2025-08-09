@@ -1,7 +1,7 @@
 use crate::capabilities::semantic_tokens::{TOKEN_MODIFIERS_MAP, TOKEN_TYPES_MAP};
 use crate::types::ruby_document::RubyDocument;
 use log::debug;
-use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
+use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
 use ruby_prism::{
     visit_block_local_variable_node, visit_constant_path_node, visit_local_variable_and_write_node,
     visit_local_variable_operator_write_node, visit_local_variable_or_write_node,

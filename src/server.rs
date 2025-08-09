@@ -4,7 +4,7 @@ use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info};
-use lsp_types::{
+use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
     GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, InlayHintParams,
@@ -186,7 +186,7 @@ impl LanguageServer for RubyLanguageServer {
     async fn inlay_hint(
         &self,
         params: InlayHintParams,
-    ) -> LspResult<Option<Vec<lsp_types::InlayHint>>> {
+    ) -> LspResult<Option<Vec<tower_lsp::lsp_types::InlayHint>>> {
         info!(
             "Inlay hint request received for {:?}",
             params.text_document.uri.path()

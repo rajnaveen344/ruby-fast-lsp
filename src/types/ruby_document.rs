@@ -1,5 +1,5 @@
 use log::debug;
-use lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
+use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 use ruby_prism::{Location as PrismLocation, Visit};
 use std::{cmp, collections::BTreeMap};
 

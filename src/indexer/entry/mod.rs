@@ -4,7 +4,7 @@ pub mod entry_kind;
 use std::cmp::PartialEq;
 
 use entry_kind::EntryKind;
-use lsp_types::Location;
+use tower_lsp::lsp_types::Location;
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;

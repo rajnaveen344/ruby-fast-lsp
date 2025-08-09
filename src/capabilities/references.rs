@@ -1,5 +1,5 @@
 use log::info;
-use lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::analyzer_prism::{Identifier, ReceiverKind};

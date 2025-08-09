@@ -1,4 +1,4 @@
-use lsp_types::Location;
+use tower_lsp::lsp_types::Location;
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
 

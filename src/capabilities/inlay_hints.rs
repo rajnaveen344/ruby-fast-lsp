@@ -1,4 +1,4 @@
-use lsp_types::{
+use tower_lsp::lsp_types::{
     InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
     WorkDoneProgressOptions,
 };

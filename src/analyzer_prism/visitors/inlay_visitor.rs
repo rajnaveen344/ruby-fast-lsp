@@ -1,4 +1,4 @@
-use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
+use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 use ruby_prism::{visit_class_node, visit_module_node, Visit};
 
 use crate::types::ruby_document::RubyDocument;
@@ -104,7 +104,7 @@ impl<'a> Visit<'a> for InlayVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lsp_types::*;
+    use tower_lsp::lsp_types::*;
 
     #[test]
     fn test_inlay_visitor_module_definition() {

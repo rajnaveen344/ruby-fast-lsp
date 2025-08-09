@@ -1,4 +1,4 @@
-use lsp_types::{Location as LspLocation, Range};
+use tower_lsp::lsp_types::{Location as LspLocation, Range};
 
 use crate::types::{
     ruby_document::RubyDocument,

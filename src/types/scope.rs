@@ -3,7 +3,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use lsp_types::Location;
+use tower_lsp::lsp_types::Location;
 
 pub type LVScopeStack = Vec<LVScope>;
 pub type LVScopeId = usize;

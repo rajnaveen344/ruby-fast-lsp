@@ -4,7 +4,7 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, error, info};
-use lsp_types::*;
+use tower_lsp::lsp_types::*;
 use parking_lot::RwLock;
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;

@@ -1,4 +1,4 @@
-use lsp_types::{
+use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse, Position,
     Url,
 };
