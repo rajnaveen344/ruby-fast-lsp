@@ -884,7 +884,8 @@ end
                         // Should have at least one method scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
+                            crate::types::scope::LVScopeKind::InstanceMethod
+                                | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!(
@@ -942,7 +943,8 @@ end
                         // Should have method scope and potentially block scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
+                            crate::types::scope::LVScopeKind::InstanceMethod
+                                | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),
@@ -988,7 +990,8 @@ end
                         // Should have method scope and explicit block local scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
+                            crate::types::scope::LVScopeKind::InstanceMethod
+                                | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),
@@ -1033,7 +1036,8 @@ end
                         // Should have method scope and potentially rescue scope
                         assert!(scope_stack.iter().any(|scope| matches!(
                             scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod | crate::types::scope::LVScopeKind::ClassMethod
+                            crate::types::scope::LVScopeKind::InstanceMethod
+                                | crate::types::scope::LVScopeKind::ClassMethod
                         )));
                     }
                     _ => panic!("Expected Local variable type"),
@@ -1433,20 +1437,23 @@ end
 "#;
         let parse_result = ruby_prism::parse(content.as_bytes());
         println!("Parse result: {:#?}", parse_result);
-        
+
         let analyzer = create_analyzer(content);
-        
+
         let test_cases = vec![
-            (2, 8, "$&"),  // Last match
-            (3, 8, "$~"),  // Last match info
+            (2, 8, "$&"), // Last match
+            (3, 8, "$~"), // Last match info
             (4, 8, "$*"), // Command line arguments
             (5, 8, "$0"), // Program name
         ];
 
         for (line, col, expected_name) in test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
-            println!("Position ({}, {}): Expected {}, Found: {:?}", line, col, expected_name, identifier_opt);
+            let (identifier_opt, _, _) = analyzer.get_identifier(position);
+            println!(
+                "Position ({}, {}): Expected {}, Found: {:?}",
+                line, col, expected_name, identifier_opt
+            );
         }
     }
 
@@ -1678,9 +1685,7 @@ end
         }
 
         // Test top-level global variable (Object namespace only)
-        let top_level_test_cases = vec![
-            (1, 0, "$global_counter", &["Object"]),
-        ];
+        let top_level_test_cases = vec![(1, 0, "$global_counter", &["Object"])];
 
         for (line, col, expected_name, expected_namespace) in top_level_test_cases {
             let position = Position::new(line, col);
