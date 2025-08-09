@@ -6,9 +6,10 @@ use anyhow::Result;
 use log::{debug, info};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, InlayHintParams,
-    Location, ReferenceParams, SemanticTokensParams, SemanticTokensResult, Url,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams, 
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, 
+    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, 
+    SemanticTokensParams, SemanticTokensResult, Url,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
@@ -227,5 +228,25 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         result
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> LspResult<Option<DocumentSymbolResponse>> {
+        info!(
+            "Document symbol request received for {:?}",
+            params.text_document.uri.path()
+        );
+        
+        let start_time = Instant::now();
+        let result = request::handle_document_symbols(self, params).await;
+        
+        info!(
+            "[PERF] Document symbols completed in {:?}",
+            start_time.elapsed()
+        );
+        
+        Ok(result)
     }
 }

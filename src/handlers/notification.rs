@@ -37,6 +37,7 @@ pub async fn handle_initialize(
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        document_symbol_provider: Some(OneOf::Left(true)),
         inlay_hint_provider: Some(OneOf::Right(
             capabilities::inlay_hints::get_inlay_hints_capability(),
         )),
