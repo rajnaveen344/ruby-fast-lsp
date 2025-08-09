@@ -8,14 +8,15 @@ use tower_lsp::lsp_types::SymbolKind;
 
 use crate::{
     analyzer_prism::scope_tracker::ScopeTracker,
-    capabilities::document_symbols::{MethodType, RubySymbolContext, SymbolVisibility},
+    capabilities::document_symbols::RubySymbolContext,
+    indexer::entry::{MethodKind, MethodVisibility},
     types::ruby_document::RubyDocument,
 };
 
 pub struct DocumentSymbolsVisitor<'a> {
     flat_symbols: Vec<(RubySymbolContext, Option<usize>)>, // (symbol, parent_index)
     document: &'a RubyDocument,
-    current_visibility: SymbolVisibility,
+    visibility_stack: Vec<MethodVisibility>, // Stack of visibility states for nested scopes
     scope_tracker: ScopeTracker,
     scope_to_symbol_index: HashMap<usize, usize>, // scope_id -> symbol_index
 }
@@ -25,9 +26,34 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         Self {
             flat_symbols: Vec::new(),
             document,
-            current_visibility: SymbolVisibility::Public,
+            visibility_stack: vec![MethodVisibility::Public], // Start with public visibility
             scope_tracker: ScopeTracker::new(document),
             scope_to_symbol_index: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Get the current visibility (top of the stack)
+    fn current_visibility(&self) -> MethodVisibility {
+        *self.visibility_stack.last().unwrap_or(&MethodVisibility::Public)
+    }
+
+    /// Push a new visibility scope (when entering a class/module)
+    fn push_visibility_scope(&mut self) {
+        // New scopes start with public visibility
+        self.visibility_stack.push(MethodVisibility::Public);
+    }
+
+    /// Pop the current visibility scope (when exiting a class/module)
+    fn pop_visibility_scope(&mut self) {
+        if self.visibility_stack.len() > 1 {
+            self.visibility_stack.pop();
+        }
+    }
+
+    /// Set the visibility in the current scope
+    fn set_current_visibility(&mut self, visibility: MethodVisibility) {
+        if let Some(current) = self.visibility_stack.last_mut() {
+            *current = visibility;
         }
     }
 
@@ -103,7 +129,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         name: String,
         kind: SymbolKind,
         location: &ruby_prism::Location,
-        method_type: Option<MethodType>,
+        method_kind: Option<MethodKind>,
     ) -> RubySymbolContext {
         let range = self.document.prism_location_to_lsp_range(location);
 
@@ -113,8 +139,8 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             detail: None, // Can be enhanced later with more detailed information
             range,
             selection_range: range,
-            visibility: Some(self.current_visibility),
-            method_type,
+            visibility: Some(self.current_visibility()),
+            method_kind,
             children: Vec::new(),
         }
     }
@@ -166,11 +192,16 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
         // Map scope to symbol for hierarchy building
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
+
+        // Push new visibility scope (classes start with public visibility)
+        self.push_visibility_scope();
     }
 
     fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_lv_scope();
+        // Pop visibility scope when exiting class
+        self.pop_visibility_scope();
     }
 
     fn process_module_node_entry(&mut self, node: &ModuleNode) {
@@ -205,23 +236,28 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
         // Map scope to symbol for hierarchy building
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
+
+        // Push new visibility scope (modules start with public visibility)
+        self.push_visibility_scope();
     }
 
     fn process_module_node_exit(&mut self, _node: &ModuleNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_lv_scope();
+        // Pop visibility scope when exiting module
+        self.pop_visibility_scope();
     }
 
     fn process_def_node_entry(&mut self, node: &DefNode) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method_type = if node.receiver().is_some() {
-            Some(MethodType::Class)
+        let method_kind = if node.receiver().is_some() {
+            Some(MethodKind::Class)
         } else {
-            Some(MethodType::Instance)
+            Some(MethodKind::Instance)
         };
 
         // Create and add symbol - this will automatically find the current parent
-        let symbol = self.create_symbol(name, SymbolKind::METHOD, &node.location(), method_type);
+        let symbol = self.create_symbol(name, SymbolKind::METHOD, &node.location(), method_kind);
         let _symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Push method scope
@@ -253,9 +289,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
         if self.is_visibility_modifier(node) {
             match method_name.as_str() {
-                "private" => self.current_visibility = SymbolVisibility::Private,
-                "protected" => self.current_visibility = SymbolVisibility::Protected,
-                "public" => self.current_visibility = SymbolVisibility::Public,
+                "private" => self.set_current_visibility(MethodVisibility::Private),
+                "protected" => self.set_current_visibility(MethodVisibility::Protected),
+                "public" => self.set_current_visibility(MethodVisibility::Public),
                 _ => {}
             }
         } else if self.is_attr_method(&method_name) {
@@ -298,8 +334,8 @@ mod tests {
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "MyClass");
         assert_eq!(symbol.kind, SymbolKind::CLASS);
-        assert_eq!(symbol.visibility, Some(SymbolVisibility::Public));
-        assert_eq!(symbol.method_type, None);
+        assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
+        assert_eq!(symbol.method_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -312,8 +348,8 @@ mod tests {
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "MyModule");
         assert_eq!(symbol.kind, SymbolKind::MODULE);
-        assert_eq!(symbol.visibility, Some(SymbolVisibility::Public));
-        assert_eq!(symbol.method_type, None);
+        assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
+        assert_eq!(symbol.method_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -326,8 +362,8 @@ mod tests {
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "my_method");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
-        assert_eq!(symbol.visibility, Some(SymbolVisibility::Public));
-        assert_eq!(symbol.method_type, Some(MethodType::Instance));
+        assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
+        assert_eq!(symbol.method_kind, Some(MethodKind::Instance));
         assert!(symbol.children.is_empty());
     }
 
@@ -340,8 +376,8 @@ mod tests {
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "class_method");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
-        assert_eq!(symbol.visibility, Some(SymbolVisibility::Public));
-        assert_eq!(symbol.method_type, Some(MethodType::Class));
+        assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
+        assert_eq!(symbol.method_kind, Some(MethodKind::Class));
         assert!(symbol.children.is_empty());
     }
 
@@ -354,8 +390,8 @@ mod tests {
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "MY_CONSTANT");
         assert_eq!(symbol.kind, SymbolKind::CONSTANT);
-        assert_eq!(symbol.visibility, Some(SymbolVisibility::Public));
-        assert_eq!(symbol.method_type, None);
+        assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
+        assert_eq!(symbol.method_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -395,12 +431,12 @@ end
             .find(|s| s.name == "instance_method")
             .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(instance_method.method_type, Some(MethodType::Instance));
+        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
 
         // Check class method
         let class_method = symbols.iter().find(|s| s.name == "class_method").unwrap();
         assert_eq!(class_method.kind, SymbolKind::METHOD);
-        assert_eq!(class_method.method_type, Some(MethodType::Class));
+        assert_eq!(class_method.method_kind, Some(MethodKind::Class));
 
         // Check module
         let module_symbol = symbols.iter().find(|s| s.name == "MyModule").unwrap();
@@ -434,22 +470,22 @@ end
 
         // Find methods by name and check their visibility
         if let Some(public_method) = symbols.iter().find(|s| s.name == "public_method") {
-            assert_eq!(public_method.visibility, Some(SymbolVisibility::Public));
+            assert_eq!(public_method.visibility, Some(MethodVisibility::Public));
         }
 
         if let Some(private_method) = symbols.iter().find(|s| s.name == "private_method") {
-            assert_eq!(private_method.visibility, Some(SymbolVisibility::Private));
+            assert_eq!(private_method.visibility, Some(MethodVisibility::Private));
         }
 
         if let Some(protected_method) = symbols.iter().find(|s| s.name == "protected_method") {
             assert_eq!(
                 protected_method.visibility,
-                Some(SymbolVisibility::Protected)
+                Some(MethodVisibility::Protected)
             );
         }
 
         if let Some(back_to_public) = symbols.iter().find(|s| s.name == "back_to_public") {
-            assert_eq!(back_to_public.visibility, Some(SymbolVisibility::Public));
+            assert_eq!(back_to_public.visibility, Some(MethodVisibility::Public));
         }
     }
 
@@ -509,25 +545,33 @@ end
 
         // Should have one root symbol (OuterModule)
         assert_eq!(hierarchical_symbols.len(), 1);
-        
+
         let outer_module = &hierarchical_symbols[0];
         assert_eq!(outer_module.name, "OuterModule");
         assert_eq!(outer_module.kind, SymbolKind::MODULE);
-        
+
         // OuterModule should have 2 children: InnerClass and InnerModule
         assert_eq!(outer_module.children.len(), 2);
-        
-        let inner_class = outer_module.children.iter().find(|s| s.name == "InnerClass").unwrap();
+
+        let inner_class = outer_module
+            .children
+            .iter()
+            .find(|s| s.name == "InnerClass")
+            .unwrap();
         assert_eq!(inner_class.kind, SymbolKind::CLASS);
-        
+
         // InnerClass should have 1 child: inner_method
         assert_eq!(inner_class.children.len(), 1);
         assert_eq!(inner_class.children[0].name, "inner_method");
         assert_eq!(inner_class.children[0].kind, SymbolKind::METHOD);
-        
-        let inner_module = outer_module.children.iter().find(|s| s.name == "InnerModule").unwrap();
+
+        let inner_module = outer_module
+            .children
+            .iter()
+            .find(|s| s.name == "InnerModule")
+            .unwrap();
         assert_eq!(inner_module.kind, SymbolKind::MODULE);
-        
+
         // InnerModule should have 1 child: INNER_CONSTANT
         assert_eq!(inner_module.children.len(), 1);
         assert_eq!(inner_module.children[0].name, "INNER_CONSTANT");
@@ -546,7 +590,7 @@ end
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "method_with_params");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
-        assert_eq!(symbol.method_type, Some(MethodType::Instance));
+        assert_eq!(symbol.method_kind, Some(MethodKind::Instance));
     }
 
     #[test]
@@ -634,6 +678,144 @@ end
             assert!(symbol.selection_range.start.line >= symbol.range.start.line);
             assert!(symbol.selection_range.end.line <= symbol.range.end.line);
         }
+    }
+
+    #[test]
+    fn test_nested_visibility_scoping() {
+        let content = r#"
+module OuterModule
+  def outer_method_public
+  end
+
+  private
+
+  def outer_method_private
+  end
+
+  class InnerClass
+    def inner_method_should_be_public
+    end
+
+    private
+
+    def inner_method_private
+    end
+  end
+
+  def another_outer_method_private
+  end
+end
+"#;
+        let symbols = extract_symbols_from_content(content);
+
+        // Find the methods
+        let outer_method_public = symbols
+            .iter()
+            .find(|s| s.name == "outer_method_public")
+            .expect("Should find outer_method_public");
+
+        let outer_method_private = symbols
+            .iter()
+            .find(|s| s.name == "outer_method_private")
+            .expect("Should find outer_method_private");
+
+        let inner_method_should_be_public = symbols
+            .iter()
+            .find(|s| s.name == "inner_method_should_be_public")
+            .expect("Should find inner_method_should_be_public");
+
+        let inner_method_private = symbols
+            .iter()
+            .find(|s| s.name == "inner_method_private")
+            .expect("Should find inner_method_private");
+
+        let another_outer_method_private = symbols
+            .iter()
+            .find(|s| s.name == "another_outer_method_private")
+            .expect("Should find another_outer_method_private");
+
+        // Check visibility
+        assert_eq!(outer_method_public.visibility, Some(MethodVisibility::Public));
+        assert_eq!(outer_method_private.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            inner_method_should_be_public.visibility,
+            Some(MethodVisibility::Public)
+        ); // This should be public because it's in a new class scope
+        assert_eq!(inner_method_private.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            another_outer_method_private.visibility,
+            Some(MethodVisibility::Private)
+        ); // This should remain private in the outer module
+    }
+
+    #[test]
+    fn test_complex_nested_visibility_scoping() {
+        let source = r#"
+class OuterClass
+  def public_method
+  end
+
+  private
+
+  def private_method
+  end
+
+  module NestedModule
+    def module_method_public
+    end
+
+    protected
+
+    def module_method_protected
+    end
+
+    class DeeplyNestedClass
+      def deeply_nested_public
+      end
+
+      private
+
+      def deeply_nested_private
+      end
+    end
+
+    def another_module_method_protected
+    end
+  end
+
+  def outer_private_method
+  end
+
+  public
+
+  def outer_public_again
+  end
+end
+"#;
+        let symbols = extract_symbols_from_content(source);
+
+        // Helper function to find method by name
+        let find_method = |name: &str| {
+            symbols
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("Should find {}", name))
+        };
+
+        // Check outer class methods
+        assert_eq!(find_method("public_method").visibility, Some(MethodVisibility::Public));
+        assert_eq!(find_method("private_method").visibility, Some(MethodVisibility::Private));
+        assert_eq!(find_method("outer_private_method").visibility, Some(MethodVisibility::Private));
+        assert_eq!(find_method("outer_public_again").visibility, Some(MethodVisibility::Public));
+
+        // Check nested module methods (should start fresh with public)
+        assert_eq!(find_method("module_method_public").visibility, Some(MethodVisibility::Public));
+        assert_eq!(find_method("module_method_protected").visibility, Some(MethodVisibility::Protected));
+        assert_eq!(find_method("another_module_method_protected").visibility, Some(MethodVisibility::Protected));
+
+        // Check deeply nested class methods (should start fresh with public)
+        assert_eq!(find_method("deeply_nested_public").visibility, Some(MethodVisibility::Public));
+        assert_eq!(find_method("deeply_nested_private").visibility, Some(MethodVisibility::Private));
     }
 
     #[test]

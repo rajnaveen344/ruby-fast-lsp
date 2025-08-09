@@ -7,6 +7,7 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::visitors::document_symbols_visitor::DocumentSymbolsVisitor,
+    indexer::entry::{MethodKind, MethodVisibility},
     server::RubyLanguageServer,
 };
 
@@ -62,9 +63,12 @@ pub async fn handle_document_symbols(
 
 /// Convert internal RubySymbolContext to LSP DocumentSymbol
 fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol {
+    // Build detail string with visibility and method kind information
+    let detail = build_symbol_detail(&ruby_symbol);
+    
     DocumentSymbol {
         name: ruby_symbol.name,
-        detail: ruby_symbol.detail,
+        detail,
         kind: ruby_symbol.kind,
         tags: None,
         deprecated: None,
@@ -84,6 +88,47 @@ fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol 
     }
 }
 
+/// Build detail string for a symbol including visibility and method kind information
+fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
+    let mut detail_parts = Vec::new();
+    
+    // Add existing detail if present
+    if let Some(existing_detail) = &ruby_symbol.detail {
+        detail_parts.push(existing_detail.clone());
+    }
+    
+    // Add visibility information for methods
+    if let Some(visibility) = &ruby_symbol.visibility {
+        match visibility {
+            MethodVisibility::Private => detail_parts.push("private".to_string()),
+            MethodVisibility::Protected => detail_parts.push("protected".to_string()),
+            MethodVisibility::Public => {
+                // Only show "public" explicitly for methods to distinguish from default
+                if matches!(ruby_symbol.kind, tower_lsp::lsp_types::SymbolKind::METHOD | tower_lsp::lsp_types::SymbolKind::FUNCTION) {
+                    detail_parts.push("public".to_string());
+                }
+            }
+        }
+    }
+    
+    // Add method kind information
+    if let Some(method_kind) = &ruby_symbol.method_kind {
+        match method_kind {
+            MethodKind::Class => detail_parts.push("class method".to_string()),
+            MethodKind::Instance => detail_parts.push("instance method".to_string()),
+            MethodKind::Unknown => {
+                // Don't add any method kind info for unknown methods
+            }
+        }
+    }
+    
+    if detail_parts.is_empty() {
+        None
+    } else {
+        Some(detail_parts.join(" • "))
+    }
+}
+
 /// Internal representation of a Ruby symbol with additional context
 #[derive(Debug, Clone)]
 pub struct RubySymbolContext {
@@ -100,21 +145,125 @@ pub struct RubySymbolContext {
     /// Nested symbols
     pub children: Vec<RubySymbolContext>,
     /// Symbol visibility (public, private, protected)
-    pub visibility: Option<SymbolVisibility>,
+    pub visibility: Option<MethodVisibility>,
     /// Whether it's a class method vs instance method
-    pub method_type: Option<MethodType>,
+    pub method_kind: Option<MethodKind>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SymbolVisibility {
-    Public,
-    Private,
-    Protected,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::{Position, Range, SymbolKind};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MethodType {
-    Instance,
-    Class,
-    Singleton,
+    fn create_test_range() -> Range {
+        Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 0, character: 10 },
+        }
+    }
+
+    #[test]
+    fn test_document_symbol_includes_visibility_information() {
+        // Test private method
+        let private_method = RubySymbolContext {
+            name: "private_method".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Private),
+            method_kind: Some(MethodKind::Instance),
+        };
+
+        let doc_symbol = convert_to_document_symbol(private_method);
+        assert_eq!(doc_symbol.name, "private_method");
+        assert_eq!(doc_symbol.detail, Some("private • instance method".to_string()));
+
+        // Test protected method
+        let protected_method = RubySymbolContext {
+            name: "protected_method".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Protected),
+            method_kind: Some(MethodKind::Class),
+        };
+
+        let doc_symbol = convert_to_document_symbol(protected_method);
+        assert_eq!(doc_symbol.name, "protected_method");
+        assert_eq!(doc_symbol.detail, Some("protected • class method".to_string()));
+
+        // Test public method
+        let public_method = RubySymbolContext {
+            name: "public_method".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Public),
+            method_kind: Some(MethodKind::Instance),
+        };
+
+        let doc_symbol = convert_to_document_symbol(public_method);
+        assert_eq!(doc_symbol.name, "public_method");
+        assert_eq!(doc_symbol.detail, Some("public • instance method".to_string()));
+    }
+
+    #[test]
+    fn test_document_symbol_with_existing_detail() {
+        let method_with_detail = RubySymbolContext {
+            name: "method_with_signature".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: Some("(param1, param2)".to_string()),
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Private),
+            method_kind: Some(MethodKind::Instance),
+        };
+
+        let doc_symbol = convert_to_document_symbol(method_with_detail);
+        assert_eq!(doc_symbol.name, "method_with_signature");
+        assert_eq!(doc_symbol.detail, Some("(param1, param2) • private • instance method".to_string()));
+    }
+
+    #[test]
+    fn test_document_symbol_non_method_no_visibility() {
+        let class_symbol = RubySymbolContext {
+            name: "MyClass".to_string(),
+            kind: SymbolKind::CLASS,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: None,
+            method_kind: None,
+        };
+
+        let doc_symbol = convert_to_document_symbol(class_symbol);
+        assert_eq!(doc_symbol.name, "MyClass");
+        assert_eq!(doc_symbol.detail, None);
+    }
+
+    #[test]
+    fn test_document_symbol_unknown_method_kind() {
+        let method_unknown = RubySymbolContext {
+            name: "unknown_method".to_string(),
+            kind: SymbolKind::METHOD,
+            detail: None,
+            range: create_test_range(),
+            selection_range: create_test_range(),
+            children: vec![],
+            visibility: Some(MethodVisibility::Private),
+            method_kind: Some(MethodKind::Unknown),
+        };
+
+        let doc_symbol = convert_to_document_symbol(method_unknown);
+        assert_eq!(doc_symbol.name, "unknown_method");
+        assert_eq!(doc_symbol.detail, Some("private".to_string()));
+    }
 }
