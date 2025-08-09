@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams, 
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, 
     InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, 
-    SemanticTokensParams, SemanticTokensResult, Url,
+    SemanticTokensParams, SemanticTokensResult, SymbolInformation, Url, WorkspaceSymbolParams,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
@@ -248,5 +248,25 @@ impl LanguageServer for RubyLanguageServer {
         );
         
         Ok(result)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> LspResult<Option<Vec<SymbolInformation>>> {
+        info!(
+            "Workspace symbol request received for query: '{}'",
+            params.query
+        );
+        
+        let start_time = Instant::now();
+        let result = request::handle_workspace_symbols(self, params).await;
+        
+        info!(
+            "[PERF] Workspace symbols completed in {:?}",
+            start_time.elapsed()
+        );
+        
+        result
     }
 }

@@ -1,4 +1,4 @@
-use crate::capabilities::{completion, definitions, document_symbols, inlay_hints, references, semantic_tokens};
+use crate::capabilities::{completion, definitions, document_symbols, inlay_hints, references, semantic_tokens, workspace_symbols};
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
 use tower_lsp::lsp_types::*;
@@ -91,4 +91,11 @@ pub async fn handle_document_symbols(
     params: DocumentSymbolParams,
 ) -> Option<DocumentSymbolResponse> {
     document_symbols::handle_document_symbols(lang_server, params).await
+}
+
+pub async fn handle_workspace_symbols(
+    lang_server: &RubyLanguageServer,
+    params: WorkspaceSymbolParams,
+) -> LspResult<Option<Vec<SymbolInformation>>> {
+    Ok(workspace_symbols::handle_workspace_symbols(lang_server, params).await)
 }
