@@ -74,7 +74,7 @@ pub async fn handle_completion(
     debug!("Completion request received with params {:?}", params);
 
     Ok(Some(
-        completion::find_completion_at_position(lang_server, uri, position).await,
+        completion::find_completion_at_position(lang_server, uri, position, params.context).await,
     ))
 }
 

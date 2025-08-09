@@ -4,14 +4,16 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::RubyPrismAnalyzer,
-    indexer::{entry::Entry, entry::entry_kind::EntryKind, index::RubyIndex},
-    types::{fully_qualified_name::FullyQualifiedName, scope::LVScope as Scope},
+    indexer::{entry::entry_kind::EntryKind, entry::Entry, index::RubyIndex},
+    types::{
+        fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant,
+        scope::LVScope as Scope,
+    },
 };
 
 use super::{
-    constant_matcher::ConstantMatcher,
+    completion_ranker::CompletionRanker, constant_matcher::ConstantMatcher,
     scope_resolver::ScopeResolver,
-    completion_ranker::CompletionRanker,
 };
 
 /// Context information for constant completion
@@ -54,8 +56,11 @@ impl ConstantCompletionContext {
         if let Some(last_scope) = name.rfind("::") {
             let namespace = &name[..last_scope];
             let partial = &name[last_scope + 2..];
-            
-            if let Ok(fqn) = FullyQualifiedName::try_from(namespace) {
+
+            // Special case: if namespace is empty, this is top-level scope resolution (::)
+            if namespace.is_empty() {
+                (None, partial.to_string())
+            } else if let Ok(fqn) = FullyQualifiedName::try_from(namespace) {
                 (Some(fqn), partial.to_string())
             } else {
                 (None, name.to_string())
@@ -187,9 +192,10 @@ impl ConstantCompletionItem {
             }),
             kind: Some(kind),
             detail: self.detail.clone(),
-            documentation: self.documentation.as_ref().map(|doc| {
-                Documentation::String(doc.clone())
-            }),
+            documentation: self
+                .documentation
+                .as_ref()
+                .map(|doc| Documentation::String(doc.clone())),
             insert_text: Some(self.insert_text.clone()),
             ..Default::default()
         }
@@ -221,24 +227,26 @@ impl ConstantCompletionEngine {
     ) -> Vec<CompletionItem> {
         // Get scope context from analyzer
         let (_, _, scope_stack) = analyzer.get_identifier(position);
-        
+
         // Create completion context
         let context = ConstantCompletionContext::new(position, scope_stack, partial_name);
-        
+
         // Find matching constants
         let mut candidates = self.find_constant_candidates(index, &context);
-        
+
         // Resolve scope accessibility
-        self.scope_resolver.resolve_accessibility(&mut candidates, &context);
-        
+        self.scope_resolver
+            .resolve_accessibility(&mut candidates, &context);
+
         // Filter out inaccessible constants
         candidates.retain(|item| item.is_accessible);
-        
+
         // Rank by relevance
         self.ranker.rank_by_relevance(&mut candidates, &context);
-        
+
         // Convert to LSP completion items
-        candidates.into_iter()
+        candidates
+            .into_iter()
             .take(50) // Limit results
             .map(|item| item.to_completion_item())
             .collect()
@@ -260,27 +268,126 @@ impl ConstantCompletionEngine {
             }
 
             // Find the best entry for this FQN (prefer the first constant-like entry)
-            let best_entry = entries
-                .iter()
-                .find(|entry| self.is_constant_entry(entry));
+            let best_entry = entries.iter().find(|entry| self.is_constant_entry(entry));
 
             if let Some(entry) = best_entry {
-                // Apply namespace filtering if qualified
-                if let Some(namespace_prefix) = &context.namespace_prefix {
-                    if !fqn.starts_with(namespace_prefix) {
+                // Handle qualified completion (e.g., "ActiveRecord::" or "ActiveRecord::B")
+                if context.is_qualified {
+                    if let Some(ref namespace_prefix) = context.namespace_prefix {
+                        // Check if this constant is a direct child of the namespace
+                        // We need to check both the direct namespace and the Object-prefixed version
+                        let is_direct_child =
+                            self.is_direct_child_of_namespace(fqn, namespace_prefix);
+
+                        // Also check if the namespace might be under Object
+                        let is_object_prefixed_child =
+                            if namespace_prefix.namespace_parts().len() == 1 {
+                                // Try creating Object::namespace_prefix and check if fqn is a child of that
+                                let object_prefixed_namespace = {
+                                    let mut parts = vec![RubyConstant::new("Object").unwrap()];
+                                    parts.extend(namespace_prefix.namespace_parts());
+                                    FullyQualifiedName::Constant(parts)
+                                };
+                                self.is_direct_child_of_namespace(fqn, &object_prefixed_namespace)
+                            } else {
+                                false
+                            };
+
+                        if !is_direct_child && !is_object_prefixed_child {
+                            continue;
+                        }
+                    } else {
+                        // Handle the "::" case - show only top-level constants
+                        // In Ruby, top-level constants are typically under Object namespace
+                        let parts = fqn.namespace_parts();
+                        if parts.len() == 2 && parts[0].to_string() == "Object" {
+                            // This is a top-level constant like Object::String -> show as String
+                        } else if parts.len() > 1 {
+                            // This is a nested constant, skip it for top-level completion
+                            continue;
+                        }
+                    }
+
+                    // For qualified completion, check if the final component matches
+                    let final_component = fqn.name();
+                    if !final_component
+                        .to_lowercase()
+                        .starts_with(&context.partial_name.to_lowercase())
+                    {
+                        continue;
+                    }
+                } else {
+                    // Handle unqualified completion
+                    if !self.matcher.matches(entry, &context.partial_name) {
                         continue;
                     }
                 }
 
-                // Check if the name matches the partial input
-                if self.matcher.matches(entry, &context.partial_name) {
-                    candidates.push(ConstantCompletionItem::new(entry.clone(), context));
-                    seen_fqns.insert(fqn.clone());
-                }
+                candidates.push(ConstantCompletionItem::new(entry.clone(), context));
+                seen_fqns.insert(fqn.clone());
             }
         }
 
         candidates
+    }
+
+    /// Check if the given FQN is a direct child of the specified namespace
+    fn is_direct_child_of_namespace(
+        &self,
+        fqn: &FullyQualifiedName,
+        namespace: &FullyQualifiedName,
+    ) -> bool {
+        let fqn_parts = fqn.namespace_parts();
+        let namespace_parts = namespace.namespace_parts();
+
+        // Try direct match first
+        if self.is_direct_match(&fqn_parts, &namespace_parts) {
+            return true;
+        }
+
+        // Try Object-prefixed match: if namespace doesn't start with Object,
+        // try matching against Object::namespace
+        if !namespace_parts.is_empty() && namespace_parts[0].to_string() != "Object" {
+            // Check if FQN starts with Object and then matches the namespace
+            if fqn_parts.len() == namespace_parts.len() + 2 && fqn_parts[0].to_string() == "Object"
+            {
+                // Check if the rest of the FQN matches the namespace
+                let mut matches = true;
+                for (i, namespace_part) in namespace_parts.iter().enumerate() {
+                    if fqn_parts.get(i + 1) != Some(namespace_part) {
+                        matches = false;
+                        break;
+                    }
+                }
+
+                if matches {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Helper function to check direct namespace match
+    fn is_direct_match(
+        &self,
+        fqn_parts: &[crate::types::ruby_namespace::RubyConstant],
+        namespace_parts: &[crate::types::ruby_namespace::RubyConstant],
+    ) -> bool {
+        // The FQN should have exactly one more part than the namespace
+        if fqn_parts.len() != namespace_parts.len() + 1 {
+            return false;
+        }
+
+        // All namespace parts should match
+        for (i, namespace_part) in namespace_parts.iter().enumerate() {
+            if fqn_parts.get(i) != Some(namespace_part) {
+                return false;
+            }
+        }
+
+        true
     }
 
     fn is_constant_entry(&self, entry: &Entry) -> bool {
@@ -294,5 +401,263 @@ impl ConstantCompletionEngine {
 impl Default for ConstantCompletionEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        indexer::{entry::Entry, index::RubyIndex},
+        types::fully_qualified_name::FullyQualifiedName,
+    };
+    use tower_lsp::lsp_types::{Location, Range, Url};
+
+    fn create_test_entry(name: &str, kind: EntryKind) -> Entry {
+        Entry {
+            fqn: FullyQualifiedName::try_from(name).unwrap(),
+            kind,
+            location: Location {
+                uri: Url::parse("file:///test.rb").unwrap(),
+                range: Range::default(),
+            },
+        }
+    }
+
+    fn create_test_index() -> RubyIndex {
+        let mut index = RubyIndex::new();
+
+        // Add some test constants with nested namespaces
+        let entries = vec![
+            (
+                "ActiveRecord",
+                EntryKind::Module {
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "ActiveRecord::Base",
+                EntryKind::Class {
+                    superclass: None,
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "ActiveRecord::Migration",
+                EntryKind::Class {
+                    superclass: None,
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "ActiveRecord::Base::Connection",
+                EntryKind::Class {
+                    superclass: None,
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "ActiveSupport",
+                EntryKind::Module {
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "ActiveSupport::Cache",
+                EntryKind::Module {
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "String",
+                EntryKind::Class {
+                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "StringIO",
+                EntryKind::Class {
+                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+        ];
+
+        for (name, kind) in entries {
+            let entry = create_test_entry(name, kind);
+            index.add_entry(entry);
+        }
+
+        index
+    }
+
+    #[test]
+    fn test_is_direct_child_of_namespace() {
+        let engine = ConstantCompletionEngine::new();
+
+        let namespace = FullyQualifiedName::try_from("ActiveRecord").unwrap();
+        let direct_child = FullyQualifiedName::try_from("ActiveRecord::Base").unwrap();
+        let nested_child = FullyQualifiedName::try_from("ActiveRecord::Base::Connection").unwrap();
+        let unrelated = FullyQualifiedName::try_from("ActiveSupport::Cache").unwrap();
+
+        assert!(engine.is_direct_child_of_namespace(&direct_child, &namespace));
+        assert!(!engine.is_direct_child_of_namespace(&nested_child, &namespace));
+        assert!(!engine.is_direct_child_of_namespace(&unrelated, &namespace));
+    }
+
+    #[test]
+    fn test_scope_resolution_completion() {
+        let engine = ConstantCompletionEngine::new();
+        let index = create_test_index();
+
+        // Test completion for "ActiveRecord::" - should only show direct children
+        let context = ConstantCompletionContext::new(
+            Position::new(0, 0),
+            vec![],
+            "ActiveRecord::".to_string(),
+        );
+
+        let candidates = engine.find_constant_candidates(&index, &context);
+
+        // Should find Base and Migration, but not Base::Connection
+        let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"Base".to_string()));
+        assert!(names.contains(&"Migration".to_string()));
+        assert!(!names.contains(&"Connection".to_string())); // This is nested under Base
+
+        // Should not contain ActiveRecord itself or unrelated constants
+        assert!(!names.contains(&"ActiveRecord".to_string()));
+        assert!(!names.contains(&"ActiveSupport".to_string()));
+        assert!(!names.contains(&"String".to_string()));
+    }
+
+    #[test]
+    fn test_scope_resolution_with_partial_name() {
+        let engine = ConstantCompletionEngine::new();
+        let index = create_test_index();
+
+        // Test completion for "ActiveRecord::B" - should only show Base
+        let context = ConstantCompletionContext::new(
+            Position::new(0, 0),
+            vec![],
+            "ActiveRecord::B".to_string(),
+        );
+
+        let candidates = engine.find_constant_candidates(&index, &context);
+
+        // Should find only Base (starts with "B")
+        let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"Base".to_string()));
+        assert!(!names.contains(&"Migration".to_string())); // Doesn't start with "B"
+    }
+
+    #[test]
+    fn test_unqualified_completion() {
+        let engine = ConstantCompletionEngine::new();
+        let index = create_test_index();
+
+        // Test completion for "Str" - should show String and StringIO
+        let context =
+            ConstantCompletionContext::new(Position::new(0, 0), vec![], "Str".to_string());
+
+        let candidates = engine.find_constant_candidates(&index, &context);
+
+        // Should find String and StringIO
+        let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"String".to_string()));
+        assert!(names.contains(&"StringIO".to_string()));
+
+        // Should not contain ActiveRecord constants
+        assert!(!names.contains(&"ActiveRecord".to_string()));
+        assert!(!names.contains(&"Base".to_string()));
+    }
+
+    #[test]
+    fn test_empty_namespace_completion() {
+        let engine = ConstantCompletionEngine::new();
+        let index = create_test_index();
+
+        // Test completion for "::" - should show top-level constants
+        let context = ConstantCompletionContext::new(Position::new(0, 0), vec![], "::".to_string());
+
+        let candidates = engine.find_constant_candidates(&index, &context);
+
+        // Should find top-level constants only
+        let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"ActiveRecord".to_string()));
+        assert!(names.contains(&"ActiveSupport".to_string()));
+        assert!(names.contains(&"String".to_string()));
+        assert!(names.contains(&"StringIO".to_string()));
+
+        // Should not contain nested constants
+        assert!(!names.contains(&"Base".to_string()));
+        assert!(!names.contains(&"Migration".to_string()));
+        assert!(!names.contains(&"Cache".to_string()));
+    }
+
+    #[test]
+    fn test_simple_nested_module_completion() {
+        let engine = ConstantCompletionEngine::new();
+        let mut index = RubyIndex::new();
+
+        // Add the exact scenario from the user's issue: module A with nested module B
+        let entries = vec![
+            (
+                "A",
+                EntryKind::Module {
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+            (
+                "A::B",
+                EntryKind::Module {
+                    includes: vec![],
+                    extends: vec![],
+                    prepends: vec![],
+                },
+            ),
+        ];
+
+        for (name, kind) in entries {
+            let entry = create_test_entry(name, kind);
+            index.add_entry(entry);
+        }
+
+        // Test completion for "A::" - should show nested module B
+        let context =
+            ConstantCompletionContext::new(Position::new(0, 0), vec![], "A::".to_string());
+
+        let candidates = engine.find_constant_candidates(&index, &context);
+
+        // Should find B as a direct child of A
+        let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+
+        assert!(
+            names.contains(&"B".to_string()),
+            "Expected to find module B in A:: completion, but found: {:?}",
+            names
+        );
+
+        // Should not contain A itself
+        assert!(!names.contains(&"A".to_string()));
     }
 }

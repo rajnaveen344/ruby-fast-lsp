@@ -47,6 +47,10 @@ pub async fn handle_initialize(
         )),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(true),
+            trigger_characters: Some(vec![
+                ":".to_string(),  // Trigger on ":" to handle "::" for constant completion
+                ".".to_string(),  // Trigger on "." for method completion (future enhancement)
+            ]),
             ..CompletionOptions::default()
         }),
         ..ServerCapabilities::default()
