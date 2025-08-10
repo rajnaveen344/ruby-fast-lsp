@@ -7,10 +7,10 @@ use log::{debug, info};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentOnTypeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, 
-    InitializeParams, InitializeResult, InitializedParams, InlayHintParams, Location, 
-    ReferenceParams, SemanticTokensParams, SemanticTokensResult, 
-    SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult, 
+    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams, 
+    SemanticTokensResult, SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
@@ -292,6 +292,26 @@ impl LanguageServer for RubyLanguageServer {
         
         info!(
             "[PERF] Document on type formatting completed in {:?}",
+            start_time.elapsed()
+        );
+        
+        result
+    }
+
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> LspResult<Option<Vec<FoldingRange>>> {
+        info!(
+            "Folding range request received for {:?}",
+            params.text_document.uri.path()
+        );
+        
+        let start_time = Instant::now();
+        let result = request::handle_folding_range(self, params).await;
+        
+        info!(
+            "[PERF] Folding range completed in {:?}",
             start_time.elapsed()
         );
         

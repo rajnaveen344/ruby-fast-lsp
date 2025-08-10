@@ -1,5 +1,5 @@
 use crate::capabilities::{
-    completion, definitions, document_symbols, formatting, inlay_hints, references, semantic_tokens,
+    completion, definitions, document_symbols, folding_range, formatting, inlay_hints, references, semantic_tokens,
     workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
@@ -108,4 +108,22 @@ pub async fn handle_document_on_type_formatting(
     params: DocumentOnTypeFormattingParams,
 ) -> LspResult<Option<Vec<TextEdit>>> {
     Ok(formatting::handle_document_on_type_formatting(lang_server, params).await)
+}
+
+pub async fn handle_folding_range(
+    lang_server: &RubyLanguageServer,
+    params: FoldingRangeParams,
+) -> LspResult<Option<Vec<FoldingRange>>> {
+    let uri = &params.text_document.uri;
+    
+    // Get the document from the language server
+    match lang_server.get_doc(uri) {
+        Some(document) => {
+            folding_range::handle_folding_range(&document, params).await
+        }
+        None => {
+            debug!("Document not found for URI: {}", uri);
+            Ok(None)
+        }
+    }
 }
