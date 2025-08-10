@@ -4,6 +4,7 @@ use log::debug;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry};
+use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 
 #[derive(Debug)]
@@ -26,6 +27,10 @@ pub struct RubyIndex {
     // Reverse mixin tracking: module/class FQN -> list of classes/modules that include/extend/prepend it
     // For example, if class Foo includes module Bar, then reverse_mixins[Bar] contains Foo
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
+
+    // Prefix tree for auto-completion
+    // Single prefix tree that holds all entries for fast lookup during completion
+    pub prefix_tree: PrefixTree,
 }
 
 impl RubyIndex {
@@ -36,6 +41,7 @@ impl RubyIndex {
             references: HashMap::new(),
             methods_by_name: HashMap::new(),
             reverse_mixins: HashMap::new(),
+            prefix_tree: PrefixTree::new(),
         }
     }
 
@@ -66,6 +72,9 @@ impl RubyIndex {
 
         // Update reverse mixin tracking for classes and modules with mixins
         self.update_reverse_mixins(&entry);
+
+        // Add to prefix trees for auto-completion
+        self.add_to_prefix_trees(&entry);
     }
 
     pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
@@ -113,6 +122,9 @@ impl RubyIndex {
                 }
             }
         }
+
+        // Remove entries from prefix trees
+        self.remove_from_prefix_trees(&entries, uri);
     }
 
     pub fn get(&self, fqn: &FullyQualifiedName) -> Option<&Vec<Entry>> {
@@ -174,6 +186,33 @@ impl RubyIndex {
         debug!("get_including_classes for {:?}: {:?}", module_fqn, result);
         result
     }
+
+    /// Add entry to appropriate prefix trees for auto-completion
+    fn add_to_prefix_trees(&mut self, entry: &Entry) {
+        let key = entry.fqn.name();
+        if key.is_empty() {
+            return;
+        }
+
+        // Add all entry types to the single prefix tree
+        self.prefix_tree.insert(&key, entry.clone());
+    }
+
+    /// Search for entries by prefix
+    pub fn search_by_prefix(&self, prefix: &str) -> Vec<&Entry> {
+        self.prefix_tree.search(prefix)
+    }
+
+    /// Remove entries from prefix trees when a file is removed
+    fn remove_from_prefix_trees(&mut self, entries: &[Entry], _uri: &Url) {
+        for entry in entries {
+            let key = entry.fqn.name();
+            if !key.is_empty() {
+                self.prefix_tree.delete(&key);
+                debug!("Removed entry from prefix tree: {}", key);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -222,5 +261,110 @@ mod tests {
         index.remove_entries_for_uri(&uri);
         assert_eq!(index.definitions.len(), 0);
         assert_eq!(index.references.len(), 0);
+    }
+
+    #[test]
+    fn test_prefix_tree_search() {
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file://test.rb").unwrap();
+
+        // Add a class
+        let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("TestClass").unwrap()]);
+        let entry1 = EntryBuilder::new()
+            .fqn(fqn1)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::new_class(None))
+            .build()
+            .unwrap();
+        index.add_entry(entry1);
+
+        // Add a module
+        let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("TestModule").unwrap()]);
+        let entry2 = EntryBuilder::new()
+            .fqn(fqn2)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::new_module())
+            .build()
+            .unwrap();
+        index.add_entry(entry2);
+
+        // Test prefix search
+        let results = index.search_by_prefix("Test");
+        assert_eq!(results.len(), 2);
+
+        let results = index.search_by_prefix("TestC");
+        assert_eq!(results.len(), 1);
+
+        let results = index.search_by_prefix("TestM");
+        assert_eq!(results.len(), 1);
+
+        let results = index.search_by_prefix("NonExistent");
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_prefix_tree_all_entry_types() {
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file://test.rb").unwrap();
+
+        // Add a constant
+        let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("MY_CONSTANT").unwrap()]);
+        let entry1 = EntryBuilder::new()
+            .fqn(fqn1)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::Constant {
+                value: Some("42".to_string()),
+                visibility: None,
+            })
+            .build()
+            .unwrap();
+        index.add_entry(entry1);
+
+        // Add a class
+        let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("MyClass").unwrap()]);
+        let entry2 = EntryBuilder::new()
+            .fqn(fqn2)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::new_class(None))
+            .build()
+            .unwrap();
+        index.add_entry(entry2);
+
+        // Add a module
+        let fqn3 = FullyQualifiedName::from(vec![RubyConstant::try_from("MyModule").unwrap()]);
+        let entry3 = EntryBuilder::new()
+            .fqn(fqn3)
+            .location(Location {
+                uri: uri.clone(),
+                range: Default::default(),
+            })
+            .kind(EntryKind::new_module())
+            .build()
+            .unwrap();
+        index.add_entry(entry3);
+
+        // Test searching for constants
+        let constant_results = index.search_by_prefix("MY_");
+        assert_eq!(constant_results.len(), 1);
+        
+        // Test searching for classes and modules
+        let my_results = index.search_by_prefix("My");
+        assert_eq!(my_results.len(), 2); // MyClass and MyModule
+        
+        // Test searching with no matches
+        let no_results = index.search_by_prefix("xyz");
+        assert_eq!(no_results.len(), 0);
     }
 }
