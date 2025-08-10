@@ -1907,4 +1907,58 @@ a."#;
             _ => panic!("Expected array response"),
         }
     }
+
+    #[tokio::test]
+    async fn test_keyword_snippets_filtered_in_method_call_context() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"a = [1, 2, 3]
+a."#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position right after the dot
+        let position = Position {
+            line: 1,
+            character: 2,
+        }; // Right after "a."
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // In method call context, keyword snippets should be filtered out
+                let keyword_snippets = ["if", "unless", "while", "for", "def", "class", "module", "begin rescue"];
+                
+                for keyword in keyword_snippets {
+                    let keyword_completion = completions.iter().find(|c| c.label == keyword);
+                    assert!(
+                        keyword_completion.is_none(),
+                        "Should not have '{}' keyword snippet in method call context",
+                        keyword
+                    );
+                }
+
+                // But should still have method-appropriate snippets
+                let method_snippets = ["each", "map", "select", "reject"];
+                for method in method_snippets {
+                    let method_completion = completions.iter().find(|c| c.label == method);
+                    assert!(
+                        method_completion.is_some(),
+                        "Should have '{}' method snippet in method call context",
+                        method
+                    );
+                }
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
 }

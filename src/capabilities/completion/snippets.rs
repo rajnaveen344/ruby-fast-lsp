@@ -146,13 +146,30 @@ impl RubySnippets {
         let matching_snippets: Vec<CompletionItem> = all_snippets
             .into_iter()
             .filter(|snippet| {
-                if prefix.is_empty() {
+                // First filter by prefix
+                let prefix_matches = if prefix.is_empty() {
                     true // Include all snippets when prefix is empty
                 } else {
                     snippet.label.to_lowercase().starts_with(&prefix.to_lowercase()) ||
                     snippet.filter_text.as_ref().map_or(false, |filter| {
                         filter.to_lowercase().contains(&prefix.to_lowercase())
                     })
+                };
+                
+                // Then filter by context appropriateness
+                if !prefix_matches {
+                    return false;
+                }
+                
+                match context {
+                    SnippetContext::MethodCall => {
+                        // In method call context, exclude keyword/control flow snippets
+                        !Self::is_keyword_snippet(&snippet.label)
+                    }
+                    SnippetContext::General => {
+                        // In general context, include all snippets
+                        true
+                    }
                 }
             })
             .map(|mut snippet| {
@@ -225,6 +242,21 @@ impl RubySnippets {
     /// Check if a snippet is an iterator snippet that should be contextual
     fn is_iterator_snippet(label: &str) -> bool {
         matches!(label, "each" | "each_with_index" | "map" | "select" | "reject")
+    }
+
+    /// Check if a snippet is a keyword/control flow snippet that should be excluded in MethodCall context
+    fn is_keyword_snippet(label: &str) -> bool {
+        matches!(label, 
+            // Control flow keywords
+            "if" | "if else" | "unless" | "unless else" | "case when" | 
+            "while" | "until" | "for" | "loop" |
+            // Definition keywords  
+            "def" | "def with args" | "class" | "class with superclass" | "module" |
+            // Exception handling keywords
+            "begin rescue" | "begin rescue ensure" | "rescue" |
+            // Testing keywords (these are also not methods)
+            "describe" | "it" | "context" | "before" | "after"
+        )
     }
 
     /// Convert a full template iterator snippet to a contextual method snippet
