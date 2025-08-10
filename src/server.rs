@@ -5,12 +5,12 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentOnTypeFormattingParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, 
     InitializeParams, InitializeResult, InitializedParams, InlayHintParams, Location, 
-    ReferenceParams, SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, 
-    Url, WorkspaceSymbolParams,
+    ReferenceParams, SemanticTokensParams, SemanticTokensResult, 
+    SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
@@ -73,6 +73,13 @@ impl RubyLanguageServer {
 
         debug!("Processed file: {}", uri);
         Ok(())
+    }
+
+    /// Publish diagnostics for a document
+    pub async fn publish_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
+        if let Some(client) = &self.client {
+            let _ = client.publish_diagnostics(uri, diagnostics, None).await;
+        }
     }
 }
 

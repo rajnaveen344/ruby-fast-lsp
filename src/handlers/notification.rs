@@ -74,18 +74,24 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
 
+    let document = RubyDocument::new(
+        uri.clone(),
+        content.clone(),
+        params.text_document.version,
+    );
+
     lang_server.docs.lock().insert(
         uri.clone(),
-        Arc::new(RwLock::new(RubyDocument::new(
-            uri.clone(),
-            content.clone(),
-            params.text_document.version,
-        ))),
+        Arc::new(RwLock::new(document.clone())),
     );
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
     let _ = process_file_for_definitions(lang_server, uri.clone());
     let _ = process_file_for_references(lang_server, uri.clone(), true);
+    
+    // Generate and publish diagnostics
+    let diagnostics = capabilities::diagnostics::generate_diagnostics(&document);
+    lang_server.publish_diagnostics(uri, diagnostics).await;
 }
 
 pub async fn handle_did_change(
@@ -101,10 +107,14 @@ pub async fn handle_did_change(
         lang_server
             .docs
             .lock()
-            .insert(uri.clone(), Arc::new(RwLock::new(doc)));
+            .insert(uri.clone(), Arc::new(RwLock::new(doc.clone())));
 
         let _ = process_file_for_definitions(lang_server, uri.clone());
         let _ = process_file_for_references(lang_server, uri.clone(), true);
+        
+        // Generate and publish diagnostics
+        let diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
+        lang_server.publish_diagnostics(uri.clone(), diagnostics).await;
     }
 }
 
@@ -115,6 +125,9 @@ pub async fn handle_did_close(
     let uri = params.text_document.uri.clone();
     lang_server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
+    
+    // Clear diagnostics for the closed document
+    lang_server.publish_diagnostics(uri, vec![]).await;
 }
 
 pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {

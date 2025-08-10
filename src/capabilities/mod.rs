@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod definitions;
+pub mod diagnostics;
 pub mod document_symbols;
 pub mod formatting;
 pub mod inlay_hints;

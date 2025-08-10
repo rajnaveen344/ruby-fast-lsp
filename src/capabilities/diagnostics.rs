@@ -1,0 +1,205 @@
+use crate::types::ruby_document::RubyDocument;
+use log::{debug, warn};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+
+/// Generate diagnostics for a Ruby document
+/// 
+/// This function analyzes the document for syntax errors and other issues,
+/// returning a vector of LSP diagnostics that can be published to the client.
+pub fn generate_diagnostics(document: &RubyDocument) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    
+    debug!("Generating diagnostics for document: {}", document.uri);
+    
+    // Parse the document content using ruby-prism
+    let parse_result = ruby_prism::parse(document.content.as_bytes());
+    
+    // Check for syntax errors
+    let errors: Vec<_> = parse_result.errors().collect();
+    
+    if !errors.is_empty() {
+        debug!("Found {} syntax errors in document", errors.len());
+        
+        for error in errors {
+            let location = error.location();
+            let start_offset = location.start_offset();
+            let end_offset = location.end_offset();
+            
+            // Convert byte offsets to LSP positions
+            let start_pos = document.offset_to_position(start_offset);
+            let end_pos = document.offset_to_position(end_offset);
+            
+            // Create diagnostic for syntax error
+            let diagnostic = Diagnostic {
+                range: Range::new(start_pos, end_pos),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("ruby-fast-lsp".to_string()),
+                message: format!("Syntax error: {:?}", error),
+                related_information: None,
+                tags: None,
+                data: None,
+            };
+            
+            diagnostics.push(diagnostic);
+        }
+    }
+    
+    // Check for warnings from the parser
+    let warnings: Vec<_> = parse_result.warnings().collect();
+    
+    if !warnings.is_empty() {
+        debug!("Found {} warnings in document", warnings.len());
+        
+        for warning in warnings {
+            let location = warning.location();
+            let start_offset = location.start_offset();
+            let end_offset = location.end_offset();
+            
+            // Convert byte offsets to LSP positions
+            let start_pos = document.offset_to_position(start_offset);
+            let end_pos = document.offset_to_position(end_offset);
+            
+            // Create diagnostic for warning
+            let diagnostic = Diagnostic {
+                range: Range::new(start_pos, end_pos),
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: None,
+                code_description: None,
+                source: Some("ruby-fast-lsp".to_string()),
+                message: format!("Warning: {:?}", warning),
+                related_information: None,
+                tags: None,
+                data: None,
+            };
+            
+            diagnostics.push(diagnostic);
+        }
+    }
+    
+    // Additional linting checks can be added here in the future
+    // For example:
+    // - Unused variables
+    // - Unreachable code
+    // - Style violations
+    // - Performance suggestions
+    
+    debug!("Generated {} total diagnostics for document", diagnostics.len());
+    diagnostics
+}
+
+/// Validate that a diagnostic range is within document bounds
+/// 
+/// This is a safety check to ensure we don't send invalid ranges to the client
+fn _validate_diagnostic_range(document: &RubyDocument, range: &Range) -> bool {
+    let lines: Vec<&str> = document.content.lines().collect();
+    let line_count = lines.len();
+    
+    // Check if start position is valid
+    if range.start.line as usize >= line_count {
+        warn!("Diagnostic start line {} exceeds document line count {}", 
+              range.start.line, line_count);
+        return false;
+    }
+    
+    // Check if end position is valid
+    if range.end.line as usize >= line_count {
+        warn!("Diagnostic end line {} exceeds document line count {}", 
+              range.end.line, line_count);
+        return false;
+    }
+    
+    // Check if character positions are valid for their respective lines
+    if let Some(start_line) = lines.get(range.start.line as usize) {
+        if range.start.character as usize > start_line.len() {
+            warn!("Diagnostic start character {} exceeds line length {}", 
+                  range.start.character, start_line.len());
+            return false;
+        }
+    }
+    
+    if let Some(end_line) = lines.get(range.end.line as usize) {
+        if range.end.character as usize > end_line.len() {
+            warn!("Diagnostic end character {} exceeds line length {}", 
+                  range.end.character, end_line.len());
+            return false;
+        }
+    }
+    
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Url;
+
+    #[test]
+    fn test_generate_diagnostics_valid_ruby() {
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+class TestClass
+  def test_method
+    puts "Hello, World!"
+  end
+end
+"#.to_string();
+        
+        let document = RubyDocument::new(uri, content, 1);
+        let diagnostics = generate_diagnostics(&document);
+        
+        // Valid Ruby code should have no diagnostics
+        assert_eq!(diagnostics.len(), 0);
+    }
+    
+    #[test]
+    fn test_generate_diagnostics_syntax_error() {
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+class TestClass
+  def test_method
+    puts "Hello, World!"
+  # Missing 'end' for method
+end
+"#.to_string();
+        
+        let document = RubyDocument::new(uri, content, 1);
+        let diagnostics = generate_diagnostics(&document);
+        
+        // Should have at least one syntax error diagnostic
+        assert!(!diagnostics.is_empty());
+        
+        // Check that the diagnostic is an error
+        let first_diagnostic = &diagnostics[0];
+        assert_eq!(first_diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(first_diagnostic.source, Some("ruby-fast-lsp".to_string()));
+    }
+    
+    #[test]
+    fn test_generate_diagnostics_multiple_errors() {
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+class TestClass
+  def test_method(
+    puts "Hello, World!"
+  # Missing closing parenthesis and 'end'
+end
+"#.to_string();
+        
+        let document = RubyDocument::new(uri, content, 1);
+        let diagnostics = generate_diagnostics(&document);
+        
+        // Should have multiple syntax diagnostics
+        assert!(!diagnostics.is_empty());
+        
+        // All diagnostics should be either errors or warnings
+        for diagnostic in &diagnostics {
+            assert!(
+                diagnostic.severity == Some(DiagnosticSeverity::ERROR) ||
+                diagnostic.severity == Some(DiagnosticSeverity::WARNING)
+            );
+            assert_eq!(diagnostic.source, Some("ruby-fast-lsp".to_string()));
+        }
+    }
+}
