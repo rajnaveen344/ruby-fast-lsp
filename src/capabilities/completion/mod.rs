@@ -3,6 +3,7 @@ pub mod constant;
 pub mod constant_completion;
 pub mod constant_matcher;
 pub mod scope_resolver;
+pub mod snippets;
 pub mod variable;
 
 use tower_lsp::lsp_types::{
@@ -20,6 +21,7 @@ pub use constant_completion::{
 };
 pub use constant_matcher::ConstantMatcher;
 pub use scope_resolver::ScopeResolver;
+pub use snippets::RubySnippets;
 
 pub async fn find_completion_at_position(
     server: &RubyLanguageServer,
@@ -90,6 +92,10 @@ pub async fn find_completion_at_position(
                 iden.last().map(|c| c.to_string()).unwrap_or_default()
             }
         }
+        Some(Identifier::RubyMethod { namespace: _, receiver_kind: _, receiver: _, iden }) => {
+            // For method completion, extract the method name being typed
+            iden.to_string()
+        }
         None => {
             if is_scope_resolution_context {
                 // For top-level scope resolution (::) or when analyzer doesn't detect a constant
@@ -130,7 +136,21 @@ pub async fn find_completion_at_position(
                     "::".to_string()
                 }
             } else {
-                String::new()
+                // Fallback: extract partial word from current line for snippet completion
+                let line_text = document
+                    .content
+                    .lines()
+                    .nth(position.line as usize)
+                    .unwrap_or("");
+                let char_pos = position.character as usize;
+
+                // Look backwards from the current position to find the start of the current word
+                let before_cursor = &line_text[..char_pos.min(line_text.len())];
+                if let Some(start) = before_cursor.rfind(|c: char| !c.is_alphanumeric() && c != '_') {
+                    before_cursor[start + 1..].to_string()
+                } else {
+                    before_cursor.trim().to_string()
+                }
             }
         }
         _ => {
@@ -153,7 +173,7 @@ pub async fn find_completion_at_position(
             constant::find_constant_completions(&index_guard, &analyzer, position, partial_string);
         completions.extend(constant_completions);
     } else {
-        // Normal completion: include both variables and constants
+        // Normal completion: include variables, constants, and snippets
 
         // Add local variable completions
         let variable_completions = variable::find_variable_completions(&document, &lv_stack_at_pos);
@@ -163,8 +183,12 @@ pub async fn find_completion_at_position(
         let index_arc = server.index();
         let index_guard = index_arc.lock();
         let constant_completions =
-            constant::find_constant_completions(&*index_guard, &analyzer, position, partial_string);
+            constant::find_constant_completions(&*index_guard, &analyzer, position, partial_string.clone());
         completions.extend(constant_completions);
+
+        // Add snippet completions
+        let snippet_completions = RubySnippets::get_matching_snippets(&partial_string);
+        completions.extend(snippet_completions);
     }
 
     CompletionResponse::Array(completions)
@@ -181,7 +205,7 @@ mod tests {
     use tower_lsp::{
         lsp_types::{
             CompletionItemKind, CompletionTriggerKind, DidOpenTextDocumentParams, InitializeParams,
-            Location, Range, TextDocumentItem, Url,
+            InsertTextFormat, Location, Range, TextDocumentItem, Url,
         },
         LanguageServer,
     };
@@ -1619,6 +1643,107 @@ A::"#;
                     2,
                     "Should have exactly 2 completions for A:: (A and B)"
                 );
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snippet_completions() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+def test_method
+  i
+end
+"#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position where "i" is typed (should match "if" snippet)
+        let position = Position {
+            line: 2,
+            character: 3,
+        }; // After "i"
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                assert!(!completions.is_empty(), "Should have completions");
+
+                // Check if we have snippet completions
+                let if_snippet = completions.iter().find(|c| c.label == "if");
+                assert!(if_snippet.is_some(), "Should have 'if' snippet completion");
+
+                if let Some(completion) = if_snippet {
+                    assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
+                    assert!(completion.insert_text.is_some(), "Should have insert text");
+                    assert_eq!(completion.insert_text_format, Some(InsertTextFormat::SNIPPET));
+                }
+
+                // Check for other control structure snippets that contain "i"
+                let while_snippet = completions.iter().find(|c| c.label == "while");
+                assert!(while_snippet.is_some(), "Should have 'while' snippet completion");
+
+                let times_snippet = completions.iter().find(|c| c.label == "times");
+                assert!(times_snippet.is_some(), "Should have 'times' snippet completion");
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snippet_completions_partial_match() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+def test_method
+  wh
+end
+"#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position where "wh" is typed (should match "while" snippet)
+        let position = Position {
+            line: 2,
+            character: 4,
+        }; // After "wh"
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // Check if we have while snippet completion
+                let while_snippet = completions.iter().find(|c| c.label == "while");
+                assert!(while_snippet.is_some(), "Should have 'while' snippet completion for 'wh' prefix");
+
+                if let Some(completion) = while_snippet {
+                    assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
+                    assert!(completion.insert_text.is_some(), "Should have insert text");
+                    assert_eq!(completion.insert_text_format, Some(InsertTextFormat::SNIPPET));
+                }
+
+                // Should not have 'if' snippet since it doesn't match 'wh'
+                let if_snippet = completions.iter().find(|c| c.label == "if");
+                assert!(if_snippet.is_none(), "Should not have 'if' snippet for 'wh' prefix");
             }
             _ => panic!("Expected array response"),
         }

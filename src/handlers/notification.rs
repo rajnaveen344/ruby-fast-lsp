@@ -51,6 +51,9 @@ pub async fn handle_initialize(
                 ":".to_string(),  // Trigger on ":" to handle "::" for constant completion
                 ".".to_string(),  // Trigger on "." for method completion (future enhancement)
             ]),
+            completion_item: Some(CompletionOptionsCompletionItem {
+                label_details_support: Some(true),
+            }),
             ..CompletionOptions::default()
         }),
         ..ServerCapabilities::default()
