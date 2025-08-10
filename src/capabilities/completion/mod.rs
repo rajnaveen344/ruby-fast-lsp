@@ -203,16 +203,21 @@ pub async fn find_completion_at_position(
         completions.extend(constant_completions);
 
         // Add snippet completions with context awareness
-        let snippet_context = snippets::RubySnippets::determine_context_with_position(
-            &partial_name,
-            line_text,
-            position.character,
-        );
+        // Only include snippets if not triggered by a dot character
+        let is_dot_trigger = is_trigger_character && trigger_character == Some(".");
+        
+        if !is_dot_trigger {
+            let snippet_context = snippets::RubySnippets::determine_context_with_position(
+                &partial_name,
+                line_text,
+                position.character,
+            );
 
-        let snippet_completions =
-            RubySnippets::get_matching_snippets_with_context(&partial_string, snippet_context);
+            let snippet_completions =
+                RubySnippets::get_matching_snippets_with_context(&partial_string, snippet_context);
 
-        completions.extend(snippet_completions);
+            completions.extend(snippet_completions);
+        }
     }
 
     CompletionResponse::Array(completions)
@@ -1956,6 +1961,102 @@ a."#;
                         "Should have '{}' method snippet in method call context",
                         method
                     );
+                }
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snippets_not_shown_on_dot_trigger() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"a = [1, 2, 3]
+a."#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position right after the dot with dot trigger
+        let position = Position {
+            line: 1,
+            character: 2,
+        }; // Right after "a."
+        
+        let context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        });
+        
+        let response = find_completion_at_position(&server, uri, position, context).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // When triggered by dot, snippets should NOT be included
+                let snippet_completions: Vec<_> = completions
+                    .iter()
+                    .filter(|c| c.kind == Some(CompletionItemKind::SNIPPET))
+                    .collect();
+                
+                assert!(
+                    snippet_completions.is_empty(),
+                    "Should not have any snippet completions when triggered by dot character. Found: {:?}",
+                    snippet_completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+                );
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snippets_shown_on_character_typing() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let content = r#"
+def test_method
+  wh
+end
+"#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion when user types characters (not triggered by special character)
+        let position = Position {
+            line: 2,
+            character: 4,
+        }; // After "wh"
+        
+        // No trigger context (user is just typing)
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // When not triggered by dot, snippets should be included
+                let while_snippet = completions.iter().find(|c| c.label == "while");
+                assert!(
+                    while_snippet.is_some(),
+                    "Should have 'while' snippet completion when user types characters"
+                );
+
+                if let Some(completion) = while_snippet {
+                    assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
                 }
             }
             _ => panic!("Expected array response"),
