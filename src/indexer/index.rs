@@ -199,7 +199,7 @@ impl RubyIndex {
     }
 
     /// Search for entries by prefix
-    pub fn search_by_prefix(&self, prefix: &str) -> Vec<&Entry> {
+    pub fn search_by_prefix(&self, prefix: &str) -> Vec<Entry> {
         self.prefix_tree.search(prefix)
     }
 

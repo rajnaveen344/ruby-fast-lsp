@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::cell::RefCell;
+use trie_rs::map::{Trie, TrieBuilder};
 
 use crate::indexer::entry::Entry;
 
@@ -21,137 +23,86 @@ use crate::indexer::entry::Entry;
 /// A PrefixTree is useful for autocomplete, since we always want to find all alternatives while the developer hasn't
 /// finished typing yet. This PrefixTree implementation allows for string keys and Entry values.
 ///
+/// This implementation uses the `trie-rs` crate for efficient memory usage and fast lookups.
 /// See https://en.wikipedia.org/wiki/Trie for more information
 #[derive(Debug)]
 pub struct PrefixTree {
-    root: Node,
+    // We maintain both a built trie for fast searches and a map for modifications
+    trie: RefCell<Option<Trie<u8, Entry>>>,
+    entries: RefCell<HashMap<String, Entry>>,
+    needs_rebuild: RefCell<bool>,
 }
-
-
 
 impl PrefixTree {
     pub fn new() -> Self {
         PrefixTree {
-            root: Node::new(None),
+            trie: RefCell::new(None),
+            entries: RefCell::new(HashMap::new()),
+            needs_rebuild: RefCell::new(false),
         }
     }
 
     /// Search the PrefixTree based on a given `prefix`. If `foo` is an entry in the tree, then searching for `fo` will
     /// return it as a result. The result is always an array of Entry references.
-    pub fn search(&self, prefix: &str) -> Vec<&Entry> {
-        if let Some(node) = self.find_node(prefix) {
-            node.collect()
+    pub fn search(&self, prefix: &str) -> Vec<Entry> {
+        // Ensure trie is built
+        self.ensure_trie_built();
+        
+        if prefix.is_empty() {
+            // Return all entries for empty prefix
+            self.entries.borrow().values().cloned().collect()
         } else {
-            Vec::new()
+            // Use trie's predictive search to find all entries with the given prefix
+            let trie_ref = self.trie.borrow();
+            let trie = trie_ref.as_ref().unwrap();
+            let results: Vec<(String, &Entry)> = trie.predictive_search(prefix).collect();
+            results.into_iter().map(|(_, entry)| entry.clone()).collect()
         }
     }
 
     /// Inserts an `entry` using the given `key`
     pub fn insert(&mut self, key: &str, entry: Entry) {
-        let mut node = &mut self.root;
-
-        for char in key.chars() {
-            let char_str = char.to_string();
-            if !node.children.contains_key(&char_str) {
-                let new_node = Node::new(None);
-                node.children.insert(char_str.clone(), new_node);
-            }
-            node = node.children.get_mut(&char_str).unwrap();
-        }
-
         // This line is to allow a value to be overridden. When we are indexing files, we want to be able to update entries
         // for a given fully qualified name if we find more occurrences of it. Without being able to override, that would
         // not be possible
-        node.value = Some(entry);
-        node.is_leaf = true;
+        self.entries.borrow_mut().insert(key.to_string(), entry);
+        *self.needs_rebuild.borrow_mut() = true;
     }
 
     /// Deletes the entry identified by `key` from the tree. Notice that a partial match will still delete all entries
     /// that match it. For example, if the tree contains `foo` and we ask to delete `fo`, then `foo` will be deleted
     pub fn delete(&mut self, key: &str) {
-        if let Some(node) = self.find_node_mut(key) {
-            node.value = None;
-            node.is_leaf = false;
-
-            // TODO: Implement cleanup of empty parent nodes
-            // This is more complex in Rust due to ownership, so we'll keep it simple for now
+        if self.entries.borrow_mut().remove(key).is_some() {
+            *self.needs_rebuild.borrow_mut() = true;
         }
     }
 
-    /// Find a node that matches the given `key`
-    fn find_node(&self, key: &str) -> Option<&Node> {
-        let mut node = &self.root;
-
-        for char in key.chars() {
-            let char_str = char.to_string();
-            if let Some(child_node) = node.children.get(&char_str) {
-                node = child_node;
-            } else {
-                return None;
-            }
+    /// Ensure the trie is built if it needs rebuilding
+    fn ensure_trie_built(&self) {
+        let needs_rebuild = *self.needs_rebuild.borrow();
+        let trie_is_none = self.trie.borrow().is_none();
+        
+        if needs_rebuild || trie_is_none {
+            self.rebuild_trie();
         }
-
-        Some(node)
     }
 
-    /// Find a mutable node that matches the given `key`
-    fn find_node_mut(&mut self, key: &str) -> Option<&mut Node> {
-        let mut node = &mut self.root;
-
-        for char in key.chars() {
-            let char_str = char.to_string();
-            if node.children.contains_key(&char_str) {
-                node = node.children.get_mut(&char_str).unwrap();
-            } else {
-                return None;
-            }
+    /// Rebuild the trie from the current entries
+    fn rebuild_trie(&self) {
+        let mut builder = TrieBuilder::new();
+        
+        for (key, entry) in self.entries.borrow().iter() {
+            builder.push(key, entry.clone());
         }
-
-        Some(node)
+        
+        *self.trie.borrow_mut() = Some(builder.build());
+        *self.needs_rebuild.borrow_mut() = false;
     }
 }
 
 impl Default for PrefixTree {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(Debug)]
-struct Node {
-    value: Option<Entry>,
-    children: HashMap<String, Node>,
-    is_leaf: bool,
-}
-
-impl Node {
-    fn new(value: Option<Entry>) -> Self {
-        Node {
-            value,
-            children: HashMap::new(),
-            is_leaf: false,
-        }
-    }
-
-    /// Collect all entries in this subtree using depth-first traversal
-    fn collect(&self) -> Vec<&Entry> {
-        let mut result = Vec::new();
-        let mut stack = vec![self];
-
-        while let Some(node) = stack.pop() {
-            if node.is_leaf {
-                if let Some(ref entry) = node.value {
-                    result.push(entry);
-                }
-            }
-
-            // Add children to stack for traversal
-            for child in node.children.values() {
-                stack.push(child);
-            }
-        }
-
-        result
     }
 }
 
