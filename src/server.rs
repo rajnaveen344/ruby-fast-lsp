@@ -6,10 +6,11 @@ use anyhow::Result;
 use log::{debug, info};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams, 
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, 
-    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, 
-    SemanticTokensParams, SemanticTokensResult, SymbolInformation, Url, WorkspaceSymbolParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentOnTypeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, 
+    InitializeParams, InitializeResult, InitializedParams, InlayHintParams, Location, 
+    ReferenceParams, SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, 
+    Url, WorkspaceSymbolParams,
 };
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
@@ -264,6 +265,26 @@ impl LanguageServer for RubyLanguageServer {
         
         info!(
             "[PERF] Workspace symbols completed in {:?}",
+            start_time.elapsed()
+        );
+        
+        result
+    }
+
+    async fn on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> LspResult<Option<Vec<TextEdit>>> {
+        info!(
+            "Document on type formatting request received for {:?}",
+            params.text_document_position.text_document.uri.path()
+        );
+        
+        let start_time = Instant::now();
+        let result = request::handle_document_on_type_formatting(self, params).await;
+        
+        info!(
+            "[PERF] Document on type formatting completed in {:?}",
             start_time.elapsed()
         );
         

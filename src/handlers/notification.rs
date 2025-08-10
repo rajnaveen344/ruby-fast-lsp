@@ -56,6 +56,9 @@ pub async fn handle_initialize(
             }),
             ..CompletionOptions::default()
         }),
+        document_on_type_formatting_provider: Some(
+            capabilities::formatting::get_document_on_type_formatting_options(),
+        ),
         ..ServerCapabilities::default()
     };
 
