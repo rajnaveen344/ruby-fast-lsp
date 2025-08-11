@@ -2,7 +2,6 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
-use crate::stubs::integration::StubIntegration;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info};
@@ -28,20 +27,17 @@ pub struct RubyLanguageServer {
     pub client: Option<Client>,
     pub index: Arc<Mutex<RubyIndex>>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
-    pub stubs: Arc<Mutex<StubIntegration>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
         let index = RubyIndex::new();
-        let stubs = StubIntegration::new();
         let config = RubyFastLspConfig::default();
         Ok(Self {
             client: Some(client),
             index: Arc::new(Mutex::new(index)),
             docs: Arc::new(Mutex::new(HashMap::new())),
-            stubs: Arc::new(Mutex::new(stubs)),
             config: Arc::new(Mutex::new(config)),
         })
     }
@@ -98,7 +94,6 @@ impl Default for RubyLanguageServer {
             client: None,
             index: Arc::new(Mutex::new(RubyIndex::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
-            stubs: Arc::new(Mutex::new(StubIntegration::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
         }
     }

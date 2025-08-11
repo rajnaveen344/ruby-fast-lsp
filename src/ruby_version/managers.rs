@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use log::{debug, warn};
 
-use crate::stubs::version::MinorVersion;
+use crate::version::MinorVersion;
 
 /// Represents different Ruby version managers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -92,7 +92,7 @@ impl VersionManager {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
                     let version_str = line.trim();
-                    if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = MinorVersion::from_full_version(version_str) {
                         versions.push(version);
                     }
                 }
@@ -112,7 +112,7 @@ impl VersionManager {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_str) = version_output.split_whitespace().next() {
-                    return MinorVersion::from_full_version(version_str).ok();
+                    return MinorVersion::from_full_version(version_str);
                 }
             }
         }
@@ -131,7 +131,7 @@ impl VersionManager {
                 for line in versions_output.lines() {
                     let line = line.trim();
                     if let Some(version_str) = line.strip_prefix("ruby-") {
-                        if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = MinorVersion::from_full_version(version_str) {
                             versions.push(version);
                         }
                     }
@@ -153,7 +153,7 @@ impl VersionManager {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_str) = version_output.strip_prefix("ruby-") {
                     let version_str = version_str.trim();
-                    return MinorVersion::from_full_version(version_str).ok();
+                    return MinorVersion::from_full_version(version_str);
                 }
             }
         }
@@ -173,7 +173,7 @@ impl VersionManager {
                     // chruby output format: "   ruby-3.0.0"
                     if let Some(version_str) = line.strip_prefix("ruby-") {
                         let version_str = version_str.trim_start_matches('*').trim();
-                        if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = MinorVersion::from_full_version(version_str) {
                             versions.push(version);
                         }
                     }
@@ -198,7 +198,7 @@ impl VersionManager {
                     if line.starts_with('*') {
                         if let Some(version_str) = line.strip_prefix("* ruby-") {
                             let version_str = version_str.trim();
-                            return MinorVersion::from_full_version(version_str).ok();
+                            return MinorVersion::from_full_version(version_str);
                         }
                     }
                 }
@@ -215,7 +215,7 @@ impl VersionManager {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
-                    return MinorVersion::from_full_version(version_part).ok();
+                    return MinorVersion::from_full_version(version_part);
                 }
             }
         }

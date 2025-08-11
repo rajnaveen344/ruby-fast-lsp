@@ -6,7 +6,7 @@ use crate::handlers::helpers::{
     init_workspace, process_file_for_definitions, process_file_for_references,
 };
 use crate::server::RubyLanguageServer;
-use crate::stubs::version::MinorVersion;
+use crate::version::MinorVersion;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, info, warn};
 use tower_lsp::lsp_types::{
@@ -94,37 +94,29 @@ pub async fn handle_initialized(
     
     // Determine Ruby version based on configuration
     let ruby_version = if let Some(version) = config.get_ruby_version() {
-        info!("Using configured Ruby version: {}", version);
+        info!("Using configured Ruby version: {:?}", version);
         version
     } else {
         // Auto-detect Ruby version
         detect_system_ruby_version()
             .unwrap_or_else(|| {
                 info!("No Ruby version detected, using default Ruby 3.0");
-                MinorVersion::new(3, 0)
+                (3, 0)
             })
     };
 
-    info!("Using Ruby version: {}", ruby_version);
+    info!("Using Ruby version: {:?}", ruby_version);
 
-    // Initialize the stub system if enabled in configuration
+    // Core stubs will be handled by indexing additional paths
     if config.enable_core_stubs {
-        let mut stubs = server.stubs.lock();
-        match stubs.initialize(ruby_version) {
-            Ok(_) => {
-                info!("Stub system initialized successfully with Ruby {}", ruby_version);
-            }
-            Err(e) => {
-                warn!("Failed to initialize stub system: {}", e);
-            }
-        }
+        info!("Core stubs enabled - will be indexed from VSIX stubs directory");
     } else {
         info!("Core stubs disabled in configuration");
     }
 }
 
 /// Simple system Ruby version detection without workspace context
-fn detect_system_ruby_version() -> Option<MinorVersion> {
+fn detect_system_ruby_version() -> Option<(u8, u8)> {
     if let Ok(output) = std::process::Command::new("ruby")
         .args(&["--version"])
         .output()
@@ -134,7 +126,9 @@ fn detect_system_ruby_version() -> Option<MinorVersion> {
             // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
             if let Some(version_part) = version_output.split_whitespace().nth(1) {
                 debug!("System ruby version output: {}", version_part);
-                return MinorVersion::from_full_version(version_part).ok();
+                if let Some(version) = MinorVersion::from_full_version(version_part) {
+                    return Some((version.major, version.minor));
+                }
             }
         }
     }
@@ -216,32 +210,24 @@ pub async fn handle_did_change_configuration(
                 // Update the server configuration
                 *server.config.lock() = config.clone();
                 
-                // Re-initialize stub system if configuration changed
+                // Handle configuration change for Ruby version
                 let ruby_version = if let Some(version) = config.get_ruby_version() {
-                    info!("Using configured Ruby version: {}", version);
+                    info!("Using configured Ruby version: {:?}", version);
                     version
                 } else {
                     // Auto-detect Ruby version
                     detect_system_ruby_version()
                         .unwrap_or_else(|| {
                             info!("No Ruby version detected, using default Ruby 3.0");
-                            MinorVersion::new(3, 0)
+                            (3, 0)
                         })
                 };
 
-                info!("Re-initializing with Ruby version: {}", ruby_version);
+                info!("Configuration updated with Ruby version: {:?}", ruby_version);
 
-                // Re-initialize the stub system if enabled
+                // Core stubs will be handled by indexing additional paths
                 if config.enable_core_stubs {
-                    let mut stubs = server.stubs.lock();
-                    match stubs.initialize(ruby_version) {
-                        Ok(_) => {
-                            info!("Stub system re-initialized successfully with Ruby {}", ruby_version);
-                        }
-                        Err(e) => {
-                            warn!("Failed to re-initialize stub system: {}", e);
-                        }
-                    }
+                    info!("Core stubs enabled - will be indexed from VSIX stubs directory");
                 } else {
                     info!("Core stubs disabled in updated configuration");
                 }

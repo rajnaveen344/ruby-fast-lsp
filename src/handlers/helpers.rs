@@ -3,7 +3,7 @@ use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tower_lsp::lsp_types::*;
 use parking_lot::RwLock;
 use ruby_prism::{parse, Visit};
@@ -16,6 +16,82 @@ use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+/// Detect Ruby version from workspace context
+fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
+    // Check for .ruby-version file
+    let ruby_version_file = workspace_path.join(".ruby-version");
+    if ruby_version_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&ruby_version_file) {
+            let version_str = content.trim();
+            if let Some((major, minor)) = parse_ruby_version(version_str) {
+                info!("Detected Ruby version {} from .ruby-version file", version_str);
+                return Some((major, minor));
+            }
+        }
+    }
+    
+    // Check for Gemfile
+    let gemfile = workspace_path.join("Gemfile");
+    if gemfile.exists() {
+        if let Ok(content) = std::fs::read_to_string(&gemfile) {
+            for line in content.lines() {
+                if line.trim().starts_with("ruby") {
+                    // Extract version from lines like: ruby "3.1.0" or ruby '3.1'
+                    if let Some(start) = line.find('"').or_else(|| line.find('\'')) {
+                        let quote_char = line.chars().nth(start).unwrap();
+                        if let Some(end) = line[start + 1..].find(quote_char) {
+                            let version_str = &line[start + 1..start + 1 + end];
+                            if let Some((major, minor)) = parse_ruby_version(version_str) {
+                                info!("Detected Ruby version {} from Gemfile", version_str);
+                                return Some((major, minor));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback: detect system Ruby version
+    detect_system_ruby_version()
+}
+
+/// Detect the system Ruby version by running `ruby --version`
+fn detect_system_ruby_version() -> Option<(u8, u8)> {
+    use std::process::Command;
+    
+    let output = Command::new("ruby")
+        .args(&["--version"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let version_output = String::from_utf8_lossy(&output.stdout);
+    // Ruby version output format: "ruby 3.3.5 (2024-09-03 revision ef084cc8f4) [arm64-darwin23]"
+    for word in version_output.split_whitespace() {
+        if let Some((major, minor)) = parse_ruby_version(word) {
+            info!("Detected system Ruby version {}.{}", major, minor);
+            return Some((major, minor));
+        }
+    }
+    
+    None
+}
+
+/// Parse Ruby version string into (major, minor) tuple
+fn parse_ruby_version(version_str: &str) -> Option<(u8, u8)> {
+    let parts: Vec<&str> = version_str.split('.').collect();
+    if parts.len() >= 2 {
+        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u8>(), parts[1].parse::<u8>()) {
+            return Some((major, minor));
+        }
+    }
+    None
+}
+
 pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Result<()> {
     let start_time = Instant::now();
     info!("Indexing workspace folder: {}", folder_uri);
@@ -25,19 +101,53 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
         .to_file_path()
         .map_err(|_| anyhow::anyhow!("Failed to convert URI to file path: {}", folder_uri))?;
 
-    // Find all Ruby files in the workspace
+    // Get all index paths using the new path discovery system
+    let config = server.config.lock().clone();
+    
+    // Determine Ruby version for path discovery
+    let ruby_version = if let Some(version) = config.get_ruby_version() {
+        info!("Using configured Ruby version {}.{}", version.0, version.1);
+        version
+    } else {
+        // Auto-detect Ruby version in workspace context
+        detect_workspace_ruby_version(&folder_path)
+            .unwrap_or_else(|| {
+                warn!("Could not detect Ruby version, falling back to Ruby 3.0");
+                (3, 0)
+            })
+    };
+    
+    let all_index_paths = config.get_index_paths(ruby_version, folder_path.clone());
+    
+    info!("Discovered {} paths to index:", all_index_paths.len());
+    for path in &all_index_paths {
+        info!("  - {}", path.display());
+    }
+
+    // Find all Ruby files across all discovered paths
     let file_search_start = Instant::now();
-    let files = find_ruby_files(&folder_path).await?;
+    let mut all_files = Vec::new();
+    
+    for path in all_index_paths {
+        if path.exists() {
+            let files = find_ruby_files(&path).await?;
+            info!("Found {} Ruby files in {}", files.len(), path.display());
+            all_files.extend(files);
+        } else {
+            debug!("Skipping non-existent path: {}", path.display());
+        }
+    }
+    
     let file_search_duration = file_search_start.elapsed();
     info!(
-        "Found {} Ruby files to index in {:?}",
-        files.len(),
+        "Found {} total Ruby files to index in {:?}",
+        all_files.len(),
         file_search_duration
     );
 
     // Process files in parallel for indexing
     let definitions_index_start = Instant::now();
-    process_files_parallel(server, files.clone(), ProcessingMode::Definitions).await?;
+    process_files_parallel(server, all_files.clone(), ProcessingMode::Definitions).await?;
     let definitions_index_duration = definitions_index_start.elapsed();
     info!(
         "Definitions indexing completed in {:?}",
@@ -48,7 +158,7 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
     let references_index_start = Instant::now();
     process_files_parallel(
         server,
-        files,
+        all_files,
         ProcessingMode::References {
             include_local_vars: false, // Skip local variable references during workspace init as they are file-scoped
         },

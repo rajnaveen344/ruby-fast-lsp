@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
 
-use crate::stubs::version::MinorVersion;
+use crate::version::MinorVersion;
 
 /// Detects Ruby version from various workspace sources
 pub struct RubyVersionDetector {
@@ -51,7 +51,7 @@ impl RubyVersionDetector {
         let version_str = content.trim();
 
         debug!("Found .ruby-version file with content: {}", version_str);
-        MinorVersion::from_full_version(version_str).ok()
+        MinorVersion::from_full_version(version_str)
     }
 
     /// Detect version from Gemfile ruby directive
@@ -76,7 +76,7 @@ impl RubyVersionDetector {
                         c == '"' || c == '\'' || c == '~' || c == '>' || c == ' '
                     });
                     debug!("Found Gemfile ruby directive: {}", version_str);
-                    if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = MinorVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -94,7 +94,7 @@ impl RubyVersionDetector {
             if let Ok(content) = fs::read_to_string(&rbenv_version_file) {
                 let version_str = content.trim();
                 debug!("Found .rbenv-version file with content: {}", version_str);
-                if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                if let Some(version) = MinorVersion::from_full_version(version_str) {
                     return Some(version);
                 }
             }
@@ -111,7 +111,7 @@ impl RubyVersionDetector {
                 // Parse output like "3.0.0 (set by /path/to/.ruby-version)"
                 if let Some(version_str) = version_output.split_whitespace().next() {
                     debug!("rbenv version output: {}", version_str);
-                    if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = MinorVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -134,7 +134,7 @@ impl RubyVersionDetector {
                         if let Some(ruby_part) = line.split("ruby-").nth(1) {
                             let version_str = ruby_part.split_whitespace().next().unwrap_or("");
                             debug!("Found .rvmrc ruby version: {}", version_str);
-                            if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                            if let Some(version) = MinorVersion::from_full_version(version_str) {
                                 return Some(version);
                             }
                         }
@@ -155,7 +155,7 @@ impl RubyVersionDetector {
                 if let Some(version_str) = version_output.strip_prefix("ruby-") {
                     let version_str = version_str.trim();
                     debug!("rvm current output: {}", version_str);
-                    if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = MinorVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -177,7 +177,7 @@ impl RubyVersionDetector {
                 // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
                     debug!("System ruby version output: {}", version_part);
-                    if let Ok(version) = MinorVersion::from_full_version(version_part) {
+                    if let Some(version) = MinorVersion::from_full_version(version_part) {
                         return Some(version);
                     }
                 }
@@ -200,7 +200,7 @@ impl RubyVersionDetector {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
                     let version_str = line.trim();
-                    if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = MinorVersion::from_full_version(version_str) {
                         if !versions.contains(&version) {
                             versions.push(version);
                         }
@@ -219,7 +219,7 @@ impl RubyVersionDetector {
                 for line in versions_output.lines() {
                     let line = line.trim();
                     if let Some(version_str) = line.strip_prefix("ruby-") {
-                        if let Ok(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = MinorVersion::from_full_version(version_str) {
                             if !versions.contains(&version) {
                                 versions.push(version);
                             }
