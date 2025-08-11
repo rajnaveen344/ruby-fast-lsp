@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
 
-use crate::version::MinorVersion;
+use super::version::RubyVersion;
 
 /// Detects Ruby version from various workspace sources
 pub struct RubyVersionDetector {
@@ -16,10 +16,14 @@ impl RubyVersionDetector {
         Some(Self { workspace_root })
     }
 
+    pub fn from_path(workspace_root: PathBuf) -> Self {
+        Self { workspace_root }
+    }
+
     /// Detect Ruby version from workspace, trying multiple sources in priority order
-    pub fn detect_version(&self) -> Option<MinorVersion> {
+    pub fn detect_version(&self) -> Option<RubyVersion> {
         // Priority order for version detection
-        let detection_methods: Vec<(&str, fn(&Self) -> Option<MinorVersion>)> = vec![
+        let detection_methods: Vec<(&str, fn(&Self) -> Option<RubyVersion>)> = vec![
             ("ruby-version file", Self::detect_from_ruby_version),
             ("Gemfile", Self::detect_from_gemfile),
             ("rbenv version", Self::detect_from_rbenv),
@@ -41,7 +45,7 @@ impl RubyVersionDetector {
     }
 
     /// Detect version from .ruby-version file
-    fn detect_from_ruby_version(&self) -> Option<MinorVersion> {
+    fn detect_from_ruby_version(&self) -> Option<RubyVersion> {
         let ruby_version_file = self.workspace_root.join(".ruby-version");
         if !ruby_version_file.exists() {
             return None;
@@ -51,11 +55,11 @@ impl RubyVersionDetector {
         let version_str = content.trim();
 
         debug!("Found .ruby-version file with content: {}", version_str);
-        MinorVersion::from_full_version(version_str)
+        RubyVersion::from_full_version(version_str)
     }
 
     /// Detect version from Gemfile ruby directive
-    fn detect_from_gemfile(&self) -> Option<MinorVersion> {
+    fn detect_from_gemfile(&self) -> Option<RubyVersion> {
         let gemfile_path = self.workspace_root.join("Gemfile");
         if !gemfile_path.exists() {
             return None;
@@ -76,7 +80,7 @@ impl RubyVersionDetector {
                         c == '"' || c == '\'' || c == '~' || c == '>' || c == ' '
                     });
                     debug!("Found Gemfile ruby directive: {}", version_str);
-                    if let Some(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = RubyVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -87,14 +91,14 @@ impl RubyVersionDetector {
     }
 
     /// Detect version from rbenv
-    fn detect_from_rbenv(&self) -> Option<MinorVersion> {
+    fn detect_from_rbenv(&self) -> Option<RubyVersion> {
         // Check for .rbenv-version file
         let rbenv_version_file = self.workspace_root.join(".rbenv-version");
         if rbenv_version_file.exists() {
             if let Ok(content) = fs::read_to_string(&rbenv_version_file) {
                 let version_str = content.trim();
                 debug!("Found .rbenv-version file with content: {}", version_str);
-                if let Some(version) = MinorVersion::from_full_version(version_str) {
+                if let Some(version) = RubyVersion::from_full_version(version_str) {
                     return Some(version);
                 }
             }
@@ -111,7 +115,7 @@ impl RubyVersionDetector {
                 // Parse output like "3.0.0 (set by /path/to/.ruby-version)"
                 if let Some(version_str) = version_output.split_whitespace().next() {
                     debug!("rbenv version output: {}", version_str);
-                    if let Some(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = RubyVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -122,7 +126,7 @@ impl RubyVersionDetector {
     }
 
     /// Detect version from rvm
-    fn detect_from_rvm(&self) -> Option<MinorVersion> {
+    fn detect_from_rvm(&self) -> Option<RubyVersion> {
         // Check for .rvmrc file
         let rvmrc_file = self.workspace_root.join(".rvmrc");
         if rvmrc_file.exists() {
@@ -134,7 +138,7 @@ impl RubyVersionDetector {
                         if let Some(ruby_part) = line.split("ruby-").nth(1) {
                             let version_str = ruby_part.split_whitespace().next().unwrap_or("");
                             debug!("Found .rvmrc ruby version: {}", version_str);
-                            if let Some(version) = MinorVersion::from_full_version(version_str) {
+                            if let Some(version) = RubyVersion::from_full_version(version_str) {
                                 return Some(version);
                             }
                         }
@@ -155,7 +159,7 @@ impl RubyVersionDetector {
                 if let Some(version_str) = version_output.strip_prefix("ruby-") {
                     let version_str = version_str.trim();
                     debug!("rvm current output: {}", version_str);
-                    if let Some(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = RubyVersion::from_full_version(version_str) {
                         return Some(version);
                     }
                 }
@@ -166,7 +170,7 @@ impl RubyVersionDetector {
     }
 
     /// Detect version from system ruby
-    fn detect_from_system(&self) -> Option<MinorVersion> {
+    fn detect_from_system(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("ruby")
             .args(&["--version"])
             .current_dir(&self.workspace_root)
@@ -177,7 +181,7 @@ impl RubyVersionDetector {
                 // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
                     debug!("System ruby version output: {}", version_part);
-                    if let Some(version) = MinorVersion::from_full_version(version_part) {
+                    if let Some(version) = RubyVersion::from_full_version(version_part) {
                         return Some(version);
                     }
                 }
@@ -188,7 +192,7 @@ impl RubyVersionDetector {
     }
 
     /// Get all available Ruby versions from version managers
-    pub fn get_available_versions(&self) -> Vec<MinorVersion> {
+    pub fn get_available_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
 
         // Get versions from rbenv
@@ -200,7 +204,7 @@ impl RubyVersionDetector {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
                     let version_str = line.trim();
-                    if let Some(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = RubyVersion::from_full_version(version_str) {
                         if !versions.contains(&version) {
                             versions.push(version);
                         }
@@ -219,7 +223,7 @@ impl RubyVersionDetector {
                 for line in versions_output.lines() {
                     let line = line.trim();
                     if let Some(version_str) = line.strip_prefix("ruby-") {
-                        if let Some(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = RubyVersion::from_full_version(version_str) {
                             if !versions.contains(&version) {
                                 versions.push(version);
                             }
@@ -256,7 +260,7 @@ mod tests {
         fs::write(&ruby_version_path, "3.0.4").unwrap();
 
         let version = detector.detect_from_ruby_version();
-        assert_eq!(version, Some(MinorVersion::new(3, 0)));
+        assert_eq!(version, Some(RubyVersion::new(3, 0)));
     }
 
     #[test]
@@ -278,7 +282,7 @@ gem 'rails', '~> 7.0'
         .unwrap();
 
         let version = detector.detect_from_gemfile();
-        assert_eq!(version, Some(MinorVersion::new(2, 7)));
+        assert_eq!(version, Some(RubyVersion::new(2, 7)));
     }
 
     #[test]
@@ -290,6 +294,6 @@ gem 'rails', '~> 7.0'
         fs::write(&rbenv_version_path, "3.1.0").unwrap();
 
         let version = detector.detect_from_rbenv();
-        assert_eq!(version, Some(MinorVersion::new(3, 1)));
+        assert_eq!(version, Some(RubyVersion::new(3, 1)));
     }
 }

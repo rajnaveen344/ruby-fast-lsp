@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use log::{debug, warn};
 
-use crate::version::MinorVersion;
+use super::version::RubyVersion;
 
 /// Represents different Ruby version managers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,7 +62,7 @@ impl VersionManager {
     }
 
     /// Get all installed Ruby versions for this manager
-    pub fn get_installed_versions(&self) -> Vec<MinorVersion> {
+    pub fn get_installed_versions(&self) -> Vec<RubyVersion> {
         match self {
             VersionManager::Rbenv => self.get_rbenv_versions(),
             VersionManager::Rvm => self.get_rvm_versions(),
@@ -72,7 +72,7 @@ impl VersionManager {
     }
 
     /// Get the currently active version for this manager
-    pub fn get_current_version(&self) -> Option<MinorVersion> {
+    pub fn get_current_version(&self) -> Option<RubyVersion> {
         match self {
             VersionManager::Rbenv => self.get_rbenv_current(),
             VersionManager::Rvm => self.get_rvm_current(),
@@ -81,7 +81,7 @@ impl VersionManager {
         }
     }
 
-    fn get_rbenv_versions(&self) -> Vec<MinorVersion> {
+    fn get_rbenv_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
         
         if let Ok(output) = std::process::Command::new("rbenv")
@@ -92,7 +92,7 @@ impl VersionManager {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
                     let version_str = line.trim();
-                    if let Some(version) = MinorVersion::from_full_version(version_str) {
+                    if let Some(version) = RubyVersion::from_full_version(version_str) {
                         versions.push(version);
                     }
                 }
@@ -104,7 +104,7 @@ impl VersionManager {
         versions
     }
 
-    fn get_rbenv_current(&self) -> Option<MinorVersion> {
+    fn get_rbenv_current(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("rbenv")
             .args(&["version"])
             .output()
@@ -112,14 +112,14 @@ impl VersionManager {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_str) = version_output.split_whitespace().next() {
-                    return MinorVersion::from_full_version(version_str);
+                    return RubyVersion::from_full_version(version_str);
                 }
             }
         }
         None
     }
 
-    fn get_rvm_versions(&self) -> Vec<MinorVersion> {
+    fn get_rvm_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
         
         if let Ok(output) = std::process::Command::new("rvm")
@@ -131,7 +131,7 @@ impl VersionManager {
                 for line in versions_output.lines() {
                     let line = line.trim();
                     if let Some(version_str) = line.strip_prefix("ruby-") {
-                        if let Some(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = RubyVersion::from_full_version(version_str) {
                             versions.push(version);
                         }
                     }
@@ -144,7 +144,7 @@ impl VersionManager {
         versions
     }
 
-    fn get_rvm_current(&self) -> Option<MinorVersion> {
+    fn get_rvm_current(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("rvm")
             .args(&["current"])
             .output()
@@ -153,14 +153,14 @@ impl VersionManager {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_str) = version_output.strip_prefix("ruby-") {
                     let version_str = version_str.trim();
-                    return MinorVersion::from_full_version(version_str);
+                    return RubyVersion::from_full_version(version_str);
                 }
             }
         }
         None
     }
 
-    fn get_chruby_versions(&self) -> Vec<MinorVersion> {
+    fn get_chruby_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
         
         if let Ok(output) = std::process::Command::new("chruby")
@@ -173,7 +173,7 @@ impl VersionManager {
                     // chruby output format: "   ruby-3.0.0"
                     if let Some(version_str) = line.strip_prefix("ruby-") {
                         let version_str = version_str.trim_start_matches('*').trim();
-                        if let Some(version) = MinorVersion::from_full_version(version_str) {
+                        if let Some(version) = RubyVersion::from_full_version(version_str) {
                             versions.push(version);
                         }
                     }
@@ -186,7 +186,7 @@ impl VersionManager {
         versions
     }
 
-    fn get_chruby_current(&self) -> Option<MinorVersion> {
+    fn get_chruby_current(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("chruby")
             .output()
         {
@@ -198,7 +198,7 @@ impl VersionManager {
                     if line.starts_with('*') {
                         if let Some(version_str) = line.strip_prefix("* ruby-") {
                             let version_str = version_str.trim();
-                            return MinorVersion::from_full_version(version_str);
+                            return RubyVersion::from_full_version(version_str);
                         }
                     }
                 }
@@ -207,7 +207,7 @@ impl VersionManager {
         None
     }
 
-    fn get_system_version(&self) -> Option<MinorVersion> {
+    fn get_system_version(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("ruby")
             .args(&["--version"])
             .output()
@@ -215,7 +215,7 @@ impl VersionManager {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
-                    return MinorVersion::from_full_version(version_part);
+                    return RubyVersion::from_full_version(version_part);
                 }
             }
         }
@@ -235,7 +235,7 @@ impl VersionManagerRegistry {
     }
 
     /// Get all unique Ruby versions across all managers
-    pub fn get_all_versions(&self) -> Vec<MinorVersion> {
+    pub fn get_all_versions(&self) -> Vec<RubyVersion> {
         let mut all_versions = Vec::new();
         
         for manager in &self.managers {
@@ -252,7 +252,7 @@ impl VersionManagerRegistry {
     }
 
     /// Get version information grouped by manager
-    pub fn get_versions_by_manager(&self) -> HashMap<VersionManager, Vec<MinorVersion>> {
+    pub fn get_versions_by_manager(&self) -> HashMap<VersionManager, Vec<RubyVersion>> {
         let mut versions_map = HashMap::new();
         
         for manager in &self.managers {
@@ -264,7 +264,7 @@ impl VersionManagerRegistry {
     }
 
     /// Get the currently active version from the highest priority manager
-    pub fn get_current_version(&self) -> Option<MinorVersion> {
+    pub fn get_current_version(&self) -> Option<RubyVersion> {
         // Priority order: rbenv > rvm > chruby > system
         let priority_order = [
             VersionManager::Rbenv,

@@ -1,10 +1,10 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
+use crate::ruby_library::PathDiscovery;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use tower_lsp::lsp_types::*;
 use parking_lot::RwLock;
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
@@ -15,6 +15,7 @@ use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tower_lsp::lsp_types::*;
 
 /// Detect Ruby version from workspace context
 fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
@@ -24,12 +25,15 @@ fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
         if let Ok(content) = std::fs::read_to_string(&ruby_version_file) {
             let version_str = content.trim();
             if let Some((major, minor)) = parse_ruby_version(version_str) {
-                info!("Detected Ruby version {} from .ruby-version file", version_str);
+                info!(
+                    "Detected Ruby version {} from .ruby-version file",
+                    version_str
+                );
                 return Some((major, minor));
             }
         }
     }
-    
+
     // Check for Gemfile
     let gemfile = workspace_path.join("Gemfile");
     if gemfile.exists() {
@@ -51,7 +55,7 @@ fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
             }
         }
     }
-    
+
     // Fallback: detect system Ruby version
     detect_system_ruby_version()
 }
@@ -59,11 +63,8 @@ fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
 /// Detect the system Ruby version by running `ruby --version`
 fn detect_system_ruby_version() -> Option<(u8, u8)> {
     use std::process::Command;
-    
-    let output = Command::new("ruby")
-        .args(&["--version"])
-        .output()
-        .ok()?;
+
+    let output = Command::new("ruby").args(&["--version"]).output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -77,7 +78,7 @@ fn detect_system_ruby_version() -> Option<(u8, u8)> {
             return Some((major, minor));
         }
     }
-    
+
     None
 }
 
@@ -103,72 +104,127 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
 
     // Get all index paths using the new path discovery system
     let config = server.config.lock().clone();
-    
+
     // Determine Ruby version for path discovery
     let ruby_version = if let Some(version) = config.get_ruby_version() {
         info!("Using configured Ruby version {}.{}", version.0, version.1);
         version
     } else {
         // Auto-detect Ruby version in workspace context
-        detect_workspace_ruby_version(&folder_path)
-            .unwrap_or_else(|| {
-                warn!("Could not detect Ruby version, falling back to Ruby 3.0");
-                (3, 0)
-            })
+        detect_workspace_ruby_version(&folder_path).unwrap_or_else(|| {
+            warn!("Could not detect Ruby version, falling back to Ruby 3.0");
+            (3, 0)
+        })
     };
-    
-    let all_index_paths = config.get_index_paths(ruby_version, folder_path.clone());
-    
-    info!("Discovered {} paths to index:", all_index_paths.len());
-    for path in &all_index_paths {
+
+    let discovery = PathDiscovery::new(folder_path.clone());
+    let simplified_paths = discovery.discover_simplified_paths();
+
+    // Use simplified indexing: only project root, standard library, and core stubs
+    let project_paths = vec![simplified_paths.project_root];
+    let mut library_paths = simplified_paths.stdlib_paths;
+
+    // Add core stubs if enabled
+    if config.enable_core_stubs {
+        if let Some(core_stubs_path) = config.get_core_stubs_path_for_version(ruby_version) {
+            library_paths.push(core_stubs_path);
+        }
+    }
+
+    info!(
+        "Discovered {} project paths and {} library paths to index:",
+        project_paths.len(),
+        library_paths.len()
+    );
+    info!("Project paths:");
+    for path in &project_paths {
+        info!("  - {}", path.display());
+    }
+    info!("Library paths:");
+    for path in &library_paths {
         info!("  - {}", path.display());
     }
 
     // Find all Ruby files across all discovered paths
     let file_search_start = Instant::now();
-    let mut all_files = Vec::new();
-    
-    for path in all_index_paths {
+    let mut project_files = Vec::new();
+    let mut library_files = Vec::new();
+
+    // Process project paths
+    for path in project_paths {
         if path.exists() {
             let files = find_ruby_files(&path).await?;
-            info!("Found {} Ruby files in {}", files.len(), path.display());
-            all_files.extend(files);
+            info!(
+                "Found {} Ruby files in project path {}",
+                files.len(),
+                path.display()
+            );
+            project_files.extend(files);
         } else {
-            debug!("Skipping non-existent path: {}", path.display());
+            debug!("Skipping non-existent project path: {}", path.display());
         }
     }
-    
+
+    // Process library paths
+    for path in library_paths {
+        if path.exists() {
+            let files = find_ruby_files(&path).await?;
+            info!(
+                "Found {} Ruby files in library path {}",
+                files.len(),
+                path.display()
+            );
+            library_files.extend(files);
+        } else {
+            debug!("Skipping non-existent library path: {}", path.display());
+        }
+    }
+
     let file_search_duration = file_search_start.elapsed();
     info!(
-        "Found {} total Ruby files to index in {:?}",
-        all_files.len(),
+        "Found {} project files and {} library files to index in {:?}",
+        project_files.len(),
+        library_files.len(),
         file_search_duration
     );
 
-    // Process files in parallel for indexing
+    // Process all files for definitions (both project and library files need definitions)
     let definitions_index_start = Instant::now();
-    process_files_parallel(server, all_files.clone(), ProcessingMode::Definitions).await?;
+    let mut all_files_for_definitions = project_files.clone();
+    all_files_for_definitions.extend(library_files.clone());
+    process_files_parallel(
+        server,
+        all_files_for_definitions,
+        ProcessingMode::Definitions,
+    )
+    .await?;
     let definitions_index_duration = definitions_index_start.elapsed();
     info!(
         "Definitions indexing completed in {:?}",
         definitions_index_duration
     );
 
-    // Process files in parallel for references after indexing is complete
+    // Process only project files for references (library files don't need references)
     let references_index_start = Instant::now();
-    process_files_parallel(
-        server,
-        all_files,
-        ProcessingMode::References {
-            include_local_vars: false, // Skip local variable references during workspace init as they are file-scoped
-        },
-    )
-    .await?;
+    let project_files_count = project_files.len();
+    if !project_files.is_empty() {
+        process_files_parallel(
+            server,
+            project_files,
+            ProcessingMode::References {
+                include_local_vars: false, // Skip local variable references during workspace init as they are file-scoped
+            },
+        )
+        .await?;
+        info!(
+            "References indexing completed for {} project files in {:?}",
+            project_files_count,
+            references_index_start.elapsed()
+        );
+    } else {
+        info!("No project files found, skipping references indexing");
+    }
     let references_index_duration = references_index_start.elapsed();
-    info!(
-        "References indexing completed in {:?}",
-        references_index_duration
-    );
 
     let total_duration = start_time.elapsed();
     info!(
