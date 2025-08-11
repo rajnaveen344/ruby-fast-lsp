@@ -41,6 +41,8 @@ function getServerPath() {
 }
 
 function activate(context) {
+    const config = vscode.workspace.getConfiguration('rubyFastLsp');
+    
     const serverOptions = {
         command: getServerPath(),
         args: [],
@@ -50,7 +52,19 @@ function activate(context) {
     const clientOptions = {
         documentSelector: [{ scheme: 'file', language: 'ruby' }],
         synchronize: {
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.rb')
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.rb'),
+            configurationSection: 'rubyFastLsp'
+        },
+        initializationOptions: {
+            rubyVersion: config.get('rubyVersion', 'auto'),
+            enableCoreStubs: config.get('enableCoreStubs', true),
+            stubsPath: config.get('stubsPath', ''),
+            versionDetection: config.get('versionDetection', {
+                enableRbenv: true,
+                enableRvm: true,
+                enableChruby: true,
+                enableSystemRuby: true
+            })
         }
     };
 
@@ -59,6 +73,33 @@ function activate(context) {
         'Ruby Fast LSP',
         serverOptions,
         clientOptions
+    );
+
+    // Handle configuration changes
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('rubyFastLsp')) {
+                // Notify the server about configuration changes
+                if (client) {
+                    const newConfig = vscode.workspace.getConfiguration('rubyFastLsp');
+                    client.sendNotification('workspace/didChangeConfiguration', {
+                        settings: {
+                            rubyFastLsp: {
+                                rubyVersion: newConfig.get('rubyVersion', 'auto'),
+                                enableCoreStubs: newConfig.get('enableCoreStubs', true),
+                                stubsPath: newConfig.get('stubsPath', ''),
+                                versionDetection: newConfig.get('versionDetection', {
+                                    enableRbenv: true,
+                                    enableRvm: true,
+                                    enableChruby: true,
+                                    enableSystemRuby: true
+                                })
+                            }
+                        }
+                    });
+                }
+            }
+        })
     );
 
     client.start();

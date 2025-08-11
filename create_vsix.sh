@@ -233,6 +233,19 @@ if [ "$SKIP_BUILDS" = false ]; then
     echo "Successfully built for: ${built_platforms[*]}"
 fi
 
+# Verify stubs are available in extension directory
+echo "Verifying Ruby stubs in extension directory..."
+STUBS_TARGET_DIR="$EXTENSION_DIR/stubs"
+
+if [ -d "$STUBS_TARGET_DIR" ]; then
+    # Count stub directories for verification
+    stub_count=$(find "$STUBS_TARGET_DIR" -maxdepth 1 -type d -name "rubystubs*" | wc -l)
+    echo "Found $stub_count Ruby version stub directories in $STUBS_TARGET_DIR"
+else
+    echo "Warning: Stubs directory not found at $STUBS_TARGET_DIR"
+    echo "Stubs will not be included in the VSIX package"
+fi
+
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"
 echo "Installing dependencies..."

@@ -31,6 +31,11 @@ parking_lot = "0.12.4"
 unicode-ident = "1.0.18"
 lazy_static = "1.4.0"
 trie-rs = "0.4.2"
+chrono = { version = "0.4.31", features = ["serde"] }
+flate2 = "1.0.28"
+clap = { version = "4.4.0", features = ["derive"] }
+
+
 
 # Web server for AST visualization
 actix-web = "4.3.1"

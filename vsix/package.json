@@ -48,7 +48,93 @@
           "Rakefile"
         ]
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Ruby Fast LSP",
+      "properties": {
+        "rubyFastLsp.rubyVersion": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "1.9",
+            "2.0",
+            "2.1",
+            "2.2",
+            "2.3",
+            "2.4",
+            "2.5",
+            "2.6",
+            "2.7",
+            "3.0",
+            "3.1",
+            "3.2",
+            "3.3",
+            "3.4"
+          ],
+          "default": "auto",
+          "description": "Ruby version to use for core class stubs and language features. 'auto' will detect the version from your workspace (.ruby-version, Gemfile, etc.) or system Ruby installation.",
+          "enumDescriptions": [
+            "Automatically detect Ruby version from workspace or system",
+            "Ruby 1.9.x",
+            "Ruby 2.0.x",
+            "Ruby 2.1.x",
+            "Ruby 2.2.x",
+            "Ruby 2.3.x",
+            "Ruby 2.4.x",
+            "Ruby 2.5.x",
+            "Ruby 2.6.x",
+            "Ruby 2.7.x",
+            "Ruby 3.0.x",
+            "Ruby 3.1.x",
+            "Ruby 3.2.x",
+            "Ruby 3.3.x",
+            "Ruby 3.4.x"
+          ]
+        },
+        "rubyFastLsp.enableCoreStubs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Ruby core class stubs for better completion and navigation of built-in classes like String, Array, Hash, etc."
+        },
+        "rubyFastLsp.stubsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to Ruby stubs directory. Leave empty to use bundled stubs."
+        },
+        "rubyFastLsp.versionDetection": {
+          "type": "object",
+          "properties": {
+            "enableRbenv": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable rbenv version detection"
+            },
+            "enableRvm": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable RVM version detection"
+            },
+            "enableChruby": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable chruby version detection"
+            },
+            "enableSystemRuby": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable system Ruby detection as fallback"
+            }
+          },
+          "default": {
+            "enableRbenv": true,
+            "enableRvm": true,
+            "enableChruby": true,
+            "enableSystemRuby": true
+          },
+          "description": "Configure which Ruby version managers to use for automatic version detection"
+        }
+      }
+    }
   },
   "scripts": {
     "package": "vsce package"

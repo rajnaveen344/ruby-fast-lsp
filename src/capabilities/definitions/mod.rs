@@ -32,6 +32,31 @@ pub async fn find_definition_at_position(
         identifier,
     );
 
+    // First check if this is a Ruby core class in stub files
+    if let Identifier::RubyConstant { namespace: _, iden } = &identifier {
+        let stubs = server.stubs.lock();
+        
+        // Check if the stub system is initialized
+        if !stubs.is_initialized() {
+            info!("Stub system not initialized, skipping core class lookup");
+        } else {
+            // Try each constant in the identifier chain as a potential core class
+            for constant in iden.iter() {
+                let class_name = constant.to_string();
+                info!("Checking if '{}' is a Ruby core class", class_name);
+                
+                if stubs.is_core_class(&class_name) {
+                    if let Some(location) = stubs.get_class_definition(&class_name) {
+                        info!("Found core class definition for {} in stub files", class_name);
+                        return Some(vec![location]);
+                    }
+                }
+            }
+            
+            info!("No core class found for identifier: {:?}", iden);
+        }
+    }
+
     let index = server.index.lock();
 
     let result = match &identifier {
