@@ -19,39 +19,17 @@ use tower_lsp::lsp_types::*;
 
 /// Detect Ruby version from workspace context
 fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
-    // Check for .ruby-version file
-    let ruby_version_file = workspace_path.join(".ruby-version");
-    if ruby_version_file.exists() {
-        if let Ok(content) = std::fs::read_to_string(&ruby_version_file) {
-            let version_str = content.trim();
-            if let Some((major, minor)) = parse_ruby_version(version_str) {
-                info!(
-                    "Detected Ruby version {} from .ruby-version file",
-                    version_str
-                );
-                return Some((major, minor));
-            }
-        }
-    }
+    use crate::ruby_library::version_detector::RubyVersionDetector;
+    use tower_lsp::lsp_types::Url;
 
-    // Check for Gemfile
-    let gemfile = workspace_path.join("Gemfile");
-    if gemfile.exists() {
-        if let Ok(content) = std::fs::read_to_string(&gemfile) {
-            for line in content.lines() {
-                if line.trim().starts_with("ruby") {
-                    // Extract version from lines like: ruby "3.1.0" or ruby '3.1'
-                    if let Some(start) = line.find('"').or_else(|| line.find('\'')) {
-                        let quote_char = line.chars().nth(start).unwrap();
-                        if let Some(end) = line[start + 1..].find(quote_char) {
-                            let version_str = &line[start + 1..start + 1 + end];
-                            if let Some((major, minor)) = parse_ruby_version(version_str) {
-                                info!("Detected Ruby version {} from Gemfile", version_str);
-                                return Some((major, minor));
-                            }
-                        }
-                    }
-                }
+    // Use the comprehensive RubyVersionDetector
+    if let Ok(workspace_uri) = Url::from_file_path(workspace_path) {
+        if let Some(detector) = RubyVersionDetector::new(&workspace_uri) {
+            if let Some(version) = detector.detect_version() {
+                let mri_compatible = version.get_mri_compatible_version();
+                info!("Detected Ruby version {}.{} (implementation: {:?}, MRI-compatible: {}.{})", 
+                      version.major, version.minor, version.implementation, mri_compatible.0, mri_compatible.1);
+                return Some(mri_compatible);
             }
         }
     }
@@ -63,6 +41,7 @@ fn detect_workspace_ruby_version(workspace_path: &Path) -> Option<(u8, u8)> {
 /// Detect the system Ruby version by running `ruby --version`
 fn detect_system_ruby_version() -> Option<(u8, u8)> {
     use std::process::Command;
+    use crate::ruby_library::version::RubyVersion;
 
     let output = Command::new("ruby").args(&["--version"]).output().ok()?;
 
@@ -71,10 +50,19 @@ fn detect_system_ruby_version() -> Option<(u8, u8)> {
     }
 
     let version_output = String::from_utf8_lossy(&output.stdout);
-    // Ruby version output format: "ruby 3.3.5 (2024-09-03 revision ef084cc8f4) [arm64-darwin23]"
+    
+    // Use the new comprehensive version parsing that handles MRI, JRuby, and TruffleRuby
+    if let Some(version) = RubyVersion::parse_from_version_output(&version_output) {
+        let mri_compatible = version.get_mri_compatible_version();
+        info!("Detected Ruby version {}.{} (implementation: {:?}, MRI-compatible: {}.{})", 
+              version.major, version.minor, version.implementation, mri_compatible.0, mri_compatible.1);
+        return Some(mri_compatible);
+    }
+    
+    // Fallback to old parsing for compatibility
     for word in version_output.split_whitespace() {
         if let Some((major, minor)) = parse_ruby_version(word) {
-            info!("Detected system Ruby version {}.{}", major, minor);
+            info!("Detected system Ruby version {}.{} (fallback parsing)", major, minor);
             return Some((major, minor));
         }
     }

@@ -178,9 +178,16 @@ impl RubyVersionDetector {
         {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
-                // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
+                debug!("System ruby version output: {}", version_output);
+                
+                // Use the new comprehensive version parsing that handles MRI, JRuby, and TruffleRuby
+                if let Some(version) = RubyVersion::parse_from_version_output(&version_output) {
+                    return Some(version);
+                }
+                
+                // Fallback to old parsing for compatibility
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
-                    debug!("System ruby version output: {}", version_part);
+                    debug!("Fallback parsing for version: {}", version_part);
                     if let Some(version) = RubyVersion::from_full_version(version_part) {
                         return Some(version);
                     }
