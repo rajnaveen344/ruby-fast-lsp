@@ -190,6 +190,26 @@ impl DependencyTracker {
         let source_path = require_stmt.source_file.to_file_path().ok()?;
         let source_dir = source_path.parent()?;
 
+        // Helper function to safely convert path to URL, canonicalizing only when necessary
+        let safe_path_to_url = |path: PathBuf| -> Option<Url> {
+            // Check if path contains problematic patterns that need canonicalization
+            let path_str = path.to_string_lossy();
+            let needs_canonicalization = path_str.contains("../") || 
+                                        path_str.contains("./") ||
+                                        path_str.matches("../").count() > 3; // Detect potential infinite loops
+            
+            if needs_canonicalization {
+                if let Ok(canonical_path) = path.canonicalize() {
+                    Url::from_file_path(canonical_path).ok()
+                } else {
+                    // Fallback to non-canonical if canonicalization fails
+                    Url::from_file_path(path).ok()
+                }
+            } else {
+                Url::from_file_path(path).ok()
+            }
+        };
+
         // Try with .rb extension first
         let mut target_path = source_dir.join(&require_stmt.path);
         if !target_path.extension().is_some() {
@@ -197,7 +217,7 @@ impl DependencyTracker {
         }
 
         if target_path.exists() {
-            return Url::from_file_path(target_path).ok();
+            return safe_path_to_url(target_path);
         }
 
         // Try without extension if it was already provided
@@ -205,7 +225,7 @@ impl DependencyTracker {
             let path_without_ext = require_stmt.path.strip_suffix(".rb").unwrap();
             let target_path = source_dir.join(path_without_ext);
             if target_path.exists() {
-                return Url::from_file_path(target_path).ok();
+                return safe_path_to_url(target_path);
             }
         }
 
@@ -396,24 +416,44 @@ impl DependencyTracker {
             return None;
         }
 
+        // Helper function to safely convert path to URL, canonicalizing only when necessary
+        let safe_path_to_url = |path: PathBuf| -> Option<Url> {
+            // Check if path contains problematic patterns that need canonicalization
+            let path_str = path.to_string_lossy();
+            let needs_canonicalization = path_str.contains("../") || 
+                                        path_str.contains("./") ||
+                                        path_str.matches("../").count() > 3; // Detect potential infinite loops
+            
+            if needs_canonicalization {
+                if let Ok(canonical_path) = path.canonicalize() {
+                    Url::from_file_path(canonical_path).ok()
+                } else {
+                    // Fallback to non-canonical if canonicalization fails
+                    Url::from_file_path(path).ok()
+                }
+            } else {
+                Url::from_file_path(path).ok()
+            }
+        };
+
         // Strategy 1: Try exact path as provided
         let exact_path = dir.join(require_path);
         if exact_path.exists() && self.is_ruby_file(&exact_path) {
-            return Url::from_file_path(exact_path).ok();
+            return safe_path_to_url(exact_path);
         }
 
         // Strategy 2: Try with .rb extension if no extension provided
         if !require_path.contains('.') {
             let rb_path = dir.join(format!("{}.rb", require_path));
             if rb_path.exists() && self.is_ruby_file(&rb_path) {
-                return Url::from_file_path(rb_path).ok();
+                return safe_path_to_url(rb_path);
             }
         }
 
         // Strategy 3: Try as directory with index.rb
         let index_path = dir.join(require_path).join("index.rb");
         if index_path.exists() {
-            return Url::from_file_path(index_path).ok();
+            return safe_path_to_url(index_path);
         }
 
         // Strategy 4: Try without extension if .rb was provided
@@ -421,7 +461,7 @@ impl DependencyTracker {
             let path_without_ext = require_path.strip_suffix(".rb").unwrap();
             let target_path = dir.join(path_without_ext);
             if target_path.exists() && self.is_ruby_file(&target_path) {
-                return Url::from_file_path(target_path).ok();
+                return safe_path_to_url(target_path);
             }
         }
 
@@ -429,7 +469,7 @@ impl DependencyTracker {
         for ext in ["rake", "ruby"] {
             let ext_path = dir.join(format!("{}.{}", require_path, ext));
             if ext_path.exists() && self.is_ruby_file(&ext_path) {
-                return Url::from_file_path(ext_path).ok();
+                return safe_path_to_url(ext_path);
             }
         }
 
@@ -437,7 +477,7 @@ impl DependencyTracker {
         if require_path.contains('/') {
             let nested_rb_path = dir.join(format!("{}.rb", require_path));
             if nested_rb_path.exists() && self.is_ruby_file(&nested_rb_path) {
-                return Url::from_file_path(nested_rb_path).ok();
+                return safe_path_to_url(nested_rb_path);
             }
         }
 
