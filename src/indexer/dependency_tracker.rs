@@ -294,7 +294,7 @@ impl DependencyTracker {
             }
         }
 
-        // Try resolving as a gem in vendor/bundle or bundler paths
+        // Try resolving as a gem using the gem indexer
         if let Some(gem_resolved) = self.resolve_as_gem(require_path) {
             return Some(gem_resolved);
         }
@@ -381,29 +381,11 @@ impl DependencyTracker {
 
     /// Try to resolve a require as a gem
     fn resolve_as_gem(&self, require_path: &str) -> Option<Url> {
-        // First, try to resolve using the gem indexer if available
+        // Only resolve using the gem indexer - gems should only be searched in gem paths
         if let Some(gem_indexer) = &self.gem_indexer {
             if let Some(resolved) = self.resolve_with_gem_indexer(require_path, gem_indexer) {
                 debug!("Resolved '{}' using gem indexer", require_path);
                 return Some(resolved);
-            }
-        }
-
-        // Fallback to traditional gem directory search
-        let gem_dirs = vec![
-            self.project_root.join("vendor").join("bundle"),
-            self.project_root.join("vendor").join("cache"),
-            self.project_root.join("vendor").join("gems"),
-            self.project_root.join(".bundle"),
-        ];
-
-        for gem_dir in gem_dirs {
-            if gem_dir.exists() {
-                // Search recursively in gem directories
-                if let Some(resolved) = self.search_gem_directories(&gem_dir, require_path) {
-                    debug!("Resolved '{}' as gem in: {:?}", require_path, gem_dir);
-                    return Some(resolved);
-                }
             }
         }
 
@@ -441,27 +423,7 @@ impl DependencyTracker {
         None
     }
 
-    /// Search for a file in gem directories recursively
-    fn search_gem_directories(&self, gem_dir: &Path, require_path: &str) -> Option<Url> {
-        if let Ok(entries) = std::fs::read_dir(gem_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    // Try in lib subdirectory of each gem
-                    let lib_path = path.join("lib");
-                    if let Some(resolved) = self.try_resolve_in_dir(&lib_path, require_path) {
-                        return Some(resolved);
-                    }
 
-                    // Try in the gem root directory
-                    if let Some(resolved) = self.try_resolve_in_dir(&path, require_path) {
-                        return Some(resolved);
-                    }
-                }
-            }
-        }
-        None
-    }
 
     /// Try to resolve a file in a specific directory
     fn try_resolve_in_dir(&self, dir: &Path, require_path: &str) -> Option<Url> {
