@@ -145,12 +145,22 @@ impl RubyIndex {
 
     /// Update reverse mixin tracking when an entry with mixins is added
     pub fn update_reverse_mixins(&mut self, entry: &Entry) {
-        use crate::indexer::entry::entry_kind::EntryKind;
         use crate::indexer::ancestor_chain::resolve_mixin_ref;
+        use crate::indexer::entry::entry_kind::EntryKind;
 
         match &entry.kind {
-            EntryKind::Class { includes, extends, prepends, .. } | 
-            EntryKind::Module { includes, extends, prepends, .. } => {
+            EntryKind::Class {
+                includes,
+                extends,
+                prepends,
+                ..
+            }
+            | EntryKind::Module {
+                includes,
+                extends,
+                prepends,
+                ..
+            } => {
                 debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
                 // Process includes, extends, and prepends
                 for mixin_refs in [includes, extends, prepends] {
@@ -159,10 +169,11 @@ impl RubyIndex {
                         if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
                             debug!("Resolved mixin ref {:?} to {:?}, adding reverse mapping: {:?} -> {:?}", 
                                    mixin_ref, resolved_fqn, resolved_fqn, entry.fqn);
-                            let including_classes = self.reverse_mixins
+                            let including_classes = self
+                                .reverse_mixins
                                 .entry(resolved_fqn)
                                 .or_insert_with(Vec::new);
-                            
+
                             // Avoid duplicates
                             if !including_classes.contains(&entry.fqn) {
                                 including_classes.push(entry.fqn.clone());
@@ -178,8 +189,12 @@ impl RubyIndex {
     }
 
     /// Get all classes/modules that include the given module
-    pub fn get_including_classes(&self, module_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
-        let result = self.reverse_mixins
+    pub fn get_including_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<FullyQualifiedName> {
+        let result = self
+            .reverse_mixins
             .get(module_fqn)
             .map(|classes| classes.clone())
             .unwrap_or_default();
@@ -358,11 +373,11 @@ mod tests {
         // Test searching for constants
         let constant_results = index.search_by_prefix("MY_");
         assert_eq!(constant_results.len(), 1);
-        
+
         // Test searching for classes and modules
         let my_results = index.search_by_prefix("My");
         assert_eq!(my_results.len(), 2); // MyClass and MyModule
-        
+
         // Test searching with no matches
         let no_results = index.search_by_prefix("xyz");
         assert_eq!(no_results.len(), 0);

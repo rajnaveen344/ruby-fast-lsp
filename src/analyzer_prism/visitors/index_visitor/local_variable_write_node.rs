@@ -16,7 +16,6 @@ impl IndexVisitor {
     fn process_local_variable_write(&mut self, name: &[u8], name_loc: Location) {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
-
         let var = RubyVariable::new(
             &variable_name,
             RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
@@ -25,8 +24,6 @@ impl IndexVisitor {
         match var {
             Ok(variable) => {
                 let fqn = FullyQualifiedName::variable(variable.clone());
-
-        
 
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
@@ -39,11 +36,18 @@ impl IndexVisitor {
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock();
                     index.add_entry(entry.clone());
-                    self.document.add_local_var_entry(
-                        self.scope_tracker.current_lv_scope().unwrap().scope_id(),
-                        entry.clone(),
-                    );
-                    debug!("Added local variable entry: {:?}", variable);
+
+                    // Safely get the current scope before adding local variable entry
+                    if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
+                        self.document
+                            .add_local_var_entry(current_scope.scope_id(), entry.clone());
+                        debug!("Added local variable entry: {:?}", variable);
+                    } else {
+                        error!(
+                            "No current local variable scope available for variable: {}",
+                            variable_name
+                        );
+                    }
                 } else {
                     error!("Error creating entry for local variable: {}", variable_name);
                 }

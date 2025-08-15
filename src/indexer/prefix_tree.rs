@@ -9,15 +9,40 @@ use crate::indexer::entry::Entry;
 ///
 /// ## Example
 /// ```rust
+/// use ruby_fast_lsp::indexer::prefix_tree::PrefixTree;
+/// use ruby_fast_lsp::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+/// use ruby_fast_lsp::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
+/// use tower_lsp::lsp_types::{Location, Url};
+/// 
 /// let mut tree = PrefixTree::new();
+/// let uri = Url::parse("file://test.rb").unwrap();
+/// 
+/// // Create test entries
+/// let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("Bar").unwrap()]);
+/// let entry1 = EntryBuilder::new()
+///     .fqn(fqn1)
+///     .location(Location { uri: uri.clone(), range: Default::default() })
+///     .kind(EntryKind::new_class(None))
+///     .build()
+///     .unwrap();
+/// 
+/// let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("Baz").unwrap()]);
+/// let entry2 = EntryBuilder::new()
+///     .fqn(fqn2)
+///     .location(Location { uri: uri.clone(), range: Default::default() })
+///     .kind(EntryKind::new_class(None))
+///     .build()
+///     .unwrap();
+/// 
 /// // Insert entries using the same key and value
 /// tree.insert("bar", entry1);
 /// tree.insert("baz", entry2);
+/// 
 /// // When we search it, it finds all possible values based on partial (or complete matches):
-/// tree.search(""); // => [entry1, entry2]
-/// tree.search("b"); // => [entry1, entry2]
-/// tree.search("ba"); // => [entry1, entry2]
-/// tree.search("bar"); // => [entry1]
+/// assert_eq!(tree.search("").len(), 2);    // => [entry1, entry2]
+/// assert_eq!(tree.search("b").len(), 2);   // => [entry1, entry2]
+/// assert_eq!(tree.search("ba").len(), 2);  // => [entry1, entry2]
+/// assert_eq!(tree.search("bar").len(), 1); // => [entry1]
 /// ```
 ///
 /// A PrefixTree is useful for autocomplete, since we always want to find all alternatives while the developer hasn't

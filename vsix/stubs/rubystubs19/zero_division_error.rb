@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+# Raised when attempting to divide an integer by 0.
+#
+#    42 / 0
+#
+# <em>raises the exception:</em>
+#
+#    ZeroDivisionError: divided by 0
+#
+# Note that only division by an exact 0 will raise that exception:
+#
+#    42 /  0.0 #=> Float::INFINITY
+#    42 / -0.0 #=> -Float::INFINITY
+#    0  /  0.0 #=> NaN
+class ZeroDivisionError < StandardError
+end

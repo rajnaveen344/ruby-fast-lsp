@@ -1,23 +1,25 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info};
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentOnTypeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult, 
-    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams, 
-    SemanticTokensResult, SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
-};
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
+    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
+    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
+    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, Url,
+    WorkspaceSymbolParams,
+};
 use tower_lsp::{Client, LanguageServer};
 
 #[derive(Clone)]
@@ -25,15 +27,18 @@ pub struct RubyLanguageServer {
     pub client: Option<Client>,
     pub index: Arc<Mutex<RubyIndex>>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
+    pub config: Arc<Mutex<RubyFastLspConfig>>,
 }
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
         let index = RubyIndex::new();
+        let config = RubyFastLspConfig::default();
         Ok(Self {
             client: Some(client),
             index: Arc::new(Mutex::new(index)),
             docs: Arc::new(Mutex::new(HashMap::new())),
+            config: Arc::new(Mutex::new(config)),
         })
     }
 
@@ -89,6 +94,7 @@ impl Default for RubyLanguageServer {
             client: None,
             index: Arc::new(Mutex::new(RubyIndex::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
+            config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
         }
     }
 }
@@ -133,6 +139,16 @@ impl LanguageServer for RubyLanguageServer {
         notification::handle_did_close(self, params).await;
         info!(
             "[PERF] Document close handler completed in {:?}",
+            start_time.elapsed()
+        );
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        info!("Configuration changed");
+        let start_time = Instant::now();
+        notification::handle_did_change_configuration(self, params).await;
+        info!(
+            "[PERF] Configuration change handler completed in {:?}",
             start_time.elapsed()
         );
     }
@@ -246,15 +262,15 @@ impl LanguageServer for RubyLanguageServer {
             "Document symbol request received for {:?}",
             params.text_document.uri.path()
         );
-        
+
         let start_time = Instant::now();
         let result = request::handle_document_symbols(self, params).await;
-        
+
         info!(
             "[PERF] Document symbols completed in {:?}",
             start_time.elapsed()
         );
-        
+
         Ok(result)
     }
 
@@ -266,15 +282,15 @@ impl LanguageServer for RubyLanguageServer {
             "Workspace symbol request received for query: '{}'",
             params.query
         );
-        
+
         let start_time = Instant::now();
         let result = request::handle_workspace_symbols(self, params).await;
-        
+
         info!(
             "[PERF] Workspace symbols completed in {:?}",
             start_time.elapsed()
         );
-        
+
         result
     }
 
@@ -286,15 +302,15 @@ impl LanguageServer for RubyLanguageServer {
             "Document on type formatting request received for {:?}",
             params.text_document_position.text_document.uri.path()
         );
-        
+
         let start_time = Instant::now();
         let result = request::handle_document_on_type_formatting(self, params).await;
-        
+
         info!(
             "[PERF] Document on type formatting completed in {:?}",
             start_time.elapsed()
         );
-        
+
         result
     }
 
@@ -306,15 +322,15 @@ impl LanguageServer for RubyLanguageServer {
             "Folding range request received for {:?}",
             params.text_document.uri.path()
         );
-        
+
         let start_time = Instant::now();
         let result = request::handle_folding_range(self, params).await;
-        
+
         info!(
             "[PERF] Folding range completed in {:?}",
             start_time.elapsed()
         );
-        
+
         result
     }
 }

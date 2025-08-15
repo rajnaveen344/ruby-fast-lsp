@@ -1,0 +1,119 @@
+# frozen_string_literal: true
+
+# UNIXSocket represents a UNIX domain stream client socket.
+class UNIXSocket < BasicSocket
+  # Creates a pair of sockets connected to each other.
+  #
+  # _socktype_ should be a socket type such as: :STREAM, :DGRAM, :RAW, etc.
+  #
+  # _protocol_ should be a protocol defined in the domain.
+  # 0 is default protocol for the domain.
+  #
+  #   s1, s2 = UNIXSocket.pair
+  #   s1.send "a", 0
+  #   s1.send "b", 0
+  #   p s2.recv(10) #=> "ab"
+  def self.pair(p1 = v1, p2 = v2) end
+
+  # Creates a pair of sockets connected to each other.
+  #
+  # _socktype_ should be a socket type such as: :STREAM, :DGRAM, :RAW, etc.
+  #
+  # _protocol_ should be a protocol defined in the domain.
+  # 0 is default protocol for the domain.
+  #
+  #   s1, s2 = UNIXSocket.pair
+  #   s1.send "a", 0
+  #   s1.send "b", 0
+  #   p s2.recv(10) #=> "ab"
+  def self.socketpair(p1 = v1, p2 = v2) end
+
+  # Creates a new UNIX client socket connected to _path_.
+  #
+  #   s = UNIXSocket.new("/tmp/sock")
+  #   s.send "hello", 0
+  def initialize(path) end
+
+  # Returns the local address as an array which contains
+  # address_family and unix_path.
+  #
+  # Example
+  #   serv = UNIXServer.new("/tmp/sock")
+  #   p serv.addr #=> ["AF_UNIX", "/tmp/sock"]
+  def addr; end
+
+  # Returns the path of the local address of unixsocket.
+  #
+  #   s = UNIXServer.new("/tmp/sock")
+  #   p s.path #=> "/tmp/sock"
+  def path; end
+
+  # Returns the remote address as an array which contains
+  # address_family and unix_path.
+  #
+  # Example
+  #   serv = UNIXServer.new("/tmp/sock")
+  #   c = UNIXSocket.new("/tmp/sock")
+  #   p c.peeraddr #=> ["AF_UNIX", "/tmp/sock"]
+  def peeraddr; end
+
+  # Example
+  #
+  #   UNIXServer.open("/tmp/sock") {|serv|
+  #     UNIXSocket.open("/tmp/sock") {|c|
+  #       s = serv.accept
+  #
+  #       c.send_io STDOUT
+  #       stdout = s.recv_io
+  #
+  #       p STDOUT.fileno #=> 1
+  #       p stdout.fileno #=> 7
+  #
+  #       stdout.puts "hello" # outputs "hello\n" to standard output.
+  #     }
+  #   }
+  #
+  # _klass_ will determine the class of _io_ returned (using the
+  # IO.for_fd singleton method or similar).
+  # If _klass_ is +nil+, an integer file descriptor is returned.
+  #
+  # _mode_ is the same as the argument passed to IO.for_fd
+  def recv_io(p1 = v1, p2 = v2) end
+
+  # Receives a message via _unixsocket_.
+  #
+  # _maxlen_ is the maximum number of bytes to receive.
+  #
+  # _flags_ should be a bitwise OR of Socket::MSG_* constants.
+  #
+  # _outbuf_ will contain only the received data after the method call
+  # even if it is not empty at the beginning.
+  #
+  #   s1 = Socket.new(:UNIX, :DGRAM, 0)
+  #   s1_ai = Addrinfo.unix("/tmp/sock1")
+  #   s1.bind(s1_ai)
+  #
+  #   s2 = Socket.new(:UNIX, :DGRAM, 0)
+  #   s2_ai = Addrinfo.unix("/tmp/sock2")
+  #   s2.bind(s2_ai)
+  #   s3 = UNIXSocket.for_fd(s2.fileno)
+  #
+  #   s1.send "a", 0, s2_ai
+  #   p s3.recvfrom(10) #=> ["a", ["AF_UNIX", "/tmp/sock1"]]
+  def recvfrom(*args) end
+
+  # Sends _io_ as file descriptor passing.
+  #
+  #   s1, s2 = UNIXSocket.pair
+  #
+  #   s1.send_io STDOUT
+  #   stdout = s2.recv_io
+  #
+  #   p STDOUT.fileno #=> 1
+  #   p stdout.fileno #=> 6
+  #
+  #   stdout.puts "hello" # outputs "hello\n" to standard output.
+  #
+  # _io_ may be any kind of IO object or integer file descriptor.
+  def send_io(io) end
+end
