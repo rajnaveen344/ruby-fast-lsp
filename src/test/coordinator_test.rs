@@ -630,4 +630,54 @@ end
         // Clean up environment variable
         std::env::remove_var("RUBY_LSP_MAX_GEMS");
     }
+
+    #[tokio::test]
+    async fn test_coordinator_vendor_directory_exclusion() {
+        let fixture = TestProjectFixture::new();
+        fixture.setup_complete_project();
+
+        // Create a vendor directory with Ruby files that should be excluded
+        let vendor_dir = fixture.project_root().join("vendor");
+        fs::create_dir_all(&vendor_dir).expect("Failed to create vendor directory");
+        
+        let vendor_bundle_dir = vendor_dir.join("bundle");
+        fs::create_dir_all(&vendor_bundle_dir).expect("Failed to create vendor/bundle directory");
+        
+        // Create a Ruby file in vendor that should be excluded
+        let vendor_ruby_file = vendor_dir.join("excluded_gem.rb");
+        fs::write(&vendor_ruby_file, "class ExcludedGem\nend").expect("Failed to write vendor Ruby file");
+        
+        let vendor_bundle_ruby_file = vendor_bundle_dir.join("bundled_gem.rb");
+        fs::write(&vendor_bundle_ruby_file, "class BundledGem\nend").expect("Failed to write vendor/bundle Ruby file");
+
+        let config = RubyFastLspConfig::default();
+        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
+
+        // Collect Ruby files from the project
+        let mut collected_files = Vec::new();
+        coordinator.collect_ruby_files_recursive(fixture.project_root(), &mut collected_files);
+
+        // Verify that vendor files are excluded
+        let vendor_files: Vec<_> = collected_files
+            .iter()
+            .filter(|path| path.to_string_lossy().contains("vendor"))
+            .collect();
+        
+        assert!(
+            vendor_files.is_empty(),
+            "Vendor directory files should be excluded from indexing, but found: {:?}",
+            vendor_files
+        );
+        
+        // Verify that non-vendor files are still collected
+        let non_vendor_files: Vec<_> = collected_files
+            .iter()
+            .filter(|path| !path.to_string_lossy().contains("vendor"))
+            .collect();
+        
+        assert!(
+            !non_vendor_files.is_empty(),
+            "Non-vendor Ruby files should still be collected"
+        );
+    }
 }

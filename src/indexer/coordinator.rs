@@ -276,8 +276,16 @@ impl IndexingCoordinator {
                 if path.is_dir() {
                     // Skip common directories that don't contain Ruby source
                     if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !["node_modules", ".git", "tmp", "log", "coverage", ".bundle"]
-                            .contains(&dir_name)
+                        if ![
+                            "node_modules",
+                            ".git",
+                            "tmp",
+                            "log",
+                            "coverage",
+                            ".bundle",
+                            "vendor",
+                        ]
+                        .contains(&dir_name)
                         {
                             self.collect_ruby_files_recursive(&path, files);
                         }
