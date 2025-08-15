@@ -1,10 +1,11 @@
+use crate::indexer::gem_indexer::GemIndexer;
 use log::debug;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
 /// Tracks dependencies between Ruby files based on require statements
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DependencyTracker {
     /// Maps file URIs to their direct dependencies
     dependencies: HashMap<Url, Vec<Url>>,
@@ -16,6 +17,8 @@ pub struct DependencyTracker {
     ruby_lib_dirs: Vec<PathBuf>,
     /// Project root directory
     project_root: PathBuf,
+    /// Gem indexer for resolving gem dependencies
+    gem_indexer: Option<GemIndexer>,
 }
 
 /// Represents a require statement found in Ruby code
@@ -38,7 +41,18 @@ impl DependencyTracker {
             processed_files: HashSet::new(),
             ruby_lib_dirs,
             project_root,
+            gem_indexer: None,
         }
+    }
+
+    /// Set the gem indexer for enhanced gem resolution
+    pub fn set_gem_indexer(&mut self, gem_indexer: GemIndexer) {
+        self.gem_indexer = Some(gem_indexer);
+    }
+
+    /// Get a reference to the gem indexer
+    pub fn gem_indexer(&self) -> Option<&GemIndexer> {
+        self.gem_indexer.as_ref()
     }
 
     /// Add a require statement found during parsing
@@ -194,10 +208,10 @@ impl DependencyTracker {
         let safe_path_to_url = |path: PathBuf| -> Option<Url> {
             // Check if path contains problematic patterns that need canonicalization
             let path_str = path.to_string_lossy();
-            let needs_canonicalization = path_str.contains("../") || 
-                                        path_str.contains("./") ||
-                                        path_str.matches("../").count() > 3; // Detect potential infinite loops
-            
+            let needs_canonicalization = path_str.contains("../")
+                || path_str.contains("./")
+                || path_str.matches("../").count() > 3; // Detect potential infinite loops
+
             if needs_canonicalization {
                 if let Ok(canonical_path) = path.canonicalize() {
                     Url::from_file_path(canonical_path).ok()
@@ -367,9 +381,18 @@ impl DependencyTracker {
 
     /// Try to resolve a require as a gem
     fn resolve_as_gem(&self, require_path: &str) -> Option<Url> {
-        // Common gem directories to search
+        // First, try to resolve using the gem indexer if available
+        if let Some(gem_indexer) = &self.gem_indexer {
+            if let Some(resolved) = self.resolve_with_gem_indexer(require_path, gem_indexer) {
+                debug!("Resolved '{}' using gem indexer", require_path);
+                return Some(resolved);
+            }
+        }
+
+        // Fallback to traditional gem directory search
         let gem_dirs = vec![
             self.project_root.join("vendor").join("bundle"),
+            self.project_root.join("vendor").join("cache"),
             self.project_root.join("vendor").join("gems"),
             self.project_root.join(".bundle"),
         ];
@@ -385,6 +408,36 @@ impl DependencyTracker {
         }
 
         debug!("Could not resolve '{}' as a gem", require_path);
+        None
+    }
+
+    /// Resolve a require path using the gem indexer
+    fn resolve_with_gem_indexer(
+        &self,
+        require_path: &str,
+        gem_indexer: &GemIndexer,
+    ) -> Option<Url> {
+        // Try to find the gem that contains this require path
+        for gem in gem_indexer.get_all_gems() {
+            for lib_path in &gem.lib_paths {
+                if let Some(resolved) = self.try_resolve_in_dir(lib_path, require_path) {
+                    debug!(
+                        "Resolved '{}' in gem '{}' at {:?}",
+                        require_path, gem.name, lib_path
+                    );
+                    return Some(resolved);
+                }
+            }
+        }
+
+        // Also check gem paths directly
+        for gem_path in gem_indexer.get_gem_lib_paths() {
+            if let Some(resolved) = self.try_resolve_in_dir(&gem_path, require_path) {
+                debug!("Resolved '{}' in gem path: {:?}", require_path, gem_path);
+                return Some(resolved);
+            }
+        }
+
         None
     }
 
@@ -420,10 +473,10 @@ impl DependencyTracker {
         let safe_path_to_url = |path: PathBuf| -> Option<Url> {
             // Check if path contains problematic patterns that need canonicalization
             let path_str = path.to_string_lossy();
-            let needs_canonicalization = path_str.contains("../") || 
-                                        path_str.contains("./") ||
-                                        path_str.matches("../").count() > 3; // Detect potential infinite loops
-            
+            let needs_canonicalization = path_str.contains("../")
+                || path_str.contains("./")
+                || path_str.matches("../").count() > 3; // Detect potential infinite loops
+
             if needs_canonicalization {
                 if let Ok(canonical_path) = path.canonicalize() {
                     Url::from_file_path(canonical_path).ok()

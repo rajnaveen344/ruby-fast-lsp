@@ -1,7 +1,7 @@
 use ruby_prism::{CallNode, Node};
 
-use crate::indexer::entry::MixinRef;
 use crate::indexer::dependency_tracker::RequireStatement;
+use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
@@ -12,7 +12,7 @@ impl IndexVisitor {
     /// Implemented: include, extend, prepend, require, require_relative
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        
+
         if node.receiver().is_some() {
             return;
         }
@@ -30,10 +30,8 @@ impl IndexVisitor {
                 .filter_map(|arg| self.resolve_mixin_ref(&arg))
                 .collect();
 
-
-
             let current_fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
-            
+
             if current_fqn.is_empty() {
                 return;
             }
@@ -45,20 +43,18 @@ impl IndexVisitor {
                         "include" => {
                             entry.add_includes(mixin_refs);
                             true
-                        },
+                        }
                         "extend" => {
                             entry.add_extends(mixin_refs);
                             true
-                        },
+                        }
                         "prepend" => {
                             entry.add_prepends(mixin_refs);
                             true
-                        },
-                        _ => {
-                            false
                         }
+                        _ => false,
                     };
-                    
+
                     // Update reverse mixin tracking after adding mixins
                     if should_update_reverse_mixins {
                         // Clone the entry to avoid borrow checker issues
@@ -88,15 +84,21 @@ impl IndexVisitor {
                         is_relative: method_name == "require_relative",
                         source_file: self.document.uri.clone(),
                     };
-                    
+
                     // Add to dependency tracker if available
                     if let Some(dependency_tracker) = &self.dependency_tracker {
                         let mut tracker = dependency_tracker.lock();
-                        log::debug!("Added require statement to dependency tracker: {} (relative: {})", 
-                                  require_stmt.path, require_stmt.is_relative);
+                        log::debug!(
+                            "Added require statement to dependency tracker: {} (relative: {})",
+                            require_stmt.path,
+                            require_stmt.is_relative
+                        );
                         tracker.add_require(require_stmt);
                     } else {
-                        log::debug!("Found require statement but no dependency tracker available: {:?}", require_stmt);
+                        log::debug!(
+                            "Found require statement but no dependency tracker available: {:?}",
+                            require_stmt
+                        );
                     }
                 }
             }

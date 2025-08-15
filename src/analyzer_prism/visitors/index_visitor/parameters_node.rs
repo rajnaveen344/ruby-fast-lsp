@@ -19,8 +19,6 @@ impl IndexVisitor {
     /// 6. Keyword rest parameters
     /// 7. Block parameter
     pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
-
-
         // Process required parameters
         let requireds = node.requireds();
         for required in requireds.iter() {
@@ -73,8 +71,6 @@ impl IndexVisitor {
                 // Create a fully qualified name for the variable
                 let fqn = FullyQualifiedName::variable(variable.clone());
 
-
-
                 // Create an entry with EntryKind::Variable
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
@@ -88,11 +84,17 @@ impl IndexVisitor {
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock();
                     index.add_entry(entry.clone());
-                    self.document.add_local_var_entry(
-                        self.scope_tracker.current_lv_scope().unwrap().scope_id(),
-                        entry.clone(),
-                    );
-    
+
+                    // Safely get the current scope before adding local variable entry
+                    if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
+                        self.document
+                            .add_local_var_entry(current_scope.scope_id(), entry.clone());
+                    } else {
+                        error!(
+                            "No current local variable scope available for parameter: {}",
+                            param_name
+                        );
+                    }
                 } else {
                     error!("Error creating entry for parameter: {}", param_name);
                 }
