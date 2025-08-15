@@ -1,12 +1,15 @@
 use crate::config::RubyFastLspConfig;
-use crate::handlers::helpers::{process_files_parallel, ProcessingMode};
+use crate::handlers::helpers::{process_files_parallel, process_files_parallel_with_tracker, ProcessingMode};
+use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, info, warn};
+use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
 
@@ -16,6 +19,7 @@ pub struct IndexingCoordinator {
     ruby_version: Option<RubyVersion>,
     ruby_lib_dirs: Vec<PathBuf>,
     config: RubyFastLspConfig,
+    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
 }
 
 impl IndexingCoordinator {
@@ -25,33 +29,34 @@ impl IndexingCoordinator {
             ruby_version: None,
             ruby_lib_dirs: Vec::new(),
             config,
+            dependency_tracker: None,
         }
     }
 
-    /// Execute the simplified indexing workflow
+    /// Execute the complete indexing process
     pub async fn execute_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let start_time = Instant::now();
-        info!("Starting simplified workspace indexing");
+        info!("Starting indexing process for workspace: {:?}", self.workspace_root);
 
         // Step 1: Detect Ruby version
         self.detect_ruby_version();
         info!("Detected Ruby version: {:?}", self.ruby_version);
 
-        // Step 2: Index corresponding core stubs
-        self.index_core_stubs(server).await?;
-
-        // Step 3: Get current Ruby's lib dirs deterministically
+        // Step 2: Discover Ruby lib directories
         self.discover_ruby_lib_dirs();
-        info!(
-            "Discovered {} Ruby lib directories",
-            self.ruby_lib_dirs.len()
-        );
+        info!("Discovered {} Ruby lib directories", self.ruby_lib_dirs.len());
 
-        // Step 4: Index project's root directory
+        // Step 3: Index core stubs if available
+        if let Err(e) = self.index_core_stubs(server).await {
+            warn!("Failed to index core stubs: {}", e);
+        }
+
+        // Step 4: Index project files with dependency tracking
         self.index_project_root(server).await?;
 
         let duration = start_time.elapsed();
-        info!("Simplified workspace indexing completed in {:?}", duration);
+        info!("Indexing completed in {:?}", duration);
+
         Ok(())
     }
 
@@ -152,9 +157,22 @@ impl IndexingCoordinator {
         }
     }
 
-    /// Index project's root directory
-    async fn index_project_root(&self, server: &RubyLanguageServer) -> Result<()> {
+    /// Initialize dependency tracker
+    pub fn initialize_dependency_tracker(&mut self) {
+        self.dependency_tracker = Some(Arc::new(Mutex::new(DependencyTracker::new(
+            self.workspace_root.clone(),
+            self.ruby_lib_dirs.clone(),
+        ))));
+    }
+
+    /// Index project's root directory with dependency tracking
+    async fn index_project_root(&mut self, server: &RubyLanguageServer) -> Result<()> {
         info!("Indexing project root directory: {:?}", self.workspace_root);
+
+        // Initialize dependency tracker if not already done
+        if self.dependency_tracker.is_none() {
+            self.initialize_dependency_tracker();
+        }
 
         let mut project_files = Vec::new();
         self.collect_ruby_files_recursive(&self.workspace_root, &mut project_files);
@@ -162,19 +180,61 @@ impl IndexingCoordinator {
         if !project_files.is_empty() {
             info!("Found {} Ruby files in project", project_files.len());
 
-            // Index definitions first
-            process_files_parallel(server, project_files.clone(), ProcessingMode::Definitions)
-                .await?;
+            // Process files with dependency tracking
+            if let Some(ref tracker) = self.dependency_tracker {
+                // Add initial files to processing queue
+                {
+                    let mut tracker_guard = tracker.lock();
+                    for file in &project_files {
+                        tracker_guard.add_file_to_queue(file.clone());
+                    }
+                }
 
-            // Then collect references
-            process_files_parallel(
-                server,
-                project_files,
-                ProcessingMode::References {
-                    include_local_vars: false,
-                },
-            )
-            .await?;
+                // Process files in dependency order
+                loop {
+                    let file_path = {
+                        let mut tracker_guard = tracker.lock();
+                        tracker_guard.get_next_file()
+                    };
+                    
+                    if let Some(file_path) = file_path {
+                        info!("Processing file with dependencies: {:?}", file_path);
+                        
+                        // Index definitions first with dependency tracker
+                        process_files_parallel_with_tracker(
+                            server, 
+                            vec![file_path.clone()], 
+                            ProcessingMode::Definitions,
+                            Some(tracker.clone())
+                        ).await?;
+
+                        // Then collect references
+                        process_files_parallel(
+                            server,
+                            vec![file_path],
+                            ProcessingMode::References {
+                                include_local_vars: false,
+                            },
+                        )
+                        .await?;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // Fallback to original processing if tracker fails
+                process_files_parallel(server, project_files.clone(), ProcessingMode::Definitions)
+                    .await?;
+
+                process_files_parallel(
+                    server,
+                    project_files,
+                    ProcessingMode::References {
+                        include_local_vars: false,
+                    },
+                )
+                .await?;
+            }
 
             info!("Completed indexing project files");
         } else {

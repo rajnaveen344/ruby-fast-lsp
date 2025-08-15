@@ -6,6 +6,7 @@ use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;
+use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 
@@ -27,6 +28,7 @@ pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
+    pub dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
 }
 
 impl IndexVisitor {
@@ -38,7 +40,13 @@ impl IndexVisitor {
             index,
             document,
             scope_tracker,
+            dependency_tracker: None,
         }
+    }
+
+    pub fn with_dependency_tracker(mut self, dependency_tracker: Arc<Mutex<DependencyTracker>>) -> Self {
+        self.dependency_tracker = Some(dependency_tracker);
+        self
     }
 }
 

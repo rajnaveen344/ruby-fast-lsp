@@ -1,11 +1,12 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::indexer::coordinator::IndexingCoordinator;
+use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -53,6 +54,15 @@ pub async fn process_files_parallel(
     files: Vec<PathBuf>,
     mode: ProcessingMode,
 ) -> Result<()> {
+    process_files_parallel_with_tracker(server, files, mode, None).await
+}
+
+pub async fn process_files_parallel_with_tracker(
+    server: &RubyLanguageServer,
+    files: Vec<PathBuf>,
+    mode: ProcessingMode,
+    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
+) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
@@ -62,10 +72,10 @@ pub async fn process_files_parallel(
 
     match mode {
         ProcessingMode::Definitions => {
-            info!("Processing {} files for definitions", total_files);
+            debug!("Processing {} files for definitions", total_files);
         }
         ProcessingMode::References { include_local_vars } => {
-            info!(
+            debug!(
                 "Processing {} files for references (include_local_vars: {})",
                 total_files, include_local_vars
             );
@@ -84,6 +94,7 @@ pub async fn process_files_parallel(
     for file_path in files {
         let server_clone = server.clone();
         let semaphore_clone = semaphore.clone();
+        let dependency_tracker_clone = dependency_tracker.clone();
 
         join_set.spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
@@ -100,9 +111,11 @@ pub async fn process_files_parallel(
             };
 
             match mode {
-                ProcessingMode::Definitions => {
-                    process_file_for_definitions(&server_clone, file_uri)
-                }
+                ProcessingMode::Definitions => process_file_for_definitions_with_tracker(
+                    &server_clone,
+                    file_uri,
+                    dependency_tracker_clone,
+                ),
                 ProcessingMode::References { include_local_vars } => {
                     process_file_for_references(&server_clone, file_uri, include_local_vars)
                 }
@@ -184,6 +197,14 @@ pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
+    process_file_for_definitions_with_tracker(server, uri, None)
+}
+
+pub fn process_file_for_definitions_with_tracker(
+    server: &RubyLanguageServer,
+    uri: Url,
+    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
+) -> Result<(), String> {
     let file_path = uri
         .to_file_path()
         .map_err(|_| format!("Failed to convert URI to file path: {}", uri))?;
@@ -208,6 +229,9 @@ pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Re
         .insert(uri.clone(), Arc::new(RwLock::new(document)));
 
     let mut visitor = IndexVisitor::new(server, uri.clone());
+    if let Some(tracker) = dependency_tracker {
+        visitor = visitor.with_dependency_tracker(tracker);
+    }
     visitor.visit(&parse_result.node());
 
     Ok(())

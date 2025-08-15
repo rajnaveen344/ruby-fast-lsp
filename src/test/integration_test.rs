@@ -270,6 +270,14 @@ fn relativize_uris(value: &mut Value, project_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::indexer::dependency_tracker::DependencyTracker;
+use crate::server::RubyLanguageServer;
+use crate::types::ruby_document::RubyDocument;
+use parking_lot::{Mutex, RwLock};
+use std::path::PathBuf;
+use std::sync::Arc;
+use tower_lsp::lsp_types::Url;
 
     /// Simply verifies that we can load a fixture directory without panicking.
     #[tokio::test]
@@ -277,5 +285,66 @@ mod tests {
         let harness = TestHarness::new().await;
         harness.open_fixture_dir("goto").await;
         assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_integration() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///test.rb").unwrap();
+        // Add integration test logic here
+    }
+
+    #[tokio::test]
+    async fn test_dependency_tracking_integration() {
+        // Create a mock server
+        let server = RubyLanguageServer::default();
+        
+        // Create dependency tracker
+        let workspace_root = PathBuf::from("/Users/naveenraj/sources/devtools/ruby-fast-lsp");
+        let lib_dirs = vec![workspace_root.join("lib")];
+        let dependency_tracker = Arc::new(Mutex::new(DependencyTracker::new(
+            workspace_root.clone(),
+            lib_dirs,
+        )));
+        
+        // Create test file URL
+        let test_file = workspace_root.join("test_set.rb");
+        let uri = Url::from_file_path(&test_file).unwrap();
+        
+        // Test content with require_relative
+        let content = r#"
+require_relative 'lib/set'
+
+class TestClass
+  def initialize
+    @my_set = Set.new
+  end
+end
+"#;
+        
+        // Insert a RubyDocument so that IndexVisitor::new can retrieve it
+        let doc = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        server
+            .docs
+            .lock()
+            .insert(uri.clone(), Arc::new(RwLock::new(doc.clone())));
+        
+        // Create IndexVisitor with dependency tracker
+        let mut visitor = IndexVisitor::new(&server, uri.clone())
+            .with_dependency_tracker(dependency_tracker.clone());
+        
+        // Parse and visit the content
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let root = parse_result.node();
+        
+        use ruby_prism::Visit;
+        visitor.visit(&root);
+        
+        // Check that the dependency was tracked
+        let tracker_guard = dependency_tracker.lock();
+        let stats = tracker_guard.get_stats();
+        
+        println!("Dependency stats: {:?}", stats);
+        assert!(stats.total_dependencies > 0, "Should have tracked at least one dependency");
     }
 }
