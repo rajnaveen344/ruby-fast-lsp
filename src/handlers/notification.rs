@@ -5,7 +5,7 @@ use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
     init_workspace, process_file_for_definitions, process_file_for_references,
 };
-use crate::ruby_library::RubyVersion;
+use crate::types::ruby_version::RubyVersion;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, info, warn};

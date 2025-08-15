@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
 
-use super::version::RubyVersion;
+use crate::types::ruby_version::RubyVersion;
 
 /// Detects Ruby version from various workspace sources
 pub struct RubyVersionDetector {

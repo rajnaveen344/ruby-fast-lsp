@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use log::{debug, warn};
 
-use super::version::RubyVersion;
+use crate::types::ruby_version::RubyVersion;
 
 /// Represents different Ruby version managers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

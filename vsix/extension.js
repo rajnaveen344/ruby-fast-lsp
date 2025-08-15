@@ -59,6 +59,7 @@ function activate(context) {
             rubyVersion: config.get('rubyVersion', 'auto'),
             enableCoreStubs: config.get('enableCoreStubs', true),
             stubsPath: config.get('stubsPath', ''),
+            extensionPath: context.extensionPath,
             versionDetection: config.get('versionDetection', {
                 enableRbenv: true,
                 enableRvm: true,
