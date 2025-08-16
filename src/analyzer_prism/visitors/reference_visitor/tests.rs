@@ -1,14 +1,21 @@
 use std::sync::Arc;
 
 use crate::capabilities::references;
-use crate::handlers::helpers::{process_file_for_definitions, process_file_for_references};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use tower_lsp::lsp_types::*;
+use tower_lsp::LanguageServer;
 use parking_lot::RwLock;
 
-fn create_server() -> RubyLanguageServer {
-    RubyLanguageServer::default()
+async fn create_server() -> RubyLanguageServer {
+    let server = RubyLanguageServer::default();
+    let workspace_uri = Url::parse("file:///tmp/test_workspace").unwrap();
+    let init_params = InitializeParams {
+        root_uri: Some(workspace_uri),
+        ..Default::default()
+    };
+    let _ = server.initialize(init_params).await;
+    server
 }
 
 fn open_file(server: &RubyLanguageServer, content: &str, uri: &Url) -> RubyDocument {
@@ -26,9 +33,47 @@ fn open_file_with_options(
         .docs
         .lock()
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
-    let _ = process_file_for_definitions(server, uri.clone());
-    let _ = process_file_for_references(server, uri.clone(), include_local_vars);
+    
+    // Process content directly instead of reading from filesystem
+    process_content_for_definitions(server, uri.clone(), content);
+    process_content_for_references(server, uri.clone(), content, include_local_vars);
     document
+}
+
+// Helper function to process content for definitions without reading from filesystem
+fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, content: &str) {
+    use ruby_prism::{parse, Visit};
+    use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+    
+    let parse_result = parse(content.as_bytes());
+    let errors_count = parse_result.errors().count();
+    if errors_count > 0 {
+        println!("Parse errors in content: {} errors", errors_count);
+        return;
+    }
+
+    let mut visitor = IndexVisitor::new(server, uri);
+    visitor.visit(&parse_result.node());
+}
+
+// Helper function to process content for references without reading from filesystem
+fn process_content_for_references(server: &RubyLanguageServer, uri: Url, content: &str, include_local_vars: bool) {
+    use ruby_prism::{parse, Visit};
+    use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
+    
+    let parse_result = parse(content.as_bytes());
+    let errors_count = parse_result.errors().count();
+    if errors_count > 0 {
+        println!("Parse errors in content: {} errors", errors_count);
+        return;
+    }
+
+    let mut visitor = if include_local_vars {
+        ReferenceVisitor::new(server, uri)
+    } else {
+        ReferenceVisitor::with_options(server, uri, false)
+    };
+    visitor.visit(&parse_result.node());
 }
 
 #[tokio::test]
@@ -46,19 +91,18 @@ module Core
     end
 end
         "#;
-    let server = create_server();
+    let server = create_server().await;
     let uri = Url::parse("file:///dummy.rb").unwrap();
     open_file(&server, code, &uri);
 
+    // Test finding references to Users constant at position (4, 19)
     let references =
         references::find_references_at_position(&server, &uri, Position::new(4, 19)).await;
-
     assert_eq!(references.unwrap().len(), 2);
 
-    // ConstantReadNode
+    // Test finding references to API constant at position (3, 15)
     let references =
         references::find_references_at_position(&server, &uri, Position::new(3, 15)).await;
-
     assert_eq!(references.unwrap().len(), 2);
 }
 
@@ -79,7 +123,7 @@ end
 my_method
         "#;
 
-    let server = create_server();
+    let server = create_server().await;
     let uri = Url::parse("file:///local_vars.rb").unwrap();
 
     // First test with local vars enabled
@@ -100,7 +144,7 @@ my_method
     );
 
     // Now test with local vars disabled
-    let server = create_server();
+    let server = create_server().await;
     open_file_with_options(&server, code, &uri, false);
     let index = server.index();
     let index_guard = index.lock();

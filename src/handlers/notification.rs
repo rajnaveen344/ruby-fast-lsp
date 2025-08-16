@@ -3,7 +3,8 @@ use std::sync::Arc;
 use crate::capabilities;
 use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
-    init_workspace, process_file_for_definitions, process_file_for_references,
+    init_workspace, process_content_for_definitions, process_content_for_references,
+    process_file_for_definitions, process_file_for_references,
 };
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
@@ -136,8 +137,8 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
-    let _ = process_file_for_definitions(lang_server, uri.clone());
-    let _ = process_file_for_references(lang_server, uri.clone(), true);
+    let _ = process_content_for_definitions(lang_server, uri.clone(), &content);
+    let _ = process_content_for_references(lang_server, uri.clone(), &content, true);
 
     // Generate and publish diagnostics
     let diagnostics = capabilities::diagnostics::generate_diagnostics(&document);

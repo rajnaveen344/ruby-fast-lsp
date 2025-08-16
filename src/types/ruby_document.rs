@@ -154,12 +154,6 @@ impl RubyDocument {
     }
 
     pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
-        debug!(
-            "Total entries length: {}, keys: {:?}",
-            self.lvars.len(),
-            self.lvars.keys()
-        );
-        debug!("Searching with scope id: {}", scope_id);
         self.lvars.get(&scope_id)
     }
 }

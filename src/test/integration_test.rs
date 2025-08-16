@@ -293,19 +293,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_dependency_tracking_integration() {
+        init_logger();
+
+        // Create a temporary directory for test files
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+        
+        // Create the lib directory and set.rb file
+        let lib_dir = temp_path.join("lib");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let set_file = lib_dir.join("set.rb");
+        std::fs::write(&set_file, "class Set\n  # Set implementation\nend\n").unwrap();
+
         // Create a mock server
         let server = RubyLanguageServer::default();
 
         // Create dependency tracker
-        let workspace_root = PathBuf::from("/Users/naveenraj/sources/devtools/ruby-fast-lsp");
-        let lib_dirs = vec![workspace_root.join("lib")];
+        let lib_dirs = vec![lib_dir.clone()];
         let dependency_tracker = Arc::new(Mutex::new(DependencyTracker::new(
-            workspace_root.clone(),
+            temp_path.to_path_buf(),
             lib_dirs,
         )));
 
         // Create test file URL
-        let test_file = workspace_root.join("test_set.rb");
+        let test_file = temp_path.join("test_set.rb");
         let uri = Url::from_file_path(&test_file).unwrap();
 
         // Test content with require_relative
@@ -318,6 +329,9 @@ class TestClass
   end
 end
 "#;
+
+        // Write the test file to disk
+        std::fs::write(&test_file, content).unwrap();
 
         // Insert a RubyDocument so that IndexVisitor::new can retrieve it
         let doc = RubyDocument::new(uri.clone(), content.to_string(), 0);

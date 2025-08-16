@@ -32,6 +32,65 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
     Ok(())
 }
 
+// Helper function to process content for definitions without reading from filesystem
+pub fn process_content_for_definitions(
+    server: &RubyLanguageServer,
+    uri: Url,
+    content: &str,
+) -> Result<(), String> {
+    let parse_result = parse(content.as_bytes());
+    let errors_count = parse_result.errors().count();
+    if errors_count > 0 {
+        debug!(
+            "Parse errors in content for URI {:?}: {} errors",
+            uri, errors_count
+        );
+        return Ok(()); // Continue processing despite parse errors
+    }
+
+    let mut visitor = IndexVisitor::new(server, uri.clone());
+    visitor.visit(&parse_result.node());
+
+    // Update the document in the server's cache with the visitor's modified document
+    if let Some(doc_arc) = server.docs.lock().get(&uri) {
+        *doc_arc.write() = visitor.document;
+    }
+
+    Ok(())
+}
+
+// Helper function to process content for references without reading from filesystem
+pub fn process_content_for_references(
+    server: &RubyLanguageServer,
+    uri: Url,
+    content: &str,
+    include_local_vars: bool,
+) -> Result<(), String> {
+    let parse_result = parse(content.as_bytes());
+    let errors_count = parse_result.errors().count();
+    if errors_count > 0 {
+        debug!(
+            "Parse errors in content for URI {:?}: {} errors",
+            uri, errors_count
+        );
+        return Ok(()); // Continue processing despite parse errors
+    }
+
+    let mut visitor = if include_local_vars {
+        ReferenceVisitor::new(server, uri.clone())
+    } else {
+        ReferenceVisitor::with_options(server, uri.clone(), false)
+    };
+    visitor.visit(&parse_result.node());
+
+    // Update the document in the server's cache with the visitor's modified document
+    if let Some(doc_arc) = server.docs.lock().get(&uri) {
+        *doc_arc.write() = visitor.document;
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ProcessingMode {
     /// Index only definitions (classes, methods, constants, etc.)

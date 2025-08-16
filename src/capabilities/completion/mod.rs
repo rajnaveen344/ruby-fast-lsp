@@ -205,7 +205,7 @@ pub async fn find_completion_at_position(
         // Add snippet completions with context awareness
         // Only include snippets if not triggered by a dot character
         let is_dot_trigger = is_trigger_character && trigger_character == Some(".");
-        
+
         if !is_dot_trigger {
             let snippet_context = snippets::RubySnippets::determine_context_with_position(
                 &partial_name,
@@ -1941,8 +1941,17 @@ a."#;
         match response {
             CompletionResponse::Array(completions) => {
                 // In method call context, keyword snippets should be filtered out
-                let keyword_snippets = ["if", "unless", "while", "for", "def", "class", "module", "begin rescue"];
-                
+                let keyword_snippets = [
+                    "if",
+                    "unless",
+                    "while",
+                    "for",
+                    "def",
+                    "class",
+                    "module",
+                    "begin rescue",
+                ];
+
                 for keyword in keyword_snippets {
                     let keyword_completion = completions.iter().find(|c| c.label == keyword);
                     assert!(
@@ -1990,12 +1999,12 @@ a."#;
             line: 1,
             character: 2,
         }; // Right after "a."
-        
+
         let context = Some(CompletionContext {
             trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
             trigger_character: Some(".".to_string()),
         });
-        
+
         let response = find_completion_at_position(&server, uri, position, context).await;
 
         match response {
@@ -2005,7 +2014,7 @@ a."#;
                     .iter()
                     .filter(|c| c.kind == Some(CompletionItemKind::SNIPPET))
                     .collect();
-                
+
                 assert!(
                     snippet_completions.is_empty(),
                     "Should not have any snippet completions when triggered by dot character. Found: {:?}",
@@ -2042,7 +2051,7 @@ end
             line: 2,
             character: 4,
         }; // After "wh"
-        
+
         // No trigger context (user is just typing)
         let response = find_completion_at_position(&server, uri, position, None).await;
 
