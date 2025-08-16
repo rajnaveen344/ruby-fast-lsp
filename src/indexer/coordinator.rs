@@ -1,6 +1,6 @@
 use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
-    process_files_parallel, process_files_parallel_with_tracker, ProcessingMode,
+    process_files_parallel, ProcessingMode,
 };
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::gem_indexer::GemIndexer;
@@ -94,7 +94,7 @@ impl IndexingCoordinator {
             info!("Using system Ruby version: {}", version);
             self.ruby_version = Some(version);
         } else {
-            info!("Could not detect Ruby version, using default 3.0.0");
+            debug!("Could not detect Ruby version, using default 3.0.0");
             self.ruby_version = Some(RubyVersion::new(3, 0));
         }
     }
@@ -104,7 +104,7 @@ impl IndexingCoordinator {
         if let Some(version) = &self.ruby_version {
             let version_tuple = (version.major, version.minor);
             if let Some(stubs_path) = self.get_core_stubs_path(version_tuple) {
-                info!("Indexing core stubs from: {:?}", stubs_path);
+                debug!("Indexing core stubs from: {:?}", stubs_path);
                 let mut files = Vec::new();
                 if stubs_path.is_file() && self.is_ruby_file(&stubs_path) {
                     files.push(stubs_path);
@@ -114,7 +114,7 @@ impl IndexingCoordinator {
                 if !files.is_empty() {
                     let file_count = files.len();
                     process_files_parallel(server, files, ProcessingMode::Definitions).await?;
-                    info!("Indexed {} core stub files", file_count);
+                    debug!("Indexed {} core stub files", file_count);
                 }
             } else {
                 debug!("No core stubs found for Ruby version {:?}", version_tuple);
@@ -125,7 +125,7 @@ impl IndexingCoordinator {
 
     /// Discover and index gems
     async fn discover_and_index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        info!("Starting gem discovery and indexing");
+        debug!("Starting gem discovery and indexing");
 
         // Initialize gem indexer with detected Ruby version
         let mut gem_indexer = GemIndexer::new(self.ruby_version.clone());
@@ -139,9 +139,26 @@ impl IndexingCoordinator {
         let gem_count = gem_indexer.gem_count();
         info!("Discovered {} gems", gem_count);
 
+        // Log which gems are selected for indexing
+        let selected_gems = gem_indexer.get_all_gems();
+        for gem in &selected_gems {
+            debug!(
+                "Selected gem for indexing: {} v{} (default: {}, lib_paths: {})",
+                gem.name,
+                gem.version,
+                gem.is_default,
+                gem.lib_paths.len()
+            );
+        }
+
         // Get gem library paths for indexing
         let gem_lib_paths = gem_indexer.get_gem_lib_paths();
         info!("Found {} gem library paths to index", gem_lib_paths.len());
+
+        // Log each gem library path being indexed
+        for gem_lib_path in &gem_lib_paths {
+            debug!("Indexing gem library path: {:?}", gem_lib_path);
+        }
 
         // Add gem lib paths to ruby_lib_dirs for dependency resolution
         self.ruby_lib_dirs.extend(gem_lib_paths.clone());
@@ -155,7 +172,8 @@ impl IndexingCoordinator {
         }
 
         if !gem_files.is_empty() {
-            info!("Indexing {} Ruby files from gems", gem_files.len());
+            let gem_files_count = gem_files.len();
+            debug!("Indexing {} Ruby files from {} gems", gem_files_count, selected_gems.len());
 
             // Index gem files (definitions only for performance)
             if let Err(e) =
@@ -163,8 +181,10 @@ impl IndexingCoordinator {
             {
                 warn!("Failed to index some gem files: {}", e);
             } else {
-                info!("Successfully indexed gem files");
+                debug!("Successfully indexed {} Ruby files from gems", gem_files_count);
             }
+        } else {
+            debug!("No gem files found to index");
         }
 
         // Store the gem indexer for later use
@@ -188,7 +208,7 @@ impl IndexingCoordinator {
                     let path = PathBuf::from(path_str.trim());
                     if path.exists() && path.is_dir() {
                         self.ruby_lib_dirs.push(path);
-                        info!("Found Ruby lib directory: {:?}", path_str.trim());
+                        debug!("Found Ruby lib directory: {:?}", path_str.trim());
                     }
                 }
             } else {
@@ -215,7 +235,7 @@ impl IndexingCoordinator {
                         let gems_dir = path.join("gems");
                         if gems_dir.exists() {
                             self.ruby_lib_dirs.push(gems_dir.clone());
-                            info!("Found gem directory: {:?}", gems_dir);
+                            debug!("Found gem directory: {:?}", gems_dir);
                         }
                     }
                 }
@@ -244,7 +264,7 @@ impl IndexingCoordinator {
         self.collect_ruby_files_recursive(&self.workspace_root, &mut project_files);
 
         if !project_files.is_empty() {
-            info!("Found {} Ruby files in project", project_files.len());
+            debug!("Found {} Ruby files in project", project_files.len());
 
             // Use parallel processing for better performance
             // Dependency tracking is disabled for now due to performance issues
@@ -260,9 +280,9 @@ impl IndexingCoordinator {
             )
             .await?;
 
-            info!("Completed indexing project files");
+            debug!("Completed indexing project files");
         } else {
-            info!("No Ruby files found in project root");
+            debug!("No Ruby files found in project root");
         }
 
         Ok(())
@@ -323,7 +343,7 @@ impl IndexingCoordinator {
             let stubs_path = stubs_dir.join(version_dir);
 
             if stubs_path.exists() {
-                info!("Found core stubs in workspace at: {:?}", stubs_path);
+                debug!("Found core stubs in workspace at: {:?}", stubs_path);
                 Some(stubs_path)
             } else {
                 // Fallback to a default version if specific version not found

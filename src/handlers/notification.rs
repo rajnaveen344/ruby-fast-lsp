@@ -5,9 +5,9 @@ use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
     init_workspace, process_file_for_definitions, process_file_for_references,
 };
-use crate::types::ruby_version::RubyVersion;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
+use crate::types::ruby_version::RubyVersion;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -25,7 +25,7 @@ pub async fn handle_initialize(
     // Process initialization options for configuration
     if let Some(init_options) = params.initialization_options {
         if let Ok(config) = serde_json::from_value::<RubyFastLspConfig>(init_options) {
-            info!("Received configuration: {:?}", config);
+            debug!("Received configuration: {:?}", config);
             *lang_server.config.lock() = config;
         } else {
             warn!("Failed to parse initialization options as configuration");
@@ -102,13 +102,6 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
     };
 
     info!("Using Ruby version: {}.{}", ruby_version.0, ruby_version.1);
-
-    // Core stubs will be handled by indexing additional paths
-    if config.enable_core_stubs {
-        info!("Core stubs enabled - will be indexed from VSIX stubs directory");
-    } else {
-        info!("Core stubs disabled in configuration");
-    }
 }
 
 /// Simple system Ruby version detection without workspace context
@@ -222,13 +215,6 @@ pub async fn handle_did_change_configuration(
                     "Configuration updated with Ruby version: {:?}",
                     ruby_version
                 );
-
-                // Core stubs will be handled by indexing additional paths
-                if config.enable_core_stubs {
-                    info!("Core stubs enabled - will be indexed from VSIX stubs directory");
-                } else {
-                    info!("Core stubs disabled in updated configuration");
-                }
             } else {
                 warn!("Failed to parse configuration from settings");
             }

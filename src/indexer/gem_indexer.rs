@@ -2,7 +2,7 @@ use crate::types::ruby_version::RubyVersion;
 use anyhow::{anyhow, Result};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -36,7 +36,7 @@ impl GemIndexer {
 
     /// Discover all installed gems and their paths
     pub fn discover_gems(&mut self) -> Result<()> {
-        info!("Starting gem discovery process");
+        debug!("Starting gem discovery process");
 
         // Clear previous discoveries
         self.discovered_gems.clear();
@@ -77,173 +77,146 @@ impl GemIndexer {
         Ok(())
     }
 
-    /// Discover all installed gems using gem list
+    /// Discover all installed gems using efficient bulk approach
     fn discover_installed_gems(&mut self) -> Result<()> {
-        // Get list of all installed gems with versions
-        let output = Command::new("gem")
-            .args(["list", "--local", "--no-versions"])
+        // Use Ruby script to get all gem information in one command
+        let ruby_script = r#"
+            require 'rubygems'
+            require 'json'
+            
+            gems = []
+            Gem::Specification.each do |spec|
+              next if spec.name.nil? || spec.version.nil?
+              
+              gem_info = {
+                name: spec.name,
+                version: spec.version.to_s,
+                gem_dir: spec.gem_dir,
+                lib_dirs: spec.require_paths.map { |p| File.join(spec.gem_dir, p) },
+                dependencies: spec.dependencies.map(&:name),
+                default_gem: spec.default_gem?
+              }
+              gems << gem_info
+            end
+            
+            puts JSON.generate(gems)
+        "#;
+
+        let output = Command::new("ruby")
+            .args(["-e", ruby_script])
             .output()
-            .map_err(|e| anyhow!("Failed to execute gem list command: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute ruby gem discovery script: {}", e))?;
 
         if !output.status.success() {
             return Err(anyhow!(
-                "Gem list command failed: {}",
+                "Ruby gem discovery script failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
 
-        let gem_list = String::from_utf8_lossy(&output.stdout);
-        let mut gem_names = HashSet::new();
+        let json_output = String::from_utf8_lossy(&output.stdout);
+        let gem_data: Vec<serde_json::Value> = serde_json::from_str(&json_output)
+            .map_err(|e| anyhow!("Failed to parse gem JSON data: {}", e))?;
 
-        for line in gem_list.lines() {
-            let line = line.trim();
-            if !line.is_empty() && !line.starts_with("***") {
-                // Extract gem name (before any version info)
-                if let Some(name) = line.split_whitespace().next() {
-                    gem_names.insert(name.to_string());
-                }
-            }
-        }
-
-        // Limit the number of gems to process to avoid timeouts
+        // Apply gem limit if set
         let max_gems = std::env::var("RUBY_LSP_MAX_GEMS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(50); // Default to 50 gems
+            .unwrap_or(usize::MAX); // No limit by default
 
-        info!(
-            "Processing up to {} gems out of {} discovered",
-            max_gems,
-            gem_names.len()
-        );
+        let total_gems = gem_data.len();
+        let processed_gems = std::cmp::min(total_gems, max_gems);
+        
+        if max_gems < total_gems {
+            info!(
+                "Processing {} gems out of {} discovered (limited by RUBY_LSP_MAX_GEMS)",
+                processed_gems,
+                total_gems
+            );
+        }
 
-        // Get detailed information for each gem (limited)
-        let mut processed = 0;
-        for gem_name in gem_names {
-            if processed >= max_gems {
-                debug!(
-                    "Reached maximum gem limit ({}), stopping discovery",
-                    max_gems
-                );
+        // Process gem data
+        for (i, gem_json) in gem_data.iter().enumerate() {
+            if i >= max_gems {
                 break;
             }
 
-            if let Ok(gem_info) = self.get_gem_info(&gem_name) {
+            if let Ok(gem_info) = self.parse_gem_json(gem_json) {
+                debug!(
+                    "Discovered gem: {} v{} at {:?} (default: {}, lib_paths: {})",
+                    gem_info.name,
+                    gem_info.version,
+                    gem_info.path,
+                    gem_info.is_default,
+                    gem_info.lib_paths.len()
+                );
                 self.discovered_gems
-                    .entry(gem_name.clone())
+                    .entry(gem_info.name.clone())
                     .or_insert_with(Vec::new)
-                    .extend(gem_info);
+                    .push(gem_info);
             }
-            processed += 1;
         }
 
         Ok(())
     }
 
-    /// Get detailed information about a specific gem
-    fn get_gem_info(&self, gem_name: &str) -> Result<Vec<GemInfo>> {
-        // Use a timeout to prevent hanging on problematic gems
-        let mut cmd = Command::new("gem");
-        cmd.args(["specification", gem_name, "--all", "--ruby"]);
-
-        // Set a timeout for the command
-        let output = std::process::Command::new("timeout")
-            .args(["10s"]) // 10 second timeout
-            .arg("gem")
-            .args(["specification", gem_name, "--all", "--ruby"])
-            .output()
-            .or_else(|_| {
-                // Fallback to direct command if timeout is not available
-                cmd.output()
+    /// Parse gem information from JSON data
+    fn parse_gem_json(&self, gem_json: &serde_json::Value) -> Result<GemInfo> {
+        let name = gem_json["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing gem name"))?
+            .to_string();
+        
+        let version = gem_json["version"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing gem version"))?
+            .to_string();
+        
+        let gem_dir = gem_json["gem_dir"]
+            .as_str()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        
+        let lib_paths = gem_json["lib_dirs"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .filter(|p| p.exists())
+                    .collect()
             })
-            .map_err(|e| anyhow!("Failed to get gem specification for {}: {}", gem_name, e))?;
-
-        if !output.status.success() {
-            debug!(
-                "Failed to get gem specification for {}: {}",
-                gem_name,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return Ok(Vec::new());
-        }
-
-        let spec_output = String::from_utf8_lossy(&output.stdout);
-        self.parse_gem_specifications(&spec_output)
+            .unwrap_or_default();
+        
+        let dependencies = gem_json["dependencies"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        
+        let is_default = gem_json["default_gem"]
+            .as_bool()
+            .unwrap_or(false);
+        
+        Ok(GemInfo {
+            name,
+            version,
+            path: gem_dir,
+            lib_paths,
+            dependencies,
+            is_default,
+        })
     }
 
-    /// Parse gem specifications from gem command output
-    fn parse_gem_specifications(&self, spec_output: &str) -> Result<Vec<GemInfo>> {
-        let mut gems = Vec::new();
-        let mut current_gem: Option<GemInfo> = None;
-        let mut in_dependencies = false;
 
-        for line in spec_output.lines() {
-            let line = line.trim();
 
-            if line.starts_with("Gem::Specification.new") {
-                // Start of a new gem specification
-                if let Some(gem) = current_gem.take() {
-                    gems.push(gem);
-                }
-                current_gem = Some(GemInfo {
-                    name: String::new(),
-                    version: String::new(),
-                    path: PathBuf::new(),
-                    lib_paths: Vec::new(),
-                    dependencies: Vec::new(),
-                    is_default: false,
-                });
-                in_dependencies = false;
-            } else if let Some(ref mut gem) = current_gem {
-                if line.starts_with("s.name = ") {
-                    gem.name = self.extract_quoted_value(line);
-                } else if line.starts_with("s.version = ") {
-                    gem.version = self.extract_quoted_value(line);
-                } else if line.starts_with("s.installed_by_version = ") {
-                    // This indicates it's a default gem
-                    gem.is_default = true;
-                } else if line.starts_with("s.add_runtime_dependency") {
-                    in_dependencies = true;
-                    if let Some(dep_name) = self.extract_dependency_name(line) {
-                        gem.dependencies.push(dep_name);
-                    }
-                } else if in_dependencies && line.starts_with("s.add_runtime_dependency") {
-                    if let Some(dep_name) = self.extract_dependency_name(line) {
-                        gem.dependencies.push(dep_name);
-                    }
-                }
-            }
-        }
 
-        // Add the last gem if any
-        if let Some(gem) = current_gem {
-            gems.push(gem);
-        }
 
-        Ok(gems)
-    }
 
-    /// Extract quoted value from gem specification line
-    fn extract_quoted_value(&self, line: &str) -> String {
-        if let Some(start) = line.find('"') {
-            if let Some(end) = line.rfind('"') {
-                if start < end {
-                    return line[start + 1..end].to_string();
-                }
-            }
-        }
-        String::new()
-    }
-
-    /// Extract dependency name from add_runtime_dependency line
-    fn extract_dependency_name(&self, line: &str) -> Option<String> {
-        if let Some(start) = line.find('"') {
-            if let Some(end) = line[start + 1..].find('"') {
-                return Some(line[start + 1..start + 1 + end].to_string());
-            }
-        }
-        None
-    }
 
     /// Resolve library paths for discovered gems
     fn resolve_gem_lib_paths(&mut self) -> Result<()> {
@@ -445,20 +418,5 @@ mod tests {
         assert_eq!(indexer.gem_count(), 0);
     }
 
-    #[test]
-    fn test_extract_quoted_value() {
-        let indexer = GemIndexer::new(None);
-        let line = r#"s.name = "test_gem""#;
-        assert_eq!(indexer.extract_quoted_value(line), "test_gem");
-    }
 
-    #[test]
-    fn test_extract_dependency_name() {
-        let indexer = GemIndexer::new(None);
-        let line = r#"s.add_runtime_dependency "rails", ">= 6.0""#;
-        assert_eq!(
-            indexer.extract_dependency_name(line),
-            Some("rails".to_string())
-        );
-    }
 }

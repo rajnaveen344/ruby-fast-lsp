@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::fs;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
@@ -33,7 +33,7 @@ impl RubyVersionDetector {
 
         for (method_name, detect_fn) in detection_methods {
             if let Some(version) = detect_fn(self) {
-                info!("Detected Ruby version {} from {}", version, method_name);
+                debug!("Detected Ruby version {} from {}", version, method_name);
                 return Some(version);
             } else {
                 debug!("No Ruby version found from {}", method_name);
