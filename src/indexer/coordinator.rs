@@ -1,7 +1,5 @@
 use crate::config::RubyFastLspConfig;
-use crate::handlers::helpers::{
-    process_files_parallel, ProcessingMode,
-};
+use crate::handlers::helpers::{process_files_parallel, ProcessingMode};
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::gem_indexer::GemIndexer;
 use crate::indexer::version::version_detector::RubyVersionDetector;
@@ -57,14 +55,14 @@ impl IndexingCoordinator {
             self.ruby_lib_dirs.len()
         );
 
-        // Step 3: Discover and index gems
-        if let Err(e) = self.discover_and_index_gems(server).await {
-            warn!("Failed to discover and index gems: {}", e);
-        }
-
-        // Step 4: Index core stubs if available
+        // Step 3: Index core stubs if available
         if let Err(e) = self.index_core_stubs(server).await {
             warn!("Failed to index core stubs: {}", e);
+        }
+
+        // Step 4: Discover and index gems
+        if let Err(e) = self.discover_and_index_gems(server).await {
+            warn!("Failed to discover and index gems: {}", e);
         }
 
         // Step 5: Index project files with dependency tracking
@@ -127,8 +125,9 @@ impl IndexingCoordinator {
     async fn discover_and_index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
         debug!("Starting gem discovery and indexing");
 
-        // Initialize gem indexer with detected Ruby version
-        let mut gem_indexer = GemIndexer::new(self.ruby_version.clone());
+        // Initialize gem indexer with detected Ruby version and workspace root
+        let mut gem_indexer =
+            GemIndexer::with_workspace_root(self.ruby_version.clone(), self.workspace_root.clone());
 
         // Discover all installed gems
         if let Err(e) = gem_indexer.discover_gems() {
@@ -173,7 +172,11 @@ impl IndexingCoordinator {
 
         if !gem_files.is_empty() {
             let gem_files_count = gem_files.len();
-            debug!("Indexing {} Ruby files from {} gems", gem_files_count, selected_gems.len());
+            debug!(
+                "Indexing {} Ruby files from {} gems",
+                gem_files_count,
+                selected_gems.len()
+            );
 
             // Index gem files (definitions only for performance)
             if let Err(e) =
@@ -181,7 +184,10 @@ impl IndexingCoordinator {
             {
                 warn!("Failed to index some gem files: {}", e);
             } else {
-                debug!("Successfully indexed {} Ruby files from gems", gem_files_count);
+                debug!(
+                    "Successfully indexed {} Ruby files from gems",
+                    gem_files_count
+                );
             }
         } else {
             debug!("No gem files found to index");

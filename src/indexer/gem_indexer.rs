@@ -1,8 +1,10 @@
 use crate::types::ruby_version::RubyVersion;
 use anyhow::{anyhow, Result};
-use log::{debug, info};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashMap;
+use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -21,6 +23,7 @@ pub struct GemInfo {
 #[derive(Clone, Debug)]
 pub struct GemIndexer {
     ruby_version: Option<RubyVersion>,
+    workspace_root: Option<PathBuf>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
     gem_paths: Vec<PathBuf>,
 }
@@ -29,6 +32,16 @@ impl GemIndexer {
     pub fn new(ruby_version: Option<RubyVersion>) -> Self {
         Self {
             ruby_version,
+            workspace_root: None,
+            discovered_gems: HashMap::new(),
+            gem_paths: Vec::new(),
+        }
+    }
+
+    pub fn with_workspace_root(ruby_version: Option<RubyVersion>, workspace_root: PathBuf) -> Self {
+        Self {
+            ruby_version,
+            workspace_root: Some(workspace_root),
             discovered_gems: HashMap::new(),
             gem_paths: Vec::new(),
         }
@@ -79,7 +92,119 @@ impl GemIndexer {
 
     /// Discover all installed gems using efficient bulk approach
     fn discover_installed_gems(&mut self) -> Result<()> {
-        // Use Ruby script to get all gem information in one command
+        // Check configuration for gem indexing scope
+        let gem_scope = std::env::var("RUBY_LSP_GEM_SCOPE")
+            .unwrap_or_else(|_| "auto".to_string())
+            .to_lowercase();
+        
+        match gem_scope.as_str() {
+            "bundler" | "gemfile" => {
+                // Only use Bundler gems, fail if no Gemfile
+                info!("Gem indexing scope: Bundler/Gemfile only");
+                self.discover_bundler_gems()
+            }
+            "global" => {
+                // Only use global gems, skip Bundler
+                info!("Gem indexing scope: Global gems only");
+                self.discover_global_gems()
+            }
+            "auto" | _ => {
+                // Auto mode: try Bundler first, fallback to global
+                debug!("Gem indexing scope: Auto (Bundler with global fallback)");
+                if let Ok(_bundler_gems) = self.discover_bundler_gems() {
+                    debug!("Using Bundler gems from Gemfile");
+                    return Ok(());
+                }
+                
+                debug!("Falling back to global gem discovery");
+                self.discover_global_gems()
+            }
+        }
+    }
+    
+    /// Discover gems using Bundler (Gemfile-based)
+    fn discover_bundler_gems(&mut self) -> Result<()> {
+        // Find Gemfile in workspace hierarchy
+        let gemfile_path = self.find_gemfile_in_workspace()?;
+        
+        let ruby_script = format!(r#"
+            require 'bundler'
+            require 'json'
+            
+            begin
+              # Change to the directory containing the Gemfile
+              Dir.chdir('{}')
+              
+              # Check if we're in a bundler project
+              Bundler.root
+              
+              gems = []
+              Bundler.load.specs.each do |spec|
+                next if spec.name.nil? || spec.version.nil?
+                
+                gem_info = {{
+                  name: spec.name,
+                  version: spec.version.to_s,
+                  gem_dir: spec.gem_dir,
+                  lib_dirs: spec.require_paths.map {{ |p| File.join(spec.gem_dir, p) }},
+                  dependencies: spec.dependencies.map(&:name),
+                  default_gem: spec.default_gem?,
+                  bundler_gem: true
+                }}
+                gems << gem_info
+              end
+              
+              puts JSON.generate(gems)
+            rescue Bundler::GemfileNotFound
+              exit 1
+            end
+        "#, gemfile_path.parent().unwrap().display());
+        
+        let output = Command::new("ruby")
+            .args(["-e", &ruby_script])
+            .output()
+            .map_err(|e| anyhow!("Failed to execute bundler gem discovery script: {}", e))?;
+
+        if !output.status.success() {
+            return Err(anyhow!("No Gemfile found or bundler failed"));
+        }
+        
+        self.process_gem_data(&output.stdout, "Bundler")
+    }
+    
+    /// Find Gemfile in workspace hierarchy
+    fn find_gemfile_in_workspace(&self) -> Result<PathBuf> {
+        if let Some(workspace_root) = &self.workspace_root {
+            // First check the workspace root
+            let gemfile_path = workspace_root.join("Gemfile");
+            if gemfile_path.exists() {
+                return Ok(gemfile_path);
+            }
+            
+            // Then check subdirectories
+            if let Ok(entries) = std::fs::read_dir(workspace_root) {
+                for entry in entries.flatten() {
+                    if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                        let subdir_gemfile = entry.path().join("Gemfile");
+                        if subdir_gemfile.exists() {
+                            return Ok(subdir_gemfile);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback to current directory
+        let current_dir_gemfile = std::env::current_dir()?.join("Gemfile");
+        if current_dir_gemfile.exists() {
+            return Ok(current_dir_gemfile);
+        }
+        
+        Err(anyhow!("No Gemfile found in workspace hierarchy"))
+    }
+    
+    /// Discover all global gems
+    fn discover_global_gems(&mut self) -> Result<()> {
         let ruby_script = r#"
             require 'rubygems'
             require 'json'
@@ -94,7 +219,8 @@ impl GemIndexer {
                 gem_dir: spec.gem_dir,
                 lib_dirs: spec.require_paths.map { |p| File.join(spec.gem_dir, p) },
                 dependencies: spec.dependencies.map(&:name),
-                default_gem: spec.default_gem?
+                default_gem: spec.default_gem?,
+                bundler_gem: false
               }
               gems << gem_info
             end
@@ -114,7 +240,12 @@ impl GemIndexer {
             ));
         }
 
-        let json_output = String::from_utf8_lossy(&output.stdout);
+        self.process_gem_data(&output.stdout, "Global")
+    }
+    
+    /// Process gem data from JSON output
+    fn process_gem_data(&mut self, json_bytes: &[u8], source: &str) -> Result<()> {
+        let json_output = String::from_utf8_lossy(json_bytes);
         let gem_data: Vec<serde_json::Value> = serde_json::from_str(&json_output)
             .map_err(|e| anyhow!("Failed to parse gem JSON data: {}", e))?;
 
@@ -129,10 +260,13 @@ impl GemIndexer {
         
         if max_gems < total_gems {
             info!(
-                "Processing {} gems out of {} discovered (limited by RUBY_LSP_MAX_GEMS)",
+                "Processing {} {} gems out of {} discovered (limited by RUBY_LSP_MAX_GEMS)",
                 processed_gems,
+                source.to_lowercase(),
                 total_gems
             );
+        } else {
+            info!("Discovered {} {} gems", total_gems, source.to_lowercase());
         }
 
         // Process gem data
@@ -143,7 +277,8 @@ impl GemIndexer {
 
             if let Ok(gem_info) = self.parse_gem_json(gem_json) {
                 debug!(
-                    "Discovered gem: {} v{} at {:?} (default: {}, lib_paths: {})",
+                    "Discovered {} gem: {} v{} at {:?} (default: {}, lib_paths: {})",
+                    source.to_lowercase(),
                     gem_info.name,
                     gem_info.version,
                     gem_info.path,
