@@ -91,48 +91,12 @@
             "Ruby 3.4.x"
           ]
         },
-        "rubyFastLsp.enableCoreStubs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Ruby core class stubs for better completion and navigation of built-in classes like String, Array, Hash, etc."
-        },
         "rubyFastLsp.stubsPath": {
           "type": "string",
           "default": "",
           "description": "Custom path to Ruby stubs directory. Leave empty to use bundled stubs."
-        },
-        "rubyFastLsp.versionDetection": {
-          "type": "object",
-          "properties": {
-            "enableRbenv": {
-              "type": "boolean",
-              "default": true,
-              "description": "Enable rbenv version detection"
-            },
-            "enableRvm": {
-              "type": "boolean",
-              "default": true,
-              "description": "Enable RVM version detection"
-            },
-            "enableChruby": {
-              "type": "boolean",
-              "default": true,
-              "description": "Enable chruby version detection"
-            },
-            "enableSystemRuby": {
-              "type": "boolean",
-              "default": true,
-              "description": "Enable system Ruby detection as fallback"
-            }
-          },
-          "default": {
-            "enableRbenv": true,
-            "enableRvm": true,
-            "enableChruby": true,
-            "enableSystemRuby": true
-          },
-          "description": "Configure which Ruby version managers to use for automatic version detection"
         }
+
       }
     }
   },

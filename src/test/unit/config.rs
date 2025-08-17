@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{RubyFastLspConfig, VersionDetectionConfig};
+    use crate::config::RubyFastLspConfig;
     use serde_json::json;
 
     #[test]
@@ -8,34 +8,17 @@ mod tests {
         let config = RubyFastLspConfig::default();
 
         assert_eq!(config.ruby_version, "auto");
-        assert_eq!(config.enable_core_stubs, true);
-        assert_eq!(config.version_detection.enable_rbenv, true);
-        assert_eq!(config.version_detection.enable_rvm, true);
-        assert_eq!(config.version_detection.enable_chruby, true);
-        assert_eq!(config.version_detection.enable_system_ruby, true);
     }
 
     #[test]
     fn test_config_deserialization() {
         let json_config = json!({
-            "rubyVersion": "3.2",
-            "enableCoreStubs": false,
-            "versionDetection": {
-                "enableRbenv": false,
-                "enableRvm": true,
-                "enableChruby": false,
-                "enableSystemRuby": true
-            }
+            "rubyVersion": "3.0"
         });
 
         let config: RubyFastLspConfig = serde_json::from_value(json_config).unwrap();
 
-        assert_eq!(config.ruby_version, "3.2");
-        assert_eq!(config.enable_core_stubs, false);
-        assert_eq!(config.version_detection.enable_rbenv, false);
-        assert_eq!(config.version_detection.enable_rvm, true);
-        assert_eq!(config.version_detection.enable_chruby, false);
-        assert_eq!(config.version_detection.enable_system_ruby, true);
+        assert_eq!(config.ruby_version, "3.0");
     }
 
     #[test]
@@ -68,23 +51,6 @@ mod tests {
         let config: RubyFastLspConfig = serde_json::from_value(json_config).unwrap();
 
         assert_eq!(config.ruby_version, "2.7");
-        assert_eq!(config.enable_core_stubs, true); // Should use default
-
-        // Version detection should use defaults
-        assert_eq!(config.version_detection.enable_rbenv, true);
-        assert_eq!(config.version_detection.enable_rvm, true);
-        assert_eq!(config.version_detection.enable_chruby, true);
-        assert_eq!(config.version_detection.enable_system_ruby, true);
-    }
-
-    #[test]
-    fn test_version_detection_config_default() {
-        let config = VersionDetectionConfig::default();
-
-        assert_eq!(config.enable_rbenv, true);
-        assert_eq!(config.enable_rvm, true);
-        assert_eq!(config.enable_chruby, true);
-        assert_eq!(config.enable_system_ruby, true);
     }
 
     #[test]

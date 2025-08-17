@@ -57,15 +57,8 @@ function activate(context) {
         },
         initializationOptions: {
             rubyVersion: config.get('rubyVersion', 'auto'),
-            enableCoreStubs: config.get('enableCoreStubs', true),
             stubsPath: config.get('stubsPath', ''),
-            extensionPath: context.extensionPath,
-            versionDetection: config.get('versionDetection', {
-                enableRbenv: true,
-                enableRvm: true,
-                enableChruby: true,
-                enableSystemRuby: true
-            })
+            extensionPath: context.extensionPath
         }
     };
 
@@ -87,14 +80,7 @@ function activate(context) {
                         settings: {
                             rubyFastLsp: {
                                 rubyVersion: newConfig.get('rubyVersion', 'auto'),
-                                enableCoreStubs: newConfig.get('enableCoreStubs', true),
-                                stubsPath: newConfig.get('stubsPath', ''),
-                                versionDetection: newConfig.get('versionDetection', {
-                                    enableRbenv: true,
-                                    enableRvm: true,
-                                    enableChruby: true,
-                                    enableSystemRuby: true
-                                })
+                                stubsPath: newConfig.get('stubsPath', '')
                             }
                         }
                     });
