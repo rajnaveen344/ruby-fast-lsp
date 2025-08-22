@@ -1,6 +1,7 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::indexer::index::RubyIndex;
+use crate::indexer::utils;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -22,36 +23,17 @@ impl IndexerCore {
         Self { index }
     }
 
-    /// Index a single Ruby file and add its symbols to the index
-    pub async fn index_file(&self, file_path: &Path, server: &RubyLanguageServer) -> Result<()> {
-        let start_time = Instant::now();
-        debug!("Indexing file: {:?}", file_path);
 
-        // Convert path to URI
-        let uri = Url::from_file_path(file_path)
-            .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", file_path))?;
 
-        // Read file content
-        let content = tokio::fs::read_to_string(file_path)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", file_path, e))?;
-
-        // Index the file content
-        self.index_content(&uri, &content, server).await?;
-
-        debug!("Indexed file {:?} in {:?}", file_path, start_time.elapsed());
-        Ok(())
-    }
-
-    /// Index Ruby content and extract its symbols
-    pub async fn index_content(
+    /// Phase 1: Index only definitions from Ruby content
+    pub async fn index_definitions(
         &self,
         uri: &Url,
         content: &str,
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let start_time = Instant::now();
-        debug!("Indexing content for: {:?}", uri);
+        debug!("Indexing definitions for: {:?}", uri);
 
         // Remove existing entries for this URI
         self.index.lock().remove_entries_for_uri(uri);
@@ -63,37 +45,60 @@ impl IndexerCore {
             .lock()
             .insert(uri.clone(), Arc::new(parking_lot::RwLock::new(document)));
 
-        // Parse Ruby code using Prism and extract symbols using IndexVisitor
+        // Parse Ruby code using Prism and extract definitions using IndexVisitor
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
         let mut index_visitor = IndexVisitor::new(server, uri.clone());
 
-        // Visit the AST to extract definitions
+        // Visit the AST to extract definitions only
         use ruby_prism::Visit;
         index_visitor.visit(&node);
 
-        // Only use ReferenceVisitor for project files, not stdlib/gem files
-        if self.is_project_file(uri, server) {
-            let mut reference_visitor = ReferenceVisitor::new(server, uri.clone());
-            reference_visitor.visit(&node);
-        }
-
         debug!(
-            "Indexed content for {:?} in {:?}",
+            "Indexed definitions for {:?} in {:?}",
             uri,
             start_time.elapsed()
         );
         Ok(())
     }
 
-    /// Index multiple files in parallel
-    pub async fn index_files_parallel(
+    /// Phase 2: Index only references from Ruby content
+    pub async fn index_references(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        let start_time = Instant::now();
+        debug!("Indexing references for: {:?}", uri);
+
+        // Parse Ruby code using Prism and extract references using ReferenceVisitor
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let node = parse_result.node();
+        let mut reference_visitor = ReferenceVisitor::new(server, uri.clone());
+
+        // Visit the AST to extract references only
+        use ruby_prism::Visit;
+        reference_visitor.visit(&node);
+
+        debug!(
+            "Indexed references for {:?} in {:?}",
+            uri,
+            start_time.elapsed()
+        );
+        Ok(())
+    }
+
+
+
+    /// Phase 1: Index definitions from multiple files in parallel
+    pub async fn index_definitions_parallel(
         &self,
         file_paths: &[PathBuf],
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let start_time = Instant::now();
-        info!("Indexing {} files in parallel", file_paths.len());
+        info!("Indexing definitions from {} files in parallel", file_paths.len());
 
         // Process files in batches to avoid overwhelming the system
         const BATCH_SIZE: usize = 50;
@@ -106,77 +111,133 @@ impl IndexerCore {
                 let server = server.clone();
                 let path = file_path.clone();
 
-                let task = tokio::spawn(async move { core.index_file(&path, &server).await });
+                let task = tokio::spawn(async move { core.index_file_definitions(&path, &server).await });
                 tasks.push(task);
             }
 
             // Wait for all tasks in this batch to complete
             for task in tasks {
                 if let Err(e) = task.await? {
-                    log::warn!("Failed to index file: {}", e);
+                    log::warn!("Failed to index file definitions: {}", e);
                 }
             }
         }
 
         info!(
-            "Indexed {} files in {:?}",
+            "Indexed definitions from {} files in {:?}",
             file_paths.len(),
             start_time.elapsed()
         );
         Ok(())
     }
 
-    /// Check if a file should be indexed based on its extension
-    pub fn should_index_file(&self, path: &Path) -> bool {
-        if let Some(extension) = path.extension() {
-            matches!(extension.to_str(), Some("rb" | "rake" | "gemspec"))
-        } else {
-            // Check for files without extensions that might be Ruby
-            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                matches!(
-                    file_name,
-                    "Rakefile" | "Gemfile" | "Guardfile" | "Capfile" | "Vagrantfile"
-                )
-            } else {
-                false
+    /// Phase 2: Index references from multiple files in parallel
+    pub async fn index_references_parallel(
+        &self,
+        file_paths: &[PathBuf],
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        let start_time = Instant::now();
+        info!("Indexing references from {} files in parallel", file_paths.len());
+
+        // Filter to only project files for reference indexing
+        let project_files: Vec<_> = file_paths
+            .iter()
+            .filter(|path| {
+                if let Ok(uri) = Url::from_file_path(path) {
+                    self.is_project_file(&uri, server)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        if project_files.is_empty() {
+            debug!("No project files to index references for");
+            return Ok(());
+        }
+
+        // Process files in batches to avoid overwhelming the system
+        const BATCH_SIZE: usize = 50;
+
+        for batch in project_files.chunks(BATCH_SIZE) {
+            let mut tasks = Vec::new();
+
+            for file_path in batch {
+                let core = self.clone();
+                let server = server.clone();
+                let path = (*file_path).clone();
+
+                let task = tokio::spawn(async move { core.index_file_references(&path, &server).await });
+                tasks.push(task);
+            }
+
+            // Wait for all tasks in this batch to complete
+            for task in tasks {
+                if let Err(e) = task.await? {
+                    log::warn!("Failed to index file references: {}", e);
+                }
             }
         }
+
+        info!(
+            "Indexed references from {} project files in {:?}",
+            project_files.len(),
+            start_time.elapsed()
+        );
+        Ok(())
+    }
+
+    /// Index definitions from a single Ruby file
+    pub async fn index_file_definitions(&self, file_path: &Path, server: &RubyLanguageServer) -> Result<()> {
+        let start_time = Instant::now();
+        debug!("Indexing definitions from file: {:?}", file_path);
+
+        // Convert path to URI
+        let uri = Url::from_file_path(file_path)
+            .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", file_path))?;
+
+        // Read file content
+        let content = tokio::fs::read_to_string(file_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", file_path, e))?;
+
+        // Index only definitions
+        self.index_definitions(&uri, &content, server).await?;
+
+        debug!("Indexed definitions from file {:?} in {:?}", file_path, start_time.elapsed());
+        Ok(())
+    }
+
+    /// Index references from a single Ruby file
+    pub async fn index_file_references(&self, file_path: &Path, server: &RubyLanguageServer) -> Result<()> {
+        let start_time = Instant::now();
+        debug!("Indexing references from file: {:?}", file_path);
+
+        // Convert path to URI
+        let uri = Url::from_file_path(file_path)
+            .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", file_path))?;
+
+        // Read file content
+        let content = tokio::fs::read_to_string(file_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", file_path, e))?;
+
+        // Index only references
+        self.index_references(&uri, &content, server).await?;
+
+        debug!("Indexed references from file {:?} in {:?}", file_path, start_time.elapsed());
+        Ok(())
+    }
+
+    /// Check if a file should be indexed based on its extension
+    pub fn should_index_file(&self, path: &Path) -> bool {
+        utils::should_index_file(path)
     }
 
     /// Collect Ruby files recursively from a directory
     pub fn collect_ruby_files(&self, dir: &Path) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        self.collect_ruby_files_recursive(dir, &mut files);
-        files
-    }
-
-    /// Recursively collect Ruby files from a directory
-    fn collect_ruby_files_recursive(&self, dir: &Path, files: &mut Vec<PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-
-                if path.is_dir() {
-                    // Skip common directories that don't contain indexable Ruby files
-                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !matches!(
-                            dir_name,
-                            ".git"
-                                | ".svn"
-                                | "node_modules"
-                                | "tmp"
-                                | "log"
-                                | "coverage"
-                                | ".bundle"
-                        ) {
-                            self.collect_ruby_files_recursive(&path, files);
-                        }
-                    }
-                } else if self.should_index_file(&path) {
-                    files.push(path);
-                }
-            }
-        }
+        utils::collect_ruby_files(dir)
     }
 
     /// Get a reference to the underlying index
@@ -186,23 +247,7 @@ impl IndexerCore {
 
     /// Check if a URI belongs to a project file (not stdlib or gem)
     fn is_project_file(&self, uri: &Url, _server: &RubyLanguageServer) -> bool {
-        if let Ok(file_path) = uri.to_file_path() {
-            let path_str = file_path.to_string_lossy();
-            
-            // Check if the file is in common stdlib or gem paths
-            let is_stdlib_or_gem = path_str.contains("/ruby/") && 
-                (path_str.contains("/lib/ruby/") || 
-                 path_str.contains("/gems/") ||
-                 path_str.contains("/rubystubs") ||
-                 path_str.contains("/site_ruby/") ||
-                 path_str.contains("/vendor_ruby/"));
-            
-            // If it's not in stdlib/gem paths, consider it a project file
-            !is_stdlib_or_gem
-        } else {
-            // If we can't convert to file path, assume it's a project file
-            true
-        }
+        utils::is_project_file(uri)
     }
 }
 

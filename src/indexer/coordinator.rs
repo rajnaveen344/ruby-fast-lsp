@@ -4,6 +4,7 @@ use crate::indexer::indexer_core::IndexerCore;
 use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
+use crate::indexer::utils;
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
@@ -16,14 +17,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// The IndexingCoordinator manages the entire indexing process.
-/// 
+///
 /// It works in 5 simple steps:
 /// 1. Find out which Ruby version we're using
 /// 2. Set up the basic indexing tools
 /// 3. Index the project files (and track what libraries they need)
 /// 4. Index the Ruby standard library
 /// 5. Index the gems (external libraries)
-/// 
+///
 /// Think of it like organizing a library - first you figure out what system you're using,
 /// then you organize your own books, then you add the reference books, and finally
 /// you add books from other collections.
@@ -31,31 +32,31 @@ pub struct IndexingCoordinator {
     // Basic setup
     workspace_root: PathBuf,
     config: RubyFastLspConfig,
-    
+
     // Ruby version info
     version_detector: RubyVersionDetector,
     detected_ruby_version: Option<RubyVersion>,
-    
+
     // The main indexing engine
     core_indexer: Option<IndexerCore>,
-    
+
     // Project-specific indexer
     project_indexer: Option<IndexerProject>,
     dependency_tracker: Arc<Mutex<DependencyTracker>>,
-    
+
     // Standard library indexer
     stdlib_indexer: Option<IndexerStdlib>,
-    
+
     // Gem indexer
     gem_indexer: Option<IndexerGem>,
-    
+
     // Where to find Ruby libraries on this system
     ruby_library_paths: Vec<PathBuf>,
 }
 
 impl IndexingCoordinator {
     /// Creates a new IndexingCoordinator for the given workspace.
-    /// 
+    ///
     /// This sets up all the basic components but doesn't start indexing yet.
     /// Call `run_complete_indexing()` to actually start the indexing process.
     pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig) -> Self {
@@ -79,17 +80,21 @@ impl IndexingCoordinator {
         }
     }
 
-    /// Runs the complete indexing process from start to finish.
-    /// 
-    /// This is the main method you call to index everything. It does these steps:
+    /// Runs the complete indexing process from start to finish using two-phase approach.
+    ///
+    /// This method implements two-phase indexing to avoid race conditions:
+    /// Phase 1 - Index all definitions:
     /// 1. Figure out which Ruby version we're using
     /// 2. Find where Ruby libraries are installed on this system
     /// 3. Set up the main indexing engine
-    /// 4. Index all the project files (and track what libraries they use)
-    /// 5. Index the Ruby standard library
-    /// 6. Index the gems (external libraries)
+    /// 4. Index definitions from project files
+    /// 5. Index definitions from Ruby standard library
+    /// 6. Index definitions from gems
+    ///
+    /// Phase 2 - Index all references:
+    /// 7. Index references from project files (now that all definitions are available)
     pub async fn run_complete_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        info!("Starting complete indexing process");
+        info!("Starting complete two-phase indexing process");
         let start_time = Instant::now();
 
         // Step 1: Figure out which Ruby version we're using
@@ -102,17 +107,32 @@ impl IndexingCoordinator {
         // Step 3: Set up the main indexing engine
         self.setup_core_indexer(server);
 
-        // Step 4: Index the project files
-        self.index_project_files(server).await?;
+        // PHASE 1: Index all definitions first
+        info!("Phase 1: Indexing all definitions");
+        let phase1_start = Instant::now();
 
-        // Step 5: Index the Ruby standard library
+        // Step 4: Index definitions from project files
+        self.index_project_definitions(server).await?;
+
+        // Step 5: Index definitions from Ruby standard library
         self.index_standard_library(server, &ruby_version).await?;
 
-        // Step 6: Index the gems
+        // Step 6: Index definitions from gems
         self.index_gems().await?;
 
+        info!("Phase 1 completed in {:?}", phase1_start.elapsed());
+
+        // PHASE 2: Index all references (now that definitions are available)
+        info!("Phase 2: Indexing all references");
+        let phase2_start = Instant::now();
+
+        // Step 7: Index references from project files
+        self.index_project_references(server).await?;
+
+        info!("Phase 2 completed in {:?}", phase2_start.elapsed());
+
         info!(
-            "Complete indexing finished in {:?}",
+            "Complete two-phase indexing finished in {:?}",
             start_time.elapsed()
         );
         Ok(())
@@ -130,28 +150,42 @@ impl IndexingCoordinator {
         self.core_indexer = Some(IndexerCore::new(server.index()));
     }
 
-    /// Step 4: Index all the project files and track what libraries they need
-    async fn index_project_files(&mut self, server: &RubyLanguageServer) -> Result<()> {
+    /// Phase 1 Step 4: Index definitions from project files and track what libraries they need
+    async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let mut project_indexer = IndexerProject::new(
             self.workspace_root.clone(),
             self.core_indexer.as_ref().unwrap().clone(),
             self.dependency_tracker.clone(),
         );
-        
-        project_indexer.index_project(server).await?;
+
+        project_indexer.index_project_definitions(server).await?;
         self.project_indexer = Some(project_indexer);
         Ok(())
     }
 
+    /// Phase 2 Step 7: Index references from project files
+    async fn index_project_references(&mut self, server: &RubyLanguageServer) -> Result<()> {
+        if let Some(ref mut project_indexer) = self.project_indexer {
+            project_indexer.index_project_references(server).await?;
+        } else {
+            warn!("Project indexer not initialized, cannot index references");
+        }
+        Ok(())
+    }
+
     /// Step 5: Index the Ruby standard library
-    async fn index_standard_library(&mut self, server: &RubyLanguageServer, ruby_version: &Option<RubyVersion>) -> Result<()> {
+    async fn index_standard_library(
+        &mut self,
+        server: &RubyLanguageServer,
+        ruby_version: &Option<RubyVersion>,
+    ) -> Result<()> {
         let required_stdlib = self.get_required_stdlib_modules();
-        
+
         let mut stdlib_indexer = IndexerStdlib::new(
             self.core_indexer.as_ref().unwrap().clone(),
             ruby_version.clone(),
         );
-        
+
         stdlib_indexer.set_required_modules(required_stdlib);
         stdlib_indexer.index_stdlib(server).await?;
         self.stdlib_indexer = Some(stdlib_indexer);
@@ -161,14 +195,14 @@ impl IndexingCoordinator {
     /// Step 6: Index the gems (external libraries)
     async fn index_gems(&mut self) -> Result<()> {
         let required_gems = self.get_required_gems();
-        
+
         let mut gem_indexer = IndexerGem::new(
             Arc::new(std::sync::Mutex::new(
                 self.core_indexer.as_ref().unwrap().clone(),
             )),
             Some(self.workspace_root.clone()),
         );
-        
+
         gem_indexer.set_required_gems(required_gems.into_iter().collect());
         gem_indexer.index_gems(true).await?; // selective = true
         self.gem_indexer = Some(gem_indexer);
@@ -194,7 +228,7 @@ impl IndexingCoordinator {
     }
 
     /// Step 2: Find where Ruby libraries are installed on this system
-    /// 
+    ///
     /// This looks for Ruby's standard library and gem directories so we know
     /// where to find external code that the project might be using.
     pub fn discover_ruby_library_paths(&mut self) {
@@ -247,68 +281,38 @@ impl IndexingCoordinator {
     }
 
     /// Set up the dependency tracker with the Ruby library paths we found
-    /// 
+    ///
     /// The dependency tracker helps us figure out what external libraries
     /// the project is using so we can index them too.
     pub fn initialize_dependency_tracker(&mut self) {
-        let tracker = DependencyTracker::new(
-            self.workspace_root.clone(), 
-            self.ruby_library_paths.clone()
-        );
+        let tracker =
+            DependencyTracker::new(self.workspace_root.clone(), self.ruby_library_paths.clone());
         self.dependency_tracker = Arc::new(Mutex::new(tracker));
     }
 
     /// Find all Ruby files in a directory and its subdirectories
-    /// 
+    ///
     /// This walks through a directory tree and collects all Ruby files,
     /// but skips common directories that usually don't contain Ruby source code
     /// (like node_modules, .git, tmp, etc.)
     pub fn find_all_ruby_files_in_directory(&self, dir: &Path, files: &mut Vec<PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    // Skip directories that typically don't contain Ruby source code
-                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                        let should_skip = [
-                            "node_modules", ".git", "tmp", "log", "coverage", 
-                            ".bundle", "vendor"
-                        ].contains(&dir_name);
-                        
-                        if !should_skip {
-                            self.find_all_ruby_files_in_directory(&path, files);
-                        }
-                    }
-                } else if self.is_ruby_file(&path) {
-                    files.push(path);
-                }
-            }
-        }
+        let collected_files = utils::collect_ruby_files(dir);
+        files.extend(collected_files);
     }
 
     /// Check if a file is a Ruby file
-    /// 
+    ///
     /// This looks at the file extension (.rb, .ruby, .rake) and also checks
     /// for common Ruby files that don't have extensions (like Rakefile, Gemfile)
     pub fn is_ruby_file(&self, path: &Path) -> bool {
-        // Check file extension first
-        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-            return matches!(extension, "rb" | "ruby" | "rake");
-        }
-        
-        // Check for Ruby files without extensions
-        if let Some(filename) = path.file_name().and_then(|name| name.to_str()) {
-            matches!(filename, "Rakefile" | "Gemfile" | "Guardfile" | "Capfile")
-        } else {
-            false
-        }
+        utils::should_index_file(path)
     }
 
     /// Find the Ruby core stubs for a specific Ruby version
-    /// 
+    ///
     /// Ruby core stubs are pre-written definitions of Ruby's built-in classes and methods.
     /// This helps the language server understand Ruby's core functionality.
-    /// 
+    ///
     /// We try to find stubs in this order:
     /// 1. Use the configured stub path
     /// 2. Look in the workspace's vsix/stubs directory
@@ -318,7 +322,7 @@ impl IndexingCoordinator {
         if let Some(stubs_path_str) = self.config.get_core_stubs_path_internal(version) {
             return Some(PathBuf::from(stubs_path_str));
         }
-        
+
         // Look for stubs in the workspace
         let stubs_dir = self.workspace_root.join("vsix").join("stubs");
         let version_dir = format!("rubystubs{}{}", version.0, version.1);
@@ -328,7 +332,7 @@ impl IndexingCoordinator {
             debug!("Found core stubs in workspace at: {:?}", stubs_path);
             return Some(stubs_path);
         }
-        
+
         // Fall back to Ruby 3.0 stubs if the specific version isn't available
         let default_stubs = stubs_dir.join("rubystubs30");
         if default_stubs.exists() {
@@ -341,7 +345,7 @@ impl IndexingCoordinator {
     }
 
     /// Get the Ruby library paths we discovered
-    /// 
+    ///
     /// This returns the list of directories where Ruby libraries are installed.
     pub fn get_ruby_library_paths(&self) -> &[PathBuf] {
         &self.ruby_library_paths

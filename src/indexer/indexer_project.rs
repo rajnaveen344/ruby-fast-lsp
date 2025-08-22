@@ -33,10 +33,13 @@ impl IndexerProject {
         }
     }
 
-    /// Index the entire project and track dependencies
-    pub async fn index_project(&mut self, server: &RubyLanguageServer) -> Result<()> {
+    /// Phase 1: Index only definitions from project files and track dependencies
+    pub async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let start_time = Instant::now();
-        info!("Starting project indexing for: {:?}", self.workspace_root);
+        info!(
+            "Starting project definitions indexing for: {:?}",
+            self.workspace_root
+        );
 
         // Clear previous dependency tracking
         self.clear_dependencies();
@@ -45,14 +48,15 @@ impl IndexerProject {
         let ruby_files = self.collect_project_files();
         info!("Found {} Ruby files in project", ruby_files.len());
 
-        // Index project files and track dependencies
-        self.index_and_track_dependencies(&ruby_files, server).await?;
+        // Index definitions from project files and track dependencies
+        self.index_definitions_and_track_dependencies(&ruby_files, server)
+            .await?;
 
         // Update dependency tracker with discovered dependencies
         self.update_dependency_tracker();
 
         info!(
-            "Project indexing completed in {:?}. Found {} stdlib deps, {} gem deps",
+            "Project definitions indexing completed in {:?}. Found {} stdlib deps, {} gem deps",
             start_time.elapsed(),
             self.required_stdlib.lock().len(),
             self.required_gems.lock().len()
@@ -61,49 +65,79 @@ impl IndexerProject {
         Ok(())
     }
 
-    /// Collect all Ruby files in the project
-    fn collect_project_files(&self) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        
-        // Index main source directories
-        let source_dirs = vec![
-            self.workspace_root.join("app"),
-            self.workspace_root.join("lib"),
-            self.workspace_root.join("config"),
-            self.workspace_root.join("spec"),
-            self.workspace_root.join("test"),
-            self.workspace_root.clone(), // Root directory for files like Rakefile, Gemfile
-        ];
+    /// Phase 2: Index only references from project files
+    pub async fn index_project_references(&mut self, server: &RubyLanguageServer) -> Result<()> {
+        let start_time = Instant::now();
+        info!(
+            "Starting project references indexing for: {:?}",
+            self.workspace_root
+        );
 
-        for dir in source_dirs {
-            if dir.exists() && dir.is_dir() {
-                let dir_files = self.core.collect_ruby_files(&dir);
-                files.extend(dir_files);
-            }
-        }
+        // Collect all Ruby files in the project
+        let ruby_files = self.collect_project_files();
+        info!(
+            "Indexing references from {} Ruby files in project",
+            ruby_files.len()
+        );
 
-        // Remove duplicates and sort
-        files.sort();
-        files.dedup();
-        
-        files
+        // Index references from project files
+        self.index_references_only(&ruby_files, server).await?;
+
+        info!(
+            "Project references indexing completed in {:?}",
+            start_time.elapsed()
+        );
+
+        Ok(())
     }
 
-    /// Index files and track their dependencies
-    async fn index_and_track_dependencies(
+    /// Collect all Ruby files in the project
+    fn collect_project_files(&self) -> Vec<PathBuf> {
+        // Simply collect all Ruby files from the workspace root recursively
+        // This ensures we don't miss any Ruby files regardless of project structure
+        self.core.collect_ruby_files(&self.workspace_root)
+    }
+
+
+
+    /// Index definitions from files and track their dependencies
+    async fn index_definitions_and_track_dependencies(
         &self,
         files: &[PathBuf],
         server: &RubyLanguageServer,
     ) -> Result<()> {
         for file_path in files {
-            // Index the file
-            if let Err(e) = self.core.index_file(file_path, server).await {
-                warn!("Failed to index file {:?}: {}", file_path, e);
+            // Index only definitions from the file
+            if let Err(e) = self.core.index_file_definitions(file_path, server).await {
+                warn!(
+                    "Failed to index definitions from file {:?}: {}",
+                    file_path, e
+                );
                 continue;
             }
 
             // Track dependencies from this file
             self.track_file_dependencies(file_path).await;
+        }
+
+        Ok(())
+    }
+
+    /// Index only references from files
+    async fn index_references_only(
+        &self,
+        files: &[PathBuf],
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        for file_path in files {
+            // Index only references from the file
+            if let Err(e) = self.core.index_file_references(file_path, server).await {
+                warn!(
+                    "Failed to index references from file {:?}: {}",
+                    file_path, e
+                );
+                continue;
+            }
         }
 
         Ok(())
@@ -120,10 +154,10 @@ impl IndexerProject {
     /// Extract require statements to identify stdlib dependencies
     fn extract_require_statements(&self, content: &str) {
         let mut stdlib_deps = self.required_stdlib.lock();
-        
+
         for line in content.lines() {
             let trimmed = line.trim();
-            
+
             // Match require statements
             if let Some(required) = self.parse_require_statement(trimmed) {
                 // Check if it's a stdlib module
@@ -141,7 +175,7 @@ impl IndexerProject {
         // require 'module'
         // require "module"
         // require_relative 'module'
-        
+
         if line.starts_with("require ") || line.starts_with("require_relative ") {
             // Find the quoted string
             if let Some(start) = line.find('"').or_else(|| line.find('\'')) {
@@ -152,7 +186,7 @@ impl IndexerProject {
                 }
             }
         }
-        
+
         None
     }
 
@@ -160,30 +194,83 @@ impl IndexerProject {
     fn is_stdlib_module(&self, module_name: &str) -> bool {
         // Common stdlib modules
         const STDLIB_MODULES: &[&str] = &[
-            "json", "yaml", "csv", "uri", "net/http", "net/https", "openssl",
-            "digest", "base64", "time", "date", "fileutils", "pathname",
-            "tempfile", "tmpdir", "logger", "benchmark", "optparse",
-            "ostruct", "set", "forwardable", "delegate", "singleton",
-            "observer", "thread", "mutex_m", "monitor", "sync",
-            "fiber", "continuation", "english", "abbrev", "cgi",
-            "erb", "rexml", "rss", "xmlrpc", "webrick", "socket",
-            "ipaddr", "resolv", "open-uri", "open3", "pty", "expect",
-            "readline", "zlib", "stringio", "strscan", "scanf",
-            "getoptlong", "find", "ftools", "shell", "shellwords",
-            "etc", "fcntl", "io/console", "io/nonblock", "io/wait",
-            "dbm", "gdbm", "sdbm", "pstore", "yaml/store",
+            "json",
+            "yaml",
+            "csv",
+            "uri",
+            "net/http",
+            "net/https",
+            "openssl",
+            "digest",
+            "base64",
+            "time",
+            "date",
+            "fileutils",
+            "pathname",
+            "tempfile",
+            "tmpdir",
+            "logger",
+            "benchmark",
+            "optparse",
+            "ostruct",
+            "set",
+            "forwardable",
+            "delegate",
+            "singleton",
+            "observer",
+            "thread",
+            "mutex_m",
+            "monitor",
+            "sync",
+            "fiber",
+            "continuation",
+            "english",
+            "abbrev",
+            "cgi",
+            "erb",
+            "rexml",
+            "rss",
+            "xmlrpc",
+            "webrick",
+            "socket",
+            "ipaddr",
+            "resolv",
+            "open-uri",
+            "open3",
+            "pty",
+            "expect",
+            "readline",
+            "zlib",
+            "stringio",
+            "strscan",
+            "scanf",
+            "getoptlong",
+            "find",
+            "ftools",
+            "shell",
+            "shellwords",
+            "etc",
+            "fcntl",
+            "io/console",
+            "io/nonblock",
+            "io/wait",
+            "dbm",
+            "gdbm",
+            "sdbm",
+            "pstore",
+            "yaml/store",
         ];
-        
+
         STDLIB_MODULES.contains(&module_name)
     }
 
     /// Extract gem dependencies from various sources
     fn extract_gem_dependencies(&self, content: &str) {
         let mut gem_deps = self.required_gems.lock();
-        
+
         for line in content.lines() {
             let trimmed = line.trim();
-            
+
             // Match gem statements in Gemfile
             if let Some(gem_name) = self.parse_gem_statement(trimmed) {
                 debug!("Found gem dependency: {}", gem_name);
@@ -204,7 +291,7 @@ impl IndexerProject {
                 }
             }
         }
-        
+
         None
     }
 
@@ -217,12 +304,12 @@ impl IndexerProject {
     /// Update the dependency tracker with discovered dependencies
     fn update_dependency_tracker(&self) {
         let mut tracker = self.dependency_tracker.lock();
-        
+
         // Add stdlib dependencies
         for stdlib_dep in self.required_stdlib.lock().iter() {
             tracker.add_stdlib_dependency(stdlib_dep.clone());
         }
-        
+
         // Add gem dependencies
         for gem_dep in self.required_gems.lock().iter() {
             tracker.add_gem_dependency(gem_dep.clone());
