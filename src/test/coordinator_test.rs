@@ -313,11 +313,11 @@ end
         let server = create_test_server();
 
         // Execute the complete indexing process
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         assert!(result.is_ok(), "Indexing should complete successfully");
 
         // Verify that Ruby lib directories were discovered
-        let lib_dirs = coordinator.get_ruby_lib_dirs();
+        let lib_dirs = coordinator.get_ruby_library_paths();
         assert!(
             !lib_dirs.is_empty(),
             "Should discover at least one Ruby lib directory"
@@ -334,7 +334,7 @@ end
 
         // Test Ruby file collection
         let mut files = Vec::new();
-        coordinator.collect_ruby_files_recursive(fixture.project_root(), &mut files);
+        coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut files);
 
         assert!(!files.is_empty(), "Should find Ruby files in project");
 
@@ -381,7 +381,7 @@ end
         let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test core stubs path resolution
-        let stubs_path = coordinator.get_core_stubs_path((3, 0));
+        let stubs_path = coordinator.find_core_stubs_for_version((3, 0));
         assert!(stubs_path.is_some(), "Should find core stubs path");
 
         let stubs_path = stubs_path.unwrap();
@@ -426,7 +426,7 @@ end
         let server = create_test_server();
 
         // Test indexing with missing directories (should not panic)
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         assert!(
             result.is_ok(),
             "Indexing should handle missing directories gracefully"
@@ -440,8 +440,8 @@ end
         let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test lib directory discovery
-        coordinator.discover_ruby_lib_dirs();
-        let lib_dirs = coordinator.get_ruby_lib_dirs();
+        coordinator.discover_ruby_library_paths();
+        let lib_dirs = coordinator.get_ruby_library_paths();
 
         // This test depends on the system having Ruby installed
         // In CI environments, this might not be available, so we make it lenient
@@ -489,7 +489,7 @@ end
 
         // Measure indexing time
         let start = std::time::Instant::now();
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         let duration = start.elapsed();
 
         assert!(
@@ -518,13 +518,13 @@ end
         let server = create_test_server();
 
         // Execute indexing which should include gem discovery
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         assert!(result.is_ok(), "Indexing with gem discovery should succeed");
 
         // Verify that gem indexer was initialized
         // Note: We can't directly access the gem_indexer field, but we can verify
         // that the ruby_lib_dirs includes gem paths
-        let lib_dirs = coordinator.get_ruby_lib_dirs();
+        let lib_dirs = coordinator.get_ruby_library_paths();
         
         // Should have at least some library directories (system + potentially gems)
         assert!(!lib_dirs.is_empty(), "Should discover library directories including potential gem paths");
@@ -559,16 +559,16 @@ end
         let server = create_test_server();
 
         // Test that gem indexing doesn't break the overall indexing process
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         assert!(result.is_ok(), "Indexing should succeed even with gem discovery");
 
         // Verify the indexing process completed all steps
-        let lib_dirs = coordinator.get_ruby_lib_dirs();
+        let lib_dirs = coordinator.get_ruby_library_paths();
         assert!(!lib_dirs.is_empty(), "Library directories should be discovered");
         
         // The gem indexing should not interfere with project file indexing
         let mut project_files = Vec::new();
-        coordinator.collect_ruby_files_recursive(fixture.project_root(), &mut project_files);
+        coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut project_files);
         assert!(!project_files.is_empty(), "Project files should still be discoverable after gem indexing");
         
         // Clean up environment variable
@@ -589,11 +589,11 @@ end
 
         // Even if gem discovery fails, the overall indexing should still succeed
         // This tests the error handling in discover_and_index_gems
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         assert!(result.is_ok(), "Indexing should succeed even if gem discovery encounters errors");
         
         // Basic functionality should still work
-        let lib_dirs = coordinator.get_ruby_lib_dirs();
+        let lib_dirs = coordinator.get_ruby_library_paths();
         // We should at least have some directories (even if gem discovery failed)
         // The system Ruby directories should still be found
         assert!(!lib_dirs.is_empty() || true, "Should handle gem discovery errors gracefully");
@@ -616,7 +616,7 @@ end
 
         // Measure time for indexing including gem discovery
         let start = std::time::Instant::now();
-        let result = coordinator.execute_indexing(&server).await;
+        let result = coordinator.run_complete_indexing(&server).await;
         let elapsed = start.elapsed();
 
         assert!(result.is_ok(), "Indexing with gem discovery should complete successfully");
@@ -654,8 +654,8 @@ end
         let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Collect Ruby files from the project
-        let mut collected_files = Vec::new();
-        coordinator.collect_ruby_files_recursive(fixture.project_root(), &mut collected_files);
+        let mut collected_files: Vec<PathBuf> = Vec::new();
+        coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut collected_files);
 
         // Verify that vendor files are excluded
         let vendor_files: Vec<_> = collected_files

@@ -27,7 +27,7 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
     info!("Initializing workspace: {:?}", workspace_path);
 
     let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
-    coordinator.execute_indexing(server).await?;
+    coordinator.run_complete_indexing(server).await?;
 
     Ok(())
 }
