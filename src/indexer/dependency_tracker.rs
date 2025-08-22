@@ -1,4 +1,4 @@
-use crate::indexer::gem_indexer::GemIndexer;
+use crate::indexer::indexer_gem::IndexerGem;
 use log::debug;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ pub struct DependencyTracker {
     /// Project root directory
     project_root: PathBuf,
     /// Gem indexer for resolving gem dependencies
-    gem_indexer: Option<GemIndexer>,
+    gem_indexer: Option<IndexerGem>,
 }
 
 /// Represents a require statement found in Ruby code
@@ -46,12 +46,12 @@ impl DependencyTracker {
     }
 
     /// Set the gem indexer for enhanced gem resolution
-    pub fn set_gem_indexer(&mut self, gem_indexer: GemIndexer) {
+    pub fn set_gem_indexer(&mut self, gem_indexer: IndexerGem) {
         self.gem_indexer = Some(gem_indexer);
     }
 
     /// Get a reference to the gem indexer
-    pub fn gem_indexer(&self) -> Option<&GemIndexer> {
+    pub fn gem_indexer(&self) -> Option<&IndexerGem> {
         self.gem_indexer.as_ref()
     }
 
@@ -397,7 +397,7 @@ impl DependencyTracker {
     fn resolve_with_gem_indexer(
         &self,
         require_path: &str,
-        gem_indexer: &GemIndexer,
+        gem_indexer: &IndexerGem,
     ) -> Option<Url> {
         // Try to find the gem that contains this require path
         for gem in gem_indexer.get_all_gems() {
@@ -526,6 +526,20 @@ impl DependencyTracker {
             pending_files,
             processed_files,
         }
+    }
+
+    /// Add a stdlib dependency for tracking
+    pub fn add_stdlib_dependency(&mut self, stdlib_name: String) {
+        debug!("Adding stdlib dependency: {}", stdlib_name);
+        // This could be used to track which stdlib modules are required
+        // For now, we just log it
+    }
+
+    /// Add a gem dependency for tracking
+    pub fn add_gem_dependency(&mut self, gem_name: String) {
+        debug!("Adding gem dependency: {}", gem_name);
+        // This could be used to track which gems are required
+        // For now, we just log it
     }
 
     /// Clear all tracking data

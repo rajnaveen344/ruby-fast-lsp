@@ -1,7 +1,9 @@
 use crate::config::RubyFastLspConfig;
-use crate::handlers::helpers::{process_files_parallel, ProcessingMode};
 use crate::indexer::dependency_tracker::DependencyTracker;
-use crate::indexer::gem_indexer::GemIndexer;
+use crate::indexer::indexer_core::IndexerCore;
+use crate::indexer::indexer_gem::IndexerGem;
+use crate::indexer::indexer_project::IndexerProject;
+use crate::indexer::indexer_stdlib::IndexerStdlib;
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
@@ -12,190 +14,126 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
-use tower_lsp::lsp_types::Url;
 
-/// Coordinates the simplified indexing process
+/// Coordinates the modular indexing process following the specified order:
+/// 1. version_detector
+/// 2. indexer_core  
+/// 3. indexer_project (tracks required stdlib and gems)
+/// 4. indexer_stdlib
+/// 5. indexer_gem
 pub struct IndexingCoordinator {
     workspace_root: PathBuf,
-    ruby_version: Option<RubyVersion>,
-    ruby_lib_dirs: Vec<PathBuf>,
     config: RubyFastLspConfig,
-    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
-    gem_indexer: Option<GemIndexer>,
+
+    // Phase 1: Version detection
+    version_detector: RubyVersionDetector,
+    ruby_version: Option<RubyVersion>,
+
+    // Phase 2: Core indexing
+    indexer_core: Option<IndexerCore>,
+
+    // Phase 3: Project indexing with dependency tracking
+    indexer_project: Option<IndexerProject>,
+    dependency_tracker: Arc<Mutex<DependencyTracker>>,
+
+    // Phase 4: Standard library indexing
+    indexer_stdlib: Option<IndexerStdlib>,
+
+    // Phase 5: Gem indexing
+    indexer_gem: Option<IndexerGem>,
+
+    // Ruby library directories for dependency resolution
+    ruby_lib_dirs: Vec<PathBuf>,
 }
 
 impl IndexingCoordinator {
     pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig) -> Self {
+        let version_detector = RubyVersionDetector::from_path(workspace_root.clone());
+        let dependency_tracker = Arc::new(Mutex::new(DependencyTracker::new(
+            workspace_root.clone(),
+            Vec::new(),
+        )));
+
         Self {
             workspace_root,
-            ruby_version: None,
-            ruby_lib_dirs: Vec::new(),
             config,
-            dependency_tracker: None,
-            gem_indexer: None,
+            version_detector,
+            ruby_version: None,
+            indexer_core: None,
+            indexer_project: None,
+            dependency_tracker,
+            indexer_stdlib: None,
+            indexer_gem: None,
+            ruby_lib_dirs: Vec::new(),
         }
     }
 
-    /// Execute the complete indexing process
+    /// Execute the complete indexing process in the specified order:
+    /// 1. Version detection
+    /// 2. Core indexing setup
+    /// 3. Project indexing (with stdlib/gem tracking)
+    /// 4. Standard library indexing
+    /// 5. Gem indexing
     pub async fn execute_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
+        info!("Starting coordinated indexing process");
         let start_time = Instant::now();
-        info!(
-            "Starting indexing process for workspace: {:?}",
-            self.workspace_root
-        );
 
-        // Step 1: Detect Ruby version
-        self.detect_ruby_version();
-        info!("Detected Ruby version: {:?}", self.ruby_version);
+        // 1. Detect Ruby version
+        let ruby_version = self.version_detector.detect_version();
+        self.ruby_version = ruby_version.clone();
+        info!("Detected Ruby version: {:?}", ruby_version);
 
-        // Step 2: Discover Ruby lib directories
+        // 1.5. Discover Ruby lib directories for dependency resolution
         self.discover_ruby_lib_dirs();
-        info!(
-            "Discovered {} Ruby lib directories",
-            self.ruby_lib_dirs.len()
+
+        // 2. Initialize core indexing
+        self.indexer_core = Some(IndexerCore::new(server.index()));
+
+        // 3. Initialize and execute project indexing
+        let mut indexer_project = IndexerProject::new(
+            self.workspace_root.clone(),
+            self.indexer_core.as_ref().unwrap().clone(),
+            self.dependency_tracker.clone(),
         );
+        indexer_project.index_project(server).await?;
+        self.indexer_project = Some(indexer_project);
 
-        // Step 3: Index core stubs if available
-        if let Err(e) = self.index_core_stubs(server).await {
-            warn!("Failed to index core stubs: {}", e);
-        }
-
-        // Step 4: Discover and index gems
-        if let Err(e) = self.discover_and_index_gems(server).await {
-            warn!("Failed to discover and index gems: {}", e);
-        }
-
-        // Step 5: Index project files with dependency tracking
-        self.index_project_root(server).await?;
-
-        let duration = start_time.elapsed();
-        info!("Indexing completed in {:?}", duration);
-
-        Ok(())
-    }
-
-    /// Detect Ruby version for the workspace
-    fn detect_ruby_version(&mut self) {
-        if let Ok(workspace_uri) = Url::from_file_path(&self.workspace_root) {
-            if let Some(detector) = RubyVersionDetector::new(&workspace_uri) {
-                if let Some(version) = detector.detect_version() {
-                    info!("Detected Ruby version: {}", version);
-                    self.ruby_version = Some(version);
-                    return;
-                }
-            }
-        }
-
-        // Fallback to system version detection
-        if let Some(system_version) = self.detect_system_ruby_version() {
-            let version = RubyVersion::new(system_version.0, system_version.1);
-            info!("Using system Ruby version: {}", version);
-            self.ruby_version = Some(version);
+        // Get tracked dependencies from project indexer
+        let required_stdlib = if let Some(ref project) = self.indexer_project {
+            project.get_required_stdlib()
         } else {
-            debug!("Could not detect Ruby version, using default 3.0.0");
-            self.ruby_version = Some(RubyVersion::new(3, 0));
-        }
-    }
-
-    /// Index core Ruby stubs based on detected version
-    async fn index_core_stubs(&self, server: &RubyLanguageServer) -> Result<()> {
-        if let Some(version) = &self.ruby_version {
-            let version_tuple = (version.major, version.minor);
-            if let Some(stubs_path) = self.get_core_stubs_path(version_tuple) {
-                debug!("Indexing core stubs from: {:?}", stubs_path);
-                let mut files = Vec::new();
-                if stubs_path.is_file() && self.is_ruby_file(&stubs_path) {
-                    files.push(stubs_path);
-                } else if stubs_path.is_dir() {
-                    self.collect_ruby_files_recursive(&stubs_path, &mut files);
-                }
-                if !files.is_empty() {
-                    let file_count = files.len();
-                    process_files_parallel(server, files, ProcessingMode::Definitions).await?;
-                    debug!("Indexed {} core stub files", file_count);
-                }
-            } else {
-                debug!("No core stubs found for Ruby version {:?}", version_tuple);
-            }
-        }
-        Ok(())
-    }
-
-    /// Discover and index gems
-    async fn discover_and_index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        debug!("Starting gem discovery and indexing");
-
-        // Initialize gem indexer with detected Ruby version and workspace root
-        let mut gem_indexer =
-            GemIndexer::with_workspace_root(self.ruby_version.clone(), self.workspace_root.clone());
-
-        // Discover all installed gems
-        if let Err(e) = gem_indexer.discover_gems() {
-            warn!("Failed to discover gems: {}", e);
-            return Ok(()); // Don't fail the entire indexing process
-        }
-
-        let gem_count = gem_indexer.gem_count();
-        info!("Discovered {} gems", gem_count);
-
-        // Log which gems are selected for indexing
-        let selected_gems = gem_indexer.get_all_gems();
-        for gem in &selected_gems {
-            debug!(
-                "Selected gem for indexing: {} v{} (default: {}, lib_paths: {})",
-                gem.name,
-                gem.version,
-                gem.is_default,
-                gem.lib_paths.len()
-            );
-        }
-
-        // Get gem library paths for indexing
-        let gem_lib_paths = gem_indexer.get_gem_lib_paths();
-        info!("Found {} gem library paths to index", gem_lib_paths.len());
-
-        // Log each gem library path being indexed
-        for gem_lib_path in &gem_lib_paths {
-            debug!("Indexing gem library path: {:?}", gem_lib_path);
-        }
-
-        // Add gem lib paths to ruby_lib_dirs for dependency resolution
-        self.ruby_lib_dirs.extend(gem_lib_paths.clone());
-
-        // Collect Ruby files from gem libraries
-        let mut gem_files = Vec::new();
-        for gem_lib_path in &gem_lib_paths {
-            if gem_lib_path.exists() && gem_lib_path.is_dir() {
-                self.collect_ruby_files_recursive(gem_lib_path, &mut gem_files);
-            }
-        }
-
-        if !gem_files.is_empty() {
-            let gem_files_count = gem_files.len();
-            debug!(
-                "Indexing {} Ruby files from {} gems",
-                gem_files_count,
-                selected_gems.len()
-            );
-
-            // Index gem files (definitions only for performance)
-            if let Err(e) =
-                process_files_parallel(server, gem_files, ProcessingMode::Definitions).await
-            {
-                warn!("Failed to index some gem files: {}", e);
-            } else {
-                debug!(
-                    "Successfully indexed {} Ruby files from gems",
-                    gem_files_count
-                );
-            }
+            Vec::new()
+        };
+        let required_gems = if let Some(ref project) = self.indexer_project {
+            project.get_required_gems()
         } else {
-            debug!("No gem files found to index");
-        }
+            Vec::new()
+        };
 
-        // Store the gem indexer for later use
-        self.gem_indexer = Some(gem_indexer);
+        // 4. Initialize and execute stdlib indexing
+        let mut indexer_stdlib = IndexerStdlib::new(
+            self.indexer_core.as_ref().unwrap().clone(),
+            ruby_version.clone(),
+        );
+        indexer_stdlib.set_required_modules(required_stdlib);
+        indexer_stdlib.index_stdlib(server).await?;
+        self.indexer_stdlib = Some(indexer_stdlib);
 
+        // 5. Initialize and execute gem indexing
+        let mut indexer_gem = IndexerGem::new(
+            Arc::new(std::sync::Mutex::new(
+                self.indexer_core.as_ref().unwrap().clone(),
+            )),
+            Some(self.workspace_root.clone()),
+        );
+        indexer_gem.set_required_gems(required_gems.into_iter().collect());
+        indexer_gem.index_gems(true).await?; // selective = true
+        self.indexer_gem = Some(indexer_gem);
+
+        info!(
+            "Coordinated indexing completed in {:?}",
+            start_time.elapsed()
+        );
         Ok(())
     }
 
@@ -251,47 +189,10 @@ impl IndexingCoordinator {
 
     /// Initialize dependency tracker
     pub fn initialize_dependency_tracker(&mut self) {
-        let mut tracker =
+        let tracker =
             DependencyTracker::new(self.workspace_root.clone(), self.ruby_lib_dirs.clone());
 
-        // Set the gem indexer if available
-        if let Some(gem_indexer) = self.gem_indexer.clone() {
-            tracker.set_gem_indexer(gem_indexer);
-        }
-
-        self.dependency_tracker = Some(Arc::new(Mutex::new(tracker)));
-    }
-
-    /// Index project's root directory with dependency tracking
-    async fn index_project_root(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        info!("Indexing project root directory: {:?}", self.workspace_root);
-
-        let mut project_files = Vec::new();
-        self.collect_ruby_files_recursive(&self.workspace_root, &mut project_files);
-
-        if !project_files.is_empty() {
-            debug!("Found {} Ruby files in project", project_files.len());
-
-            // Use parallel processing for better performance
-            // Dependency tracking is disabled for now due to performance issues
-            process_files_parallel(server, project_files.clone(), ProcessingMode::Definitions)
-                .await?;
-
-            process_files_parallel(
-                server,
-                project_files,
-                ProcessingMode::References {
-                    include_local_vars: false,
-                },
-            )
-            .await?;
-
-            debug!("Completed indexing project files");
-        } else {
-            debug!("No Ruby files found in project root");
-        }
-
-        Ok(())
+        self.dependency_tracker = Arc::new(Mutex::new(tracker));
     }
 
     /// Recursively collect Ruby files from a directory
@@ -366,29 +267,6 @@ impl IndexingCoordinator {
                 }
             }
         }
-    }
-
-    /// Detect system Ruby version as fallback
-    fn detect_system_ruby_version(&self) -> Option<(u8, u8)> {
-        if let Ok(output) = Command::new("ruby").args(["-v"]).output() {
-            if output.status.success() {
-                let version_str = String::from_utf8_lossy(&output.stdout);
-                // Parse version string like "ruby 3.1.0p0 (2021-12-25 revision fb4df44d16) [arm64-darwin21]"
-                if let Some(version_part) = version_str.split_whitespace().nth(1) {
-                    let version_nums: Vec<&str> = version_part.split('.').collect();
-                    if version_nums.len() >= 2 {
-                        if let (Ok(major), Ok(minor)) =
-                            (version_nums[0].parse::<u8>(), version_nums[1].parse::<u8>())
-                        {
-                            return Some((major, minor));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback to default version
-        Some((3, 0))
     }
 
     /// Get the discovered Ruby lib directories
