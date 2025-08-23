@@ -26,12 +26,14 @@ async fn main() -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| {
+    let (service, socket) = LspService::build(|client| {
         RubyLanguageServer::new(client).unwrap_or_else(|e| {
             error!("Failed to initialize Ruby LSP server: {}", e);
             exit(1)
         })
-    });
+    })
+    .custom_method("ruby/namespaceTree", RubyLanguageServer::handle_namespace_tree_request)
+    .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");
 

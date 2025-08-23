@@ -1,4 +1,5 @@
 pub mod completion;
+pub mod namespace_tree;
 pub mod definitions;
 pub mod diagnostics;
 pub mod document_symbols;

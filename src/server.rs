@@ -86,6 +86,14 @@ impl RubyLanguageServer {
             let _ = client.publish_diagnostics(uri, diagnostics, None).await;
         }
     }
+
+    pub async fn handle_namespace_tree_request(
+        &self,
+        params: crate::capabilities::namespace_tree::NamespaceTreeParams,
+    ) -> tower_lsp::jsonrpc::Result<crate::capabilities::namespace_tree::NamespaceTreeResponse> {
+        use crate::handlers::request;
+        request::handle_namespace_tree(self, params).await
+    }
 }
 
 impl Default for RubyLanguageServer {

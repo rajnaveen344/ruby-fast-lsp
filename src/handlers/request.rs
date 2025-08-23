@@ -1,5 +1,5 @@
 use crate::capabilities::{
-    completion, definitions, document_symbols, folding_range, formatting, inlay_hints, references, semantic_tokens,
+    completion, definitions, document_symbols, folding_range, formatting, inlay_hints, namespace_tree, references, semantic_tokens,
     workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
@@ -126,4 +126,15 @@ pub async fn handle_folding_range(
             Ok(None)
         }
     }
+}
+
+pub async fn handle_namespace_tree(
+    lang_server: &RubyLanguageServer,
+    params: namespace_tree::NamespaceTreeParams,
+) -> LspResult<namespace_tree::NamespaceTreeResponse> {
+    info!("Namespace tree request received");
+    let start_time = std::time::Instant::now();
+    let result = namespace_tree::handle_namespace_tree(lang_server, params).await;
+    info!("[PERF] Namespace tree completed in {:?}", start_time.elapsed());
+    Ok(result)
 }

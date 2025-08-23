@@ -98,6 +98,32 @@
         }
 
       }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "rubyNamespaceTree",
+          "name": "Ruby Namespace Tree",
+          "visibility": "visible",
+          "icon": "$(module)"
+        }
+      ]
+    },
+    "commands": [
+      {
+          "command": "rubyNamespaceTree.refresh",
+          "title": "Refresh",
+          "icon": "$(refresh)"
+        }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "rubyNamespaceTree.refresh",
+          "when": "view == rubyNamespaceTree",
+          "group": "navigation"
+        }
+      ]
     }
   },
   "scripts": {
