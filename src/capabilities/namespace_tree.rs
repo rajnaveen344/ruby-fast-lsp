@@ -1,4 +1,5 @@
 use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::utils;
 use crate::server::RubyLanguageServer;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -50,9 +51,14 @@ pub async fn handle_namespace_tree(
     );
     let mut namespace_map: HashMap<String, NamespaceNode> = HashMap::new();
 
-    // Collect all class and module entries from the index
+    // Collect all class and module entries from the index (project files only)
     for (fqn, entries) in &index.definitions {
         for entry in entries {
+            // Filter to only include project files (not stdlib or gems)
+            if !utils::is_project_file(&entry.location.uri) {
+                continue;
+            }
+
             match &entry.kind {
                 EntryKind::Class { .. } | EntryKind::Module { .. } => {
                     let kind = match &entry.kind {
@@ -86,8 +92,9 @@ pub async fn handle_namespace_tree(
     }
 
     info!(
-        "[NAMESPACE_TREE] Found {} namespace entries",
-        namespace_map.len()
+        "[NAMESPACE_TREE] Found {} project namespace entries (filtered from {} total definitions)",
+        namespace_map.len(),
+        index.definitions.len()
     );
 
     // Log some sample namespace entries
