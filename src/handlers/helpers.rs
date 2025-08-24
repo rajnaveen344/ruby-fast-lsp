@@ -48,6 +48,9 @@ pub fn process_content_for_definitions(
         return Ok(()); // Continue processing despite parse errors
     }
 
+    // Remove existing entries for this URI before adding new ones
+    server.index().lock().remove_entries_for_uri(&uri);
+
     let mut visitor = IndexVisitor::new(server, uri.clone());
     visitor.visit(&parse_result.node());
 
@@ -75,6 +78,9 @@ pub fn process_content_for_references(
         );
         return Ok(()); // Continue processing despite parse errors
     }
+
+    // Remove existing references for this URI before adding new ones
+    server.index().lock().remove_references_for_uri(&uri);
 
     let mut visitor = if include_local_vars {
         ReferenceVisitor::new(server, uri.clone())
@@ -281,6 +287,9 @@ pub fn process_file_for_definitions_with_tracker(
         return Ok(()); // Continue processing despite parse errors
     }
 
+    // Remove existing entries for this URI before adding new ones
+    server.index().lock().remove_entries_for_uri(&uri);
+
     let document = RubyDocument::new(uri.clone(), content.clone(), 0);
     server
         .docs
@@ -317,6 +326,9 @@ pub fn process_file_for_references(
         );
         return Ok(()); // Continue processing despite parse errors
     }
+
+    // Remove existing references for this URI before adding new ones
+    server.index().lock().remove_references_for_uri(&uri);
 
     let document = RubyDocument::new(uri.clone(), content.clone(), 0);
     server
