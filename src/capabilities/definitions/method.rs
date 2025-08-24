@@ -25,7 +25,10 @@ pub fn find_method_definitions(
                 // For constant receivers, we need to resolve the receiver in the current namespace context
                 // Check if the first part of the receiver matches any part in the ancestors
                 let full_receiver_ns = if let Some(first_receiver_part) = receiver_ns.first() {
-                    if let Some(pos) = ancestors.iter().position(|ancestor| ancestor == first_receiver_part) {
+                    if let Some(pos) = ancestors
+                        .iter()
+                        .position(|ancestor| ancestor == first_receiver_part)
+                    {
                         // Found the receiver's first part in ancestors, resolve from that position
                         let mut resolved_ns = ancestors[..=pos].to_vec();
                         resolved_ns.extend(receiver_ns[1..].iter().cloned());
@@ -85,7 +88,9 @@ fn find_method_without_receiver(
 
     // If we're in a module and didn't find the method, search in all classes/modules that include this module
     // This handles the case where a method in ModuleA calls a method from ModuleB, and both are included in a class
-    if let Some(including_classes) = search_in_sibling_modules(&receiver_fqn, method, index, method_kind) {
+    if let Some(including_classes) =
+        search_in_sibling_modules(&receiver_fqn, method, index, method_kind)
+    {
         return Some(including_classes);
     }
 
@@ -195,25 +200,33 @@ fn search_in_sibling_modules(
     kind: MethodKind,
 ) -> Option<Vec<Location>> {
     let mut found_locations = Vec::new();
-    
+
     debug!(
         "Searching for {} method {:?} in sibling modules of {:?}",
-        if kind == MethodKind::Class { "class" } else { "instance" },
+        if kind == MethodKind::Class {
+            "class"
+        } else {
+            "instance"
+        },
         method.get_name(),
         module_fqn.to_string(),
     );
 
     // Get all classes/modules that include this module
     let including_classes = index.get_including_classes(module_fqn);
-    
+
     debug!(
         "Found including classes: {:?}",
-        including_classes.iter().map(|fqn| fqn.to_string()).collect::<Vec<_>>()
+        including_classes
+            .iter()
+            .map(|fqn| fqn.to_string())
+            .collect::<Vec<_>>()
     );
 
     // For each including class, search in its complete ancestor chain
     for including_class_fqn in including_classes {
-        if let Some(locations) = search_in_ancestor_chain(&including_class_fqn, method, index, kind) {
+        if let Some(locations) = search_in_ancestor_chain(&including_class_fqn, method, index, kind)
+        {
             found_locations.extend(locations);
         }
     }

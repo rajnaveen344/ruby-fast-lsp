@@ -129,6 +129,16 @@ impl ReferenceVisitor {
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
     ) -> (Vec<RubyConstant>, MethodKind) {
+        // Use the centralized constant resolution utility
+        let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
+        let index_guard = self.index.lock();
+        if let Some(resolved_fqn) = utils::resolve_constant_fqn(&*index_guard, receiver_node, &current_fqn) {
+            if let FullyQualifiedName::Constant(parts) = resolved_fqn {
+                return (parts, MethodKind::Class);
+            }
+        }
+        
+        // Fallback to mixin_ref approach if resolution fails
         if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
             let final_namespace = if mixin_ref.absolute {
                 mixin_ref.parts

@@ -135,8 +135,9 @@ impl ConstantCompletionItem {
     fn extract_detail(entry: &Entry) -> Option<String> {
         match &entry.kind {
             EntryKind::Class { superclass, .. } => {
-                if let Some(parent) = superclass {
-                    Some(format!(" < {}", parent))
+                if let Some(_parent) = superclass {
+                    // TODO: Resolve MixinRef to display superclass name
+                    Some(" class".to_string())
                 } else {
                     Some(" class".to_string())
                 }
@@ -408,8 +409,8 @@ impl Default for ConstantCompletionEngine {
 mod tests {
     use super::*;
     use crate::{
-        indexer::{entry::Entry, index::RubyIndex},
-        types::fully_qualified_name::FullyQualifiedName,
+        indexer::{entry::{Entry, MixinRef}, index::RubyIndex},
+        types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
     };
     use tower_lsp::lsp_types::{Location, Range, Url};
 
@@ -483,7 +484,10 @@ mod tests {
             (
                 "String",
                 EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -492,7 +496,10 @@ mod tests {
             (
                 "StringIO",
                 EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],

@@ -1,0 +1,19 @@
+---
+source: src/test/integration_test.rs
+expression: value
+---
+[
+  {
+    "range": {
+      "end": {
+        "character": 28,
+        "line": 9
+      },
+      "start": {
+        "character": 10,
+        "line": 9
+      }
+    },
+    "uri": "file://$PROJECT_ROOT/src/test/fixtures/test_mixin_issue.rb"
+  }
+]

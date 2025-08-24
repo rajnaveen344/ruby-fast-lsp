@@ -33,6 +33,10 @@ impl Entry {
     pub fn add_prepends(&mut self, mixin_refs: Vec<MixinRef>) {
         self.kind.add_prepends(mixin_refs);
     }
+
+    pub fn set_superclass(&mut self, superclass_ref: MixinRef) {
+        self.kind.set_superclass(superclass_ref);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

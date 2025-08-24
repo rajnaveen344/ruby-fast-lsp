@@ -292,4 +292,53 @@ mod tests {
         )
         .await;
     }
+
+    /// Validate definitions for methods from included modules in inherited classes.
+    /// Tests the scenario where a child class inherits from a base class that includes
+    /// modules, and the child class should be able to find method definitions in the included modules.
+    #[tokio::test]
+    async fn goto_inherited_mixin_method_defs() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("test_mixin_issue.rb").await;
+
+        // Test finding api_method from inherited included module in child class
+        snapshot_definitions(
+            &harness,
+            "test_mixin_issue.rb",
+            46,  // Line where api_method is called in PlatformApp#app_method (0-indexed: line 47)
+            4,   // Column position of api_method call
+            "inherited_api_method_def",
+        )
+        .await;
+
+        // Test finding set_cookie from inherited included module in child class
+        snapshot_definitions(
+            &harness,
+            "test_mixin_issue.rb",
+            47,  // Line where set_cookie is called in PlatformApp#app_method (0-indexed: line 48)
+            4,   // Column position of set_cookie call
+            "inherited_set_cookie_method_def",
+        )
+        .await;
+
+        // Test finding another_api_method from inherited included module in child class
+        snapshot_definitions(
+            &harness,
+            "test_mixin_issue.rb",
+            53,  // Line where another_api_method is called in PlatformApp#another_app_method (0-indexed: line 54)
+            4,   // Column position of another_api_method call
+            "inherited_another_api_method_def",
+        )
+        .await;
+
+        // Test finding get_cookie from inherited included module in child class
+        snapshot_definitions(
+            &harness,
+            "test_mixin_issue.rb",
+            54,  // Line where get_cookie is called in PlatformApp#another_app_method (0-indexed: line 55)
+            4,   // Column position of get_cookie call
+            "inherited_get_cookie_method_def",
+        )
+        .await;
+    }
 }

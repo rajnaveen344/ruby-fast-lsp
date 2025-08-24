@@ -10,7 +10,7 @@ use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryKind {
     Class {
-        superclass: Option<FullyQualifiedName>,
+        superclass: Option<MixinRef>,
         includes: Vec<MixinRef>,
         prepends: Vec<MixinRef>,
         extends: Vec<MixinRef>,
@@ -79,7 +79,18 @@ impl EntryKind {
             }
         }
     }
-    pub fn new_class(superclass: Option<FullyQualifiedName>) -> Self {
+
+    pub fn set_superclass(&mut self, superclass_ref: MixinRef) {
+        match self {
+            EntryKind::Class { superclass, .. } => {
+                *superclass = Some(superclass_ref);
+            }
+            _ => {
+                panic!("Cannot set superclass on non-class entry");
+            }
+        }
+    }
+    pub fn new_class(superclass: Option<MixinRef>) -> Self {
         Self::Class {
             superclass,
             includes: Vec::new(),

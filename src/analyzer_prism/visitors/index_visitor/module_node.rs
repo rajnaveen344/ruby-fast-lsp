@@ -12,7 +12,6 @@ impl IndexVisitor {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
         let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
-
         let body_loc = if let Some(body) = node.body() {
             self.document
                 .prism_location_to_lsp_location(&body.location())
@@ -42,10 +41,8 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
-
-
         let entry = EntryBuilder::new()
-            .fqn(fqn)
+            .fqn(fqn.clone())
             .location(
                 self.document
                     .prism_location_to_lsp_location(&node.location()),
@@ -57,8 +54,6 @@ impl IndexVisitor {
             error!("Error creating entry: {}", e);
             return;
         }
-
-
 
         self.index.lock().add_entry(entry.unwrap());
     }

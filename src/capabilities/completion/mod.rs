@@ -227,9 +227,9 @@ pub async fn find_completion_at_position(
 mod tests {
     use super::*;
     use crate::{
-        indexer::{entry::entry_kind::EntryKind, entry::Entry},
+        indexer::{entry::{entry_kind::EntryKind, Entry, MixinRef}},
         server::RubyLanguageServer,
-        types::fully_qualified_name::FullyQualifiedName,
+        types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
     };
     use tower_lsp::{
         lsp_types::{
@@ -334,7 +334,10 @@ end"#;
             let string_entry = create_test_entry(
                 "String",
                 EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -346,7 +349,10 @@ end"#;
             let stringio_entry = create_test_entry(
                 "StringIO",
                 EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -440,7 +446,10 @@ end
             let string_entry = create_test_entry(
                 "String",
                 EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -634,7 +643,10 @@ end
             let string_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -649,7 +661,10 @@ end
             let array_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::Array").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -800,7 +815,10 @@ end
                 fqn: FullyQualifiedName::try_from("Object::OuterModule::MiddleModule::InnerClass")
                     .unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -816,7 +834,10 @@ end
             let string_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -831,7 +852,10 @@ end
             let hash_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::Hash").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -979,7 +1003,10 @@ end
                 let string_entry = Entry {
                     fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
                     kind: EntryKind::Class {
-                        superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                        superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                         includes: vec![],
                         extends: vec![],
                         prepends: vec![],
@@ -994,7 +1021,10 @@ end
                 let test_class_entry = Entry {
                     fqn: FullyQualifiedName::try_from("Object::TestClass").unwrap(),
                     kind: EntryKind::Class {
-                        superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                        superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                         includes: vec![],
                         extends: vec![],
                         prepends: vec![],
@@ -1195,7 +1225,10 @@ end
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
                     kind: EntryKind::Class {
-                        superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                        superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                         includes: vec![],
                         extends: vec![],
                         prepends: vec![],
@@ -1212,7 +1245,10 @@ end
             let builtin_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::Array").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -1317,7 +1353,10 @@ end
             let my_class_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::MyModule::MyClass").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -1332,7 +1371,10 @@ end
             let my_top_class_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Object::MyTopClass").unwrap(),
                 kind: EntryKind::Class {
-                    superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                    superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                     includes: vec![],
                     extends: vec![],
                     prepends: vec![],
@@ -1451,7 +1493,10 @@ A::B::"#;
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(module_fqn).unwrap(),
                     kind: EntryKind::Class {
-                        superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                        superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                         includes: vec![],
                         extends: vec![],
                         prepends: vec![],
@@ -1614,7 +1659,10 @@ A::"#;
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
                     kind: EntryKind::Class {
-                        superclass: Some(FullyQualifiedName::try_from("Object").unwrap()),
+                        superclass: Some(MixinRef {
+                            parts: vec![RubyConstant::new("Object").unwrap()],
+                            absolute: false,
+                        }),
                         includes: vec![],
                         extends: vec![],
                         prepends: vec![],
