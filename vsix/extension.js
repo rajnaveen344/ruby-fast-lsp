@@ -61,7 +61,22 @@ class RubyNamespaceTreeProvider {
                 hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
             );
             
-            item.tooltip = `${ns.kind}: ${ns.name}`;
+            // Build detailed tooltip with mixin information
+            let tooltip = `${ns.kind}: ${ns.fqn}`;
+            if (ns.superclass) {
+                tooltip += `\nSuperclass: ${ns.superclass}`;
+            }
+            if (ns.includes && ns.includes.length > 0) {
+                tooltip += `\nIncludes: ${ns.includes.join(', ')}`;
+            }
+            if (ns.prepends && ns.prepends.length > 0) {
+                tooltip += `\nPrepends: ${ns.prepends.join(', ')}`;
+            }
+            if (ns.extends && ns.extends.length > 0) {
+                tooltip += `\nExtends: ${ns.extends.join(', ')}`;
+            }
+            
+            item.tooltip = tooltip;
             item.description = ns.kind;
             item.children = ns.children || [];
             
@@ -134,7 +149,7 @@ function getServerPath() {
 
 function activate(context) {
     // Create output channel for extension logs
-    outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP Namespace Tree');
+    outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP Extension');
     context.subscriptions.push(outputChannel);
     
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
@@ -214,6 +229,56 @@ function activate(context) {
         vscode.window.onDidChangeActiveTextEditor(() => {
             if (vscode.window.activeTextEditor?.document.languageId === 'ruby') {
                 namespaceTreeProvider.refresh();
+            }
+        })
+    );
+
+    // Auto-refresh namespace tree when Ruby files are saved or changed
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument((document) => {
+            if (document.languageId === 'ruby') {
+                // Debounce the refresh to avoid excessive updates
+                setTimeout(() => {
+                    namespaceTreeProvider.refresh();
+                }, 500); // 500ms delay to match server-side debouncing
+            }
+        })
+    );
+
+    // Auto-refresh on real-time document changes (as you type)
+    let changeTimeout;
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+            if (event.document.languageId === 'ruby') {
+                // Clear previous timeout to debounce rapid typing
+                if (changeTimeout) {
+                    clearTimeout(changeTimeout);
+                }
+                // Set new timeout for namespace tree refresh
+                changeTimeout = setTimeout(() => {
+                    namespaceTreeProvider.refresh();
+                }, 1000); // 1 second delay for typing changes
+            }
+        })
+    );
+
+    // Auto-refresh when Ruby files are opened or closed
+    context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument((document) => {
+            if (document.languageId === 'ruby') {
+                setTimeout(() => {
+                    namespaceTreeProvider.refresh();
+                }, 500);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidCloseTextDocument((document) => {
+            if (document.languageId === 'ruby') {
+                setTimeout(() => {
+                    namespaceTreeProvider.refresh();
+                }, 500);
             }
         })
     );

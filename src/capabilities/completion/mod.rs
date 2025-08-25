@@ -29,7 +29,14 @@ pub async fn find_completion_at_position(
     position: Position,
     context: Option<CompletionContext>,
 ) -> CompletionResponse {
-    let document = server.get_doc(&uri).unwrap();
+    // Use unified document access to ensure we get the latest in-memory content
+    let document = match server.get_doc(&uri) {
+        Some(doc) => doc,
+        None => {
+            // Return empty completion response if document not found
+            return CompletionResponse::Array(vec![]);
+        }
+    };
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
 
     // Check if completion was triggered by a trigger character
@@ -268,16 +275,22 @@ def test_method
 end
 "#;
 
-        // Open the document in the server
-        let params = DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "ruby".into(),
-                version: 1,
-                text: content.to_string(),
-            },
-        };
-        server.did_open(params).await;
+        // Explicitly call processing function to ensure local variables are indexed
+        use crate::handlers::helpers::process_content_for_definitions;
+        use crate::types::ruby_document::RubyDocument;
+        use parking_lot::RwLock;
+        use std::sync::Arc;
+        
+        // Create and store the document in cache first
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 1);
+        let doc_arc = Arc::new(RwLock::new(document));
+        server.docs.lock().insert(uri.clone(), doc_arc);
+        
+        // Process for definitions (which includes local variables)
+        let _ = process_content_for_definitions(&server, uri.clone(), content);
+
+        // Give a small delay to ensure processing completes
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         // Test completion at position where "loc" is typed (should match "local_var")
         let position = Position {

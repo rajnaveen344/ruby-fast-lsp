@@ -1,4 +1,5 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::capabilities::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
@@ -9,16 +10,17 @@ use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
-    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, Url,
-    WorkspaceSymbolParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentOnTypeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams,
+    SemanticTokensResult, SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -28,6 +30,8 @@ pub struct RubyLanguageServer {
     pub index: Arc<Mutex<RubyIndex>>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
+    pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
+    pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
 }
 
 impl RubyLanguageServer {
@@ -39,6 +43,8 @@ impl RubyLanguageServer {
             index: Arc::new(Mutex::new(index)),
             docs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
+            namespace_tree_cache: Arc::new(Mutex::new(None)),
+            cache_invalidation_timer: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -89,20 +95,54 @@ impl RubyLanguageServer {
 
     pub async fn handle_namespace_tree_request(
         &self,
-        params: crate::capabilities::namespace_tree::NamespaceTreeParams,
-    ) -> tower_lsp::jsonrpc::Result<crate::capabilities::namespace_tree::NamespaceTreeResponse> {
-        use crate::handlers::request;
+        params: NamespaceTreeParams,
+    ) -> LspResult<NamespaceTreeResponse> {
         request::handle_namespace_tree(self, params).await
+    }
+
+    /// Invalidate namespace tree cache with debouncing (300ms delay)
+    pub fn invalidate_namespace_tree_cache_debounced(&self) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            // Set the timer to current time
+            {
+                let mut timer = server.cache_invalidation_timer.lock();
+                *timer = Some(Instant::now());
+            }
+
+            // Wait for the debounce period
+            sleep(Duration::from_millis(300)).await;
+
+            // Check if we should still invalidate (no newer timer was set)
+            let should_invalidate = {
+                let timer = server.cache_invalidation_timer.lock();
+                if let Some(timer_instant) = *timer {
+                    timer_instant.elapsed() >= Duration::from_millis(300)
+                } else {
+                    false
+                }
+            };
+
+            if should_invalidate {
+                *server.namespace_tree_cache.lock() = None;
+                debug!("Namespace tree cache invalidated after debounce period");
+
+                // Clear the timer
+                *server.cache_invalidation_timer.lock() = None;
+            }
+        });
     }
 }
 
 impl Default for RubyLanguageServer {
     fn default() -> Self {
-        RubyLanguageServer {
+        Self {
             client: None,
             index: Arc::new(Mutex::new(RubyIndex::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
+            namespace_tree_cache: Arc::new(Mutex::new(None)),
+            cache_invalidation_timer: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -157,6 +197,26 @@ impl LanguageServer for RubyLanguageServer {
         notification::handle_did_change_configuration(self, params).await;
         info!(
             "[PERF] Configuration change handler completed in {:?}",
+            start_time.elapsed()
+        );
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        info!("Document saved: {}", params.text_document.uri.path());
+        let start_time = Instant::now();
+        notification::handle_did_save(self, params).await;
+        info!(
+            "[PERF] Document save handler completed in {:?}",
+            start_time.elapsed()
+        );
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        info!("Watched files changed: {} files", params.changes.len());
+        let start_time = Instant::now();
+        notification::handle_did_change_watched_files(self, params).await;
+        info!(
+            "[PERF] Watched files change handler completed in {:?}",
             start_time.elapsed()
         );
     }
