@@ -1,14 +1,14 @@
 use crate::indexer::ancestor_chain::resolve_mixin_ref;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::MixinRef;
+use crate::indexer::entry::{Entry, MixinRef};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::utils;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,14 +68,17 @@ pub async fn handle_namespace_tree(
         let cache = lang_server.namespace_tree_cache.lock();
         if let Some((cached_hash, cached_response)) = cache.as_ref() {
             if *cached_hash == index_hash {
-                debug!("[NAMESPACE_TREE] Cache hit, returning cached result in {:?}", start_time.elapsed());
+                debug!(
+                    "[NAMESPACE_TREE] Cache hit, returning cached result in {:?}",
+                    start_time.elapsed()
+                );
                 return cached_response.clone();
             }
         }
     }
 
     debug!("[NAMESPACE_TREE] Cache miss, computing namespace tree");
-    
+
     // Reacquire lock for computation
     let index = lang_server.index.lock();
     debug!(
@@ -83,25 +86,30 @@ pub async fn handle_namespace_tree(
         index.definitions.len()
     );
 
-    // Early filtering: collect only project class/module entries
-    let mut project_entries = Vec::new();
+    // Early filtering and deduplication: collect only project class/module entries
+    // Group entries by FQN to avoid duplicate processing
+    let mut fqn_to_entries: HashMap<&FullyQualifiedName, Vec<&Entry>> = HashMap::new();
     for (fqn, entries) in &index.definitions {
+        let mut project_entries_for_fqn = Vec::new();
         for entry in entries {
             if !utils::is_project_file(&entry.location.uri) {
                 continue;
             }
             match &entry.kind {
                 EntryKind::Class { .. } | EntryKind::Module { .. } => {
-                    project_entries.push((fqn, entry));
+                    project_entries_for_fqn.push(entry);
                 }
                 _ => {}
             }
         }
+        if !project_entries_for_fqn.is_empty() {
+            fqn_to_entries.insert(fqn, project_entries_for_fqn);
+        }
     }
 
     debug!(
-        "[NAMESPACE_TREE] Found {} project namespace entries (filtered from {} total definitions)",
-        project_entries.len(),
+        "[NAMESPACE_TREE] Found {} unique project namespaces (filtered from {} total definitions)",
+        fqn_to_entries.len(),
         index.definitions.len()
     );
 
@@ -109,47 +117,78 @@ pub async fn handle_namespace_tree(
     let mut mixin_cache = HashMap::new();
     let mut namespace_map = HashMap::new();
 
-    for (fqn, entry) in project_entries {
-        let kind = match &entry.kind {
+    for (fqn, entries) in fqn_to_entries {
+        let fqn_string = fqn.to_string();
+
+        // Use the first entry for basic info (they should all have the same FQN and kind)
+        let first_entry = entries[0];
+
+        if fqn_string.contains("GoshPosh::Platform::API") {
+            debug!(
+                "[NAMESPACE_TREE] Processing namespace: {} with {} entries",
+                fqn_string,
+                entries.len()
+            );
+        }
+
+        let kind = match &first_entry.kind {
             EntryKind::Class { .. } => "Class".to_string(),
             EntryKind::Module { .. } => "Module".to_string(),
             _ => continue,
         };
 
-        let fqn_string = fqn.to_string();
         let name = fqn.name().to_string();
 
         let location = Some(LocationInfo {
-            uri: entry.location.uri.to_string(),
-            line: entry.location.range.start.line,
-            character: entry.location.range.start.character,
+            uri: first_entry.location.uri.to_string(),
+            line: first_entry.location.range.start.line,
+            character: first_entry.location.range.start.character,
         });
 
         let current_fqn = FullyQualifiedName::namespace(fqn.namespace_parts().clone());
-        let (superclass, includes, prepends, extends) = match &entry.kind {
-            EntryKind::Class {
-                superclass,
-                includes,
-                prepends,
-                extends,
-            } => (
-                superclass.as_ref().map(|s| resolve_mixin_cached(s, &index, &current_fqn, &mut mixin_cache)),
-                resolve_mixins_cached(includes, &index, &current_fqn, &mut mixin_cache),
-                resolve_mixins_cached(prepends, &index, &current_fqn, &mut mixin_cache),
-                resolve_mixins_cached(extends, &index, &current_fqn, &mut mixin_cache),
-            ),
-            EntryKind::Module {
-                includes,
-                prepends,
-                extends,
-            } => (
-                None,
-                resolve_mixins_cached(includes, &index, &current_fqn, &mut mixin_cache),
-                resolve_mixins_cached(prepends, &index, &current_fqn, &mut mixin_cache),
-                resolve_mixins_cached(extends, &index, &current_fqn, &mut mixin_cache),
-            ),
-            _ => (None, Vec::new(), Vec::new(), Vec::new()),
-        };
+
+        // Merge all mixins from all entries for this FQN
+        let mut all_includes = Vec::new();
+        let mut all_prepends = Vec::new();
+        let mut all_extends = Vec::new();
+        let mut superclass = None;
+
+        for entry in &entries {
+            match &entry.kind {
+                EntryKind::Class {
+                    superclass: sc,
+                    includes,
+                    prepends,
+                    extends,
+                } => {
+                    if superclass.is_none() {
+                        superclass = sc.clone();
+                    }
+                    all_includes.extend(includes.clone());
+                    all_prepends.extend(prepends.clone());
+                    all_extends.extend(extends.clone());
+                }
+                EntryKind::Module {
+                    includes,
+                    prepends,
+                    extends,
+                } => {
+                    all_includes.extend(includes.clone());
+                    all_prepends.extend(prepends.clone());
+                    all_extends.extend(extends.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let (resolved_superclass, resolved_includes, resolved_prepends, resolved_extends) = (
+            superclass
+                .as_ref()
+                .map(|s| resolve_mixin_cached(s, &index, &current_fqn, &mut mixin_cache)),
+            resolve_mixins_cached(&all_includes, &index, &current_fqn, &mut mixin_cache),
+            resolve_mixins_cached(&all_prepends, &index, &current_fqn, &mut mixin_cache),
+            resolve_mixins_cached(&all_extends, &index, &current_fqn, &mut mixin_cache),
+        );
 
         let node = NamespaceNode {
             name,
@@ -157,10 +196,10 @@ pub async fn handle_namespace_tree(
             kind,
             children: Vec::new(),
             location,
-            superclass,
-            includes,
-            prepends,
-            extends,
+            superclass: resolved_superclass,
+            includes: resolved_includes,
+            prepends: resolved_prepends,
+            extends: resolved_extends,
         };
 
         namespace_map.insert(fqn_string, node);
@@ -180,7 +219,7 @@ pub async fn handle_namespace_tree(
     );
 
     let response = NamespaceTreeResponse { namespaces };
-    
+
     // Cache the result
     {
         let mut cache = lang_server.namespace_tree_cache.lock();
@@ -191,14 +230,16 @@ pub async fn handle_namespace_tree(
     response
 }
 
-
-
 // Compute a hash of the index for caching
 fn compute_index_hash(index: &RubyIndex) -> u64 {
     let mut hasher = DefaultHasher::new();
     index.definitions.len().hash(&mut hasher);
     // Hash a sample of FQN strings to detect changes
-    let mut fqn_strings: Vec<String> = index.definitions.keys().map(|fqn| fqn.to_string()).collect();
+    let mut fqn_strings: Vec<String> = index
+        .definitions
+        .keys()
+        .map(|fqn| fqn.to_string())
+        .collect();
     fqn_strings.sort();
     for fqn_str in fqn_strings.iter().take(100) {
         fqn_str.hash(&mut hasher);
@@ -218,13 +259,13 @@ fn resolve_mixin_cached(
     if let Some(cached) = cache.get(&key) {
         return cached.clone();
     }
-    
+
     let result = if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, current_fqn) {
         resolved_fqn.to_string()
     } else {
         format!("{} (not found)", mixin_str)
     };
-    
+
     cache.insert(key, result.clone());
     result
 }
@@ -232,7 +273,11 @@ fn resolve_mixin_cached(
 // Helper function to format MixinRef as string
 fn format_mixin_ref(mixin_ref: &MixinRef) -> String {
     let prefix = if mixin_ref.absolute { "::" } else { "" };
-    let parts: Vec<String> = mixin_ref.parts.iter().map(|part| part.to_string()).collect();
+    let parts: Vec<String> = mixin_ref
+        .parts
+        .iter()
+        .map(|part| part.to_string())
+        .collect();
     format!("{}{}", prefix, parts.join("::"))
 }
 
@@ -243,7 +288,8 @@ fn resolve_mixins_cached(
     current_fqn: &FullyQualifiedName,
     cache: &mut HashMap<String, String>,
 ) -> Vec<String> {
-    mixins.iter()
+    mixins
+        .iter()
         .map(|m| resolve_mixin_cached(m, index, current_fqn, cache))
         .collect()
 }
@@ -265,13 +311,16 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<Na
     // First pass: identify all nodes and their potential children
     for node in all_nodes {
         let fqn = node.fqn.clone();
-        
+
         // Find parent FQN by removing the last component
         if let Some(last_sep) = fqn.rfind("::") {
             let parent_fqn = fqn[..last_sep].to_string();
-            children_map.entry(parent_fqn).or_insert_with(Vec::new).push(fqn.clone());
+            children_map
+                .entry(parent_fqn)
+                .or_insert_with(Vec::new)
+                .push(fqn.clone());
         }
-        
+
         node_lookup.insert(fqn, node);
     }
 
@@ -296,7 +345,13 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<Na
         if is_root {
             if let Some(mut node) = node_lookup.remove(&fqn) {
                 // Build children recursively for this root
-                build_children_iterative(&fqn, &mut node, &children_map, &mut node_lookup, &mut processed);
+                build_children_iterative(
+                    &fqn,
+                    &mut node,
+                    &children_map,
+                    &mut node_lookup,
+                    &mut processed,
+                );
                 roots.push(node);
             }
         }
@@ -316,19 +371,25 @@ fn build_children_iterative(
     processed: &mut HashSet<String>,
 ) {
     processed.insert(parent_fqn.to_string());
-    
+
     if let Some(child_fqns) = children_map.get(parent_fqn) {
         let mut children = Vec::new();
-        
+
         for child_fqn in child_fqns {
             if let Some(mut child_node) = node_map.remove(child_fqn) {
                 if !processed.contains(child_fqn) {
-                    build_children_iterative(child_fqn, &mut child_node, children_map, node_map, processed);
+                    build_children_iterative(
+                        child_fqn,
+                        &mut child_node,
+                        children_map,
+                        node_map,
+                        processed,
+                    );
                 }
                 children.push(child_node);
             }
         }
-        
+
         // Sort children by name
         children.sort_by(|a, b| a.name.cmp(&b.name));
         parent_node.children = children;

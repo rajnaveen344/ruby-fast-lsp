@@ -115,7 +115,7 @@ fn resolve_constant_read_fqn(
 ) -> Option<FullyQualifiedName> {
     let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
     let constant = RubyConstant::new(&name).ok()?;
-    
+
     resolve_constant_fqn_from_parts(index, &[constant], false, current_fqn)
 }
 
@@ -127,10 +127,10 @@ fn resolve_constant_path_fqn(
 ) -> Option<FullyQualifiedName> {
     let mut parts = vec![];
     collect_namespaces(node, &mut parts);
-    
+
     // A ConstantPathNode is absolute if its parent is None (starts with ::)
     let absolute = node.parent().is_none();
-    
+
     resolve_constant_fqn_from_parts(index, &parts, absolute, current_fqn)
 }
 
