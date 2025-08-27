@@ -1,6 +1,5 @@
 use log::{debug, info};
-use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::collections::HashSet;
 use std::time::Instant;
 use tower_lsp::lsp_types::Location;
 
@@ -13,9 +12,6 @@ use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
-
-// Global cache for included modules to prevent recomputation
-static INCLUDED_MODULES_CACHE: OnceLock<Mutex<HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>>> = OnceLock::new();
 
 /// Find definitions for a Ruby method
 pub fn find_method_definitions(
@@ -191,16 +187,6 @@ fn get_included_modules(
     let start_time = Instant::now();
     debug!("Starting get_included_modules for {:?}", class_fqn);
 
-    // Check cache first
-    let cache = INCLUDED_MODULES_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(cache_guard) = cache.lock() {
-        if let Some(cached_modules) = cache_guard.get(class_fqn) {
-            info!("[PERF] get_included_modules for {:?} found in cache in {:?}, {} modules",
-                class_fqn, start_time.elapsed(), cached_modules.len());
-            return cached_modules.clone();
-        }
-    }
-
     let mut included_modules = Vec::new();
     let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
@@ -226,11 +212,6 @@ fn get_included_modules(
         }
     }
     info!("[PERF] Processing mixins took: {:?}", mixin_start.elapsed());
-
-    // Store in cache
-    if let Ok(mut cache_guard) = cache.lock() {
-        cache_guard.insert(class_fqn.clone(), included_modules.clone());
-    }
 
     info!("[PERF] get_included_modules for {:?} completed in {:?}, found {} modules",
         class_fqn, start_time.elapsed(), included_modules.len());
