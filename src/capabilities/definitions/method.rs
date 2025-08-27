@@ -1,6 +1,29 @@
-use log::{debug, info};
+//! # Method Definition Search Module
+//!
+//! This module implements Ruby method definition lookup following Ruby's method resolution order.
+//! It handles both class and module contexts with different search strategies.
+//!
+//! ## Search Strategy Overview
+//!
+//! ### Class Context (when receiver is a class):
+//! 1. Search current class for the method
+//! 2. Search included modules recursively (in reverse order of inclusion)
+//! 3. Search parent class and repeat the process
+//! 4. Search parent class's modules recursively
+//!
+//! ### Module Context (when receiver is a module):
+//! 1. Search the module itself
+//! 2. Find all classes that include/prepend/extend this module
+//! 3. For each including class, search its complete hierarchy
+//!
+//! ## Key Functions:
+//! - `find_method_definitions`: Main entry point for method definition search
+//! - `search_method_in_class_hierarchy`: Handles class context search
+//! - `search_method_in_including_classes`: Handles module context search
+//! - `get_ancestor_chain`: Gets the complete ancestor chain from ancestor_chain.rs
+
+use log::debug;
 use std::collections::HashSet;
-use std::time::Instant;
 use tower_lsp::lsp_types::Location;
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
@@ -22,34 +45,17 @@ pub fn find_method_definitions(
     index: &RubyIndex,
     ancestors: &[RubyConstant],
 ) -> Option<Vec<Location>> {
-    let start_time = Instant::now();
-    info!("[PERF] Starting method definition search for method: {:?}, receiver_kind: {:?}", method.get_name(), receiver_kind);
-    
-    let result = match receiver_kind {
+    match receiver_kind {
         ReceiverKind::Constant => {
-            let const_start = Instant::now();
-            let result = handle_constant_receiver(receiver, method, index, ancestors);
-            info!("[PERF] Constant receiver search took: {:?}", const_start.elapsed());
-            result
+            handle_constant_receiver(receiver, method, index, ancestors)
         }
         ReceiverKind::None | ReceiverKind::SelfReceiver => {
-            let no_receiver_start = Instant::now();
-            let result = find_method_without_receiver(method, index, ancestors);
-            info!("[PERF] No receiver search took: {:?}", no_receiver_start.elapsed());
-            result
+            find_method_without_receiver(method, index, ancestors)
         }
         ReceiverKind::Expr => {
-            let expr_start = Instant::now();
-            let result = search_by_name(method, index);
-            info!("[PERF] Expression receiver search took: {:?}", expr_start.elapsed());
-            result
+            search_by_name(method, index)
         }
-    };
-    
-    info!("[PERF] Total method definition search took: {:?}, found {} locations", 
-          start_time.elapsed(), 
-          result.as_ref().map_or(0, |v| v.len()));
-    result
+    }
 }
 
 fn handle_constant_receiver(
@@ -100,9 +106,6 @@ fn find_method_without_receiver(
     index: &RubyIndex,
     ancestors: &[RubyConstant],
 ) -> Option<Vec<Location>> {
-    let start_time = Instant::now();
-    info!("[PERF] Starting find_method_without_receiver for method: {:?}", method.get_name());
-    
     let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
     let mut visited = HashSet::new(); // Global visited set for this entire search
 
@@ -110,29 +113,18 @@ fn find_method_without_receiver(
     // For methods without receivers, only search for the method kind that matches the method
     let method_kind = method.get_kind();
 
-    let ancestor_start = Instant::now();
     if let Some(locations) = search_in_ancestor_chain_with_visited(&receiver_fqn, method, index, method_kind, &mut visited) {
-        info!("[PERF] Ancestor chain search took: {:?}, found {} locations", 
-              ancestor_start.elapsed(), locations.len());
-        info!("[PERF] find_method_without_receiver total time: {:?}", start_time.elapsed());
         return Some(locations);
     }
-    info!("[PERF] Ancestor chain search took: {:?}, found 0 locations", ancestor_start.elapsed());
 
     // If we're in a module and didn't find the method, search in all classes/modules that include this module
     // This handles the case where a method in ModuleA calls a method from ModuleB, and both are included in a class
-    let sibling_start = Instant::now();
     if let Some(including_classes) =
         search_in_sibling_modules_with_visited(&receiver_fqn, method, index, method_kind, &mut visited)
     {
-        info!("[PERF] Sibling modules search took: {:?}, found {} locations", 
-              sibling_start.elapsed(), including_classes.len());
-        info!("[PERF] find_method_without_receiver total time: {:?}", start_time.elapsed());
         return Some(including_classes);
     }
-    info!("[PERF] Sibling modules search took: {:?}, found 0 locations", sibling_start.elapsed());
     
-    info!("[PERF] find_method_without_receiver total time: {:?}", start_time.elapsed());
     None
 }
 
@@ -184,20 +176,15 @@ fn get_included_modules(
     index: &RubyIndex,
     class_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    let start_time = Instant::now();
     debug!("Starting get_included_modules for {:?}", class_fqn);
 
     let mut included_modules = Vec::new();
     let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
     // Get the ancestor chain to check superclasses too
-    let ancestor_start = Instant::now();
     let ancestor_chain = get_ancestor_chain(index, class_fqn, false);
-    info!("[PERF] get_ancestor_chain took: {:?}, found {} ancestors", 
-          ancestor_start.elapsed(), ancestor_chain.len());
 
     // Check each class/module in the ancestor chain for included modules
-    let mixin_start = Instant::now();
     for ancestor_fqn in &ancestor_chain {
         if let Some(entries) = index.definitions.get(ancestor_fqn) {
             for entry in entries.iter() {
@@ -211,10 +198,6 @@ fn get_included_modules(
             }
         }
     }
-    info!("[PERF] Processing mixins took: {:?}", mixin_start.elapsed());
-
-    info!("[PERF] get_included_modules for {:?} completed in {:?}, found {} modules",
-        class_fqn, start_time.elapsed(), included_modules.len());
 
     included_modules
 }
@@ -299,10 +282,7 @@ fn process_mixins(
 
 /// Search for methods by name across the entire index
 fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location>> {
-    let start_time = Instant::now();
-    info!("[PERF] Starting search_by_name for method: {:?}", method.get_name());
-    
-    let result = if let Some(entries) = index.methods_by_name.get(method) {
+    if let Some(entries) = index.methods_by_name.get(method) {
         let locations: Vec<Location> = entries.iter().map(|entry| entry.location.clone()).collect();
 
         if locations.is_empty() {
@@ -312,12 +292,7 @@ fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location
         }
     } else {
         None
-    };
-    
-    info!("[PERF] search_by_name took: {:?}, found {} locations", 
-          start_time.elapsed(), 
-          result.as_ref().map_or(0, |v| v.len()));
-    result
+    }
 }
 
 // ============================================================================
@@ -343,16 +318,7 @@ fn is_class_context(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
 // ANCESTOR CHAIN SEARCH
 // ============================================================================
 
-/// Search for methods in the ancestor chain without caching
-fn search_in_ancestor_chain(
-    receiver_fqn: &FullyQualifiedName,
-    method: &RubyMethod,
-    index: &RubyIndex,
-    kind: MethodKind,
-) -> Option<Vec<Location>> {
-    let mut visited = HashSet::new();
-    search_in_ancestor_chain_with_visited(receiver_fqn, method, index, kind, &mut visited)
-}
+
 
 /// Search for methods in the ancestor chain with visited tracking
 fn search_in_ancestor_chain_with_visited(
@@ -370,9 +336,9 @@ fn search_in_ancestor_chain_with_visited(
     visited.insert(receiver_fqn.clone());
 
     let found_locations = if is_class_context(index, receiver_fqn) {
-        search_in_class_context(receiver_fqn, method, index, kind, visited)
+        search_method_in_class_hierarchy(receiver_fqn, method, index, kind, visited)
     } else {
-        search_in_module_context(receiver_fqn, method, index, kind, visited)
+        search_method_in_including_classes(receiver_fqn, method, index, kind, visited)
     };
 
     if found_locations.is_empty() {
@@ -382,28 +348,37 @@ fn search_in_ancestor_chain_with_visited(
     }
 }
 
-/// Search for methods specifically in class context
-fn search_in_class_context(
+/// Searches for method definitions in a class hierarchy context.
+/// 
+/// Follows Ruby's method lookup order:
+/// 1. Current class - search for the method in the class itself
+/// 2. Included modules - search modules included by the class (in reverse order)
+/// 3. Parent class - search the superclass and repeat the process recursively
+/// 4. Parent's modules - search modules included by parent classes
+/// 
+/// For class methods, this also processes 'extend' mixins which add class methods.
+fn search_method_in_class_hierarchy(
     receiver_fqn: &FullyQualifiedName,
     method: &RubyMethod,
     index: &RubyIndex,
     kind: MethodKind,
-    visited: &mut HashSet<FullyQualifiedName>,
+    _visited: &mut HashSet<FullyQualifiedName>,
 ) -> Vec<Location> {
-    let start_time = Instant::now();
-    debug!("Searching in class context for {:?}", receiver_fqn);
+    debug!("Searching method '{}' in class hierarchy starting from {:?}", method.get_name(), receiver_fqn);
     let mut found_locations = Vec::new();
     let is_class_method = kind == MethodKind::Class;
 
     // Build complete set of all modules/classes to search (single-pass collection)
-    let collection_start = Instant::now();
     let mut modules_to_search = HashSet::new();
     
-    // 1. Add current class
+    // Step 1: Add the current class to search
     modules_to_search.insert(receiver_fqn.clone());
     
-    // 2. Add ancestor chain
+    // Step 2: Get the complete ancestor chain (includes parent classes and their modules)
     let ancestor_chain = get_ancestor_chain(index, receiver_fqn, is_class_method);
+    debug!("Found {} ancestors in chain for {:?}", ancestor_chain.len(), receiver_fqn);
+    
+    // Step 3: Add all ancestors to the search set
     for ancestor_fqn in &ancestor_chain {
         modules_to_search.insert(ancestor_fqn.clone());
         
@@ -413,26 +388,16 @@ fn search_in_class_context(
             collect_all_searchable_modules(index, &module_fqn, &mut modules_to_search);
         }
     }
-    info!("[PERF] Module collection took: {:?}, found {} total modules to search", 
-          collection_start.elapsed(), modules_to_search.len());
     
     // 3. Search each module exactly once
-    let search_start = Instant::now();
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.definitions.get(&method_fqn) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
         }
     }
-    info!("[PERF] Module search took: {:?}", search_start.elapsed());
 
-    let dedup_start = Instant::now();
-    let result = deduplicate_locations(found_locations);
-    info!("[PERF] Deduplication took: {:?}", dedup_start.elapsed());
-    
-    info!("[PERF] search_in_class_context total time: {:?}, found {} locations", 
-          start_time.elapsed(), result.len());
-    result
+    deduplicate_locations(found_locations)
 }
 
 /// Remove duplicate locations by comparing URI and range
@@ -450,27 +415,36 @@ fn deduplicate_locations(locations: Vec<Location>) -> Vec<Location> {
     unique_locations
 }
 
-/// Search for methods specifically in module context
-fn search_in_module_context(
+/// Searches for method definitions in a module context.
+/// 
+/// When searching in a module, we need to:
+/// 1. Search the module itself for the method definition
+/// 2. Find all classes that include/prepend/extend this module
+/// 3. For each including class, search its complete hierarchy
+/// 
+/// This handles cases where a method is called on a module but the actual
+/// implementation might be in a class that includes the module.
+fn search_method_in_including_classes(
     receiver_fqn: &FullyQualifiedName,
     method: &RubyMethod,
     index: &RubyIndex,
-    kind: MethodKind,
-    visited: &mut HashSet<FullyQualifiedName>,
+    _kind: MethodKind,
+    _visited: &mut HashSet<FullyQualifiedName>,
 ) -> Vec<Location> {
-    let start_time = Instant::now();
-    debug!("Searching in module context for {:?}", receiver_fqn);
+    debug!("Searching method '{}' in module context for {:?}", method.get_name(), receiver_fqn);
     let mut found_locations = Vec::new();
 
     // Build complete set of all modules/classes to search (single-pass collection)
-    let collection_start = Instant::now();
     let mut modules_to_search = HashSet::new();
     
-    // 1. Add current module
+    // Step 1: Add the module itself to search
     modules_to_search.insert(receiver_fqn.clone());
     
-    // 2. Add all classes that include this module and their dependencies
-     let including_classes = index.get_including_classes(receiver_fqn);
+    // Step 2: Find all classes that include this module and add their dependencies
+    let including_classes = index.get_including_classes(receiver_fqn);
+    debug!("Found {} classes that include module {:?}", including_classes.len(), receiver_fqn);
+    
+    // Step 3: For each including class, add it and its complete hierarchy
     for class_fqn in including_classes {
         // Add the class itself and its ancestor chain
         collect_all_searchable_modules(index, &class_fqn, &mut modules_to_search);
@@ -481,26 +455,16 @@ fn search_in_module_context(
             collect_all_searchable_modules(index, &module_fqn, &mut modules_to_search);
         }
     }
-    info!("[PERF] Module collection took: {:?}, found {} total modules to search", 
-          collection_start.elapsed(), modules_to_search.len());
     
     // 3. Search each module exactly once
-    let search_start = Instant::now();
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.definitions.get(&method_fqn) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
         }
     }
-    info!("[PERF] Module search took: {:?}", search_start.elapsed());
 
-    let dedup_start = Instant::now();
-    let result = deduplicate_locations(found_locations);
-    info!("[PERF] Deduplication took: {:?}", dedup_start.elapsed());
-    
-    info!("[PERF] search_in_module_context total time: {:?}, found {} locations", 
-          start_time.elapsed(), result.len());
-    result
+    deduplicate_locations(found_locations)
 }
 
 /// Recursively collect all modules that should be searched for a given module/class,
@@ -537,15 +501,7 @@ fn collect_all_searchable_modules(
 // ============================================================================
 
 /// Search for methods in sibling modules (included/extended/prepended)
-fn search_in_sibling_modules(
-    class_fqn: &FullyQualifiedName,
-    method: &RubyMethod,
-    index: &RubyIndex,
-    kind: MethodKind,
-) -> Option<Vec<Location>> {
-    let mut visited = HashSet::new();
-    search_in_sibling_modules_with_visited(class_fqn, method, index, kind, &mut visited)
-}
+
 
 /// Search for methods in sibling modules with visited tracking
 fn search_in_sibling_modules_with_visited(
@@ -555,16 +511,12 @@ fn search_in_sibling_modules_with_visited(
     kind: MethodKind,
     visited: &mut HashSet<FullyQualifiedName>,
 ) -> Option<Vec<Location>> {
-    let start_time = Instant::now();
-    info!("[PERF] Starting search_in_sibling_modules for: {:?}", class_fqn);
-    
     let mut found_locations = Vec::new();
 
     // Get the modules that this class/module includes, extends, or prepends
     let included_modules = get_included_modules(index, class_fqn);
 
     // Search in each included module and its ancestor chain
-    let search_start = Instant::now();
     for module_fqn in included_modules {
         if let Some(locations) =
             search_in_ancestor_chain_with_visited(&module_fqn, method, index, kind, visited)
@@ -572,16 +524,10 @@ fn search_in_sibling_modules_with_visited(
             found_locations.extend(locations);
         }
     }
-    info!("[PERF] Sibling module searches took: {:?}", search_start.elapsed());
 
-    let result = if found_locations.is_empty() {
+    if found_locations.is_empty() {
         None
     } else {
         Some(found_locations)
-    };
-    
-    info!("[PERF] search_in_sibling_modules total time: {:?}, found {} locations", 
-          start_time.elapsed(), 
-          result.as_ref().map_or(0, |v| v.len()));
-    result
+    }
 }
