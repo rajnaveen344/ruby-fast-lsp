@@ -2,7 +2,7 @@
   "name": "ruby-fast-lsp",
   "displayName": "Ruby Fast LSP",
   "description": "High-performance Ruby Language Server with fast code navigation, syntax highlighting, and intelligent code insights for Ruby developers",
-  "version": "2025.26.0",
+  "version": "2025.35.0",
   "publisher": "naveenraj",
   "icon": "icon.png",
   "repository": {
