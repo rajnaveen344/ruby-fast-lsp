@@ -6,10 +6,7 @@ use ruby_prism::{
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::type_inference::ruby_type::RubyType;
-use crate::types::{
-    fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
 
@@ -18,38 +15,43 @@ impl IndexVisitor {
         let variable_name = String::from_utf8_lossy(name).to_string();
         debug!("Processing instance variable: {}", variable_name);
 
-        let var = RubyVariable::new(&variable_name, RubyVariableKind::Instance);
+        // Validate instance variable name
+        if !variable_name.starts_with('@') {
+            error!(
+                "Instance variable name must start with @: {}",
+                variable_name
+            );
+            return;
+        }
 
-        match var {
-            Ok(variable) => {
-                // Instance variables are associated with the class/module, not with methods
-                let fqn = FullyQualifiedName::variable(variable.clone());
+        if variable_name.len() < 2 {
+            error!("Instance variable name too short: {}", variable_name);
+            return;
+        }
 
-                debug!("Adding instance variable entry: {:?}", fqn);
+        // Instance variables are associated with the class/module, not with methods
+        let fqn = FullyQualifiedName::instance_variable(variable_name.clone()).unwrap();
 
-                let entry = EntryBuilder::new()
-                    .fqn(fqn)
-                    .location(self.document.prism_location_to_lsp_location(&name_loc))
-                    .kind(EntryKind::new_variable(variable.clone(), RubyType::Unknown))
-                    .build();
+        debug!("Adding instance variable entry: {:?}", fqn);
 
-                if let Ok(entry) = entry {
-                    let mut index = self.index.lock();
-                    index.add_entry(entry);
-                    debug!("Added instance variable entry: {:?}", variable);
-                } else {
-                    error!(
-                        "Error creating entry for instance variable: {}",
-                        variable_name
-                    );
-                }
-            }
-            Err(err) => {
-                error!(
-                    "Invalid instance variable name '{}': {}",
-                    variable_name, err
-                );
-            }
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(self.document.prism_location_to_lsp_location(&name_loc))
+            .kind(EntryKind::new_instance_variable(
+                variable_name.clone(),
+                RubyType::Unknown,
+            ))
+            .build();
+
+        if let Ok(entry) = entry {
+            let mut index = self.index.lock();
+            index.add_entry(entry);
+            debug!("Added instance variable entry: {}", variable_name);
+        } else {
+            error!(
+                "Error creating entry for instance variable: {}",
+                variable_name
+            );
         }
     }
 

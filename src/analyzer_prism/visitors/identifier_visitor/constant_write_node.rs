@@ -1,11 +1,8 @@
 use ruby_prism::ConstantWriteNode;
 
-use crate::{
-    analyzer_prism::Identifier,
-    types::ruby_namespace::RubyConstant,
-};
+use crate::{analyzer_prism::Identifier, types::ruby_namespace::RubyConstant};
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {

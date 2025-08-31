@@ -32,10 +32,10 @@ pub async fn handle_inlay_hints(
         for entry in entries {
             match &entry.kind {
                 EntryKind::LocalVariable { r#type, .. }
-                 | EntryKind::InstanceVariable { r#type, .. }
-                 | EntryKind::ClassVariable { r#type, .. }
-                 | EntryKind::GlobalVariable { r#type, .. } => {
-                     if *r#type != RubyType::Unknown {
+                | EntryKind::InstanceVariable { r#type, .. }
+                | EntryKind::ClassVariable { r#type, .. }
+                | EntryKind::GlobalVariable { r#type, .. } => {
+                    if *r#type != RubyType::Unknown {
                         // Create type hint at the end of the variable name
                         let end_position = entry.location.range.end;
                         let type_hint = InlayHint {

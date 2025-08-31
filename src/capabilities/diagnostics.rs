@@ -233,21 +233,27 @@ end
 
         // Check specific human-readable messages
         let messages: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
-        
+
         // Verify we get the expected human-readable error messages
-        assert!(messages.contains(&"unexpected string literal; expected a `)` to close the parameters"));
-        assert!(messages.contains(&"unexpected end-of-input, assuming it is closing the parent top level context"));
+        assert!(
+            messages.contains(&"unexpected string literal; expected a `)` to close the parameters")
+        );
+        assert!(messages.contains(
+            &"unexpected end-of-input, assuming it is closing the parent top level context"
+        ));
         assert!(messages.contains(&"expected an `end` to close the `def` statement"));
         assert!(messages.contains(&"possibly useless use of a literal in void context"));
 
         // Verify severities are correct
-        let error_count = diagnostics.iter()
+        let error_count = diagnostics
+            .iter()
             .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
             .count();
-        let warning_count = diagnostics.iter()
+        let warning_count = diagnostics
+            .iter()
             .filter(|d| d.severity == Some(DiagnosticSeverity::WARNING))
             .count();
-        
+
         assert_eq!(error_count, 3);
         assert_eq!(warning_count, 1);
 
@@ -266,22 +272,22 @@ end
         let diagnostics = generate_diagnostics(&document);
 
         assert!(!diagnostics.is_empty());
-        
+
         // Verify all messages are human-readable (no debug artifacts)
         for diagnostic in &diagnostics {
             let message = &diagnostic.message;
-            
+
             // Should not contain Rust debug artifacts
             assert!(!message.contains("Diagnostic {"));
             assert!(!message.contains("0x"));
             assert!(!message.contains("PhantomData"));
             assert!(!message.contains("parser:"));
             assert!(!message.contains("marker:"));
-            
+
             // Should be a proper sentence or phrase
             assert!(!message.is_empty());
             assert!(message.len() > 5); // Reasonable minimum length for a diagnostic message
-            
+
             // Verify source is set correctly
             assert_eq!(diagnostic.source, Some("ruby-fast-lsp".to_string()));
         }

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
 use parking_lot::Mutex;
 use ruby_prism::*;
+use tower_lsp::lsp_types::Url;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;

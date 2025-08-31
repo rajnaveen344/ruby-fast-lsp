@@ -3,10 +3,7 @@ use ruby_prism::ParametersNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::type_inference::ruby_type::RubyType;
-use crate::types::{
-    fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
 
@@ -62,45 +59,65 @@ impl IndexVisitor {
 
     // Helper method to add a parameter to the index
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
-        let var = RubyVariable::new(
-            param_name,
-            RubyVariableKind::Local(self.scope_tracker.get_lv_stack().to_vec()),
-        );
+        // Validate parameter name (should be a valid local variable name)
+        if param_name.is_empty() {
+            error!("Parameter name cannot be empty");
+            return;
+        }
 
-        match var {
-            Ok(variable) => {
-                // Create a fully qualified name for the variable
-                let fqn = FullyQualifiedName::variable(variable.clone());
+        let mut chars = param_name.chars();
+        let first = chars.next().unwrap();
 
-                // Create an entry with EntryKind::Variable
-                let entry = EntryBuilder::new()
-                    .fqn(fqn)
-                    .location(self.document.prism_location_to_lsp_location(&location))
-                    .kind(EntryKind::new_variable(variable.clone(), RubyType::Unknown))
-                    .build();
+        // Parameters must start with lowercase or underscore
+        if !(first.is_lowercase() || first == '_') {
+            error!(
+                "Parameter name must start with lowercase or _: {}",
+                param_name
+            );
+            return;
+        }
 
-                // Add the entry to the index
-                if let Ok(entry) = entry {
-                    let mut index = self.index.lock();
-                    index.add_entry(entry.clone());
+        // Check for valid characters (alphanumeric and underscore)
+        if !param_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            error!("Parameter name contains invalid characters: {}", param_name);
+            return;
+        }
 
-                    // Safely get the current scope before adding local variable entry
-                    if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
-                        self.document
-                            .add_local_var_entry(current_scope.scope_id(), entry.clone());
-                    } else {
-                        error!(
-                            "No current local variable scope available for parameter: {}",
-                            param_name
-                        );
-                    }
-                } else {
-                    error!("Error creating entry for parameter: {}", param_name);
-                }
+        // Create a fully qualified name for the parameter (local variable)
+        let fqn = FullyQualifiedName::local_variable(
+            param_name.to_string(),
+            self.scope_tracker.get_lv_stack().clone(),
+        )
+        .unwrap();
+
+        // Create an entry with EntryKind::LocalVariable
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(self.document.prism_location_to_lsp_location(&location))
+            .kind(EntryKind::new_local_variable(
+                param_name.to_string(),
+                self.scope_tracker.get_lv_stack().clone(),
+                RubyType::Unknown,
+            ))
+            .build();
+
+        // Add the entry to the index
+        if let Ok(entry) = entry {
+            let mut index = self.index.lock();
+            index.add_entry(entry.clone());
+
+            // Safely get the current scope before adding local variable entry
+            if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
+                self.document
+                    .add_local_var_entry(current_scope.scope_id(), entry.clone());
+            } else {
+                error!(
+                    "No current local variable scope available for parameter: {}",
+                    param_name
+                );
             }
-            Err(err) => {
-                error!("Invalid parameter name '{}': {}", param_name, err);
-            }
+        } else {
+            error!("Error creating entry for parameter: {}", param_name);
         }
     }
 

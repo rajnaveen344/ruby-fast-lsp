@@ -509,7 +509,7 @@ end
     async fn test_coordinator_gem_discovery() {
         // Set environment variable to limit gem processing for faster tests
         std::env::set_var("RUBY_LSP_MAX_GEMS", "5");
-        
+
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
@@ -525,23 +525,25 @@ end
         // Note: We can't directly access the gem_indexer field, but we can verify
         // that the ruby_lib_dirs includes gem paths
         let lib_dirs = coordinator.get_ruby_library_paths();
-        
+
         // Should have at least some library directories (system + potentially gems)
-        assert!(!lib_dirs.is_empty(), "Should discover library directories including potential gem paths");
-        
+        assert!(
+            !lib_dirs.is_empty(),
+            "Should discover library directories including potential gem paths"
+        );
+
         // Check if any paths look like gem directories
         let has_gem_like_paths = lib_dirs.iter().any(|path| {
-            path.to_string_lossy().contains("gems") || 
-            path.to_string_lossy().contains(".gem")
+            path.to_string_lossy().contains("gems") || path.to_string_lossy().contains(".gem")
         });
-        
+
         // This might not always be true in test environments, so we'll just log it
         if has_gem_like_paths {
             println!("Found gem-like paths in library directories");
         } else {
             println!("No obvious gem paths found - this is normal in test environments");
         }
-        
+
         // Clean up environment variable
         std::env::remove_var("RUBY_LSP_MAX_GEMS");
     }
@@ -550,7 +552,7 @@ end
     async fn test_coordinator_gem_indexing_integration() {
         // Set environment variable to limit gem processing for faster tests
         std::env::set_var("RUBY_LSP_MAX_GEMS", "3");
-        
+
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
@@ -560,17 +562,26 @@ end
 
         // Test that gem indexing doesn't break the overall indexing process
         let result = coordinator.run_complete_indexing(&server).await;
-        assert!(result.is_ok(), "Indexing should succeed even with gem discovery");
+        assert!(
+            result.is_ok(),
+            "Indexing should succeed even with gem discovery"
+        );
 
         // Verify the indexing process completed all steps
         let lib_dirs = coordinator.get_ruby_library_paths();
-        assert!(!lib_dirs.is_empty(), "Library directories should be discovered");
-        
+        assert!(
+            !lib_dirs.is_empty(),
+            "Library directories should be discovered"
+        );
+
         // The gem indexing should not interfere with project file indexing
         let mut project_files = Vec::new();
         coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut project_files);
-        assert!(!project_files.is_empty(), "Project files should still be discoverable after gem indexing");
-        
+        assert!(
+            !project_files.is_empty(),
+            "Project files should still be discoverable after gem indexing"
+        );
+
         // Clean up environment variable
         std::env::remove_var("RUBY_LSP_MAX_GEMS");
     }
@@ -579,7 +590,7 @@ end
     async fn test_coordinator_gem_error_handling() {
         // Set environment variable to limit gem processing for faster tests
         std::env::set_var("RUBY_LSP_MAX_GEMS", "2");
-        
+
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
@@ -590,14 +601,20 @@ end
         // Even if gem discovery fails, the overall indexing should still succeed
         // This tests the error handling in discover_and_index_gems
         let result = coordinator.run_complete_indexing(&server).await;
-        assert!(result.is_ok(), "Indexing should succeed even if gem discovery encounters errors");
-        
+        assert!(
+            result.is_ok(),
+            "Indexing should succeed even if gem discovery encounters errors"
+        );
+
         // Basic functionality should still work
         let lib_dirs = coordinator.get_ruby_library_paths();
         // We should at least have some directories (even if gem discovery failed)
         // The system Ruby directories should still be found
-        assert!(!lib_dirs.is_empty() || true, "Should handle gem discovery errors gracefully");
-        
+        assert!(
+            !lib_dirs.is_empty() || true,
+            "Should handle gem discovery errors gracefully"
+        );
+
         // Clean up environment variable
         std::env::remove_var("RUBY_LSP_MAX_GEMS");
     }
@@ -606,7 +623,7 @@ end
     async fn test_coordinator_gem_performance() {
         // Set environment variable to limit gem processing for faster tests
         std::env::set_var("RUBY_LSP_MAX_GEMS", "3");
-        
+
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
@@ -619,14 +636,24 @@ end
         let result = coordinator.run_complete_indexing(&server).await;
         let elapsed = start.elapsed();
 
-        assert!(result.is_ok(), "Indexing with gem discovery should complete successfully");
-        
+        assert!(
+            result.is_ok(),
+            "Indexing with gem discovery should complete successfully"
+        );
+
         // Gem discovery should not significantly slow down the indexing process
         // Allow up to 30 seconds for gem discovery in addition to regular indexing
-        assert!(elapsed.as_secs() < 30, "Indexing with gem discovery should complete within 30 seconds, took {}s", elapsed.as_secs());
-        
-        println!("Indexing with gem discovery completed in {}ms", elapsed.as_millis());
-        
+        assert!(
+            elapsed.as_secs() < 30,
+            "Indexing with gem discovery should complete within 30 seconds, took {}s",
+            elapsed.as_secs()
+        );
+
+        println!(
+            "Indexing with gem discovery completed in {}ms",
+            elapsed.as_millis()
+        );
+
         // Clean up environment variable
         std::env::remove_var("RUBY_LSP_MAX_GEMS");
     }
@@ -639,16 +666,18 @@ end
         // Create a vendor directory with Ruby files that should be excluded
         let vendor_dir = fixture.project_root().join("vendor");
         fs::create_dir_all(&vendor_dir).expect("Failed to create vendor directory");
-        
+
         let vendor_bundle_dir = vendor_dir.join("bundle");
         fs::create_dir_all(&vendor_bundle_dir).expect("Failed to create vendor/bundle directory");
-        
+
         // Create a Ruby file in vendor that should be excluded
         let vendor_ruby_file = vendor_dir.join("excluded_gem.rb");
-        fs::write(&vendor_ruby_file, "class ExcludedGem\nend").expect("Failed to write vendor Ruby file");
-        
+        fs::write(&vendor_ruby_file, "class ExcludedGem\nend")
+            .expect("Failed to write vendor Ruby file");
+
         let vendor_bundle_ruby_file = vendor_bundle_dir.join("bundled_gem.rb");
-        fs::write(&vendor_bundle_ruby_file, "class BundledGem\nend").expect("Failed to write vendor/bundle Ruby file");
+        fs::write(&vendor_bundle_ruby_file, "class BundledGem\nend")
+            .expect("Failed to write vendor/bundle Ruby file");
 
         let config = RubyFastLspConfig::default();
         let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
@@ -662,19 +691,19 @@ end
             .iter()
             .filter(|path| path.to_string_lossy().contains("vendor"))
             .collect();
-        
+
         assert!(
             vendor_files.is_empty(),
             "Vendor directory files should be excluded from indexing, but found: {:?}",
             vendor_files
         );
-        
+
         // Verify that non-vendor files are still collected
         let non_vendor_files: Vec<_> = collected_files
             .iter()
             .filter(|path| !path.to_string_lossy().contains("vendor"))
             .collect();
-        
+
         assert!(
             !non_vendor_files.is_empty(),
             "Non-vendor Ruby files should still be collected"

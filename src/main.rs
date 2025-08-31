@@ -33,7 +33,10 @@ async fn main() -> Result<()> {
             exit(1)
         })
     })
-    .custom_method("ruby/namespaceTree", RubyLanguageServer::handle_namespace_tree_request)
+    .custom_method(
+        "ruby/namespaceTree",
+        RubyLanguageServer::handle_namespace_tree_request,
+    )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");

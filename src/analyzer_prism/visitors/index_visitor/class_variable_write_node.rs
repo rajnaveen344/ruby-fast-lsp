@@ -6,10 +6,7 @@ use ruby_prism::{
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::type_inference::ruby_type::RubyType;
-use crate::types::{
-    fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
 
@@ -17,29 +14,34 @@ impl IndexVisitor {
     fn process_class_variable_write(&mut self, name: &[u8], name_loc: ruby_prism::Location) {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
-        let var = RubyVariable::new(&variable_name, RubyVariableKind::Class);
+        // Validate class variable name
+        if !variable_name.starts_with("@@") {
+            error!("Class variable name must start with @@: {}", variable_name);
+            return;
+        }
 
-        match var {
-            Ok(variable) => {
-                // Class variables are associated with the class/module, not with methods
-                let fqn = FullyQualifiedName::variable(variable.clone());
+        if variable_name.len() < 3 {
+            error!("Class variable name too short: {}", variable_name);
+            return;
+        }
 
-                let entry = EntryBuilder::new()
-                    .fqn(fqn)
-                    .location(self.document.prism_location_to_lsp_location(&name_loc))
-                    .kind(EntryKind::new_variable(variable.clone(), RubyType::Unknown))
-                    .build();
+        // Class variables are associated with the class/module, not with methods
+        let fqn = FullyQualifiedName::class_variable(variable_name.clone()).unwrap();
 
-                if let Ok(entry) = entry {
-                    let mut index = self.index.lock();
-                    index.add_entry(entry);
-                } else {
-                    error!("Error creating entry for class variable: {}", variable_name);
-                }
-            }
-            Err(err) => {
-                error!("Invalid class variable name '{}': {}", variable_name, err);
-            }
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(self.document.prism_location_to_lsp_location(&name_loc))
+            .kind(EntryKind::new_class_variable(
+                variable_name.clone(),
+                RubyType::Unknown,
+            ))
+            .build();
+
+        if let Ok(entry) = entry {
+            let mut index = self.index.lock();
+            index.add_entry(entry);
+        } else {
+            error!("Error creating entry for class variable: {}", variable_name);
         }
     }
 

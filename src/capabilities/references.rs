@@ -8,7 +8,7 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_variable::RubyVariableKind;
+use crate::types::scope::LVScopeStack;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(
@@ -38,8 +38,6 @@ pub async fn find_references_at_position(
 
     let index = server.index.lock();
 
-
-
     match &identifier {
         Identifier::RubyConstant { namespace: _, iden } => {
             // For namespaces, combine ancestors with the namespace parts
@@ -54,9 +52,21 @@ pub async fn find_references_at_position(
             receiver,
             iden,
         } => find_method_references(namespace, receiver_kind, receiver, iden, &index, &ancestors),
-        Identifier::RubyVariable { iden } => {
-            let fqn = FullyQualifiedName::variable(iden.clone());
-            find_variable_references(&fqn, &index, uri, position, iden)
+        Identifier::RubyLocalVariable { name, scope, .. } => {
+            let fqn = FullyQualifiedName::local_variable(name.clone(), scope.clone()).unwrap();
+            find_local_variable_references(&fqn, &index, uri, position)
+        }
+        Identifier::RubyInstanceVariable { name, .. } => {
+            let fqn = FullyQualifiedName::instance_variable(name.clone()).unwrap();
+            find_non_local_variable_references(&fqn, &index)
+        }
+        Identifier::RubyClassVariable { name, .. } => {
+            let fqn = FullyQualifiedName::class_variable(name.clone()).unwrap();
+            find_non_local_variable_references(&fqn, &index)
+        }
+        Identifier::RubyGlobalVariable { name, .. } => {
+            let fqn = FullyQualifiedName::global_variable(name.clone()).unwrap();
+            find_non_local_variable_references(&fqn, &index)
         }
     }
 }
@@ -77,33 +87,45 @@ fn find_constant_references(
     None
 }
 
-/// Find references to a variable with local variable filtering
-fn find_variable_references(
+/// Find references to a local variable with position filtering
+fn find_local_variable_references(
     fqn: &FullyQualifiedName,
     index: &crate::indexer::index::RubyIndex,
     uri: &Url,
     position: Position,
-    iden: &crate::types::ruby_variable::RubyVariable,
 ) -> Option<Vec<Location>> {
     if let Some(entries) = index.references.get(fqn) {
         if !entries.is_empty() {
-            let filtered_entries: Vec<Location> = match iden.variable_type() {
-                RubyVariableKind::Local(_) => entries
-                    .iter()
-                    .filter(|loc| loc.uri == *uri && loc.range.start >= position)
-                    .cloned()
-                    .collect(),
-                _ => entries.clone(),
-            };
+            let filtered_entries: Vec<Location> = entries
+                .iter()
+                .filter(|loc| loc.uri == *uri && loc.range.start >= position)
+                .cloned()
+                .collect();
 
             if !filtered_entries.is_empty() {
                 info!(
-                    "Found {} variable references to: {}",
+                    "Found {} local variable references to: {}",
                     filtered_entries.len(),
                     fqn
                 );
                 return Some(filtered_entries);
             }
+        }
+    }
+
+    info!("No local variable references found for {}", fqn);
+    None
+}
+
+/// Find references to non-local variables (instance, class, global)
+fn find_non_local_variable_references(
+    fqn: &FullyQualifiedName,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<Vec<Location>> {
+    if let Some(entries) = index.references.get(fqn) {
+        if !entries.is_empty() {
+            info!("Found {} variable references to: {}", entries.len(), fqn);
+            return Some(entries.clone());
         }
     }
 
@@ -122,8 +144,6 @@ fn find_method_references(
 ) -> Option<Vec<Location>> {
     let mut all_references = Vec::new();
 
-
-
     match receiver_kind {
         ReceiverKind::Constant => {
             if let Some(receiver_ns) = receiver {
@@ -134,7 +154,7 @@ fn find_method_references(
                     // Try to resolve relative to the current namespace
                     // Look for the first part of receiver_ns in ancestors
                     let first_receiver_part = &receiver_ns[0];
-                    
+
                     // Find where this constant appears in ancestors
                     if let Some(pos) = ancestors.iter().position(|c| c == first_receiver_part) {
                         // Build FQN up to that position + the receiver namespace
@@ -153,8 +173,6 @@ fn find_method_references(
                     full_ns.extend(receiver_ns.clone());
                     FullyQualifiedName::Constant(full_ns)
                 };
-
-
 
                 if let Some(refs) =
                     find_method_references_with_receiver(&receiver_fqn, method, index)

@@ -12,8 +12,8 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
-    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     InitializeParams, InitializedParams, *,
 };
 
@@ -198,7 +198,7 @@ pub async fn handle_did_close(
     params: DidCloseTextDocumentParams,
 ) {
     let uri = params.text_document.uri.clone();
-    
+
     // Only remove the document from the in-memory cache, but keep definitions and references
     // in the index since the file still exists on disk and other files may reference it
     lang_server.docs.lock().remove(&uri);
@@ -256,18 +256,24 @@ pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {
 pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
     let uri = params.text_document.uri;
     debug!("Document saved: {}", uri.path());
-    
+
     // Check if it's a Ruby file
     if uri.path().ends_with(".rb") {
         // Trigger debounced cache invalidation for namespace tree
         lang_server.invalidate_namespace_tree_cache_debounced();
-        debug!("Scheduled namespace tree cache invalidation for saved file: {}", uri.path());
+        debug!(
+            "Scheduled namespace tree cache invalidation for saved file: {}",
+            uri.path()
+        );
     }
 }
 
-pub async fn handle_did_change_watched_files(lang_server: &RubyLanguageServer, params: DidChangeWatchedFilesParams) {
+pub async fn handle_did_change_watched_files(
+    lang_server: &RubyLanguageServer,
+    params: DidChangeWatchedFilesParams,
+) {
     debug!("Watched files changed: {} files", params.changes.len());
-    
+
     let mut has_ruby_changes = false;
     for change in &params.changes {
         debug!("File change: {:?} - {:?}", change.uri.path(), change.typ);
@@ -275,7 +281,7 @@ pub async fn handle_did_change_watched_files(lang_server: &RubyLanguageServer, p
             has_ruby_changes = true;
         }
     }
-    
+
     // If any Ruby files changed, trigger debounced cache invalidation
     if has_ruby_changes {
         lang_server.invalidate_namespace_tree_cache_debounced();

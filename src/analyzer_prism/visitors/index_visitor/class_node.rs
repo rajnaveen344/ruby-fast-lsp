@@ -39,7 +39,7 @@ impl IndexVisitor {
             if let Some(superclass_ref) = self.create_superclass_mixin_ref(node) {
                 entry.set_superclass(superclass_ref);
             }
-            
+
             self.index.lock().add_entry(entry);
         } else {
             error!("Error creating entry: {:?}", entry.err());
@@ -85,7 +85,8 @@ impl IndexVisitor {
     fn create_superclass_mixin_ref(&self, node: &ClassNode) -> Option<MixinRef> {
         if let Some(superclass_node) = node.superclass() {
             if let Some(const_read_node) = superclass_node.as_constant_read_node() {
-                let superclass_name = String::from_utf8_lossy(const_read_node.name().as_slice()).to_string();
+                let superclass_name =
+                    String::from_utf8_lossy(const_read_node.name().as_slice()).to_string();
                 if let Ok(constant) = RubyConstant::new(&superclass_name) {
                     return Some(MixinRef {
                         parts: vec![constant],
@@ -97,10 +98,7 @@ impl IndexVisitor {
                 utils::collect_namespaces(&const_path_node, &mut parts);
                 if !parts.is_empty() {
                     let absolute = const_path_node.parent().is_none();
-                    return Some(MixinRef {
-                        parts,
-                        absolute,
-                    });
+                    return Some(MixinRef { parts, absolute });
                 }
             }
         }

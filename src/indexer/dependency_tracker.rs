@@ -423,8 +423,6 @@ impl DependencyTracker {
         None
     }
 
-
-
     /// Try to resolve a file in a specific directory
     fn try_resolve_in_dir(&self, dir: &Path, require_path: &str) -> Option<Url> {
         if !dir.exists() {

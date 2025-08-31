@@ -3,8 +3,7 @@ use std::fmt::Display;
 use crate::indexer::entry::MixinRef;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
-    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
-    scope::LVScopeStack,
+    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeStack,
 };
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
@@ -141,18 +140,6 @@ impl EntryKind {
 
     pub fn new_global_variable(name: String, r#type: RubyType) -> Self {
         EntryKind::GlobalVariable { name, r#type }
-    }
-
-    pub fn new_variable(name: RubyVariable, r#type: RubyType) -> Self {
-        use crate::types::ruby_variable::RubyVariableKind;
-        match name.variable_type() {
-            RubyVariableKind::Local(scope_stack) => {
-                Self::new_local_variable(name.name().clone(), scope_stack.clone(), r#type)
-            }
-            RubyVariableKind::Instance => Self::new_instance_variable(name.name().clone(), r#type),
-            RubyVariableKind::Class => Self::new_class_variable(name.name().clone(), r#type),
-            RubyVariableKind::Global => Self::new_global_variable(name.name().clone(), r#type),
-        }
     }
 }
 

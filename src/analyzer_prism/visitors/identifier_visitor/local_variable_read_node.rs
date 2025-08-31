@@ -1,11 +1,12 @@
-use ruby_prism::{LocalVariableReadNode, LocalVariableWriteNode, ClassVariableReadNode, ClassVariableWriteNode, InstanceVariableReadNode, InstanceVariableWriteNode, GlobalVariableReadNode, GlobalVariableWriteNode};
-
-use crate::{
-    analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableKind},
+use ruby_prism::{
+    ClassVariableReadNode, ClassVariableWriteNode, GlobalVariableReadNode, GlobalVariableWriteNode,
+    InstanceVariableReadNode, InstanceVariableWriteNode, LocalVariableReadNode,
+    LocalVariableWriteNode,
 };
 
-use super::{IdentifierVisitor, IdentifierType};
+use crate::analyzer_prism::Identifier;
+
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_local_variable_read_node_entry(&mut self, node: &LocalVariableReadNode) {
@@ -14,11 +15,13 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
-        let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
-            Some(Identifier::RubyVariable { iden: var }),
+            Some(Identifier::RubyLocalVariable {
+                namespace: self.scope_tracker.get_ns_stack(),
+                name: var_name,
+                scope: self.scope_tracker.get_lv_stack().clone(),
+            }),
             Some(IdentifierType::LVarRead),
             self.scope_tracker.get_ns_stack(),
             self.scope_tracker.get_lv_stack(),
@@ -37,11 +40,13 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
-            let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
-                Some(Identifier::RubyVariable { iden: var }),
+                Some(Identifier::RubyLocalVariable {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    name: var_name,
+                    scope: self.scope_tracker.get_lv_stack().clone(),
+                }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -59,11 +64,12 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableKind::Class;
-        let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
-            Some(Identifier::RubyVariable { iden: var }),
+            Some(Identifier::RubyClassVariable {
+                namespace: self.scope_tracker.get_ns_stack(),
+                name: var_name,
+            }),
             Some(IdentifierType::CVarRead),
             self.scope_tracker.get_ns_stack(),
             self.scope_tracker.get_lv_stack(),
@@ -82,11 +88,12 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableKind::Class;
-            let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
-                Some(Identifier::RubyVariable { iden: var }),
+                Some(Identifier::RubyClassVariable {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    name: var_name,
+                }),
                 Some(IdentifierType::CVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -104,11 +111,12 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableKind::Instance;
-        let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
-            Some(Identifier::RubyVariable { iden: var }),
+            Some(Identifier::RubyInstanceVariable {
+                namespace: self.scope_tracker.get_ns_stack(),
+                name: var_name,
+            }),
             Some(IdentifierType::IVarRead),
             self.scope_tracker.get_ns_stack(),
             self.scope_tracker.get_lv_stack(),
@@ -127,11 +135,12 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableKind::Instance;
-            let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
-                Some(Identifier::RubyVariable { iden: var }),
+                Some(Identifier::RubyInstanceVariable {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    name: var_name,
+                }),
                 Some(IdentifierType::IVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
@@ -149,11 +158,12 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableKind::Global;
-        let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
-            Some(Identifier::RubyVariable { iden: var }),
+            Some(Identifier::RubyGlobalVariable {
+                namespace: self.scope_tracker.get_ns_stack(),
+                name: var_name,
+            }),
             Some(IdentifierType::GVarRead),
             self.scope_tracker.get_ns_stack(),
             self.scope_tracker.get_lv_stack(),
@@ -172,11 +182,12 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableKind::Global;
-            let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
-                Some(Identifier::RubyVariable { iden: var }),
+                Some(Identifier::RubyGlobalVariable {
+                    namespace: self.scope_tracker.get_ns_stack(),
+                    name: var_name,
+                }),
                 Some(IdentifierType::GVarDef),
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),

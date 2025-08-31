@@ -349,7 +349,6 @@ impl SymbolMatcher {
 fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformation> {
     use crate::indexer::entry::entry_kind::EntryKind;
 
-
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
     match &entry.kind {
         EntryKind::LocalVariable { .. } => {
@@ -395,7 +394,10 @@ fn extract_display_name(fqn: &FullyQualifiedName) -> String {
             parts.last().map(|c| c.to_string()).unwrap_or_default()
         }
         FullyQualifiedName::Method(_, method) => method.get_name(),
-        FullyQualifiedName::Variable(var) => var.to_string(),
+        FullyQualifiedName::LocalVariable(name, _) => name.clone(),
+        FullyQualifiedName::InstanceVariable(name) => name.clone(),
+        FullyQualifiedName::ClassVariable(name) => name.clone(),
+        FullyQualifiedName::GlobalVariable(name) => name.clone(),
     }
 }
 
@@ -422,7 +424,10 @@ fn extract_container_name(fqn: &FullyQualifiedName) -> Option<String> {
                 None
             }
         }
-        FullyQualifiedName::Variable(_) => None,
+        FullyQualifiedName::LocalVariable(_, _) => None,
+        FullyQualifiedName::InstanceVariable(_) => None,
+        FullyQualifiedName::ClassVariable(_) => None,
+        FullyQualifiedName::GlobalVariable(_) => None,
     }
 }
 

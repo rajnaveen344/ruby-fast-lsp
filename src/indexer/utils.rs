@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
 /// Check if a file should be indexed based on its extension and name
-/// 
+///
 /// Returns true for:
 /// - Files with .rb, .ruby, .rake, or .gemspec extensions
 /// - Special Ruby files without extensions (Rakefile, Gemfile, etc.)
@@ -28,7 +28,7 @@ pub fn should_index_file(path: &Path) -> bool {
 }
 
 /// Collect Ruby files recursively from a directory
-/// 
+///
 /// This function walks through a directory tree and collects all Ruby files,
 /// while skipping common directories that don't contain indexable Ruby files.
 pub fn collect_ruby_files(dir: &Path) -> Vec<PathBuf> {
@@ -68,21 +68,21 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 /// Check if a URI belongs to a project file (not stdlib or gem)
-/// 
+///
 /// This function helps distinguish between project files and external dependencies
 /// by checking common stdlib and gem path patterns.
 pub fn is_project_file(uri: &Url) -> bool {
     if let Ok(file_path) = uri.to_file_path() {
         let path_str = file_path.to_string_lossy();
-        
+
         // Check if the file is in common stdlib or gem paths
-        let is_stdlib_or_gem = path_str.contains("/ruby/") && 
-            (path_str.contains("/lib/ruby/") || 
-             path_str.contains("/gems/") ||
-             path_str.contains("/rubystubs") ||
-             path_str.contains("/site_ruby/") ||
-             path_str.contains("/vendor_ruby/"));
-        
+        let is_stdlib_or_gem = path_str.contains("/ruby/")
+            && (path_str.contains("/lib/ruby/")
+                || path_str.contains("/gems/")
+                || path_str.contains("/rubystubs")
+                || path_str.contains("/site_ruby/")
+                || path_str.contains("/vendor_ruby/"));
+
         // If it's not in stdlib/gem paths, consider it a project file
         !is_stdlib_or_gem
     } else {
@@ -102,12 +102,12 @@ mod tests {
         assert!(should_index_file(&PathBuf::from("test.rb")));
         assert!(should_index_file(&PathBuf::from("test.rake")));
         assert!(should_index_file(&PathBuf::from("test.gemspec")));
-        
+
         // Test special Ruby files
         assert!(should_index_file(&PathBuf::from("Rakefile")));
         assert!(should_index_file(&PathBuf::from("Gemfile")));
         assert!(should_index_file(&PathBuf::from("Guardfile")));
-        
+
         // Test non-Ruby files
         assert!(!should_index_file(&PathBuf::from("test.txt")));
         assert!(!should_index_file(&PathBuf::from("test.js")));
@@ -119,13 +119,14 @@ mod tests {
         // Test project files
         let project_uri = Url::parse("file:///home/user/project/app/models/user.rb").unwrap();
         assert!(is_project_file(&project_uri));
-        
+
         // Test stdlib files (would return false)
         let stdlib_uri = Url::parse("file:///usr/lib/ruby/3.0.0/json.rb").unwrap();
         assert!(!is_project_file(&stdlib_uri));
-        
+
         // Test gem files (would return false)
-        let gem_uri = Url::parse("file:///usr/lib/ruby/gems/3.0.0/gems/rails-7.0.0/lib/rails.rb").unwrap();
+        let gem_uri =
+            Url::parse("file:///usr/lib/ruby/gems/3.0.0/gems/rails-7.0.0/lib/rails.rb").unwrap();
         assert!(!is_project_file(&gem_uri));
     }
 }

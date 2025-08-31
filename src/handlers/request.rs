@@ -1,6 +1,6 @@
 use crate::capabilities::{
-    completion, definitions, document_symbols, folding_range, formatting, inlay_hints, namespace_tree, references, semantic_tokens,
-    workspace_symbols,
+    completion, definitions, document_symbols, folding_range, formatting, inlay_hints,
+    namespace_tree, references, semantic_tokens, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
@@ -115,12 +115,10 @@ pub async fn handle_folding_range(
     params: FoldingRangeParams,
 ) -> LspResult<Option<Vec<FoldingRange>>> {
     let uri = &params.text_document.uri;
-    
+
     // Get the document from the language server
     match lang_server.get_doc(uri) {
-        Some(document) => {
-            folding_range::handle_folding_range(&document, params).await
-        }
+        Some(document) => folding_range::handle_folding_range(&document, params).await,
         None => {
             debug!("Document not found for URI: {}", uri);
             Ok(None)
@@ -135,6 +133,9 @@ pub async fn handle_namespace_tree(
     info!("Namespace tree request received");
     let start_time = std::time::Instant::now();
     let result = namespace_tree::handle_namespace_tree(lang_server, params).await;
-    info!("[PERF] Namespace tree completed in {:?}", start_time.elapsed());
+    info!(
+        "[PERF] Namespace tree completed in {:?}",
+        start_time.elapsed()
+    );
     Ok(result)
 }

@@ -1,10 +1,7 @@
 use log::debug;
 use ruby_prism::LocalVariableReadNode;
 
-use crate::types::{
-    fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::ReferenceVisitor;
 
@@ -25,23 +22,21 @@ impl ReferenceVisitor {
         for i in (0..lv_stack.len()).rev() {
             // Take all scopes up to the current level
             let scopes = lv_stack[0..=i].to_vec();
-            let var_type = RubyVariableKind::Local(scopes);
 
-            if let Ok(variable) = RubyVariable::new(&variable_name, var_type) {
-                let fqn = FullyQualifiedName::variable(variable);
+            let fqn =
+                FullyQualifiedName::local_variable(variable_name.clone(), scopes.clone()).unwrap();
 
-                debug!("Searching for variable: {:?}", fqn);
+            debug!("Searching for variable: {:?}", fqn);
 
-                // Check if this variable is defined in the current scope level
-                if index.definitions.contains_key(&fqn) {
-                    debug!(
-                        "Adding local variable reference: {:?} at {:?}",
-                        fqn, location
-                    );
-                    index.add_reference(fqn, location);
-                    drop(index);
-                    return;
-                }
+            // Check if this variable is defined in the current scope level
+            if index.definitions.contains_key(&fqn) {
+                debug!(
+                    "Adding local variable reference: {:?} at {:?}",
+                    fqn, location
+                );
+                index.add_reference(fqn, location);
+                drop(index);
+                return;
             }
         }
 

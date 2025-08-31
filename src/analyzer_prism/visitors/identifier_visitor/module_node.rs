@@ -2,10 +2,13 @@ use ruby_prism::ModuleNode;
 
 use crate::{
     analyzer_prism::{utils, Identifier},
-    types::{ruby_namespace::RubyConstant, scope::{LVScope, LVScopeKind}},
+    types::{
+        ruby_namespace::RubyConstant,
+        scope::{LVScope, LVScopeKind},
+    },
 };
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {

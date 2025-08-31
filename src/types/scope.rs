@@ -136,7 +136,10 @@ pub enum LVScopeKind {
 
 impl LVScopeKind {
     pub fn is_hard_scope_boundary(&self) -> bool {
-        matches!(self, LVScopeKind::InstanceMethod | LVScopeKind::ClassMethod | LVScopeKind::Constant)
+        matches!(
+            self,
+            LVScopeKind::InstanceMethod | LVScopeKind::ClassMethod | LVScopeKind::Constant
+        )
     }
 }
 

@@ -2,10 +2,10 @@ use std::fmt;
 
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
-use crate::types::ruby_variable::RubyVariable;
+
 use crate::types::{ruby_document::RubyDocument, scope::LVScopeStack};
-use tower_lsp::lsp_types::{Position, Url};
 use ruby_prism::Visit;
+use tower_lsp::lsp_types::{Position, Url};
 use visitors::identifier_visitor::IdentifierVisitor;
 
 // Export the visitors module
@@ -52,9 +52,39 @@ pub enum Identifier {
         iden: RubyMethod,
     },
 
-    /// Ruby variable with appropriate scope context
-    /// - iden: The variable information (includes its own scope context)
-    RubyVariable { iden: RubyVariable },
+    /// Ruby local variable with scope context
+    /// - namespace: Current namespace stack (where the cursor is located)
+    /// - name: Variable name
+    /// - scope: Local variable scope stack
+    RubyLocalVariable {
+        namespace: Vec<RubyConstant>,
+        name: String,
+        scope: LVScopeStack,
+    },
+
+    /// Ruby instance variable
+    /// - namespace: Current namespace stack (where the cursor is located)
+    /// - name: Variable name
+    RubyInstanceVariable {
+        namespace: Vec<RubyConstant>,
+        name: String,
+    },
+
+    /// Ruby class variable
+    /// - namespace: Current namespace stack (where the cursor is located)
+    /// - name: Variable name
+    RubyClassVariable {
+        namespace: Vec<RubyConstant>,
+        name: String,
+    },
+
+    /// Ruby global variable
+    /// - namespace: Current namespace stack (where the cursor is located)
+    /// - name: Variable name
+    RubyGlobalVariable {
+        namespace: Vec<RubyConstant>,
+        name: String,
+    },
 }
 
 impl fmt::Display for Identifier {
@@ -72,8 +102,17 @@ impl fmt::Display for Identifier {
             } => {
                 write!(f, "{}", iden)
             }
-            Identifier::RubyVariable { iden } => {
-                write!(f, "{}", iden)
+            Identifier::RubyLocalVariable { name, .. } => {
+                write!(f, "{}", name)
+            }
+            Identifier::RubyInstanceVariable { name, .. } => {
+                write!(f, "{}", name)
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                write!(f, "{}", name)
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                write!(f, "{}", name)
             }
         }
     }
@@ -176,19 +215,38 @@ mod tests {
         }
     }
 
-    /// Assert that an identifier is a RubyVariable with the expected variable name
+    /// Assert that an identifier is a variable with the expected variable name
     pub fn assert_variable_identifier(identifier: &Identifier, expected_name: &str) {
         match identifier {
-            Identifier::RubyVariable { iden } => {
+            Identifier::RubyLocalVariable { name, .. } => {
                 assert_eq!(
-                    iden.to_string(),
-                    expected_name,
-                    "Expected variable name '{}', got '{}'",
-                    expected_name,
-                    iden
+                    name, expected_name,
+                    "Expected local variable name '{}', got '{}'",
+                    expected_name, name
                 );
             }
-            _ => panic!("Expected RubyVariable identifier, got {:?}", identifier),
+            Identifier::RubyInstanceVariable { name, .. } => {
+                assert_eq!(
+                    name, expected_name,
+                    "Expected instance variable name '{}', got '{}'",
+                    expected_name, name
+                );
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                assert_eq!(
+                    name, expected_name,
+                    "Expected class variable name '{}', got '{}'",
+                    expected_name, name
+                );
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                assert_eq!(
+                    name, expected_name,
+                    "Expected global variable name '{}', got '{}'",
+                    expected_name, name
+                );
+            }
+            _ => panic!("Expected variable identifier, got {:?}", identifier),
         }
     }
 
@@ -874,27 +932,16 @@ end
 
         // Verify the variable has proper local variable scope context
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have at least one method scope
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod
-                                | crate::types::scope::LVScopeKind::ClassMethod
-                        )));
-                    }
-                    _ => panic!(
-                        "Expected Local variable type, got {:?}",
-                        iden.variable_type()
-                    ),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have at least one method scope
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::InstanceMethod
+                        | crate::types::scope::LVScopeKind::ClassMethod
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyLocalVariable identifier"),
         }
     }
 
@@ -933,24 +980,16 @@ end
 
         // Verify both have proper local variable scope context
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have method scope and potentially block scope
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod
-                                | crate::types::scope::LVScopeKind::ClassMethod
-                        )));
-                    }
-                    _ => panic!("Expected Local variable type"),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have method scope and potentially block scope
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::InstanceMethod
+                        | crate::types::scope::LVScopeKind::ClassMethod
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyLocalVariable identifier"),
         }
     }
 
@@ -980,24 +1019,16 @@ end
 
         // Verify it has proper local variable scope context with explicit block local scope
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have method scope and explicit block local scope
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod
-                                | crate::types::scope::LVScopeKind::ClassMethod
-                        )));
-                    }
-                    _ => panic!("Expected Local variable type"),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have method scope and explicit block local scope
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::InstanceMethod
+                        | crate::types::scope::LVScopeKind::ClassMethod
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyLocalVariable identifier"),
         }
     }
 
@@ -1026,24 +1057,16 @@ end
 
         // Verify it has proper local variable scope context with rescue scope
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have method scope and potentially rescue scope
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::InstanceMethod
-                                | crate::types::scope::LVScopeKind::ClassMethod
-                        )));
-                    }
-                    _ => panic!("Expected Local variable type"),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have method scope and potentially rescue scope
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::InstanceMethod
+                        | crate::types::scope::LVScopeKind::ClassMethod
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected Local variable type"),
         }
     }
 
@@ -1074,23 +1097,15 @@ end
 
         // Verify it has proper local variable scope context with constant scope
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have constant scope (class body)
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::Constant
-                        )));
-                    }
-                    _ => panic!("Expected Local variable type"),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have constant scope (class body)
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::Constant
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected Local variable type"),
         }
     }
 
@@ -1120,23 +1135,15 @@ end
 
         // Verify it has proper local variable scope context with constant scope
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
-                        assert!(
-                            !scope_stack.is_empty(),
-                            "Local variable should have scope stack"
-                        );
-                        // Should have constant scope (module body)
-                        assert!(scope_stack.iter().any(|scope| matches!(
-                            scope.kind(),
-                            crate::types::scope::LVScopeKind::Constant
-                        )));
-                    }
-                    _ => panic!("Expected Local variable type"),
-                }
+            Identifier::RubyLocalVariable { scope, .. } => {
+                assert!(!scope.is_empty(), "Local variable should have scope stack");
+                // Should have constant scope (module body)
+                assert!(scope.iter().any(|scope| matches!(
+                    scope.kind(),
+                    crate::types::scope::LVScopeKind::Constant
+                )));
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected Local variable type"),
         }
     }
 
@@ -1165,19 +1172,11 @@ end
 
         // Verify it has proper instance variable type (no additional scope context needed)
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Instance => {
-                        // Instance variables don't need additional scope context
-                        // Their scope is determined by the namespace context
-                    }
-                    _ => panic!(
-                        "Expected Instance variable type, got {:?}",
-                        iden.variable_type()
-                    ),
-                }
+            Identifier::RubyInstanceVariable { .. } => {
+                // Instance variables don't need additional scope context
+                // Their scope is determined by the namespace context
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyInstanceVariable identifier"),
         }
     }
 
@@ -1213,15 +1212,10 @@ end
 
         // Verify it has proper instance variable type with correct namespace context
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Instance => {
-                        // Instance variable scope is determined by namespace context
-                    }
-                    _ => panic!("Expected Instance variable type"),
-                }
+            Identifier::RubyInstanceVariable { .. } => {
+                // Instance variable scope is determined by namespace context
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyInstanceVariable identifier"),
         }
     }
 
@@ -1260,18 +1254,10 @@ end
 
         // Verify it has proper class variable type (namespace context determines scope)
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Class => {
-                        // Class variables scope is determined by namespace context
-                    }
-                    _ => panic!(
-                        "Expected Class variable type, got {:?}",
-                        iden.variable_type()
-                    ),
-                }
+            Identifier::RubyClassVariable { .. } => {
+                // Class variables scope is determined by namespace context
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyClassVariable identifier"),
         }
     }
 
@@ -1304,15 +1290,10 @@ end
 
         // Verify it has proper class variable type
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Class => {
-                        // Class variables are shared across inheritance hierarchy
-                    }
-                    _ => panic!("Expected Class variable type"),
-                }
+            Identifier::RubyClassVariable { .. } => {
+                // Class variables are shared across inheritance hierarchy
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyClassVariable identifier"),
         }
     }
 
@@ -1363,19 +1344,11 @@ puts $global_var
 
         // Verify it has proper global variable type (no additional context)
         match identifier {
-            Identifier::RubyVariable { iden } => {
-                match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableKind::Global => {
-                        // Global variables have no additional scope context
-                        // They are accessible from anywhere
-                    }
-                    _ => panic!(
-                        "Expected Global variable type, got {:?}",
-                        iden.variable_type()
-                    ),
-                }
+            Identifier::RubyGlobalVariable { .. } => {
+                // Global variables have no additional scope context
+                // They are accessible from anywhere
             }
-            _ => panic!("Expected RubyVariable identifier"),
+            _ => panic!("Expected RubyGlobalVariable identifier"),
         }
     }
 
@@ -1412,15 +1385,13 @@ end
 
             // Verify it has proper global variable type
             match identifier {
-                Identifier::RubyVariable { iden } => {
-                    match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableKind::Global => {
-                            // Special global variables are still global
-                        }
-                        _ => panic!("Expected Global variable type for {}", expected_name),
-                    }
+                Identifier::RubyGlobalVariable { .. } => {
+                    // Special global variables are still global
                 }
-                _ => panic!("Expected RubyVariable identifier for {}", expected_name),
+                _ => panic!(
+                    "Expected RubyGlobalVariable identifier for {}",
+                    expected_name
+                ),
             }
         }
     }
@@ -1502,15 +1473,13 @@ end
 
             // Verify it has proper global variable type
             match identifier {
-                Identifier::RubyVariable { iden } => {
-                    match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableKind::Global => {
-                            // All special global variables should be Global type
-                        }
-                        _ => panic!("Expected Global variable type for {}", expected_name),
-                    }
+                Identifier::RubyGlobalVariable { .. } => {
+                    // All special global variables should be Global type
                 }
-                _ => panic!("Expected RubyVariable identifier for {}", expected_name),
+                _ => panic!(
+                    "Expected RubyGlobalVariable identifier for {}",
+                    expected_name
+                ),
             }
         }
     }
@@ -1538,15 +1507,10 @@ end
 
             // Verify it has proper global variable type
             match identifier {
-                Identifier::RubyVariable { iden } => {
-                    match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableKind::Global => {
-                            // Global variables have no additional scope context
-                        }
-                        _ => panic!("Expected Global variable type for $global_var"),
-                    }
+                Identifier::RubyGlobalVariable { .. } => {
+                    // Global variables have no additional scope context
                 }
-                _ => panic!("Expected RubyVariable identifier for $global_var"),
+                _ => panic!("Expected RubyGlobalVariable identifier for $global_var"),
             }
         }
 
@@ -1560,15 +1524,10 @@ end
 
             // Verify it has proper global variable type
             match identifier {
-                Identifier::RubyVariable { iden } => {
-                    match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableKind::Global => {
-                            // Special global variables are still global
-                        }
-                        _ => panic!("Expected Global variable type for $LOAD_PATH"),
-                    }
+                Identifier::RubyGlobalVariable { .. } => {
+                    // Special global variables are still global
                 }
-                _ => panic!("Expected RubyVariable identifier for $LOAD_PATH"),
+                _ => panic!("Expected RubyGlobalVariable identifier for $LOAD_PATH"),
             }
         }
     }
@@ -1646,34 +1605,50 @@ end
 
                 // Verify proper variable type based on name
                 match identifier {
-                    Identifier::RubyVariable { iden } => {
-                        let expected_type = if expected_name.starts_with("@@") {
-                            "Class"
-                        } else if expected_name.starts_with("@") {
-                            "Instance"
-                        } else if expected_name.starts_with("$") {
-                            "Global"
+                    Identifier::RubyLocalVariable { .. } => {
+                        if !expected_name.starts_with("@@")
+                            && !expected_name.starts_with("@")
+                            && !expected_name.starts_with("$")
+                        {
+                            // Local variable - correct type
                         } else {
-                            "Local"
-                        };
-
-                        match (iden.variable_type(), expected_type) {
-                            (crate::types::ruby_variable::RubyVariableKind::Local(_), "Local") => {}
-                            (
-                                crate::types::ruby_variable::RubyVariableKind::Instance,
-                                "Instance",
-                            ) => {}
-                            (crate::types::ruby_variable::RubyVariableKind::Class, "Class") => {}
-                            (crate::types::ruby_variable::RubyVariableKind::Global, "Global") => {}
-                            _ => panic!(
-                                "Variable type mismatch for {}: expected {}, got {:?}",
-                                expected_name,
-                                expected_type,
-                                iden.variable_type()
-                            ),
+                            panic!(
+                                "Expected local variable for {}, got RubyLocalVariable",
+                                expected_name
+                            );
                         }
                     }
-                    _ => panic!("Expected RubyVariable identifier for {}", expected_name),
+                    Identifier::RubyInstanceVariable { .. } => {
+                        if expected_name.starts_with("@") && !expected_name.starts_with("@@") {
+                            // Instance variable - correct type
+                        } else {
+                            panic!(
+                                "Expected instance variable for {}, got RubyInstanceVariable",
+                                expected_name
+                            );
+                        }
+                    }
+                    Identifier::RubyClassVariable { .. } => {
+                        if expected_name.starts_with("@@") {
+                            // Class variable - correct type
+                        } else {
+                            panic!(
+                                "Expected class variable for {}, got RubyClassVariable",
+                                expected_name
+                            );
+                        }
+                    }
+                    Identifier::RubyGlobalVariable { .. } => {
+                        if expected_name.starts_with("$") {
+                            // Global variable - correct type
+                        } else {
+                            panic!(
+                                "Expected global variable for {}, got RubyGlobalVariable",
+                                expected_name
+                            );
+                        }
+                    }
+                    _ => panic!("Expected variable identifier for {}", expected_name),
                 }
             } else {
                 // Some positions might not resolve to identifiers, which is okay

@@ -1,11 +1,8 @@
 use ruby_prism::BackReferenceReadNode;
 
-use crate::{
-    analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::analyzer_prism::Identifier;
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_back_reference_read_node_entry(&mut self, node: &BackReferenceReadNode) {
@@ -21,17 +18,11 @@ impl IdentifierVisitor {
         let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         // The name already includes the $, so don't add another one
         let full_name = variable_name;
-        
-        // Create a RubyVariable with Global type
-        let variable = match RubyVariable::new(&full_name, RubyVariableKind::Global) {
-            Ok(var) => var,
-            Err(_) => {
-                // If validation fails, skip this variable
-                return;
-            }
-        };
 
-        let identifier = Identifier::RubyVariable { iden: variable };
+        let identifier = Identifier::RubyGlobalVariable {
+            namespace: self.scope_tracker.get_ns_stack(),
+            name: full_name,
+        };
 
         self.set_result(
             Some(identifier),

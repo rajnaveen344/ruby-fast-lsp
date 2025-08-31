@@ -185,7 +185,9 @@ impl IndexerStdlib {
 
                 let stub_files = self.core.collect_ruby_files(&stubs_path);
                 if !stub_files.is_empty() {
-                    self.core.index_definitions_parallel(&stub_files, server).await?;
+                    self.core
+                        .index_definitions_parallel(&stub_files, server)
+                        .await?;
                     info!("Indexed {} core stub files", stub_files.len());
                 } else {
                     warn!("No stub files found in: {:?}", stubs_path);

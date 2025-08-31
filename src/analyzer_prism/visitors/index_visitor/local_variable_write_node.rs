@@ -6,10 +6,7 @@ use ruby_prism::{
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::type_inference::ruby_type::RubyType;
-use crate::types::{
-    fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
 
@@ -41,49 +38,72 @@ impl IndexVisitor {
             RubyType::Unknown
         };
 
-        let var = RubyVariable::new(
-            &variable_name,
-            RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone()),
-        );
+        // Validate the variable name
+        if variable_name.is_empty() {
+            error!("Local variable name cannot be empty");
+            return;
+        }
 
-        match var {
-            Ok(variable) => {
-                let fqn = FullyQualifiedName::variable(variable.clone());
+        let mut chars = variable_name.chars();
+        let first = chars.next().unwrap();
 
-                let entry = EntryBuilder::new()
-                    .fqn(fqn)
-                    .location(self.document.prism_location_to_lsp_location(&name_loc))
-                    .kind(EntryKind::new_variable(
-                        variable.clone(),
-                        inferred_type.clone(),
-                    ))
-                    .build();
+        // Local variables must start with lowercase or underscore
+        if !(first.is_lowercase() || first == '_') {
+            error!(
+                "Local variable name must start with lowercase or _: {}",
+                variable_name
+            );
+            return;
+        }
 
-                if let Ok(entry) = entry {
-                    let mut index = self.index.lock();
-                    index.add_entry(entry.clone());
+        // Check for valid characters (alphanumeric and underscore)
+        if !variable_name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_')
+        {
+            error!(
+                "Local variable name contains invalid characters: {}",
+                variable_name
+            );
+            return;
+        }
 
-                    // Safely get the current scope before adding local variable entry
-                    if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
-                        self.document
-                            .add_local_var_entry(current_scope.scope_id(), entry.clone());
-                        debug!(
-                            "Added local variable entry with type: {:?} -> {:?}",
-                            variable, inferred_type
-                        );
-                    } else {
-                        error!(
-                            "No current local variable scope available for variable: {}",
-                            variable_name
-                        );
-                    }
-                } else {
-                    error!("Error creating entry for local variable: {}", variable_name);
-                }
+        let fqn = FullyQualifiedName::local_variable(
+            variable_name.clone(),
+            self.scope_tracker.get_lv_stack().clone(),
+        )
+        .unwrap();
+
+        let entry = EntryBuilder::new()
+            .fqn(fqn)
+            .location(self.document.prism_location_to_lsp_location(&name_loc))
+            .kind(EntryKind::new_local_variable(
+                variable_name.clone(),
+                self.scope_tracker.get_lv_stack().clone(),
+                inferred_type.clone(),
+            ))
+            .build();
+
+        if let Ok(entry) = entry {
+            let mut index = self.index.lock();
+            index.add_entry(entry.clone());
+
+            // Safely get the current scope before adding local variable entry
+            if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
+                self.document
+                    .add_local_var_entry(current_scope.scope_id(), entry.clone());
+                debug!(
+                    "Added local variable entry with type: {:?} -> {:?}",
+                    variable_name, inferred_type
+                );
+            } else {
+                error!(
+                    "No current local variable scope available for variable: {}",
+                    variable_name
+                );
             }
-            Err(err) => {
-                error!("Invalid local variable name '{}': {}", variable_name, err);
-            }
+        } else {
+            error!("Error creating entry for local variable: {}", variable_name);
         }
     }
 
@@ -338,10 +358,19 @@ mod tests {
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
                 match &entry.kind {
-                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable { r#type, .. } => {
+                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable {
+                        r#type, ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable {
+                        r#type,
+                        ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable {
+                        r#type, ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable {
+                        r#type, ..
+                    } => {
                         assert!(
                             *r#type == RubyType::Unknown,
                             "Unknown types should be stored as RubyType::Unknown in Variable entries"
@@ -370,10 +399,19 @@ mod tests {
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
                 match &entry.kind {
-                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable { r#type, .. }
-                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable { r#type, .. } => {
+                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable {
+                        r#type, ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable {
+                        r#type,
+                        ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable {
+                        r#type, ..
+                    }
+                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable {
+                        r#type, ..
+                    } => {
                         if *r#type == RubyType::string() {
                             found_string_type = true;
                         } else if *r#type == RubyType::integer() {

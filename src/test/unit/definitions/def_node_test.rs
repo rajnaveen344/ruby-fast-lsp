@@ -224,10 +224,11 @@ fn def_node_special_method_names() {
 
     // Check that all special methods are indexed
     let special_methods = ["[]", "^", "==", "+@", "-@", "<=>", "[]="];
-    
+
     for method_name in special_methods {
         let found = defs.iter().any(|(fqn, _)| {
-            fqn.to_string().contains(&format!("TestClass#{}", method_name))
+            fqn.to_string()
+                .contains(&format!("TestClass#{}", method_name))
         });
         assert!(found, "Special method '{}' should be indexed", method_name);
     }

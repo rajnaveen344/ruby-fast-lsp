@@ -409,7 +409,10 @@ impl Default for ConstantCompletionEngine {
 mod tests {
     use super::*;
     use crate::{
-        indexer::{entry::{Entry, MixinRef}, index::RubyIndex},
+        indexer::{
+            entry::{Entry, MixinRef},
+            index::RubyIndex,
+        },
         types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
     };
     use tower_lsp::lsp_types::{Location, Range, Url};

@@ -132,7 +132,9 @@ mod tests {
     #[tokio::test]
     async fn goto_module_method_cross_ref() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/module_method_cross_ref.rb").await;
+        harness
+            .open_fixture_dir("goto/module_method_cross_ref.rb")
+            .await;
 
         // `method_from_b` call inside ModuleA's method_from_a → method definition in ModuleB
         snapshot_definitions(
@@ -200,9 +202,9 @@ mod tests {
     #[tokio::test]
     async fn goto_nested_namespace_include() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/nested_namespace_include.rb").await;
-
-
+        harness
+            .open_fixture_dir("goto/nested_namespace_include.rb")
+            .await;
 
         // `method_from_b` call inside Outer::ModuleA's method_from_a → method definition in Outer::ModuleB
         snapshot_definitions(
@@ -305,8 +307,8 @@ mod tests {
         snapshot_definitions(
             &harness,
             "test_mixin_issue.rb",
-            46,  // Line where api_method is called in PlatformApp#app_method (0-indexed: line 47)
-            4,   // Column position of api_method call
+            46, // Line where api_method is called in PlatformApp#app_method (0-indexed: line 47)
+            4,  // Column position of api_method call
             "inherited_api_method_def",
         )
         .await;
@@ -315,8 +317,8 @@ mod tests {
         snapshot_definitions(
             &harness,
             "test_mixin_issue.rb",
-            47,  // Line where set_cookie is called in PlatformApp#app_method (0-indexed: line 48)
-            4,   // Column position of set_cookie call
+            47, // Line where set_cookie is called in PlatformApp#app_method (0-indexed: line 48)
+            4,  // Column position of set_cookie call
             "inherited_set_cookie_method_def",
         )
         .await;
@@ -325,8 +327,8 @@ mod tests {
         snapshot_definitions(
             &harness,
             "test_mixin_issue.rb",
-            53,  // Line where another_api_method is called in PlatformApp#another_app_method (0-indexed: line 54)
-            4,   // Column position of another_api_method call
+            53, // Line where another_api_method is called in PlatformApp#another_app_method (0-indexed: line 54)
+            4,  // Column position of another_api_method call
             "inherited_another_api_method_def",
         )
         .await;
@@ -335,8 +337,8 @@ mod tests {
         snapshot_definitions(
             &harness,
             "test_mixin_issue.rb",
-            54,  // Line where get_cookie is called in PlatformApp#another_app_method (0-indexed: line 55)
-            4,   // Column position of get_cookie call
+            54, // Line where get_cookie is called in PlatformApp#another_app_method (0-indexed: line 55)
+            4,  // Column position of get_cookie call
             "inherited_get_cookie_method_def",
         )
         .await;

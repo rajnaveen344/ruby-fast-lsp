@@ -3,8 +3,8 @@ use crate::{
     types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeStack},
 };
 
-use tower_lsp::lsp_types::Position;
 use ruby_prism::*;
+use tower_lsp::lsp_types::Position;
 
 mod back_reference_read_node;
 mod block_node;
@@ -361,11 +361,7 @@ mod tests {
     fn test_nested_constant_path_at_scope_resolution_2() {
         // Test case: Foo::Bar::Baz with cursor at second "::"
         // When cursor is at "::", we only get the constant path up to that point
-        test_visitor(
-            "Foo::Bar::Baz",
-            Position::new(0, 8),
-            vec!["Foo", "Bar"],
-        );
+        test_visitor("Foo::Bar::Baz", Position::new(0, 8), vec!["Foo", "Bar"]);
     }
 
     #[test]

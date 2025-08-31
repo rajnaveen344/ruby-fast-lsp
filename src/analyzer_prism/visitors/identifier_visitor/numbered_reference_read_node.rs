@@ -1,11 +1,8 @@
 use ruby_prism::NumberedReferenceReadNode;
 
-use crate::{
-    analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableKind},
-};
+use crate::analyzer_prism::Identifier;
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_numbered_reference_read_node_entry(&mut self, node: &NumberedReferenceReadNode) {
@@ -19,17 +16,11 @@ impl IdentifierVisitor {
 
         // Numbered references like $1, $2, etc. are special global variables
         let variable_name = format!("${}", node.number());
-        
-        // Create a RubyVariable with Global type
-        let variable = match RubyVariable::new(&variable_name, RubyVariableKind::Global) {
-            Ok(var) => var,
-            Err(_) => {
-                // If validation fails, skip this variable
-                return;
-            }
-        };
 
-        let identifier = Identifier::RubyVariable { iden: variable };
+        let identifier = Identifier::RubyGlobalVariable {
+            namespace: self.scope_tracker.get_ns_stack(),
+            name: variable_name,
+        };
 
         self.set_result(
             Some(identifier),

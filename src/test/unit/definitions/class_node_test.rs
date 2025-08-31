@@ -115,12 +115,12 @@ fn class_node_invalid_constant() {
     // lowercase class name is invalid and should be handled gracefully
     let code = "class foo; end";
     let visitor = visit_code(code);
-    
+
     // The visitor should complete without panicking
     // No entries should be created for invalid class names
     let index_lock = visitor.index.lock();
     let defs = &index_lock.definitions;
-    
+
     // Should not contain any entries for invalid class names
     assert!(defs.is_empty() || !defs.iter().any(|(fqn, _)| fqn.to_string().contains("foo")));
 }

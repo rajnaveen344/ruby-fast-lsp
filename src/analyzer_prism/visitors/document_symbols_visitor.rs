@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_write_node, visit_def_node,
-    visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode, ModuleNode, SingletonClassNode, Visit,
+    visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode,
+    ModuleNode, SingletonClassNode, Visit,
 };
 use tower_lsp::lsp_types::SymbolKind;
 
@@ -34,7 +35,10 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
     /// Get the current visibility (top of the stack)
     fn current_visibility(&self) -> MethodVisibility {
-        *self.visibility_stack.last().unwrap_or(&MethodVisibility::Public)
+        *self
+            .visibility_stack
+            .last()
+            .unwrap_or(&MethodVisibility::Public)
     }
 
     /// Push a new visibility scope (when entering a class/module)
@@ -635,7 +639,10 @@ end
         assert_eq!(class_symbol.kind, SymbolKind::CLASS);
 
         // Should find the singleton method and it should be a class method
-        let singleton_method = symbols.iter().find(|s| s.name == "singleton_method").unwrap();
+        let singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "singleton_method")
+            .unwrap();
         assert_eq!(singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
     }
@@ -729,52 +736,112 @@ end
         assert_eq!(class_symbol.kind, SymbolKind::CLASS);
 
         // Should find public_singleton_method - should be class method with public visibility
-        let public_singleton_method = symbols.iter().find(|s| s.name == "public_singleton_method").unwrap();
+        let public_singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "public_singleton_method")
+            .unwrap();
         assert_eq!(public_singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(public_singleton_method.method_kind, Some(MethodKind::Class));
-        assert_eq!(public_singleton_method.visibility, Some(MethodVisibility::Public));
+        assert_eq!(
+            public_singleton_method.visibility,
+            Some(MethodVisibility::Public)
+        );
 
         // Should find protected_singleton_method - should be class method with protected visibility
-        let protected_singleton_method = symbols.iter().find(|s| s.name == "protected_singleton_method").unwrap();
+        let protected_singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "protected_singleton_method")
+            .unwrap();
         assert_eq!(protected_singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(protected_singleton_method.method_kind, Some(MethodKind::Class));
-        assert_eq!(protected_singleton_method.visibility, Some(MethodVisibility::Protected));
+        assert_eq!(
+            protected_singleton_method.method_kind,
+            Some(MethodKind::Class)
+        );
+        assert_eq!(
+            protected_singleton_method.visibility,
+            Some(MethodVisibility::Protected)
+        );
 
         // Should find private_singleton_method - should be class method with private visibility
-        let private_singleton_method = symbols.iter().find(|s| s.name == "private_singleton_method").unwrap();
+        let private_singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "private_singleton_method")
+            .unwrap();
         assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(private_singleton_method.method_kind, Some(MethodKind::Class));
-        assert_eq!(private_singleton_method.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            private_singleton_method.method_kind,
+            Some(MethodKind::Class)
+        );
+        assert_eq!(
+            private_singleton_method.visibility,
+            Some(MethodVisibility::Private)
+        );
 
         // Should find another_public_singleton_method - should be class method with public visibility
-        let another_public_singleton_method = symbols.iter().find(|s| s.name == "another_public_singleton_method").unwrap();
+        let another_public_singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "another_public_singleton_method")
+            .unwrap();
         assert_eq!(another_public_singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(another_public_singleton_method.method_kind, Some(MethodKind::Class));
-        assert_eq!(another_public_singleton_method.visibility, Some(MethodVisibility::Public));
+        assert_eq!(
+            another_public_singleton_method.method_kind,
+            Some(MethodKind::Class)
+        );
+        assert_eq!(
+            another_public_singleton_method.visibility,
+            Some(MethodVisibility::Public)
+        );
 
         // Should find instance_method - should be instance method with public visibility
-        let instance_method = symbols.iter().find(|s| s.name == "instance_method").unwrap();
+        let instance_method = symbols
+            .iter()
+            .find(|s| s.name == "instance_method")
+            .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
         assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
         assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
 
         // Should find class_method_with_self - should be class method with public visibility
-        let class_method_with_self = symbols.iter().find(|s| s.name == "class_method_with_self").unwrap();
+        let class_method_with_self = symbols
+            .iter()
+            .find(|s| s.name == "class_method_with_self")
+            .unwrap();
         assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
         assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
-        assert_eq!(class_method_with_self.visibility, Some(MethodVisibility::Public));
+        assert_eq!(
+            class_method_with_self.visibility,
+            Some(MethodVisibility::Public)
+        );
 
         // Should find protected_instance_method - should be instance method with protected visibility
-        let protected_instance_method = symbols.iter().find(|s| s.name == "protected_instance_method").unwrap();
+        let protected_instance_method = symbols
+            .iter()
+            .find(|s| s.name == "protected_instance_method")
+            .unwrap();
         assert_eq!(protected_instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(protected_instance_method.method_kind, Some(MethodKind::Instance));
-        assert_eq!(protected_instance_method.visibility, Some(MethodVisibility::Protected));
+        assert_eq!(
+            protected_instance_method.method_kind,
+            Some(MethodKind::Instance)
+        );
+        assert_eq!(
+            protected_instance_method.visibility,
+            Some(MethodVisibility::Protected)
+        );
 
         // Should find private_instance_method - should be instance method with private visibility
-        let private_instance_method = symbols.iter().find(|s| s.name == "private_instance_method").unwrap();
+        let private_instance_method = symbols
+            .iter()
+            .find(|s| s.name == "private_instance_method")
+            .unwrap();
         assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(private_instance_method.method_kind, Some(MethodKind::Instance));
-        assert_eq!(private_instance_method.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            private_instance_method.method_kind,
+            Some(MethodKind::Instance)
+        );
+        assert_eq!(
+            private_instance_method.visibility,
+            Some(MethodVisibility::Private)
+        );
     }
 
     #[test]
@@ -810,34 +877,64 @@ end
         assert_eq!(class_symbol.kind, SymbolKind::CLASS);
 
         // Should find singleton_method - should be class method with public visibility
-        let singleton_method = symbols.iter().find(|s| s.name == "singleton_method").unwrap();
+        let singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "singleton_method")
+            .unwrap();
         assert_eq!(singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
         assert_eq!(singleton_method.visibility, Some(MethodVisibility::Public));
 
         // Should find private_singleton_method - should be class method with private visibility
-        let private_singleton_method = symbols.iter().find(|s| s.name == "private_singleton_method").unwrap();
+        let private_singleton_method = symbols
+            .iter()
+            .find(|s| s.name == "private_singleton_method")
+            .unwrap();
         assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(private_singleton_method.method_kind, Some(MethodKind::Class));
-        assert_eq!(private_singleton_method.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            private_singleton_method.method_kind,
+            Some(MethodKind::Class)
+        );
+        assert_eq!(
+            private_singleton_method.visibility,
+            Some(MethodVisibility::Private)
+        );
 
         // Should find instance_method - should be instance method with public visibility
-        let instance_method = symbols.iter().find(|s| s.name == "instance_method").unwrap();
+        let instance_method = symbols
+            .iter()
+            .find(|s| s.name == "instance_method")
+            .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
         assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
         assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
 
         // Should find class_method_with_self - should be class method with public visibility
-        let class_method_with_self = symbols.iter().find(|s| s.name == "class_method_with_self").unwrap();
+        let class_method_with_self = symbols
+            .iter()
+            .find(|s| s.name == "class_method_with_self")
+            .unwrap();
         assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
         assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
-        assert_eq!(class_method_with_self.visibility, Some(MethodVisibility::Public));
+        assert_eq!(
+            class_method_with_self.visibility,
+            Some(MethodVisibility::Public)
+        );
 
         // Should find private_instance_method - should be instance method with private visibility
-        let private_instance_method = symbols.iter().find(|s| s.name == "private_instance_method").unwrap();
+        let private_instance_method = symbols
+            .iter()
+            .find(|s| s.name == "private_instance_method")
+            .unwrap();
         assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(private_instance_method.method_kind, Some(MethodKind::Instance));
-        assert_eq!(private_instance_method.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            private_instance_method.method_kind,
+            Some(MethodKind::Instance)
+        );
+        assert_eq!(
+            private_instance_method.visibility,
+            Some(MethodVisibility::Private)
+        );
     }
 
     #[test]
@@ -949,13 +1046,22 @@ end
             .expect("Should find another_outer_method_private");
 
         // Check visibility
-        assert_eq!(outer_method_public.visibility, Some(MethodVisibility::Public));
-        assert_eq!(outer_method_private.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            outer_method_public.visibility,
+            Some(MethodVisibility::Public)
+        );
+        assert_eq!(
+            outer_method_private.visibility,
+            Some(MethodVisibility::Private)
+        );
         assert_eq!(
             inner_method_should_be_public.visibility,
             Some(MethodVisibility::Public)
         ); // This should be public because it's in a new class scope
-        assert_eq!(inner_method_private.visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            inner_method_private.visibility,
+            Some(MethodVisibility::Private)
+        );
         assert_eq!(
             another_outer_method_private.visibility,
             Some(MethodVisibility::Private)
@@ -1017,19 +1123,46 @@ end
         };
 
         // Check outer class methods
-        assert_eq!(find_method("public_method").visibility, Some(MethodVisibility::Public));
-        assert_eq!(find_method("private_method").visibility, Some(MethodVisibility::Private));
-        assert_eq!(find_method("outer_private_method").visibility, Some(MethodVisibility::Private));
-        assert_eq!(find_method("outer_public_again").visibility, Some(MethodVisibility::Public));
+        assert_eq!(
+            find_method("public_method").visibility,
+            Some(MethodVisibility::Public)
+        );
+        assert_eq!(
+            find_method("private_method").visibility,
+            Some(MethodVisibility::Private)
+        );
+        assert_eq!(
+            find_method("outer_private_method").visibility,
+            Some(MethodVisibility::Private)
+        );
+        assert_eq!(
+            find_method("outer_public_again").visibility,
+            Some(MethodVisibility::Public)
+        );
 
         // Check nested module methods (should start fresh with public)
-        assert_eq!(find_method("module_method_public").visibility, Some(MethodVisibility::Public));
-        assert_eq!(find_method("module_method_protected").visibility, Some(MethodVisibility::Protected));
-        assert_eq!(find_method("another_module_method_protected").visibility, Some(MethodVisibility::Protected));
+        assert_eq!(
+            find_method("module_method_public").visibility,
+            Some(MethodVisibility::Public)
+        );
+        assert_eq!(
+            find_method("module_method_protected").visibility,
+            Some(MethodVisibility::Protected)
+        );
+        assert_eq!(
+            find_method("another_module_method_protected").visibility,
+            Some(MethodVisibility::Protected)
+        );
 
         // Check deeply nested class methods (should start fresh with public)
-        assert_eq!(find_method("deeply_nested_public").visibility, Some(MethodVisibility::Public));
-        assert_eq!(find_method("deeply_nested_private").visibility, Some(MethodVisibility::Private));
+        assert_eq!(
+            find_method("deeply_nested_public").visibility,
+            Some(MethodVisibility::Public)
+        );
+        assert_eq!(
+            find_method("deeply_nested_private").visibility,
+            Some(MethodVisibility::Private)
+        );
     }
 
     #[test]

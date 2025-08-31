@@ -162,19 +162,14 @@ pub fn resolve_mixin_ref(
     mixin_ref: &MixinRef,
     current_fqn: &FullyQualifiedName,
 ) -> Option<FullyQualifiedName> {
-    utils::resolve_constant_fqn_from_parts(
-        index,
-        &mixin_ref.parts,
-        mixin_ref.absolute,
-        current_fqn,
-    )
+    utils::resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
 }
 
 /// Builds the complete ancestor chain for a given class or module
-/// 
+///
 /// For class methods: includes singleton class + normal ancestor chain
 /// For instance methods: includes normal ancestor chain (current class -> mixins -> superclass)
-/// 
+///
 /// The chain represents the method lookup order in Ruby's method resolution
 pub fn get_ancestor_chain(
     index: &RubyIndex,
@@ -204,7 +199,9 @@ fn build_class_method_ancestor_chain(
     // Process extends for class methods
     if let Some(entries) = index.definitions.get(fqn) {
         if let Some(entry) = entries.first() {
-            if let EntryKind::Class { extends, .. } | EntryKind::Module { extends, .. } = &entry.kind {
+            if let EntryKind::Class { extends, .. } | EntryKind::Module { extends, .. } =
+                &entry.kind
+            {
                 process_mixins_for_ancestor_chain(index, extends, fqn, chain, visited, true);
             }
         }
@@ -282,7 +279,9 @@ fn build_chain_recursive(
                     }
 
                     if let Some(superclass_ref) = superclass {
-                        if let Some(resolved_superclass) = resolve_mixin_ref(index, superclass_ref, fqn) {
+                        if let Some(resolved_superclass) =
+                            resolve_mixin_ref(index, superclass_ref, fqn)
+                        {
                             build_chain_recursive(index, &resolved_superclass, chain, visited);
                         }
                     }

@@ -179,12 +179,12 @@ impl RubyVersionDetector {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 debug!("System ruby version output: {}", version_output);
-                
+
                 // Use the new comprehensive version parsing that handles MRI, JRuby, and TruffleRuby
                 if let Some(version) = RubyVersion::parse_from_version_output(&version_output) {
                     return Some(version);
                 }
-                
+
                 // Fallback to old parsing for compatibility
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
                     debug!("Fallback parsing for version: {}", version_part);
