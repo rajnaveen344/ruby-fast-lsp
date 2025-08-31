@@ -876,7 +876,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -935,7 +935,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -982,7 +982,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -1028,7 +1028,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -1076,7 +1076,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -1122,7 +1122,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Local(scope_stack) => {
+                    crate::types::ruby_variable::RubyVariableKind::Local(scope_stack) => {
                         assert!(
                             !scope_stack.is_empty(),
                             "Local variable should have scope stack"
@@ -1167,7 +1167,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Instance => {
+                    crate::types::ruby_variable::RubyVariableKind::Instance => {
                         // Instance variables don't need additional scope context
                         // Their scope is determined by the namespace context
                     }
@@ -1215,7 +1215,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Instance => {
+                    crate::types::ruby_variable::RubyVariableKind::Instance => {
                         // Instance variable scope is determined by namespace context
                     }
                     _ => panic!("Expected Instance variable type"),
@@ -1262,7 +1262,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Class => {
+                    crate::types::ruby_variable::RubyVariableKind::Class => {
                         // Class variables scope is determined by namespace context
                     }
                     _ => panic!(
@@ -1306,7 +1306,7 @@ end
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Class => {
+                    crate::types::ruby_variable::RubyVariableKind::Class => {
                         // Class variables are shared across inheritance hierarchy
                     }
                     _ => panic!("Expected Class variable type"),
@@ -1365,7 +1365,7 @@ puts $global_var
         match identifier {
             Identifier::RubyVariable { iden } => {
                 match iden.variable_type() {
-                    crate::types::ruby_variable::RubyVariableType::Global => {
+                    crate::types::ruby_variable::RubyVariableKind::Global => {
                         // Global variables have no additional scope context
                         // They are accessible from anywhere
                     }
@@ -1414,7 +1414,7 @@ end
             match identifier {
                 Identifier::RubyVariable { iden } => {
                     match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableType::Global => {
+                        crate::types::ruby_variable::RubyVariableKind::Global => {
                             // Special global variables are still global
                         }
                         _ => panic!("Expected Global variable type for {}", expected_name),
@@ -1504,7 +1504,7 @@ end
             match identifier {
                 Identifier::RubyVariable { iden } => {
                     match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableType::Global => {
+                        crate::types::ruby_variable::RubyVariableKind::Global => {
                             // All special global variables should be Global type
                         }
                         _ => panic!("Expected Global variable type for {}", expected_name),
@@ -1540,7 +1540,7 @@ end
             match identifier {
                 Identifier::RubyVariable { iden } => {
                     match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableType::Global => {
+                        crate::types::ruby_variable::RubyVariableKind::Global => {
                             // Global variables have no additional scope context
                         }
                         _ => panic!("Expected Global variable type for $global_var"),
@@ -1562,7 +1562,7 @@ end
             match identifier {
                 Identifier::RubyVariable { iden } => {
                     match iden.variable_type() {
-                        crate::types::ruby_variable::RubyVariableType::Global => {
+                        crate::types::ruby_variable::RubyVariableKind::Global => {
                             // Special global variables are still global
                         }
                         _ => panic!("Expected Global variable type for $LOAD_PATH"),
@@ -1658,13 +1658,13 @@ end
                         };
 
                         match (iden.variable_type(), expected_type) {
-                            (crate::types::ruby_variable::RubyVariableType::Local(_), "Local") => {}
+                            (crate::types::ruby_variable::RubyVariableKind::Local(_), "Local") => {}
                             (
-                                crate::types::ruby_variable::RubyVariableType::Instance,
+                                crate::types::ruby_variable::RubyVariableKind::Instance,
                                 "Instance",
                             ) => {}
-                            (crate::types::ruby_variable::RubyVariableType::Class, "Class") => {}
-                            (crate::types::ruby_variable::RubyVariableType::Global, "Global") => {}
+                            (crate::types::ruby_variable::RubyVariableKind::Class, "Class") => {}
+                            (crate::types::ruby_variable::RubyVariableKind::Global, "Global") => {}
                             _ => panic!(
                                 "Variable type mismatch for {}: expected {}, got {:?}",
                                 expected_name,

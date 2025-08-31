@@ -8,7 +8,7 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_variable::RubyVariableType;
+use crate::types::ruby_variable::RubyVariableKind;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(
@@ -88,7 +88,7 @@ fn find_variable_references(
     if let Some(entries) = index.references.get(fqn) {
         if !entries.is_empty() {
             let filtered_entries: Vec<Location> = match iden.variable_type() {
-                RubyVariableType::Local(_) => entries
+                RubyVariableKind::Local(_) => entries
                     .iter()
                     .filter(|loc| loc.uri == *uri && loc.range.start >= position)
                     .cloned()

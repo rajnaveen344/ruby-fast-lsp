@@ -3,7 +3,7 @@ use ruby_prism::LocalVariableReadNode;
 
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableType},
+    ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::ReferenceVisitor;
@@ -25,7 +25,7 @@ impl ReferenceVisitor {
         for i in (0..lv_stack.len()).rev() {
             // Take all scopes up to the current level
             let scopes = lv_stack[0..=i].to_vec();
-            let var_type = RubyVariableType::Local(scopes);
+            let var_type = RubyVariableKind::Local(scopes);
 
             if let Ok(variable) = RubyVariable::new(&variable_name, var_type) {
                 let fqn = FullyQualifiedName::variable(variable);

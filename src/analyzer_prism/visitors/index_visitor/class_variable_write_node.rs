@@ -7,7 +7,7 @@ use ruby_prism::{
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableType},
+    ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::IndexVisitor;
@@ -17,7 +17,7 @@ impl IndexVisitor {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
 
-        let var = RubyVariable::new(&variable_name, RubyVariableType::Class);
+        let var = RubyVariable::new(&variable_name, RubyVariableKind::Class);
 
         match var {
             Ok(variable) => {

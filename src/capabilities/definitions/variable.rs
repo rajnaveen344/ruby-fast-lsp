@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{Location, Position};
 use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
-use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
+use crate::types::ruby_variable::{RubyVariable, RubyVariableKind};
 
 /// Find definitions for a Ruby variable
 pub fn find_variable_definitions(
@@ -17,11 +17,11 @@ pub fn find_variable_definitions(
     let var_type = variable.variable_type();
 
     match var_type {
-        RubyVariableType::Local(scope_stack) => {
+        RubyVariableKind::Local(scope_stack) => {
             // Handle local variables with scope
             let mut scope_stack = scope_stack.clone();
             while !scope_stack.is_empty() {
-                let var_type = RubyVariableType::Local(scope_stack.clone());
+                let var_type = RubyVariableKind::Local(scope_stack.clone());
                 if let Ok(var) = RubyVariable::new(&var_name, var_type) {
                     let fqn = FullyQualifiedName::variable(var.clone());
                     debug!(
@@ -45,8 +45,8 @@ pub fn find_variable_definitions(
                 scope_stack.pop();
             }
         }
-        RubyVariableType::Instance => {
-            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Instance) {
+        RubyVariableKind::Instance => {
+            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableKind::Instance) {
                 let fqn = FullyQualifiedName::variable(var.clone());
                 debug!("Looking for instance variable definition: {:?}", fqn);
                 if let Some(entries) = index.definitions.get(&fqn.into()) {
@@ -54,9 +54,9 @@ pub fn find_variable_definitions(
                 }
             }
         }
-        RubyVariableType::Class => {
+        RubyVariableKind::Class => {
             // For class variables, we only need to check the class/module scope
-            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Class) {
+            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableKind::Class) {
                 let fqn = FullyQualifiedName::variable(var.clone());
                 debug!("Looking for class variable definition: {:?}", fqn);
                 if let Some(entries) = index.definitions.get(&fqn.into()) {
@@ -64,8 +64,8 @@ pub fn find_variable_definitions(
                 }
             }
         }
-        RubyVariableType::Global => {
-            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableType::Global) {
+        RubyVariableKind::Global => {
+            if let Ok(var) = RubyVariable::new(&var_name, RubyVariableKind::Global) {
                 let fqn = FullyQualifiedName::variable(var.clone());
                 debug!("Looking for global variable definition: {:?}", fqn);
                 if let Some(entries) = index.definitions.get(&fqn.into()) {
@@ -96,7 +96,7 @@ pub fn find_variable_definitions_at_position(
     let var_type = variable.variable_type();
 
     // For local variables, we need position filtering
-    if let RubyVariableType::Local(_) = var_type {
+    if let RubyVariableKind::Local(_) = var_type {
         find_local_variable_definitions_with_position_filter(variable, index, position)
     } else {
         // For non-local variables, position doesn't matter
@@ -110,7 +110,7 @@ fn find_local_variable_definitions_with_position_filter(
     index: &RubyIndex,
     position: Position,
 ) -> Option<Vec<Location>> {
-    let RubyVariableType::Local(scope_stack) = variable.variable_type() else {
+    let RubyVariableKind::Local(scope_stack) = variable.variable_type() else {
         return None;
     };
 
@@ -119,7 +119,7 @@ fn find_local_variable_definitions_with_position_filter(
     let mut scope_stack = scope_stack.clone();
 
     while !scope_stack.is_empty() {
-        let var_type = RubyVariableType::Local(scope_stack.clone());
+        let var_type = RubyVariableKind::Local(scope_stack.clone());
         if let Ok(var) = RubyVariable::new(&var_name, var_type) {
             let fqn = FullyQualifiedName::variable(var.clone());
             debug!(

@@ -2,7 +2,7 @@ use ruby_prism::ParametersNode;
 
 use crate::{
     analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableType},
+    types::ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::{IdentifierVisitor, IdentifierType};
@@ -20,7 +20,7 @@ impl IdentifierVisitor {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type =
-                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                        RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
                         Some(Identifier::RubyVariable { iden: var }),
@@ -39,7 +39,7 @@ impl IdentifierVisitor {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type =
-                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                        RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
                         Some(Identifier::RubyVariable { iden: var }),
@@ -58,7 +58,7 @@ impl IdentifierVisitor {
                     if self.is_position_in_location(&param.location()) {
                         let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
                         let var_type =
-                            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                            RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
                         let var = RubyVariable::new(&param_name, var_type).unwrap();
                         self.set_result(
                             Some(Identifier::RubyVariable { iden: var }),
@@ -77,7 +77,7 @@ impl IdentifierVisitor {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                     let var_type =
-                        RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+                        RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
                     let var = RubyVariable::new(&param_name, var_type).unwrap();
                     self.set_result(
                         Some(Identifier::RubyVariable { iden: var }),

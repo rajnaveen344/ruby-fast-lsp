@@ -2,7 +2,7 @@ use ruby_prism::NumberedReferenceReadNode;
 
 use crate::{
     analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableType},
+    types::ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::{IdentifierVisitor, IdentifierType};
@@ -21,7 +21,7 @@ impl IdentifierVisitor {
         let variable_name = format!("${}", node.number());
         
         // Create a RubyVariable with Global type
-        let variable = match RubyVariable::new(&variable_name, RubyVariableType::Global) {
+        let variable = match RubyVariable::new(&variable_name, RubyVariableKind::Global) {
             Ok(var) => var,
             Err(_) => {
                 // If validation fails, skip this variable

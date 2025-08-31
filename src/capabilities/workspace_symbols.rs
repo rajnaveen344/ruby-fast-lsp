@@ -348,13 +348,13 @@ impl SymbolMatcher {
 /// Convert an Entry to SymbolInformation, filtering out unwanted symbol types
 fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformation> {
     use crate::indexer::entry::entry_kind::EntryKind;
-    use crate::types::ruby_variable::RubyVariableType;
+    use crate::types::ruby_variable::RubyVariableKind;
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
     if let EntryKind::Variable { name, .. } = &entry.kind {
         match name.variable_type() {
-            RubyVariableType::Local(_) => return None, // Exclude local variables
-            RubyVariableType::Instance | RubyVariableType::Class | RubyVariableType::Global => {
+            RubyVariableKind::Local(_) => return None, // Exclude local variables
+            RubyVariableKind::Instance | RubyVariableKind::Class | RubyVariableKind::Global => {
                 // Include instance, class, and global variables
             }
         }

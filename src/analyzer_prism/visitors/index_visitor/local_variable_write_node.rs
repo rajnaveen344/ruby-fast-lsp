@@ -3,13 +3,12 @@ use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
     LocalVariableTargetNode, LocalVariableWriteNode, Location, Node,
 };
-use tower_lsp::lsp_types::{InlayHint, InlayHintLabel};
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableType},
+    ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::IndexVisitor;
@@ -44,7 +43,7 @@ impl IndexVisitor {
 
         let var = RubyVariable::new(
             &variable_name,
-            RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone()),
+            RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone()),
         );
 
         match var {
@@ -169,12 +168,12 @@ impl IndexVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::indexer::index::RubyIndex;
-use crate::type_inference::ruby_type::RubyType;
-use parking_lot::Mutex;
-use ruby_prism::Visit;
-use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
+    use crate::indexer::index::RubyIndex;
+    use crate::type_inference::ruby_type::RubyType;
+    use parking_lot::Mutex;
+    use ruby_prism::Visit;
+    use std::sync::Arc;
+    use tower_lsp::lsp_types::Url;
 
     fn create_test_visitor(content: &str) -> (IndexVisitor, ruby_prism::ParseResult) {
         let uri = Url::parse("file:///test.rb").unwrap();
@@ -207,8 +206,11 @@ use tower_lsp::lsp_types::Url;
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index.file_entries.get(&uri).expect("Should have entries for file");
-        
+        let entries = index
+            .file_entries
+            .get(&uri)
+            .expect("Should have entries for file");
+
         // Find the variable entry and check its type
         let variable_entry = entries.iter().find(|entry| {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
@@ -217,12 +219,19 @@ use tower_lsp::lsp_types::Url;
                 false
             }
         });
-        
-        assert!(variable_entry.is_some(), "No type information was stored by IndexVisitor");
-        
+
+        assert!(
+            variable_entry.is_some(),
+            "No type information was stored by IndexVisitor"
+        );
+
         if let Some(entry) = variable_entry {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(*ruby_type.as_ref().unwrap(), RubyType::string(), "Expected String type");
+                assert_eq!(
+                    *ruby_type.as_ref().unwrap(),
+                    RubyType::string(),
+                    "Expected String type"
+                );
             }
         }
     }
@@ -238,8 +247,11 @@ use tower_lsp::lsp_types::Url;
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index.file_entries.get(&uri).expect("Should have entries for file");
-        
+        let entries = index
+            .file_entries
+            .get(&uri)
+            .expect("Should have entries for file");
+
         // Find the variable entry and check its type
         let variable_entry = entries.iter().find(|entry| {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
@@ -248,12 +260,19 @@ use tower_lsp::lsp_types::Url;
                 false
             }
         });
-        
-        assert!(variable_entry.is_some(), "No type information was stored for integer assignment");
-        
+
+        assert!(
+            variable_entry.is_some(),
+            "No type information was stored for integer assignment"
+        );
+
         if let Some(entry) = variable_entry {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(*ruby_type.as_ref().unwrap(), RubyType::integer(), "Expected Integer type");
+                assert_eq!(
+                    *ruby_type.as_ref().unwrap(),
+                    RubyType::integer(),
+                    "Expected Integer type"
+                );
             }
         }
     }
@@ -269,8 +288,11 @@ use tower_lsp::lsp_types::Url;
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index.file_entries.get(&uri).expect("Should have entries for file");
-        
+        let entries = index
+            .file_entries
+            .get(&uri)
+            .expect("Should have entries for file");
+
         // Find the variable entry and check its type
         let variable_entry = entries.iter().find(|entry| {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
@@ -279,12 +301,19 @@ use tower_lsp::lsp_types::Url;
                 false
             }
         });
-        
-        assert!(variable_entry.is_some(), "No type information was stored for float assignment");
-        
+
+        assert!(
+            variable_entry.is_some(),
+            "No type information was stored for float assignment"
+        );
+
         if let Some(entry) = variable_entry {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(*ruby_type.as_ref().unwrap(), RubyType::float(), "Expected Float type");
+                assert_eq!(
+                    *ruby_type.as_ref().unwrap(),
+                    RubyType::float(),
+                    "Expected Float type"
+                );
             }
         }
     }
@@ -300,8 +329,11 @@ use tower_lsp::lsp_types::Url;
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index.file_entries.get(&uri).expect("Should have entries for file");
-        
+        let entries = index
+            .file_entries
+            .get(&uri)
+            .expect("Should have entries for file");
+
         // Find the variable entry and check its type
         let variable_entry = entries.iter().find(|entry| {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
@@ -310,12 +342,19 @@ use tower_lsp::lsp_types::Url;
                 false
             }
         });
-        
-        assert!(variable_entry.is_some(), "No type information was stored for boolean assignment");
-        
+
+        assert!(
+            variable_entry.is_some(),
+            "No type information was stored for boolean assignment"
+        );
+
         if let Some(entry) = variable_entry {
             if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(*ruby_type.as_ref().unwrap(), RubyType::true_class(), "Expected TrueClass type");
+                assert_eq!(
+                    *ruby_type.as_ref().unwrap(),
+                    RubyType::true_class(),
+                    "Expected TrueClass type"
+                );
             }
         }
     }
@@ -330,12 +369,18 @@ use tower_lsp::lsp_types::Url;
 
         // Verify that unknown types are not stored in entries
         let index = visitor.index.lock();
-        
+
         // Find variable entries and check they don't have type information for unknown types
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                    assert!(ruby_type.is_none(), "Unknown types should not be stored in Variable entries");
+                if let crate::indexer::entry::entry_kind::EntryKind::Variable {
+                    ruby_type, ..
+                } = &entry.kind
+                {
+                    assert!(
+                        ruby_type.is_none(),
+                        "Unknown types should not be stored in Variable entries"
+                    );
                 }
             }
         }
@@ -351,13 +396,16 @@ use tower_lsp::lsp_types::Url;
 
         // Verify that type information is stored in Variable entries
         let index = visitor.index.lock();
-        
+
         let mut found_string_type = false;
         let mut found_integer_type = false;
-        
+
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable { ruby_type, .. } = &entry.kind {
+                if let crate::indexer::entry::entry_kind::EntryKind::Variable {
+                    ruby_type, ..
+                } = &entry.kind
+                {
                     if let Some(t) = ruby_type {
                         if t == &RubyType::string() {
                             found_string_type = true;
@@ -368,9 +416,15 @@ use tower_lsp::lsp_types::Url;
                 }
             }
         }
-        
-        assert!(found_string_type, "Should store String type in Variable entry");
-        assert!(found_integer_type, "Should store Integer type in Variable entry");
+
+        assert!(
+            found_string_type,
+            "Should store String type in Variable entry"
+        );
+        assert!(
+            found_integer_type,
+            "Should store Integer type in Variable entry"
+        );
     }
 
     // Note: test_combined_hints_functionality removed as we've moved to entry-based type storage

@@ -3,10 +3,10 @@ use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyVariable(String, RubyVariableType);
+pub struct RubyVariable(String, RubyVariableKind);
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum RubyVariableType {
+pub enum RubyVariableKind {
     Local(LVScopeStack),
     Instance,
     Class,
@@ -14,12 +14,12 @@ pub enum RubyVariableType {
 }
 
 impl RubyVariable {
-    pub fn new(name: &str, variable_type: RubyVariableType) -> Result<Self, &'static str> {
+    pub fn new(name: &str, variable_type: RubyVariableKind) -> Result<Self, &'static str> {
         match variable_type {
-            RubyVariableType::Local(_) => validate_local_variable(name)?,
-            RubyVariableType::Instance => validate_instance_variable(name)?,
-            RubyVariableType::Class => validate_class_variable(name)?,
-            RubyVariableType::Global => validate_global_variable(name)?,
+            RubyVariableKind::Local(_) => validate_local_variable(name)?,
+            RubyVariableKind::Instance => validate_instance_variable(name)?,
+            RubyVariableKind::Class => validate_class_variable(name)?,
+            RubyVariableKind::Global => validate_global_variable(name)?,
         };
 
         Ok(RubyVariable(name.to_string(), variable_type))
@@ -29,7 +29,7 @@ impl RubyVariable {
         &self.0
     }
 
-    pub fn variable_type(&self) -> &RubyVariableType {
+    pub fn variable_type(&self) -> &RubyVariableKind {
         &self.1
     }
 }
@@ -149,10 +149,10 @@ fn validate_global_variable(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
+impl TryFrom<(&str, RubyVariableKind)> for RubyVariable {
     type Error = &'static str;
 
-    fn try_from(value: (&str, RubyVariableType)) -> Result<Self, Self::Error> {
+    fn try_from(value: (&str, RubyVariableKind)) -> Result<Self, Self::Error> {
         let (name, variable_type) = value;
         RubyVariable::new(name, variable_type)
     }
@@ -161,10 +161,10 @@ impl TryFrom<(&str, RubyVariableType)> for RubyVariable {
 impl fmt::Display for RubyVariable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variable_type() {
-            RubyVariableType::Local(_) => write!(f, "{}", self.0),
-            RubyVariableType::Instance => write!(f, "{}", self.0),
-            RubyVariableType::Class => write!(f, "{}", self.0),
-            RubyVariableType::Global => write!(f, "{}", self.0),
+            RubyVariableKind::Local(_) => write!(f, "{}", self.0),
+            RubyVariableKind::Instance => write!(f, "{}", self.0),
+            RubyVariableKind::Class => write!(f, "{}", self.0),
+            RubyVariableKind::Global => write!(f, "{}", self.0),
         }
     }
 }
@@ -176,12 +176,12 @@ mod tests {
     #[test]
     fn test_local_variable_valid() {
         let scope_stack = LVScopeStack::new();
-        let result = RubyVariable::new("foo", RubyVariableType::Local(scope_stack.clone()));
+        let result = RubyVariable::new("foo", RubyVariableKind::Local(scope_stack.clone()));
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "foo");
 
-        if let RubyVariableType::Local(stack) = var.variable_type() {
+        if let RubyVariableKind::Local(stack) = var.variable_type() {
             assert_eq!(stack, &scope_stack);
         } else {
             panic!("Expected Local variant");
@@ -192,136 +192,136 @@ mod tests {
     fn test_local_variable_with_different_scopes() {
         let scope_stack = LVScopeStack::new();
         // Test method scope
-        let result = RubyVariable::new("foo", RubyVariableType::Local(scope_stack.clone()));
+        let result = RubyVariable::new("foo", RubyVariableKind::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test block scope
-        let result = RubyVariable::new("bar", RubyVariableType::Local(scope_stack.clone()));
+        let result = RubyVariable::new("bar", RubyVariableKind::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test top level scope
-        let result = RubyVariable::new("baz", RubyVariableType::Local(scope_stack.clone()));
+        let result = RubyVariable::new("baz", RubyVariableKind::Local(scope_stack.clone()));
         assert!(result.is_ok());
 
         // Test explicit block local scope
-        let result = RubyVariable::new("qux", RubyVariableType::Local(scope_stack));
+        let result = RubyVariable::new("qux", RubyVariableKind::Local(scope_stack));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_with_underscore() {
         let scope_stack = LVScopeStack::new();
-        let result = RubyVariable::new("_foo", RubyVariableType::Local(scope_stack));
+        let result = RubyVariable::new("_foo", RubyVariableKind::Local(scope_stack));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_local_variable_invalid_uppercase() {
         let scope_stack = LVScopeStack::new();
-        let result = RubyVariable::new("Foo", RubyVariableType::Local(scope_stack));
+        let result = RubyVariable::new("Foo", RubyVariableKind::Local(scope_stack));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_local_variable_invalid_empty() {
         let scope_stack = LVScopeStack::new();
-        let result = RubyVariable::new("", RubyVariableType::Local(scope_stack));
+        let result = RubyVariable::new("", RubyVariableKind::Local(scope_stack));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_instance_variable_valid() {
-        let result = RubyVariable::new("@foo", RubyVariableType::Instance);
+        let result = RubyVariable::new("@foo", RubyVariableKind::Instance);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_instance_variable_invalid_no_at() {
-        let result = RubyVariable::new("foo", RubyVariableType::Instance);
+        let result = RubyVariable::new("foo", RubyVariableKind::Instance);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_instance_variable_invalid_empty_after_at() {
-        let result = RubyVariable::new("@", RubyVariableType::Instance);
+        let result = RubyVariable::new("@", RubyVariableKind::Instance);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_class_variable_valid() {
-        let result = RubyVariable::new("@@foo", RubyVariableType::Class);
+        let result = RubyVariable::new("@@foo", RubyVariableKind::Class);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_class_variable_invalid_single_at() {
-        let result = RubyVariable::new("@foo", RubyVariableType::Class);
+        let result = RubyVariable::new("@foo", RubyVariableKind::Class);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_class_variable_invalid_empty_after_at() {
-        let result = RubyVariable::new("@@", RubyVariableType::Class);
+        let result = RubyVariable::new("@@", RubyVariableKind::Class);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_global_variable_valid() {
-        let result = RubyVariable::new("$foo", RubyVariableType::Global);
+        let result = RubyVariable::new("$foo", RubyVariableKind::Global);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_global_variable_special_valid() {
         // Numbered references
-        let result = RubyVariable::new("$1", RubyVariableType::Global);
+        let result = RubyVariable::new("$1", RubyVariableKind::Global);
         assert!(result.is_ok());
         
-        let result = RubyVariable::new("$2", RubyVariableType::Global);
+        let result = RubyVariable::new("$2", RubyVariableKind::Global);
         assert!(result.is_ok());
 
         // Special global variables
-        let result = RubyVariable::new("$_", RubyVariableType::Global);
+        let result = RubyVariable::new("$_", RubyVariableKind::Global);
         assert!(result.is_ok());
         
-        let result = RubyVariable::new("$!", RubyVariableType::Global);
+        let result = RubyVariable::new("$!", RubyVariableKind::Global);
         assert!(result.is_ok());
         
-        let result = RubyVariable::new("$$", RubyVariableType::Global);
+        let result = RubyVariable::new("$$", RubyVariableKind::Global);
         assert!(result.is_ok());
         
         // Other common special globals
-        let result = RubyVariable::new("$?", RubyVariableType::Global);
+        let result = RubyVariable::new("$?", RubyVariableKind::Global);
         assert!(result.is_ok());
         
-        let result = RubyVariable::new("$&", RubyVariableType::Global);
+        let result = RubyVariable::new("$&", RubyVariableKind::Global);
         assert!(result.is_ok());
         
-        let result = RubyVariable::new("$~", RubyVariableType::Global);
+        let result = RubyVariable::new("$~", RubyVariableKind::Global);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_global_variable_invalid_no_dollar() {
-        let result = RubyVariable::new("foo", RubyVariableType::Global);
+        let result = RubyVariable::new("foo", RubyVariableKind::Global);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_global_variable_invalid_empty_after_dollar() {
-        let result = RubyVariable::new("$", RubyVariableType::Global);
+        let result = RubyVariable::new("$", RubyVariableKind::Global);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_try_from() {
         let scope_stack = LVScopeStack::new();
-        let result = RubyVariable::try_from(("foo", RubyVariableType::Local(scope_stack)));
+        let result = RubyVariable::try_from(("foo", RubyVariableKind::Local(scope_stack)));
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "foo");
 
-        let result = RubyVariable::try_from(("@bar", RubyVariableType::Instance));
+        let result = RubyVariable::try_from(("@bar", RubyVariableKind::Instance));
         assert!(result.is_ok());
         let var = result.unwrap();
         assert_eq!(var.name(), "@bar");
@@ -330,16 +330,16 @@ mod tests {
     #[test]
     fn test_display() {
         let scope_stack = LVScopeStack::new();
-        let var = RubyVariable::new("foo", RubyVariableType::Local(scope_stack)).unwrap();
+        let var = RubyVariable::new("foo", RubyVariableKind::Local(scope_stack)).unwrap();
         assert_eq!(format!("{}", var), "foo");
 
-        let var = RubyVariable::new("@bar", RubyVariableType::Instance).unwrap();
+        let var = RubyVariable::new("@bar", RubyVariableKind::Instance).unwrap();
         assert_eq!(format!("{}", var), "@bar");
 
-        let var = RubyVariable::new("@@baz", RubyVariableType::Class).unwrap();
+        let var = RubyVariable::new("@@baz", RubyVariableKind::Class).unwrap();
         assert_eq!(format!("{}", var), "@@baz");
 
-        let var = RubyVariable::new("$qux", RubyVariableType::Global).unwrap();
+        let var = RubyVariable::new("$qux", RubyVariableKind::Global).unwrap();
         assert_eq!(format!("{}", var), "$qux");
     }
 }

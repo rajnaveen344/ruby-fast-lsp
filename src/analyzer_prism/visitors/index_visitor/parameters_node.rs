@@ -4,7 +4,7 @@ use ruby_prism::ParametersNode;
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
-    ruby_variable::{RubyVariable, RubyVariableType},
+    ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::IndexVisitor;
@@ -63,7 +63,7 @@ impl IndexVisitor {
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
         let var = RubyVariable::new(
             param_name,
-            RubyVariableType::Local(self.scope_tracker.get_lv_stack().to_vec()),
+            RubyVariableKind::Local(self.scope_tracker.get_lv_stack().to_vec()),
         );
 
         match var {

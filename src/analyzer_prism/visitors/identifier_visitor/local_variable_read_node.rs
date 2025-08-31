@@ -2,7 +2,7 @@ use ruby_prism::{LocalVariableReadNode, LocalVariableWriteNode, ClassVariableRea
 
 use crate::{
     analyzer_prism::Identifier,
-    types::ruby_variable::{RubyVariable, RubyVariableType},
+    types::ruby_variable::{RubyVariable, RubyVariableKind},
 };
 
 use super::{IdentifierVisitor, IdentifierType};
@@ -14,7 +14,7 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+        let var_type = RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
         let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
@@ -37,7 +37,7 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableType::Local(self.scope_tracker.get_lv_stack().clone());
+            let var_type = RubyVariableKind::Local(self.scope_tracker.get_lv_stack().clone());
             let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
@@ -59,7 +59,7 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableType::Class;
+        let var_type = RubyVariableKind::Class;
         let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
@@ -82,7 +82,7 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableType::Class;
+            let var_type = RubyVariableKind::Class;
             let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
@@ -104,7 +104,7 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableType::Instance;
+        let var_type = RubyVariableKind::Instance;
         let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
@@ -127,7 +127,7 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableType::Instance;
+            let var_type = RubyVariableKind::Instance;
             let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
@@ -149,7 +149,7 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let var_type = RubyVariableType::Global;
+        let var_type = RubyVariableKind::Global;
         let var = RubyVariable::new(&var_name, var_type).unwrap();
 
         self.set_result(
@@ -172,7 +172,7 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-            let var_type = RubyVariableType::Global;
+            let var_type = RubyVariableKind::Global;
             let var = RubyVariable::new(&var_name, var_type).unwrap();
 
             self.set_result(
