@@ -348,16 +348,14 @@ impl SymbolMatcher {
 /// Convert an Entry to SymbolInformation, filtering out unwanted symbol types
 fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformation> {
     use crate::indexer::entry::entry_kind::EntryKind;
-    use crate::types::ruby_variable::RubyVariableKind;
+
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
-    if let EntryKind::Variable { name, .. } = &entry.kind {
-        match name.variable_type() {
-            RubyVariableKind::Local(_) => return None, // Exclude local variables
-            RubyVariableKind::Instance | RubyVariableKind::Class | RubyVariableKind::Global => {
-                // Include instance, class, and global variables
-            }
+    match &entry.kind {
+        EntryKind::LocalVariable { .. } => {
+            return None; // Exclude local variables
         }
+        _ => {}
     }
 
     let name = extract_display_name(&entry.fqn);
@@ -383,7 +381,10 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
         EntryKind::Module { .. } => SymbolKind::MODULE,
         EntryKind::Method { .. } => SymbolKind::METHOD,
         EntryKind::Constant { .. } => SymbolKind::CONSTANT,
-        EntryKind::Variable { .. } => SymbolKind::VARIABLE,
+        EntryKind::LocalVariable { .. }
+        | EntryKind::InstanceVariable { .. }
+        | EntryKind::ClassVariable { .. }
+        | EntryKind::GlobalVariable { .. } => SymbolKind::VARIABLE,
     }
 }
 

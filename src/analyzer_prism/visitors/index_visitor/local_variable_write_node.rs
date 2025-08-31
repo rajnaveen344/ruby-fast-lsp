@@ -210,7 +210,7 @@ mod tests {
         // Find the variable entry and check its type
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -218,7 +218,7 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
                 assert_eq!(*r#type, RubyType::string(), "Expected String type");
             }
         }
@@ -243,7 +243,7 @@ mod tests {
         // Find the variable entry and check its type
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -251,7 +251,7 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
                 assert_eq!(*r#type, RubyType::integer(), "Expected Integer type");
             }
         }
@@ -276,7 +276,7 @@ mod tests {
         // Find the variable entry and check its type
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -284,7 +284,7 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
                 assert_eq!(*r#type, RubyType::float(), "Expected Float type");
             }
         }
@@ -309,7 +309,7 @@ mod tests {
         // Find the variable entry and check its type
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -317,7 +317,7 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
                 assert_eq!(*r#type, RubyType::true_class(), "Expected TrueClass type");
             }
         }
@@ -337,13 +337,17 @@ mod tests {
         // Find variable entries and check they don't have type information for unknown types
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable { r#type, .. } =
-                    &entry.kind
-                {
-                    assert!(
-                        *r#type == RubyType::Unknown,
-                        "Unknown types should be stored as RubyType::Unknown in Variable entries"
-                    );
+                match &entry.kind {
+                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable { r#type, .. } => {
+                        assert!(
+                            *r#type == RubyType::Unknown,
+                            "Unknown types should be stored as RubyType::Unknown in Variable entries"
+                        );
+                    }
+                    _ => {}
                 }
             }
         }
@@ -365,14 +369,18 @@ mod tests {
 
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable { r#type, .. } =
-                    &entry.kind
-                {
-                    if *r#type == RubyType::string() {
-                        found_string_type = true;
-                    } else if *r#type == RubyType::integer() {
-                        found_integer_type = true;
+                match &entry.kind {
+                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable { r#type, .. }
+                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable { r#type, .. } => {
+                        if *r#type == RubyType::string() {
+                            found_string_type = true;
+                        } else if *r#type == RubyType::integer() {
+                            found_integer_type = true;
+                        }
                     }
+                    _ => {}
                 }
             }
         }

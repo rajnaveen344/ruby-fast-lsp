@@ -17,15 +17,12 @@ impl IndexVisitor {
     fn process_class_variable_write(&mut self, name: &[u8], name_loc: ruby_prism::Location) {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
-
         let var = RubyVariable::new(&variable_name, RubyVariableKind::Class);
 
         match var {
             Ok(variable) => {
                 // Class variables are associated with the class/module, not with methods
                 let fqn = FullyQualifiedName::variable(variable.clone());
-
-
 
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
@@ -36,7 +33,6 @@ impl IndexVisitor {
                 if let Ok(entry) = entry {
                     let mut index = self.index.lock();
                     index.add_entry(entry);
-    
                 } else {
                     error!("Error creating entry for class variable: {}", variable_name);
                 }

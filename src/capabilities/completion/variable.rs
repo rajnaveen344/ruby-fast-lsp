@@ -18,19 +18,60 @@ pub fn find_variable_completions(
         let scope_id = scope.scope_id();
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let EntryKind::Variable { name, .. } = &entry.kind {
-                    let var_name = name.name().to_string();
-                    if seen_variables.insert(var_name.clone()) {
-                        completions.push(CompletionItem {
-                            label: var_name,
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: Some(" local_variable".to_string()),
-                                description: None,
-                            }),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
+                match &entry.kind {
+                    EntryKind::LocalVariable { name, .. } => {
+                        if seen_variables.insert(name.clone()) {
+                            completions.push(CompletionItem {
+                                label: name.clone(),
+                                label_details: Some(CompletionItemLabelDetails {
+                                    detail: Some(" local_variable".to_string()),
+                                    description: None,
+                                }),
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
                     }
+                    EntryKind::InstanceVariable { name, .. } => {
+                        if seen_variables.insert(name.clone()) {
+                            completions.push(CompletionItem {
+                                label: name.clone(),
+                                label_details: Some(CompletionItemLabelDetails {
+                                    detail: Some(" instance_variable".to_string()),
+                                    description: None,
+                                }),
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    EntryKind::ClassVariable { name, .. } => {
+                        if seen_variables.insert(name.clone()) {
+                            completions.push(CompletionItem {
+                                label: name.clone(),
+                                label_details: Some(CompletionItemLabelDetails {
+                                    detail: Some(" class_variable".to_string()),
+                                    description: None,
+                                }),
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    EntryKind::GlobalVariable { name, .. } => {
+                        if seen_variables.insert(name.clone()) {
+                            completions.push(CompletionItem {
+                                label: name.clone(),
+                                label_details: Some(CompletionItemLabelDetails {
+                                    detail: Some(" global_variable".to_string()),
+                                    description: None,
+                                }),
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

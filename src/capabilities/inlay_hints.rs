@@ -5,6 +5,7 @@ use tower_lsp::lsp_types::{
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::server::RubyLanguageServer;
+use crate::type_inference::ruby_type::RubyType;
 
 pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
     InlayHintServerCapabilities::Options(InlayHintOptions {
@@ -29,20 +30,28 @@ pub async fn handle_inlay_hints(
 
     if let Some(entries) = index.file_entries.get(&uri) {
         for entry in entries {
-            if let EntryKind::Variable { r#type, .. } = &entry.kind {
-                // Create type hint at the end of the variable name
-                let end_position = entry.location.range.end;
-                let type_hint = InlayHint {
-                    position: end_position,
-                    label: InlayHintLabel::String(format!(": {}", r#type.to_string())),
-                    kind: None,
-                    text_edits: None,
-                    tooltip: None,
-                    padding_left: None,
-                    padding_right: None,
-                    data: None,
-                };
-                    all_hints.push(type_hint);
+            match &entry.kind {
+                EntryKind::LocalVariable { r#type, .. }
+                 | EntryKind::InstanceVariable { r#type, .. }
+                 | EntryKind::ClassVariable { r#type, .. }
+                 | EntryKind::GlobalVariable { r#type, .. } => {
+                     if *r#type != RubyType::Unknown {
+                        // Create type hint at the end of the variable name
+                        let end_position = entry.location.range.end;
+                        let type_hint = InlayHint {
+                            position: end_position,
+                            label: InlayHintLabel::String(format!(": {}", r#type.to_string())),
+                            kind: None,
+                            text_edits: None,
+                            tooltip: None,
+                            padding_left: None,
+                            padding_right: None,
+                            data: None,
+                        };
+                        all_hints.push(type_hint);
+                    }
+                }
+                _ => {}
             }
         }
     }

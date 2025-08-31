@@ -4,6 +4,7 @@ use crate::indexer::entry::MixinRef;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
+    scope::LVScopeStack,
 };
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
@@ -33,8 +34,21 @@ pub enum EntryKind {
         value: Option<String>,
         visibility: Option<ConstVisibility>,
     },
-    Variable {
-        name: RubyVariable,
+    LocalVariable {
+        name: String,
+        scope_stack: LVScopeStack,
+        r#type: RubyType,
+    },
+    InstanceVariable {
+        name: String,
+        r#type: RubyType,
+    },
+    ClassVariable {
+        name: String,
+        r#type: RubyType,
+    },
+    GlobalVariable {
+        name: String,
         r#type: RubyType,
     },
 }
@@ -109,8 +123,36 @@ impl EntryKind {
         }
     }
 
+    pub fn new_local_variable(name: String, scope_stack: LVScopeStack, r#type: RubyType) -> Self {
+        EntryKind::LocalVariable {
+            name,
+            scope_stack,
+            r#type,
+        }
+    }
+
+    pub fn new_instance_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::InstanceVariable { name, r#type }
+    }
+
+    pub fn new_class_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::ClassVariable { name, r#type }
+    }
+
+    pub fn new_global_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::GlobalVariable { name, r#type }
+    }
+
     pub fn new_variable(name: RubyVariable, r#type: RubyType) -> Self {
-        EntryKind::Variable { name, r#type }
+        use crate::types::ruby_variable::RubyVariableKind;
+        match name.variable_type() {
+            RubyVariableKind::Local(scope_stack) => {
+                Self::new_local_variable(name.name().clone(), scope_stack.clone(), r#type)
+            }
+            RubyVariableKind::Instance => Self::new_instance_variable(name.name().clone(), r#type),
+            RubyVariableKind::Class => Self::new_class_variable(name.name().clone(), r#type),
+            RubyVariableKind::Global => Self::new_global_variable(name.name().clone(), r#type),
+        }
     }
 }
 
@@ -142,8 +184,17 @@ impl Display for EntryKind {
                     }
                 )
             }
-            EntryKind::Variable { name, r#type, .. } => {
-                write!(f, "Variable: {} ({})", name, r#type)
+            EntryKind::LocalVariable { name, r#type, .. } => {
+                write!(f, "Local Variable: {} ({})", name, r#type)
+            }
+            EntryKind::InstanceVariable { name, r#type, .. } => {
+                write!(f, "Instance Variable: {} ({})", name, r#type)
+            }
+            EntryKind::ClassVariable { name, r#type, .. } => {
+                write!(f, "Class Variable: {} ({})", name, r#type)
+            }
+            EntryKind::GlobalVariable { name, r#type, .. } => {
+                write!(f, "Global Variable: {} ({})", name, r#type)
             }
         }
     }
