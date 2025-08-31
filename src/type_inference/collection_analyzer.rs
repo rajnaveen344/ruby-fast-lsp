@@ -348,11 +348,13 @@ mod tests {
             let array_info = analyzer.analyze_array(node).unwrap();
             assert!(array_info.is_homogeneous);
             assert_eq!(array_info.element_types.len(), 2);
-            // All elements should be Array type
+            // All elements should be Array type with Integer elements
             for element_type in &array_info.element_types {
                 assert_eq!(
                     *element_type,
-                    RubyType::Class(FullyQualifiedName::try_from("Array").unwrap())
+                    RubyType::Array(vec![
+                        RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
+                    ])
                 );
             }
         });

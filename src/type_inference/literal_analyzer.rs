@@ -80,18 +80,14 @@ impl LiteralAnalyzer {
             ));
         }
 
-        // Array literals - simplified to just return Array class
-        if node.as_array_node().is_some() {
-            return Some(RubyType::Class(
-                FullyQualifiedName::try_from("Array").unwrap(),
-            ));
+        // Array literals - analyze element types
+        if let Some(array_node) = node.as_array_node() {
+            return Some(self.analyze_array_literal(&array_node));
         }
 
-        // Hash literals - simplified to just return Hash class
-        if node.as_hash_node().is_some() {
-            return Some(RubyType::Class(
-                FullyQualifiedName::try_from("Hash").unwrap(),
-            ));
+        // Hash literals - analyze key and value types
+        if let Some(hash_node) = node.as_hash_node() {
+            return Some(self.analyze_hash_literal(&hash_node));
         }
 
         // Range literals - simplified to just return Range class
@@ -115,6 +111,90 @@ impl LiteralAnalyzer {
 
         // Other nodes are not literals
         None
+    }
+
+    /// Analyze an array literal and infer element types
+    fn analyze_array_literal(&self, array_node: &ArrayNode) -> RubyType {
+        let mut element_types = Vec::new();
+        
+        for element in array_node.elements().iter() {
+            if let Some(element_type) = self.analyze_literal(&element) {
+                element_types.push(element_type);
+            } else {
+                // If we can't infer the type, use Any
+                element_types.push(RubyType::Any);
+            }
+        }
+        
+        // If array is empty, return Array with Unknown element type
+        if element_types.is_empty() {
+            return RubyType::Array(vec![RubyType::Unknown]);
+        }
+        
+        // Remove duplicate types
+        element_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        element_types.dedup();
+        
+        // Return Array with deduplicated element types
+        RubyType::Array(element_types)
+    }
+    
+    /// Analyze a hash literal and infer key and value types
+    fn analyze_hash_literal(&self, hash_node: &HashNode) -> RubyType {
+        let mut key_types = Vec::new();
+        let mut value_types = Vec::new();
+        
+        for element in hash_node.elements().iter() {
+            if let Some(assoc_node) = element.as_assoc_node() {
+                // Analyze key
+                if let Some(key_type) = self.analyze_literal(&assoc_node.key()) {
+                    key_types.push(key_type);
+                } else {
+                    key_types.push(RubyType::Any);
+                }
+                
+                // Analyze value
+                if let Some(value_type) = self.analyze_literal(&assoc_node.value()) {
+                    value_types.push(value_type);
+                } else {
+                    value_types.push(RubyType::Any);
+                }
+            } else if let Some(assoc_splat_node) = element.as_assoc_splat_node() {
+                // Handle splat operator (**hash)
+                if let Some(value) = assoc_splat_node.value() {
+                    if let Some(splat_type) = self.analyze_literal(&value) {
+                        // If it's a hash type, extract its key/value types
+                        match splat_type {
+                            RubyType::Hash(keys, values) => {
+                                key_types.extend(keys);
+                                value_types.extend(values);
+                            }
+                            _ => {
+                                // Unknown hash splat, assume Any types
+                                key_types.push(RubyType::Any);
+                                value_types.push(RubyType::Any);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If hash is empty, return Hash with Unknown key/value types
+        if key_types.is_empty() && value_types.is_empty() {
+            return RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]);
+        }
+        
+        // Remove duplicate key types
+        key_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        key_types.dedup();
+        
+        // Remove duplicate value types
+        value_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        value_types.dedup();
+        
+        // Return Hash with deduplicated key and value types
+        RubyType::Hash(key_types, value_types)
     }
 
     /// Check if a node represents a literal value
@@ -269,7 +349,9 @@ mod tests {
             let ruby_type = analyzer.analyze_literal(node).unwrap();
             assert_eq!(
                 ruby_type,
-                RubyType::Class(FullyQualifiedName::try_from("Array").unwrap())
+                RubyType::Array(vec![
+                    RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
+                ])
             );
         });
     }
@@ -281,7 +363,14 @@ mod tests {
             let ruby_type = analyzer.analyze_literal(node).unwrap();
             assert_eq!(
                 ruby_type,
-                RubyType::Class(FullyQualifiedName::try_from("Hash").unwrap())
+                RubyType::Hash(
+                    vec![
+                        RubyType::Class(FullyQualifiedName::try_from("Symbol").unwrap())
+                    ],
+                    vec![
+                        RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
+                    ]
+                )
             );
         });
     }
