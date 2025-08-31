@@ -4,6 +4,7 @@ use crate::indexer::entry::MixinRef;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
 };
+use crate::type_inference::ruby_type::RubyType;
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -34,6 +35,7 @@ pub enum EntryKind {
     },
     Variable {
         name: RubyVariable,
+        ruby_type: Option<RubyType>,
     },
 }
 
@@ -106,6 +108,13 @@ impl EntryKind {
             extends: Vec::new(),
         }
     }
+
+    pub fn new_variable(name: RubyVariable, ruby_type: Option<RubyType>) -> Self {
+        Self::Variable {
+            name,
+            ruby_type,
+        }
+    }
 }
 
 impl Display for EntryKind {
@@ -136,7 +145,12 @@ impl Display for EntryKind {
                     }
                 )
             }
-            EntryKind::Variable { name, .. } => write!(f, "Variable: {}", name),
+            EntryKind::Variable { name, ruby_type, .. } => {
+                match ruby_type {
+                    Some(t) => write!(f, "Variable: {} ({})", name, t),
+                    None => write!(f, "Variable: {}", name),
+                }
+            }
         }
     }
 }

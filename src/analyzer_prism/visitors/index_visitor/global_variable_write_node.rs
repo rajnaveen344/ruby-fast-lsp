@@ -29,9 +29,7 @@ impl IndexVisitor {
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
                     .location(self.document.prism_location_to_lsp_location(&name_loc))
-                    .kind(EntryKind::Variable {
-                        name: variable.clone(),
-                    })
+                    .kind(EntryKind::new_variable(variable.clone(), None))
                     .build();
 
                 if let Ok(entry) = entry {

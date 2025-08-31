@@ -1,7 +1,10 @@
 use log::debug;
 use ruby_prism::LocalVariableReadNode;
 
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_variable::{RubyVariable, RubyVariableType}};
+use crate::types::{
+    fully_qualified_name::FullyQualifiedName,
+    ruby_variable::{RubyVariable, RubyVariableType},
+};
 
 use super::ReferenceVisitor;
 

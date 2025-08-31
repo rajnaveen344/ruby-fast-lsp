@@ -8,6 +8,7 @@ use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
+use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
@@ -29,6 +30,7 @@ pub struct IndexVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
+    pub literal_analyzer: LiteralAnalyzer,
 }
 
 impl IndexVisitor {
@@ -41,6 +43,7 @@ impl IndexVisitor {
             document,
             scope_tracker,
             dependency_tracker: None,
+            literal_analyzer: LiteralAnalyzer::new(),
         }
     }
 

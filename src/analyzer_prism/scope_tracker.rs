@@ -5,9 +5,6 @@ use crate::types::{
     ruby_namespace::RubyConstant,
     scope::{LVScope, LVScopeKind, LVScopeStack},
 };
-use crate::type_inference::typed_variable::{TypedVariable, VariableTypeContext};
-use crate::type_inference::ruby_type::RubyType;
-use crate::types::ruby_variable::{RubyVariable, RubyVariableType};
 
 #[derive(Debug, Clone)]
 pub struct ScopeTracker {
@@ -16,10 +13,6 @@ pub struct ScopeTracker {
 
     /// Local-variable scopes (method/block/rescue/lambda)
     lv_stack: LVScopeStack,
-
-    /// Type information for variables in each scope
-    /// Each element corresponds to a scope in lv_stack
-    type_contexts: Vec<VariableTypeContext>,
 }
 
 /// Mixed scope frame – either a namespace or a `class << self` marker
@@ -56,9 +49,7 @@ impl ScopeTracker {
             LVScopeKind::Constant,
         );
         lv_stack.push(top_lv_scope);
-        let mut type_contexts = Vec::new();
-        type_contexts.push(VariableTypeContext::new());
-        Self { frames, lv_stack, type_contexts }
+        Self { frames, lv_stack }
     }
 }
 
@@ -92,12 +83,10 @@ impl ScopeTracker {
     // ---------- lv-scope helpers ----------
     pub fn push_lv_scope(&mut self, scope: LVScope) {
         self.lv_stack.push(scope);
-        self.type_contexts.push(VariableTypeContext::new());
     }
 
     pub fn pop_lv_scope(&mut self) {
         self.lv_stack.pop();
-        self.type_contexts.pop();
     }
 
     pub fn current_lv_scope(&self) -> Option<&LVScope> {
@@ -128,8 +117,8 @@ impl ScopeTracker {
     /// Returns the current method context based on the local variable scope stack.
     /// This helps determine whether bare method calls should be treated as instance or class methods.
     pub fn current_method_context(&self) -> Option<crate::indexer::entry::MethodKind> {
-        use crate::types::scope::LVScopeKind;
         use crate::indexer::entry::MethodKind;
+        use crate::types::scope::LVScopeKind;
 
         // Look for the most recent method scope in the LV stack
         for scope in self.lv_stack.iter().rev() {
@@ -147,71 +136,6 @@ impl ScopeTracker {
         }
 
         None
-    }
-
-    // Type inference methods
-
-    /// Add a typed variable to the current scope
-    pub fn add_typed_variable(&mut self, typed_var: TypedVariable) {
-        if let Some(current_context) = self.type_contexts.last_mut() {
-            current_context.add_variable(typed_var);
-        }
-    }
-
-    /// Find a typed variable in the current scope chain
-    pub fn find_typed_variable(&self, name: &str, var_type: &RubyVariableType) -> Option<&TypedVariable> {
-        // Search from current scope up to parent scopes
-        for context in self.type_contexts.iter().rev() {
-            if let Some(var) = context.find_variable(name, var_type) {
-                return Some(var);
-            }
-        }
-        None
-    }
-
-    /// Find any typed variable by name (regardless of type)
-    pub fn find_any_typed_variable(&self, name: &str) -> Option<&TypedVariable> {
-        // Search from current scope up to parent scopes
-        for context in self.type_contexts.iter().rev() {
-            if let Some(var) = context.find_any_variable(name) {
-                return Some(var);
-            }
-        }
-        None
-    }
-
-    /// Get the current variable type context
-    pub fn current_type_context(&self) -> Option<&VariableTypeContext> {
-        self.type_contexts.last()
-    }
-
-    /// Get all variables in the current scope
-    pub fn current_scope_variables(&self) -> Vec<&TypedVariable> {
-        if let Some(context) = self.type_contexts.last() {
-            context.all_variables().collect()
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// Update or add a variable with type information
-    pub fn set_variable_type(
-        &mut self,
-        name: &str,
-        var_type: RubyVariableType,
-        ruby_type: RubyType,
-        source_location: Option<LspLocation>,
-    ) {
-        if let Ok(variable) = RubyVariable::new(name, var_type) {
-            let typed_var = TypedVariable::new_inferred(variable, ruby_type, source_location);
-            self.add_typed_variable(typed_var);
-        }
-    }
-
-    /// Get the inferred type of a variable
-    pub fn get_variable_type(&self, name: &str, var_type: &RubyVariableType) -> Option<&RubyType> {
-        self.find_typed_variable(name, var_type)
-            .map(|typed_var| &typed_var.ruby_type)
     }
 }
 
@@ -260,11 +184,6 @@ mod tests {
             doc.offset_to_position(doc_content_len),
         );
         assert_eq!(top_scope.location().range, expected_range);
-
-        // Check type contexts
-        assert_eq!(tracker.type_contexts.len(), 1);
-        let context = tracker.current_type_context().unwrap();
-        assert_eq!(context.all_variables().count(), 0);
     }
 
     // ---------- namespace helpers ----------
@@ -440,75 +359,5 @@ mod tests {
         // Exit singleton
         tracker.exit_singleton();
         assert!(!tracker.in_singleton());
-    }
-
-    // ---------- type inference tests ----------
-    #[test]
-    fn test_typed_variable_management() {
-        use crate::types::scope::LVScopeStack;
-        use tower_lsp::lsp_types::{Position, Range, Url};
-        
-        let mut tracker = ScopeTracker::new(&dummy_document());
-        
-        // Add a local variable with type
-        let lv_scope_stack = LVScopeStack::new();
-        tracker.set_variable_type(
-             "x",
-             RubyVariableType::Local(lv_scope_stack),
-             RubyType::integer(),
-            Some(LspLocation {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Range::new(Position::new(1, 0), Position::new(1, 1)),
-            }),
-        );
-        
-        // Verify we can find the variable
-        let found_var = tracker.find_any_typed_variable("x");
-        assert!(found_var.is_some());
-        let var = found_var.unwrap();
-        assert_eq!(var.name(), "x");
-        assert_eq!(var.ruby_type, RubyType::integer());
-        
-        // Test getting variable type directly
-        let lv_scope_stack = LVScopeStack::new();
-        let var_type = tracker.get_variable_type("x", &RubyVariableType::Local(lv_scope_stack));
-        assert!(var_type.is_some());
-        assert_eq!(*var_type.unwrap(), RubyType::integer());
-        
-        // Test scope isolation - push new scope
-        let new_scope = LVScope::new(
-            1,
-            LspLocation {
-                uri: tracker.lv_stack[0].location().uri.clone(),
-                range: Range::new(
-                    tracker.lv_stack[0].location().range.start,
-                    tracker.lv_stack[0].location().range.end,
-                ),
-            },
-            LVScopeKind::InstanceMethod,
-        );
-        tracker.push_lv_scope(new_scope);
-        
-        // Variable from parent scope should still be accessible
-        let found_var = tracker.find_any_typed_variable("x");
-        assert!(found_var.is_some());
-        
-        // Add variable in new scope
-        let lv_scope_stack = LVScopeStack::new();
-        tracker.set_variable_type(
-             "y",
-             RubyVariableType::Local(lv_scope_stack),
-             RubyType::string(),
-            None,
-        );
-        
-        // Both variables should be accessible
-        assert!(tracker.find_any_typed_variable("x").is_some());
-        assert!(tracker.find_any_typed_variable("y").is_some());
-        
-        // Pop scope - y should no longer be accessible, x should still be
-        tracker.pop_lv_scope();
-        assert!(tracker.find_any_typed_variable("x").is_some());
-        assert!(tracker.find_any_typed_variable("y").is_none());
     }
 }

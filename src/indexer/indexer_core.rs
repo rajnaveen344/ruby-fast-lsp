@@ -1,4 +1,5 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::indexer::index::RubyIndex;
 use crate::indexer::utils;
@@ -53,6 +54,20 @@ impl IndexerCore {
         // Visit the AST to extract definitions only
         use ruby_prism::Visit;
         index_visitor.visit(&node);
+
+        // Also run InlayVisitor to populate structural hints in the document
+        let document_guard = server.docs.lock();
+        if let Some(doc_arc) = document_guard.get(uri) {
+            let document = doc_arc.read();
+            let mut inlay_visitor = InlayVisitor::new(&document);
+            inlay_visitor.visit(&node);
+            let structural_hints = inlay_visitor.inlay_hints();
+            
+            // Store structural hints in the document
+            drop(document); // Release read lock
+            let mut document_mut = doc_arc.write();
+            document_mut.set_inlay_hints(structural_hints);
+        }
 
         debug!(
             "Indexed definitions for {:?} in {:?}",

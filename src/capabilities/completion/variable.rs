@@ -18,7 +18,7 @@ pub fn find_variable_completions(
         let scope_id = scope.scope_id();
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let EntryKind::Variable { name } = &entry.kind {
+                if let EntryKind::Variable { name, .. } = &entry.kind {
                     let var_name = name.name().to_string();
                     if seen_variables.insert(var_name.clone()) {
                         completions.push(CompletionItem {
