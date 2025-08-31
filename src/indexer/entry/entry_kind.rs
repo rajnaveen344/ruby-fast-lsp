@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
 use crate::indexer::entry::MixinRef;
+use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
 };
-use crate::type_inference::ruby_type::RubyType;
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
 
@@ -35,7 +35,7 @@ pub enum EntryKind {
     },
     Variable {
         name: RubyVariable,
-        ruby_type: Option<RubyType>,
+        r#type: RubyType,
     },
 }
 
@@ -109,11 +109,8 @@ impl EntryKind {
         }
     }
 
-    pub fn new_variable(name: RubyVariable, ruby_type: Option<RubyType>) -> Self {
-        Self::Variable {
-            name,
-            ruby_type,
-        }
+    pub fn new_variable(name: RubyVariable, r#type: RubyType) -> Self {
+        EntryKind::Variable { name, r#type }
     }
 }
 
@@ -145,11 +142,8 @@ impl Display for EntryKind {
                     }
                 )
             }
-            EntryKind::Variable { name, ruby_type, .. } => {
-                match ruby_type {
-                    Some(t) => write!(f, "Variable: {} ({})", name, t),
-                    None => write!(f, "Variable: {}", name),
-                }
+            EntryKind::Variable { name, r#type, .. } => {
+                write!(f, "Variable: {} ({})", name, r#type)
             }
         }
     }

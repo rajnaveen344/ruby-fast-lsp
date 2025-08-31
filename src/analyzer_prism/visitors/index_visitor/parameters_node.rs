@@ -2,6 +2,7 @@ use log::error;
 use ruby_prism::ParametersNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName,
     ruby_variable::{RubyVariable, RubyVariableKind},
@@ -75,7 +76,7 @@ impl IndexVisitor {
                 let entry = EntryBuilder::new()
                     .fqn(fqn)
                     .location(self.document.prism_location_to_lsp_location(&location))
-                    .kind(EntryKind::new_variable(variable.clone(), None))
+                    .kind(EntryKind::new_variable(variable.clone(), RubyType::Unknown))
                     .build();
 
                 // Add the entry to the index

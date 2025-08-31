@@ -55,11 +55,7 @@ impl IndexVisitor {
                     .location(self.document.prism_location_to_lsp_location(&name_loc))
                     .kind(EntryKind::new_variable(
                         variable.clone(),
-                        if matches!(inferred_type, RubyType::Unknown) {
-                            None
-                        } else {
-                            Some(inferred_type.clone())
-                        },
+                        inferred_type.clone(),
                     ))
                     .build();
 
@@ -212,13 +208,9 @@ mod tests {
             .expect("Should have entries for file");
 
         // Find the variable entry and check its type
-        let variable_entry = entries.iter().find(|entry| {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                ruby_type.is_some()
-            } else {
-                false
-            }
-        });
+        let variable_entry = entries
+            .iter()
+            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -226,12 +218,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(
-                    *ruby_type.as_ref().unwrap(),
-                    RubyType::string(),
-                    "Expected String type"
-                );
+            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+                assert_eq!(*r#type, RubyType::string(), "Expected String type");
             }
         }
     }
@@ -253,13 +241,9 @@ mod tests {
             .expect("Should have entries for file");
 
         // Find the variable entry and check its type
-        let variable_entry = entries.iter().find(|entry| {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                ruby_type.is_some()
-            } else {
-                false
-            }
-        });
+        let variable_entry = entries
+            .iter()
+            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -267,12 +251,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(
-                    *ruby_type.as_ref().unwrap(),
-                    RubyType::integer(),
-                    "Expected Integer type"
-                );
+            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+                assert_eq!(*r#type, RubyType::integer(), "Expected Integer type");
             }
         }
     }
@@ -294,13 +274,9 @@ mod tests {
             .expect("Should have entries for file");
 
         // Find the variable entry and check its type
-        let variable_entry = entries.iter().find(|entry| {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                ruby_type.is_some()
-            } else {
-                false
-            }
-        });
+        let variable_entry = entries
+            .iter()
+            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -308,12 +284,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(
-                    *ruby_type.as_ref().unwrap(),
-                    RubyType::float(),
-                    "Expected Float type"
-                );
+            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+                assert_eq!(*r#type, RubyType::float(), "Expected Float type");
             }
         }
     }
@@ -335,13 +307,9 @@ mod tests {
             .expect("Should have entries for file");
 
         // Find the variable entry and check its type
-        let variable_entry = entries.iter().find(|entry| {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                ruby_type.is_some()
-            } else {
-                false
-            }
-        });
+        let variable_entry = entries
+            .iter()
+            .find(|entry| matches!(&entry.kind, EntryKind::Variable { .. }));
 
         assert!(
             variable_entry.is_some(),
@@ -349,12 +317,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                assert_eq!(
-                    *ruby_type.as_ref().unwrap(),
-                    RubyType::true_class(),
-                    "Expected TrueClass type"
-                );
+            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+                assert_eq!(*r#type, RubyType::true_class(), "Expected TrueClass type");
             }
         }
     }
@@ -373,13 +337,12 @@ mod tests {
         // Find variable entries and check they don't have type information for unknown types
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable {
-                    ruby_type, ..
-                } = &entry.kind
+                if let crate::indexer::entry::entry_kind::EntryKind::Variable { r#type, .. } =
+                    &entry.kind
                 {
                     assert!(
-                        ruby_type.is_none(),
-                        "Unknown types should not be stored in Variable entries"
+                        *r#type == RubyType::Unknown,
+                        "Unknown types should be stored as RubyType::Unknown in Variable entries"
                     );
                 }
             }
@@ -402,16 +365,13 @@ mod tests {
 
         for entry_vec in index.definitions.values() {
             for entry in entry_vec {
-                if let crate::indexer::entry::entry_kind::EntryKind::Variable {
-                    ruby_type, ..
-                } = &entry.kind
+                if let crate::indexer::entry::entry_kind::EntryKind::Variable { r#type, .. } =
+                    &entry.kind
                 {
-                    if let Some(t) = ruby_type {
-                        if t == &RubyType::string() {
-                            found_string_type = true;
-                        } else if t == &RubyType::integer() {
-                            found_integer_type = true;
-                        }
+                    if *r#type == RubyType::string() {
+                        found_string_type = true;
+                    } else if *r#type == RubyType::integer() {
+                        found_integer_type = true;
                     }
                 }
             }

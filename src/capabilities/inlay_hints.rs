@@ -29,22 +29,20 @@ pub async fn handle_inlay_hints(
 
     if let Some(entries) = index.file_entries.get(&uri) {
         for entry in entries {
-            if let EntryKind::Variable { ruby_type, .. } = &entry.kind {
-                if let Some(type_info) = ruby_type {
-                    // Create type hint at the end of the variable name
-                    let end_position = entry.location.range.end;
-                    let type_hint = InlayHint {
-                        position: end_position,
-                        label: InlayHintLabel::String(format!(": {}", type_info.to_string())),
-                        kind: None,
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: None,
-                        padding_right: None,
-                        data: None,
-                    };
+            if let EntryKind::Variable { r#type, .. } = &entry.kind {
+                // Create type hint at the end of the variable name
+                let end_position = entry.location.range.end;
+                let type_hint = InlayHint {
+                    position: end_position,
+                    label: InlayHintLabel::String(format!(": {}", r#type.to_string())),
+                    kind: None,
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                };
                     all_hints.push(type_hint);
-                }
             }
         }
     }
