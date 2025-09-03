@@ -65,7 +65,7 @@ pub async fn handle_document_symbols(
 fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol {
     // Build detail string with visibility and method kind information
     let detail = build_symbol_detail(&ruby_symbol);
-    
+
     DocumentSymbol {
         name: ruby_symbol.name,
         detail,
@@ -91,31 +91,35 @@ fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol 
 /// Build detail string for a symbol including visibility and method kind information
 fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
     let mut detail_parts = Vec::new();
-    
+
     // Add existing detail if present
     if let Some(existing_detail) = &ruby_symbol.detail {
         detail_parts.push(existing_detail.clone());
     }
-    
+
     // Add visibility information only for instance methods
     // Class methods don't follow the same visibility rules in Ruby
     if let Some(visibility) = &ruby_symbol.visibility {
         let is_class_method = matches!(ruby_symbol.method_kind, Some(MethodKind::Class));
-        
+
         if !is_class_method {
             match visibility {
                 MethodVisibility::Private => detail_parts.push("private".to_string()),
                 MethodVisibility::Protected => detail_parts.push("protected".to_string()),
                 MethodVisibility::Public => {
                     // Only show "public" explicitly for methods to distinguish from default
-                    if matches!(ruby_symbol.kind, tower_lsp::lsp_types::SymbolKind::METHOD | tower_lsp::lsp_types::SymbolKind::FUNCTION) {
+                    if matches!(
+                        ruby_symbol.kind,
+                        tower_lsp::lsp_types::SymbolKind::METHOD
+                            | tower_lsp::lsp_types::SymbolKind::FUNCTION
+                    ) {
                         detail_parts.push("public".to_string());
                     }
                 }
             }
         }
     }
-    
+
     // Add method kind information
     if let Some(method_kind) = &ruby_symbol.method_kind {
         match method_kind {
@@ -126,7 +130,7 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
             }
         }
     }
-    
+
     if detail_parts.is_empty() {
         None
     } else {
@@ -162,8 +166,14 @@ mod tests {
 
     fn create_test_range() -> Range {
         Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 10 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 10,
+            },
         }
     }
 
@@ -183,7 +193,10 @@ mod tests {
 
         let doc_symbol = convert_to_document_symbol(private_method);
         assert_eq!(doc_symbol.name, "private_method");
-        assert_eq!(doc_symbol.detail, Some("private • instance method".to_string()));
+        assert_eq!(
+            doc_symbol.detail,
+            Some("private • instance method".to_string())
+        );
 
         // Test class method (should not include visibility)
         let class_method = RubySymbolContext {
@@ -215,7 +228,10 @@ mod tests {
 
         let doc_symbol = convert_to_document_symbol(public_method);
         assert_eq!(doc_symbol.name, "public_method");
-        assert_eq!(doc_symbol.detail, Some("public • instance method".to_string()));
+        assert_eq!(
+            doc_symbol.detail,
+            Some("public • instance method".to_string())
+        );
 
         // Test protected instance method
         let protected_instance_method = RubySymbolContext {
@@ -231,7 +247,10 @@ mod tests {
 
         let doc_symbol = convert_to_document_symbol(protected_instance_method);
         assert_eq!(doc_symbol.name, "protected_instance_method");
-        assert_eq!(doc_symbol.detail, Some("protected • instance method".to_string()));
+        assert_eq!(
+            doc_symbol.detail,
+            Some("protected • instance method".to_string())
+        );
     }
 
     #[test]
@@ -249,7 +268,10 @@ mod tests {
 
         let doc_symbol = convert_to_document_symbol(method_with_detail);
         assert_eq!(doc_symbol.name, "method_with_signature");
-        assert_eq!(doc_symbol.detail, Some("(param1, param2) • private • instance method".to_string()));
+        assert_eq!(
+            doc_symbol.detail,
+            Some("(param1, param2) • private • instance method".to_string())
+        );
     }
 
     #[test]

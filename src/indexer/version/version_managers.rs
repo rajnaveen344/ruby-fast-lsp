@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use log::{debug, warn};
+use std::collections::HashMap;
 
 use crate::types::ruby_version::RubyVersion;
 
@@ -83,7 +83,7 @@ impl VersionManager {
 
     fn get_rbenv_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
-        
+
         if let Ok(output) = std::process::Command::new("rbenv")
             .args(&["versions", "--bare"])
             .output()
@@ -121,7 +121,7 @@ impl VersionManager {
 
     fn get_rvm_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
-        
+
         if let Ok(output) = std::process::Command::new("rvm")
             .args(&["list", "strings"])
             .output()
@@ -162,10 +162,8 @@ impl VersionManager {
 
     fn get_chruby_versions(&self) -> Vec<RubyVersion> {
         let mut versions = Vec::new();
-        
-        if let Ok(output) = std::process::Command::new("chruby")
-            .output()
-        {
+
+        if let Ok(output) = std::process::Command::new("chruby").output() {
             if output.status.success() {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
@@ -187,9 +185,7 @@ impl VersionManager {
     }
 
     fn get_chruby_current(&self) -> Option<RubyVersion> {
-        if let Ok(output) = std::process::Command::new("chruby")
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("chruby").output() {
             if output.status.success() {
                 let versions_output = String::from_utf8_lossy(&output.stdout);
                 for line in versions_output.lines() {
@@ -237,7 +233,7 @@ impl VersionManagerRegistry {
     /// Get all unique Ruby versions across all managers
     pub fn get_all_versions(&self) -> Vec<RubyVersion> {
         let mut all_versions = Vec::new();
-        
+
         for manager in &self.managers {
             let versions = manager.get_installed_versions();
             for version in versions {
@@ -254,7 +250,7 @@ impl VersionManagerRegistry {
     /// Get version information grouped by manager
     pub fn get_versions_by_manager(&self) -> HashMap<VersionManager, Vec<RubyVersion>> {
         let mut versions_map = HashMap::new();
-        
+
         for manager in &self.managers {
             let versions = manager.get_installed_versions();
             versions_map.insert(manager.clone(), versions);
@@ -276,7 +272,10 @@ impl VersionManagerRegistry {
         for preferred_manager in &priority_order {
             if self.managers.contains(preferred_manager) {
                 if let Some(version) = preferred_manager.get_current_version() {
-                    debug!("Current Ruby version {} from {:?}", version, preferred_manager);
+                    debug!(
+                        "Current Ruby version {} from {:?}",
+                        version, preferred_manager
+                    );
                     return Some(version);
                 }
             }
@@ -304,15 +303,15 @@ mod tests {
     #[test]
     fn test_version_manager_registry() {
         let registry = VersionManagerRegistry::new();
-        
+
         // Should detect at least system ruby if available
         let managers = registry.get_available_managers();
-        
+
         // Test that we can call methods without panicking
         let _all_versions = registry.get_all_versions();
         let _versions_by_manager = registry.get_versions_by_manager();
         let _current = registry.get_current_version();
-        
+
         // Basic sanity check
         assert!(!managers.is_empty() || std::process::Command::new("ruby").output().is_err());
     }

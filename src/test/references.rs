@@ -90,15 +90,17 @@ mod tests {
     #[tokio::test]
     async fn method_references_cross_module() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/module_method_cross_ref.rb").await;
+        harness
+            .open_fixture_dir("goto/module_method_cross_ref.rb")
+            .await;
 
         // Test references to 'method_from_b' call in ModuleA
         // Should find the definition in ModuleB and other references
         snapshot_references(
             &harness,
             "goto/module_method_cross_ref.rb",
-            3,  // Line 4 in 0-indexed (method_from_b call in ModuleA)
-            4,  // Position of 'method_from_b' call
+            3, // Line 4 in 0-indexed (method_from_b call in ModuleA)
+            4, // Position of 'method_from_b' call
             "cross_module_method_refs",
         )
         .await;
@@ -112,7 +114,7 @@ mod tests {
 
         // Test method references in the existing fixtures that have mixin scenarios
         // This will test the mixin-aware reference finding without needing new fixtures
-        
+
         // Note: This test validates that the enhanced reference finding works
         // with the existing test infrastructure. Additional specific mixin tests
         // can be added when more complex mixin fixtures are available.
@@ -129,8 +131,8 @@ mod tests {
         snapshot_references(
             &harness,
             "class_declaration.rb",
-            7,  // Line 8 in 0-indexed (bar call in another_method)
-            4,  // Position of 'bar' method call
+            7, // Line 8 in 0-indexed (bar call in another_method)
+            4, // Position of 'bar' method call
             "same_class_method_refs",
         )
         .await;
@@ -147,8 +149,8 @@ mod tests {
         snapshot_references(
             &harness,
             "method_with_args.rb",
-            4,  // Line 5 in 0-indexed (multiply call)
-            9,  // Position of 'multiply' method call
+            4, // Line 5 in 0-indexed (multiply call)
+            9, // Position of 'multiply' method call
             "top_level_method_refs",
         )
         .await;
@@ -215,8 +217,8 @@ mod tests {
         snapshot_references(
             &harness,
             "basic_method_refs.rb",
-            8,  // Line 9 in 0-indexed (first global_helper call)
-            0,  // Position of 'global_helper' call
+            8, // Line 9 in 0-indexed (first global_helper call)
+            0, // Position of 'global_helper' call
             "global_helper_refs",
         )
         .await;
@@ -319,14 +321,12 @@ mod tests {
         snapshot_references(
             &harness,
             "module_method.rb",
-            3,  // Line 4 in 0-indexed (log_level call in log method)
-            4,  // Position of 'log_level' method call
+            3, // Line 4 in 0-indexed (log_level call in log method)
+            4, // Position of 'log_level' method call
             "log_level_refs",
         )
         .await;
     }
-
-
 
     /// Test method references for qualified method calls
     #[tokio::test]
@@ -372,14 +372,16 @@ mod tests {
     #[tokio::test]
     async fn method_context_resolution() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("method_context_resolution.rb").await;
+        harness
+            .open_fixture_dir("method_context_resolution.rb")
+            .await;
 
         // Test bare method call in class body - should resolve as instance method
         snapshot_references(
             &harness,
             "method_context_resolution.rb",
-            5,  // Line 6 in 0-indexed (helper_method in class body)
-            2,  // Position of 'helper_method' call
+            5, // Line 6 in 0-indexed (helper_method in class body)
+            2, // Position of 'helper_method' call
             "class_body_helper_method_refs",
         )
         .await;
@@ -388,8 +390,8 @@ mod tests {
         snapshot_references(
             &harness,
             "method_context_resolution.rb",
-            9,  // Line 10 in 0-indexed (some_method in instance_method)
-            4,  // Position of 'some_method' call
+            9, // Line 10 in 0-indexed (some_method in instance_method)
+            4, // Position of 'some_method' call
             "instance_method_some_method_refs",
         )
         .await;

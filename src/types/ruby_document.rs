@@ -1,12 +1,9 @@
 use log::debug;
-use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
-use ruby_prism::{Location as PrismLocation, Visit};
+use ruby_prism::Location as PrismLocation;
 use std::{cmp, collections::BTreeMap};
+use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
-use crate::{
-    analyzer_prism::visitors::inlay_visitor::InlayVisitor, indexer::entry::Entry,
-    types::scope::LVScopeId,
-};
+use crate::{indexer::entry::Entry, types::scope::LVScopeId};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -126,23 +123,36 @@ impl RubyDocument {
         LspLocation::new(self.uri.clone(), self.prism_location_to_lsp_range(location))
     }
 
-    /// Computes inlay hints for the document by parsing it and using the inlay visitor
+    /// Computes inlay hints for the document (now only clears old hints)
     pub fn compute_inlay_hints(&mut self) {
-        let parse_result = ruby_prism::parse(self.content.as_bytes());
-        let node = parse_result.node();
+        // Clear previous structural hints - type hints are managed separately by IndexVisitor
+        self.inlay_hints.clear();
+    }
 
-        let hints = {
-            let mut visitor = InlayVisitor::new(self);
-            visitor.visit(&node);
-            visitor.inlay_hints()
-        };
+    /// Get inlay hints for the document
+    pub fn get_inlay_hints(&self) -> Vec<InlayHint> {
+        self.inlay_hints.clone()
+    }
 
+    /// Add an inlay hint to the document
+    pub fn add_inlay_hint(&mut self, hint: InlayHint) {
+        self.inlay_hints.push(hint);
+    }
+
+    /// Clear all inlay hints from the document
+    pub fn clear_inlay_hints(&mut self) {
+        self.inlay_hints.clear();
+    }
+
+    /// Set multiple inlay hints for the document
+    pub fn set_inlay_hints(&mut self, hints: Vec<InlayHint>) {
         self.inlay_hints = hints;
     }
 
-    /// Returns the computed inlay hints for the document
-    pub fn get_inlay_hints(&self) -> Vec<InlayHint> {
-        self.inlay_hints.clone()
+    /// Get all hints (both inlay and type hints) combined
+    pub fn get_all_hints(&self) -> Vec<InlayHint> {
+        let all_hints = self.inlay_hints.clone();
+        all_hints
     }
 
     pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {

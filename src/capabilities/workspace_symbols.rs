@@ -348,16 +348,13 @@ impl SymbolMatcher {
 /// Convert an Entry to SymbolInformation, filtering out unwanted symbol types
 fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformation> {
     use crate::indexer::entry::entry_kind::EntryKind;
-    use crate::types::ruby_variable::RubyVariableType;
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
-    if let EntryKind::Variable { name } = &entry.kind {
-        match name.variable_type() {
-            RubyVariableType::Local(_) => return None, // Exclude local variables
-            RubyVariableType::Instance | RubyVariableType::Class | RubyVariableType::Global => {
-                // Include instance, class, and global variables
-            }
+    match &entry.kind {
+        EntryKind::LocalVariable { .. } => {
+            return None; // Exclude local variables
         }
+        _ => {}
     }
 
     let name = extract_display_name(&entry.fqn);
@@ -383,7 +380,10 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
         EntryKind::Module { .. } => SymbolKind::MODULE,
         EntryKind::Method { .. } => SymbolKind::METHOD,
         EntryKind::Constant { .. } => SymbolKind::CONSTANT,
-        EntryKind::Variable { .. } => SymbolKind::VARIABLE,
+        EntryKind::LocalVariable { .. }
+        | EntryKind::InstanceVariable { .. }
+        | EntryKind::ClassVariable { .. }
+        | EntryKind::GlobalVariable { .. } => SymbolKind::VARIABLE,
     }
 }
 
@@ -394,7 +394,10 @@ fn extract_display_name(fqn: &FullyQualifiedName) -> String {
             parts.last().map(|c| c.to_string()).unwrap_or_default()
         }
         FullyQualifiedName::Method(_, method) => method.get_name(),
-        FullyQualifiedName::Variable(var) => var.to_string(),
+        FullyQualifiedName::LocalVariable(name, _) => name.clone(),
+        FullyQualifiedName::InstanceVariable(name) => name.clone(),
+        FullyQualifiedName::ClassVariable(name) => name.clone(),
+        FullyQualifiedName::GlobalVariable(name) => name.clone(),
     }
 }
 
@@ -421,7 +424,10 @@ fn extract_container_name(fqn: &FullyQualifiedName) -> Option<String> {
                 None
             }
         }
-        FullyQualifiedName::Variable(_) => None,
+        FullyQualifiedName::LocalVariable(_, _) => None,
+        FullyQualifiedName::InstanceVariable(_) => None,
+        FullyQualifiedName::ClassVariable(_) => None,
+        FullyQualifiedName::GlobalVariable(_) => None,
     }
 }
 

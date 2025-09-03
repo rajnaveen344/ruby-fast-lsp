@@ -11,10 +11,10 @@ use crate::{
     analyzer_prism::visitors::index_visitor::IndexVisitor, server::RubyLanguageServer,
     types::ruby_document::RubyDocument,
 };
-use tower_lsp::lsp_types::Url;
 use parking_lot::RwLock;
 use ruby_prism::Visit;
 use std::sync::Arc;
+use tower_lsp::lsp_types::Url;
 
 mod class_node_test;
 mod def_node_test;

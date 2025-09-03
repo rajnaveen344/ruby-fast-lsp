@@ -5,8 +5,7 @@ use crate::{
     analyzer_prism::utils,
     indexer::entry::MethodKind,
     types::{
-        fully_qualified_name::FullyQualifiedName,
-        ruby_method::RubyMethod,
+        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
     },
 };
@@ -22,7 +21,10 @@ impl ReferenceVisitor {
         }
 
         // Skip if this is an attribute accessor call
-        if matches!(method_name.as_str(), "attr_reader" | "attr_writer" | "attr_accessor") {
+        if matches!(
+            method_name.as_str(),
+            "attr_reader" | "attr_writer" | "attr_accessor"
+        ) {
             return;
         }
 
@@ -32,7 +34,9 @@ impl ReferenceVisitor {
             return;
         }
 
-        let location = self.document.prism_location_to_lsp_location(&node.location());
+        let location = self
+            .document
+            .prism_location_to_lsp_location(&node.location());
         let current_namespace = self.scope_tracker.get_ns_stack();
 
         // Determine the target namespace and method kind based on receiver
@@ -64,7 +68,10 @@ impl ReferenceVisitor {
     }
 
     /// Handle method calls without a receiver (e.g., `method_name`)
-    fn handle_no_receiver(&self, current_namespace: &Vec<RubyConstant>) -> (Vec<RubyConstant>, MethodKind) {
+    fn handle_no_receiver(
+        &self,
+        current_namespace: &Vec<RubyConstant>,
+    ) -> (Vec<RubyConstant>, MethodKind) {
         // Determine method kind based on current method context
         let method_kind = match self.scope_tracker.current_method_context() {
             Some(context_kind) => {
@@ -88,7 +95,11 @@ impl ReferenceVisitor {
     }
 
     /// Handle method calls with a receiver node
-    fn handle_receiver_node(&self, receiver_node: &Node, current_namespace: &Vec<RubyConstant>) -> (Vec<RubyConstant>, MethodKind) {
+    fn handle_receiver_node(
+        &self,
+        receiver_node: &Node,
+        current_namespace: &Vec<RubyConstant>,
+    ) -> (Vec<RubyConstant>, MethodKind) {
         if let Some(_) = receiver_node.as_self_node() {
             self.handle_self_receiver(current_namespace)
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
@@ -101,7 +112,10 @@ impl ReferenceVisitor {
     }
 
     /// Handle method calls with self receiver (e.g., `self.method_name`)
-    fn handle_self_receiver(&self, current_namespace: &Vec<RubyConstant>) -> (Vec<RubyConstant>, MethodKind) {
+    fn handle_self_receiver(
+        &self,
+        current_namespace: &Vec<RubyConstant>,
+    ) -> (Vec<RubyConstant>, MethodKind) {
         // Self receiver - method is in current namespace
         (current_namespace.clone(), MethodKind::Instance)
     }
@@ -132,12 +146,14 @@ impl ReferenceVisitor {
         // Use the centralized constant resolution utility
         let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
         let index_guard = self.index.lock();
-        if let Some(resolved_fqn) = utils::resolve_constant_fqn(&*index_guard, receiver_node, &current_fqn) {
+        if let Some(resolved_fqn) =
+            utils::resolve_constant_fqn(&*index_guard, receiver_node, &current_fqn)
+        {
             if let FullyQualifiedName::Constant(parts) = resolved_fqn {
                 return (parts, MethodKind::Class);
             }
         }
-        
+
         // Fallback to mixin_ref approach if resolution fails
         if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
             let final_namespace = if mixin_ref.absolute {
@@ -152,7 +168,10 @@ impl ReferenceVisitor {
     }
 
     /// Handle method calls with expression receiver (e.g., `variable.method`)
-    fn handle_expression_receiver(&self, current_namespace: &Vec<RubyConstant>) -> (Vec<RubyConstant>, MethodKind) {
+    fn handle_expression_receiver(
+        &self,
+        current_namespace: &Vec<RubyConstant>,
+    ) -> (Vec<RubyConstant>, MethodKind) {
         // Expression receiver - use current namespace
         (current_namespace.clone(), MethodKind::Instance)
     }
@@ -167,27 +186,33 @@ impl ReferenceVisitor {
         // Ruby constant resolution: look for the first part in current namespace and ancestors
         if let Some(first_part) = parts.first() {
             let mut resolved = None;
-            
+
             // Check if the first constant exists in current namespace or ancestors
             for i in (0..=current_namespace.len()).rev() {
                 let test_namespace = &current_namespace[..i];
-                
+
                 // Check if first_part exists at this level
                 // Look for the constant in the namespace parts
-                if test_namespace.iter().any(|c| c.to_string() == first_part.to_string()) {
+                if test_namespace
+                    .iter()
+                    .any(|c| c.to_string() == first_part.to_string())
+                {
                     // Found the constant in the namespace hierarchy
                     // Find the position where this constant appears
-                    if let Some(pos) = test_namespace.iter().position(|c| c.to_string() == first_part.to_string()) {
+                    if let Some(pos) = test_namespace
+                        .iter()
+                        .position(|c| c.to_string() == first_part.to_string())
+                    {
                         let mut result = test_namespace[..=pos].to_vec();
                         // Skip the first part since it's already in the namespace
                         result.extend(parts.iter().skip(1).cloned());
-                        
+
                         resolved = Some(result);
                         break;
                     }
                 }
             }
-            
+
             // If not found in hierarchy, try from root
             resolved.unwrap_or_else(|| {
                 // Check if it should be resolved from a parent namespace
@@ -201,7 +226,7 @@ impl ReferenceVisitor {
                         return result;
                     }
                 }
-                
+
                 // Default: append to current namespace
                 let mut ns = current_namespace.clone();
                 ns.extend(parts.iter().cloned());

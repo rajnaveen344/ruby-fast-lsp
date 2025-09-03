@@ -1,9 +1,9 @@
-use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 use ruby_prism::{visit_class_node, visit_module_node, Visit};
+use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 
 use crate::types::ruby_document::RubyDocument;
 
-/// Visitor that collects inlay hints for Ruby code
+/// Visitor that collects structural inlay hints for Ruby code (end hints for classes/methods)
 pub struct InlayVisitor<'a> {
     document: &'a RubyDocument,
     inlay_hints: Vec<InlayHint>,

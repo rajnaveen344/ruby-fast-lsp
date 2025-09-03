@@ -1,7 +1,10 @@
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
-use crate::types::{ruby_namespace::RubyConstant, scope::{LVScope, LVScopeKind}};
+use crate::types::{
+    ruby_namespace::RubyConstant,
+    scope::{LVScope, LVScopeKind},
+};
 
 use super::ReferenceVisitor;
 

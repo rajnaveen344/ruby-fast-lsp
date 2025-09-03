@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::capabilities::references;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
+use parking_lot::RwLock;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
-use parking_lot::RwLock;
 
 async fn create_server() -> RubyLanguageServer {
     let server = RubyLanguageServer::default();
@@ -33,7 +33,7 @@ fn open_file_with_options(
         .docs
         .lock()
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
-    
+
     // Process content directly instead of reading from filesystem
     process_content_for_definitions(server, uri.clone(), content);
     process_content_for_references(server, uri.clone(), content, include_local_vars);
@@ -42,9 +42,9 @@ fn open_file_with_options(
 
 // Helper function to process content for definitions without reading from filesystem
 fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, content: &str) {
-    use ruby_prism::{parse, Visit};
     use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-    
+    use ruby_prism::{parse, Visit};
+
     let parse_result = parse(content.as_bytes());
     let errors_count = parse_result.errors().count();
     if errors_count > 0 {
@@ -57,10 +57,15 @@ fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, conten
 }
 
 // Helper function to process content for references without reading from filesystem
-fn process_content_for_references(server: &RubyLanguageServer, uri: Url, content: &str, include_local_vars: bool) {
-    use ruby_prism::{parse, Visit};
+fn process_content_for_references(
+    server: &RubyLanguageServer,
+    uri: Url,
+    content: &str,
+    include_local_vars: bool,
+) {
     use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
-    
+    use ruby_prism::{parse, Visit};
+
     let parse_result = parse(content.as_bytes());
     let errors_count = parse_result.errors().count();
     if errors_count > 0 {

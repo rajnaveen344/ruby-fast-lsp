@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
 use crate::indexer::entry::MixinRef;
+use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
-    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_variable::RubyVariable,
+    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeStack,
 };
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
@@ -32,8 +33,22 @@ pub enum EntryKind {
         value: Option<String>,
         visibility: Option<ConstVisibility>,
     },
-    Variable {
-        name: RubyVariable,
+    LocalVariable {
+        name: String,
+        scope_stack: LVScopeStack,
+        r#type: RubyType,
+    },
+    InstanceVariable {
+        name: String,
+        r#type: RubyType,
+    },
+    ClassVariable {
+        name: String,
+        r#type: RubyType,
+    },
+    GlobalVariable {
+        name: String,
+        r#type: RubyType,
     },
 }
 
@@ -106,6 +121,26 @@ impl EntryKind {
             extends: Vec::new(),
         }
     }
+
+    pub fn new_local_variable(name: String, scope_stack: LVScopeStack, r#type: RubyType) -> Self {
+        EntryKind::LocalVariable {
+            name,
+            scope_stack,
+            r#type,
+        }
+    }
+
+    pub fn new_instance_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::InstanceVariable { name, r#type }
+    }
+
+    pub fn new_class_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::ClassVariable { name, r#type }
+    }
+
+    pub fn new_global_variable(name: String, r#type: RubyType) -> Self {
+        EntryKind::GlobalVariable { name, r#type }
+    }
 }
 
 impl Display for EntryKind {
@@ -136,7 +171,18 @@ impl Display for EntryKind {
                     }
                 )
             }
-            EntryKind::Variable { name, .. } => write!(f, "Variable: {}", name),
+            EntryKind::LocalVariable { name, r#type, .. } => {
+                write!(f, "Local Variable: {} ({})", name, r#type)
+            }
+            EntryKind::InstanceVariable { name, r#type, .. } => {
+                write!(f, "Instance Variable: {} ({})", name, r#type)
+            }
+            EntryKind::ClassVariable { name, r#type, .. } => {
+                write!(f, "Class Variable: {} ({})", name, r#type)
+            }
+            EntryKind::GlobalVariable { name, r#type, .. } => {
+                write!(f, "Global Variable: {} ({})", name, r#type)
+            }
         }
     }
 }

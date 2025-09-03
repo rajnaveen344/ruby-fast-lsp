@@ -1,4 +1,4 @@
-use crate::indexer::entry::{Entry, entry_kind::EntryKind};
+use crate::indexer::entry::{entry_kind::EntryKind, Entry};
 
 /// Handles pattern matching for constant names
 pub struct ConstantMatcher {
@@ -20,7 +20,7 @@ impl ConstantMatcher {
     /// Check if an entry matches the given partial name
     pub fn matches(&self, entry: &Entry, partial: &str) -> bool {
         let constant_name = self.extract_name(entry);
-        
+
         // Empty partial matches everything
         if partial.is_empty() {
             return true;
@@ -68,7 +68,7 @@ impl ConstantMatcher {
         } else {
             name.to_lowercase().chars().collect()
         };
-        
+
         let partial_chars: Vec<char> = if self.case_sensitive {
             partial.chars().collect()
         } else {
@@ -87,14 +87,14 @@ impl ConstantMatcher {
 
     fn camel_case_match(&self, name: &str, partial: &str) -> bool {
         // Extract uppercase letters from name for abbreviation matching
-        let uppercase_chars: String = name.chars()
-            .filter(|c| c.is_uppercase())
-            .collect();
+        let uppercase_chars: String = name.chars().filter(|c| c.is_uppercase()).collect();
 
         if self.case_sensitive {
             uppercase_chars.starts_with(partial)
         } else {
-            uppercase_chars.to_lowercase().starts_with(&partial.to_lowercase())
+            uppercase_chars
+                .to_lowercase()
+                .starts_with(&partial.to_lowercase())
         }
     }
 
@@ -127,8 +127,7 @@ impl Default for ConstantMatcher {
 mod tests {
     use super::*;
     use crate::{
-        indexer::entry::Entry,
-        indexer::entry::entry_kind::EntryKind,
+        indexer::entry::entry_kind::EntryKind, indexer::entry::Entry,
         types::fully_qualified_name::FullyQualifiedName,
     };
     use tower_lsp::lsp_types::{Location, Url};
@@ -147,12 +146,15 @@ mod tests {
     #[test]
     fn test_prefix_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::Class { 
-            superclass: None, 
-            includes: vec![], 
-            extends: vec![], 
-            prepends: vec![] 
-        });
+        let entry = create_test_entry(
+            "String",
+            EntryKind::Class {
+                superclass: None,
+                includes: vec![],
+                extends: vec![],
+                prepends: vec![],
+            },
+        );
 
         assert!(matcher.matches(&entry, "Str"));
         assert!(matcher.matches(&entry, "String"));
@@ -162,12 +164,15 @@ mod tests {
     #[test]
     fn test_case_insensitive_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::Class { 
-            superclass: None, 
-            includes: vec![], 
-            extends: vec![], 
-            prepends: vec![] 
-        });
+        let entry = create_test_entry(
+            "String",
+            EntryKind::Class {
+                superclass: None,
+                includes: vec![],
+                extends: vec![],
+                prepends: vec![],
+            },
+        );
 
         assert!(matcher.matches(&entry, "str"));
         assert!(matcher.matches(&entry, "STRING"));
@@ -177,11 +182,14 @@ mod tests {
     #[test]
     fn test_fuzzy_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("ActiveRecord", EntryKind::Module { 
-            includes: vec![], 
-            extends: vec![], 
-            prepends: vec![] 
-        });
+        let entry = create_test_entry(
+            "ActiveRecord",
+            EntryKind::Module {
+                includes: vec![],
+                extends: vec![],
+                prepends: vec![],
+            },
+        );
 
         assert!(matcher.matches(&entry, "AcRe"));
         assert!(matcher.matches(&entry, "ActRec"));
@@ -191,11 +199,14 @@ mod tests {
     #[test]
     fn test_camel_case_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("ActiveRecord", EntryKind::Module { 
-            includes: vec![], 
-            extends: vec![], 
-            prepends: vec![] 
-        });
+        let entry = create_test_entry(
+            "ActiveRecord",
+            EntryKind::Module {
+                includes: vec![],
+                extends: vec![],
+                prepends: vec![],
+            },
+        );
 
         assert!(matcher.matches(&entry, "AR"));
         assert!(matcher.matches(&entry, "A"));
@@ -205,12 +216,15 @@ mod tests {
     #[test]
     fn test_empty_partial() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::Class { 
-            superclass: None, 
-            includes: vec![], 
-            extends: vec![], 
-            prepends: vec![] 
-        });
+        let entry = create_test_entry(
+            "String",
+            EntryKind::Class {
+                superclass: None,
+                includes: vec![],
+                extends: vec![],
+                prepends: vec![],
+            },
+        );
 
         assert!(matcher.matches(&entry, ""));
     }
@@ -218,10 +232,13 @@ mod tests {
     #[test]
     fn test_constant_entry() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("MY_CONSTANT", EntryKind::Constant { 
-            value: Some("42".to_string()),
-            visibility: None,
-        });
+        let entry = create_test_entry(
+            "MY_CONSTANT",
+            EntryKind::Constant {
+                value: Some("42".to_string()),
+                visibility: None,
+            },
+        );
 
         assert!(matcher.matches(&entry, "MY"));
         assert!(matcher.matches(&entry, "CONST"));

@@ -1,6 +1,6 @@
-use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind, FoldingRangeParams};
-use ruby_prism::Visit;
 use crate::types::ruby_document::RubyDocument;
+use ruby_prism::Visit;
+use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind, FoldingRangeParams};
 
 /// Visitor that collects folding ranges from Ruby AST nodes
 pub struct FoldingRangeVisitor<'a> {
@@ -31,7 +31,7 @@ impl<'a> FoldingRangeVisitor<'a> {
     ) {
         let start_pos = self.document.offset_to_position(start_offset);
         let end_pos = self.document.offset_to_position(end_offset);
-        
+
         // Only create folding range if it spans multiple lines
         if end_pos.line > start_pos.line {
             let folding_range = FoldingRange {
@@ -54,7 +54,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_class_node(self, node);
     }
@@ -65,7 +65,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_module_node(self, node);
     }
@@ -84,7 +84,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_if_node(self, node);
     }
@@ -95,7 +95,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_while_node(self, node);
     }
@@ -106,7 +106,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_for_node(self, node);
     }
@@ -117,7 +117,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_case_node(self, node);
     }
@@ -128,16 +128,20 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_begin_node(self, node);
     }
 
     fn visit_array_node(&mut self, node: &ruby_prism::ArrayNode<'a>) {
         // Only fold multi-line arrays
-        let start_pos = self.document.offset_to_position(node.location().start_offset());
-        let end_pos = self.document.offset_to_position(node.location().end_offset());
-        
+        let start_pos = self
+            .document
+            .offset_to_position(node.location().start_offset());
+        let end_pos = self
+            .document
+            .offset_to_position(node.location().end_offset());
+
         if end_pos.line > start_pos.line {
             self.create_folding_range_from_offsets(
                 node.location().start_offset(),
@@ -145,16 +149,20 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
                 Some(FoldingRangeKind::Region),
             );
         }
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_array_node(self, node);
     }
 
     fn visit_hash_node(&mut self, node: &ruby_prism::HashNode<'a>) {
         // Only fold multi-line hashes
-        let start_pos = self.document.offset_to_position(node.location().start_offset());
-        let end_pos = self.document.offset_to_position(node.location().end_offset());
-        
+        let start_pos = self
+            .document
+            .offset_to_position(node.location().start_offset());
+        let end_pos = self
+            .document
+            .offset_to_position(node.location().end_offset());
+
         if end_pos.line > start_pos.line {
             self.create_folding_range_from_offsets(
                 node.location().start_offset(),
@@ -162,7 +170,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
                 Some(FoldingRangeKind::Region),
             );
         }
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_hash_node(self, node);
     }
@@ -173,7 +181,7 @@ impl<'a> Visit<'a> for FoldingRangeVisitor<'a> {
             node.location().end_offset(),
             Some(FoldingRangeKind::Region),
         );
-        
+
         // Continue visiting child nodes
         ruby_prism::visit_block_node(self, node);
     }
@@ -214,7 +222,7 @@ mod tests {
 
         let ranges = visitor.folding_ranges();
         assert!(!ranges.is_empty());
-        
+
         // Should have folding ranges for both class and method
         assert!(ranges.len() >= 2);
     }
@@ -331,12 +339,12 @@ end
         visitor.visit(&node);
 
         let ranges = visitor.folding_ranges();
-        
+
         println!("Found {} folding ranges:", ranges.len());
         for (i, range) in ranges.iter().enumerate() {
             println!("  {}: lines {}-{}", i, range.start_line, range.end_line);
         }
-        
+
         // We should have folding ranges for:
         // 1. class
         // 2. def (method)
@@ -348,6 +356,10 @@ end
         // 8. hash (multi-line)
         // 9. block
         // 10. for loop
-        assert!(ranges.len() >= 10, "Expected at least 10 folding ranges, got {}", ranges.len());
+        assert!(
+            ranges.len() >= 10,
+            "Expected at least 10 folding ranges, got {}",
+            ranges.len()
+        );
     }
 }

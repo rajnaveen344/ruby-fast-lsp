@@ -1,4 +1,5 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::indexer::index::RubyIndex;
 use crate::indexer::utils;
@@ -22,8 +23,6 @@ impl IndexerCore {
     pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
         Self { index }
     }
-
-
 
     /// Phase 1: Index only definitions from Ruby content
     pub async fn index_definitions(
@@ -53,6 +52,20 @@ impl IndexerCore {
         // Visit the AST to extract definitions only
         use ruby_prism::Visit;
         index_visitor.visit(&node);
+
+        // Also run InlayVisitor to populate structural hints in the document
+        let document_guard = server.docs.lock();
+        if let Some(doc_arc) = document_guard.get(uri) {
+            let document = doc_arc.read();
+            let mut inlay_visitor = InlayVisitor::new(&document);
+            inlay_visitor.visit(&node);
+            let structural_hints = inlay_visitor.inlay_hints();
+
+            // Store structural hints in the document
+            drop(document); // Release read lock
+            let mut document_mut = doc_arc.write();
+            document_mut.set_inlay_hints(structural_hints);
+        }
 
         debug!(
             "Indexed definitions for {:?} in {:?}",
@@ -89,8 +102,6 @@ impl IndexerCore {
         Ok(())
     }
 
-
-
     /// Phase 1: Index definitions from multiple files in parallel
     pub async fn index_definitions_parallel(
         &self,
@@ -98,7 +109,10 @@ impl IndexerCore {
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let start_time = Instant::now();
-        info!("Indexing definitions from {} files in parallel", file_paths.len());
+        info!(
+            "Indexing definitions from {} files in parallel",
+            file_paths.len()
+        );
 
         // Process files in batches to avoid overwhelming the system
         const BATCH_SIZE: usize = 50;
@@ -111,7 +125,8 @@ impl IndexerCore {
                 let server = server.clone();
                 let path = file_path.clone();
 
-                let task = tokio::spawn(async move { core.index_file_definitions(&path, &server).await });
+                let task =
+                    tokio::spawn(async move { core.index_file_definitions(&path, &server).await });
                 tasks.push(task);
             }
 
@@ -138,7 +153,10 @@ impl IndexerCore {
         server: &RubyLanguageServer,
     ) -> Result<()> {
         let start_time = Instant::now();
-        info!("Indexing references from {} files in parallel", file_paths.len());
+        info!(
+            "Indexing references from {} files in parallel",
+            file_paths.len()
+        );
 
         // Filter to only project files for reference indexing
         let project_files: Vec<_> = file_paths
@@ -168,7 +186,8 @@ impl IndexerCore {
                 let server = server.clone();
                 let path = (*file_path).clone();
 
-                let task = tokio::spawn(async move { core.index_file_references(&path, &server).await });
+                let task =
+                    tokio::spawn(async move { core.index_file_references(&path, &server).await });
                 tasks.push(task);
             }
 
@@ -189,7 +208,11 @@ impl IndexerCore {
     }
 
     /// Index definitions from a single Ruby file
-    pub async fn index_file_definitions(&self, file_path: &Path, server: &RubyLanguageServer) -> Result<()> {
+    pub async fn index_file_definitions(
+        &self,
+        file_path: &Path,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
         let start_time = Instant::now();
         debug!("Indexing definitions from file: {:?}", file_path);
 
@@ -205,12 +228,20 @@ impl IndexerCore {
         // Index only definitions
         self.index_definitions(&uri, &content, server).await?;
 
-        debug!("Indexed definitions from file {:?} in {:?}", file_path, start_time.elapsed());
+        debug!(
+            "Indexed definitions from file {:?} in {:?}",
+            file_path,
+            start_time.elapsed()
+        );
         Ok(())
     }
 
     /// Index references from a single Ruby file
-    pub async fn index_file_references(&self, file_path: &Path, server: &RubyLanguageServer) -> Result<()> {
+    pub async fn index_file_references(
+        &self,
+        file_path: &Path,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
         let start_time = Instant::now();
         debug!("Indexing references from file: {:?}", file_path);
 
@@ -226,7 +257,11 @@ impl IndexerCore {
         // Index only references
         self.index_references(&uri, &content, server).await?;
 
-        debug!("Indexed references from file {:?} in {:?}", file_path, start_time.elapsed());
+        debug!(
+            "Indexed references from file {:?} in {:?}",
+            file_path,
+            start_time.elapsed()
+        );
         Ok(())
     }
 

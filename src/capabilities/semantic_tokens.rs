@@ -1,12 +1,12 @@
 use lazy_static::lazy_static;
 use log::{debug, info};
+use ruby_prism::Visit;
+use std::{collections::HashMap, time::Instant};
 use tower_lsp::lsp_types::{
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, Url,
     WorkDoneProgressOptions,
 };
-use ruby_prism::Visit;
-use std::{collections::HashMap, time::Instant};
 
 use crate::{analyzer_prism::visitors::token_visitor::TokenVisitor, server::RubyLanguageServer};
 

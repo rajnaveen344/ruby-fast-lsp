@@ -2,7 +2,10 @@ use log::warn;
 use ruby_prism::DefNode;
 
 use crate::indexer::entry::MethodKind;
-use crate::types::{ruby_method::RubyMethod, scope::{LVScope, LVScopeKind}};
+use crate::types::{
+    ruby_method::RubyMethod,
+    scope::{LVScope, LVScopeKind},
+};
 
 use super::ReferenceVisitor;
 

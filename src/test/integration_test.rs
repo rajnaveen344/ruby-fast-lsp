@@ -279,7 +279,6 @@ mod tests {
     use crate::server::RubyLanguageServer;
     use crate::types::ruby_document::RubyDocument;
     use parking_lot::{Mutex, RwLock};
-    use std::path::PathBuf;
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
 
@@ -298,7 +297,7 @@ mod tests {
         // Create a temporary directory for test files
         let temp_dir = tempfile::TempDir::new().unwrap();
         let temp_path = temp_dir.path();
-        
+
         // Create the lib directory and set.rb file
         let lib_dir = temp_path.join("lib");
         std::fs::create_dir_all(&lib_dir).unwrap();

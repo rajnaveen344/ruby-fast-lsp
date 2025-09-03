@@ -1,9 +1,6 @@
 use tower_lsp::lsp_types::{CompletionItem, Position};
 
-use crate::{
-    analyzer_prism::RubyPrismAnalyzer,
-    indexer::index::RubyIndex,
-};
+use crate::{analyzer_prism::RubyPrismAnalyzer, indexer::index::RubyIndex};
 
 use super::constant_completion::ConstantCompletionEngine;
 
@@ -15,6 +12,6 @@ pub fn find_constant_completions(
 ) -> Vec<CompletionItem> {
     let engine = ConstantCompletionEngine::new();
     let completions = engine.complete_constants(index, analyzer, position, partial_name);
-    
+
     completions
 }

@@ -4,10 +4,13 @@ use ruby_prism::DefNode;
 use crate::{
     analyzer_prism::{Identifier, ReceiverKind},
     indexer::entry::MethodKind,
-    types::{ruby_method::RubyMethod, scope::{LVScope, LVScopeKind}},
+    types::{
+        ruby_method::RubyMethod,
+        scope::{LVScope, LVScopeKind},
+    },
 };
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_def_node_entry(&mut self, node: &DefNode) {
@@ -50,11 +53,8 @@ impl IdentifierVisitor {
             MethodKind::Instance => LVScopeKind::InstanceMethod,
             MethodKind::Unknown => LVScopeKind::InstanceMethod, // Default to instance method
         };
-        self.scope_tracker.push_lv_scope(LVScope::new(
-            scope_id,
-            body_loc.clone(),
-            scope_kind,
-        ));
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));
 
         // Is position on method name
         let name_loc = node.name_loc();

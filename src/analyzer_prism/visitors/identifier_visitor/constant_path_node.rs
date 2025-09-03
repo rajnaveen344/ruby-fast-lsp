@@ -5,7 +5,7 @@ use crate::{
     types::ruby_namespace::RubyConstant,
 };
 
-use super::{IdentifierVisitor, IdentifierType};
+use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
     pub fn process_constant_path_node_entry(&mut self, node: &ConstantPathNode) {

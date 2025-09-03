@@ -51,8 +51,17 @@ pub async fn find_definition_at_position(
             &index,
             &ancestors,
         ),
-        Identifier::RubyVariable { iden } => {
-            variable::find_variable_definitions_at_position(iden, &index, &ancestors, position)
+        Identifier::RubyLocalVariable { name, scope, .. } => {
+            variable::find_local_variable_definitions_at_position(name, scope, &index, position)
+        }
+        Identifier::RubyInstanceVariable { name, .. } => {
+            variable::find_instance_variable_definitions(name, &index, &ancestors)
+        }
+        Identifier::RubyClassVariable { name, .. } => {
+            variable::find_class_variable_definitions(name, &index, &ancestors)
+        }
+        Identifier::RubyGlobalVariable { name, .. } => {
+            variable::find_global_variable_definitions(name, &index, &ancestors)
         }
     };
 

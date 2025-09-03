@@ -21,10 +21,10 @@ impl RubyMethod {
 
     /// Validates if a given string is a valid Ruby method name.
     /// This includes regular method names, operator methods, and special method names.
-    /// 
+    ///
     /// # Arguments
     /// * `name` - The method name to validate
-    /// 
+    ///
     /// # Returns
     /// * `true` if the name is a valid Ruby method name, `false` otherwise
     pub fn is_valid_ruby_method_name(name: &str) -> bool {
@@ -34,8 +34,8 @@ impl RubyMethod {
 
         // Ruby operator methods (binary operators)
         let binary_operators = [
-            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=",
-            "<=>", "===", "=~", "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
+            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=", "<=>", "===", "=~",
+            "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
         ];
 
         // Ruby unary operators (with @ suffix)
@@ -189,8 +189,8 @@ mod tests {
     #[test]
     fn test_ruby_binary_operators() {
         let operators = [
-            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=",
-            "<=>", "===", "=~", "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
+            "+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=", "<=>", "===", "=~",
+            "!~", "&", "|", "^", "<<", ">>", "[]", "[]=",
         ];
 
         for op in operators {
@@ -230,7 +230,11 @@ mod tests {
 
         for suffix in invalid {
             let method = RubyMethod::new(suffix, MethodKind::Instance);
-            assert!(method.is_err(), "Standalone suffix '{}' should be invalid", suffix);
+            assert!(
+                method.is_err(),
+                "Standalone suffix '{}' should be invalid",
+                suffix
+            );
         }
     }
 

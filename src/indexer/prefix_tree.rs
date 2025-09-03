@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use trie_rs::map::{Trie, TrieBuilder};
 
 use crate::indexer::entry::Entry;
@@ -13,10 +13,10 @@ use crate::indexer::entry::Entry;
 /// use ruby_fast_lsp::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
 /// use ruby_fast_lsp::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 /// use tower_lsp::lsp_types::{Location, Url};
-/// 
+///
 /// let mut tree = PrefixTree::new();
 /// let uri = Url::parse("file://test.rb").unwrap();
-/// 
+///
 /// // Create test entries
 /// let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("Bar").unwrap()]);
 /// let entry1 = EntryBuilder::new()
@@ -25,7 +25,7 @@ use crate::indexer::entry::Entry;
 ///     .kind(EntryKind::new_class(None))
 ///     .build()
 ///     .unwrap();
-/// 
+///
 /// let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("Baz").unwrap()]);
 /// let entry2 = EntryBuilder::new()
 ///     .fqn(fqn2)
@@ -33,11 +33,11 @@ use crate::indexer::entry::Entry;
 ///     .kind(EntryKind::new_class(None))
 ///     .build()
 ///     .unwrap();
-/// 
+///
 /// // Insert entries using the same key and value
 /// tree.insert("bar", entry1);
 /// tree.insert("baz", entry2);
-/// 
+///
 /// // When we search it, it finds all possible values based on partial (or complete matches):
 /// assert_eq!(tree.search("").len(), 2);    // => [entry1, entry2]
 /// assert_eq!(tree.search("b").len(), 2);   // => [entry1, entry2]
@@ -72,7 +72,7 @@ impl PrefixTree {
     pub fn search(&self, prefix: &str) -> Vec<Entry> {
         // Ensure trie is built
         self.ensure_trie_built();
-        
+
         if prefix.is_empty() {
             // Return all entries for empty prefix
             self.entries.borrow().values().cloned().collect()
@@ -81,7 +81,10 @@ impl PrefixTree {
             let trie_ref = self.trie.borrow();
             let trie = trie_ref.as_ref().unwrap();
             let results: Vec<(String, &Entry)> = trie.predictive_search(prefix).collect();
-            results.into_iter().map(|(_, entry)| entry.clone()).collect()
+            results
+                .into_iter()
+                .map(|(_, entry)| entry.clone())
+                .collect()
         }
     }
 
@@ -106,7 +109,7 @@ impl PrefixTree {
     fn ensure_trie_built(&self) {
         let needs_rebuild = *self.needs_rebuild.borrow();
         let trie_is_none = self.trie.borrow().is_none();
-        
+
         if needs_rebuild || trie_is_none {
             self.rebuild_trie();
         }
@@ -115,11 +118,11 @@ impl PrefixTree {
     /// Rebuild the trie from the current entries
     fn rebuild_trie(&self) {
         let mut builder = TrieBuilder::new();
-        
+
         for (key, entry) in self.entries.borrow().iter() {
             builder.push(key, entry.clone());
         }
-        
+
         *self.trie.borrow_mut() = Some(builder.build());
         *self.needs_rebuild.borrow_mut() = false;
     }

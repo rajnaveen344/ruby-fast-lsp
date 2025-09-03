@@ -98,8 +98,6 @@ impl IndexerProject {
         self.core.collect_ruby_files(&self.workspace_root)
     }
 
-
-
     /// Index definitions from files and track their dependencies
     async fn index_definitions_and_track_dependencies(
         &self,

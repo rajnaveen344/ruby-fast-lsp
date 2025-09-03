@@ -117,8 +117,8 @@ impl ScopeTracker {
     /// Returns the current method context based on the local variable scope stack.
     /// This helps determine whether bare method calls should be treated as instance or class methods.
     pub fn current_method_context(&self) -> Option<crate::indexer::entry::MethodKind> {
-        use crate::types::scope::LVScopeKind;
         use crate::indexer::entry::MethodKind;
+        use crate::types::scope::LVScopeKind;
 
         // Look for the most recent method scope in the LV stack
         for scope in self.lv_stack.iter().rev() {
