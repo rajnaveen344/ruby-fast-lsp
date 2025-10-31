@@ -34,18 +34,30 @@ impl IdentifierVisitor {
         let optionals = node.optionals();
         for optional in optionals.iter() {
             if let Some(param) = optional.as_optional_parameter_node() {
-                if self.is_position_in_location(&param.location()) {
-                    let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                    self.set_result(
-                        Some(Identifier::RubyLocalVariable {
-                            namespace: self.scope_tracker.get_ns_stack(),
-                            name: param_name,
-                            scope: self.scope_tracker.get_lv_stack().clone(),
-                        }),
-                        Some(IdentifierType::LVarDef),
-                        self.scope_tracker.get_ns_stack(),
-                        self.scope_tracker.get_lv_stack(),
-                    );
+                // Check if cursor is on the parameter name, not on the default value
+                // For optional parameters, we need to check the name location specifically
+                // to avoid matching constants in the default value expression
+                let value = param.value();
+                let value_location = value.location();
+
+                // If cursor is in the default value, don't match the parameter name
+                // This allows constants in the default value to be processed by their own visitors
+                if !self.is_position_in_location(&value_location) {
+                    // Cursor is not in the default value, check if it's in the parameter name
+                    if self.is_position_in_location(&param.location()) {
+                        let param_name =
+                            String::from_utf8_lossy(param.name().as_slice()).to_string();
+                        self.set_result(
+                            Some(Identifier::RubyLocalVariable {
+                                namespace: self.scope_tracker.get_ns_stack(),
+                                name: param_name,
+                                scope: self.scope_tracker.get_lv_stack().clone(),
+                            }),
+                            Some(IdentifierType::LVarDef),
+                            self.scope_tracker.get_ns_stack(),
+                            self.scope_tracker.get_lv_stack(),
+                        );
+                    }
                 }
             }
         }

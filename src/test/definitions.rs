@@ -343,4 +343,25 @@ mod tests {
         )
         .await;
     }
+
+    /// Validate that constants in method argument default values work correctly.
+    /// Tests the scenario where a constant is used as a default value in a method parameter.
+    #[tokio::test]
+    async fn goto_constant_in_default_arg() {
+        let harness = TestHarness::new().await;
+        harness
+            .open_fixture_dir("goto/constant_in_default_arg.rb")
+            .await;
+
+        // Constant in default argument `a = Constant` → Constant class definition
+        // Line 3, character 13 is on "Constant" in "def test(a = Constant)"
+        snapshot_definitions(
+            &harness,
+            "goto/constant_in_default_arg.rb",
+            3,
+            13,
+            "constant_in_default_arg",
+        )
+        .await;
+    }
 }
