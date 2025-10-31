@@ -18,6 +18,15 @@ impl IdentifierVisitor {
             return;
         }
 
+        // Check if cursor is in the arguments - if so, skip matching the method call
+        // and let the argument visitors (like constant_read_node) handle it
+        if let Some(arguments) = node.arguments() {
+            if self.is_position_in_location(&arguments.location()) {
+                // Cursor is in arguments, don't match the method call
+                return;
+            }
+        }
+
         // Check if position is on the method name
         if let Some(message_loc) = node.message_loc() {
             if self.is_position_in_location(&message_loc) {

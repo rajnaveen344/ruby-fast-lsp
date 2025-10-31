@@ -364,4 +364,63 @@ mod tests {
         )
         .await;
     }
+
+    /// Validate that methods in method argument default values work correctly.
+    /// Tests the scenario where a method call is used as a default value in a method parameter.
+    #[tokio::test]
+    async fn goto_method_in_default_arg() {
+        let harness = TestHarness::new().await;
+        harness
+            .open_fixture_dir("goto/method_in_default_arg.rb")
+            .await;
+
+        // Method call in default argument `a = helper_method` → helper_method definition
+        // Line 3, character 13 is on "helper_method" in "def test(a = helper_method)"
+        snapshot_definitions(
+            &harness,
+            "goto/method_in_default_arg.rb",
+            3,
+            13,
+            "method_in_default_arg",
+        )
+        .await;
+    }
+
+    /// Validate that constants inside hash literals work correctly.
+    /// Tests the scenario where a constant is used as a value in a hash literal.
+    #[tokio::test]
+    async fn goto_constant_in_hash() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/constant_in_hash.rb").await;
+
+        // Constant in hash value `{ key: MyConstant }` → MyConstant class definition
+        // Line 3, character 14 is on "MyConstant" in "hash = { key: MyConstant }"
+        snapshot_definitions(
+            &harness,
+            "goto/constant_in_hash.rb",
+            3,
+            14,
+            "constant_in_hash",
+        )
+        .await;
+    }
+
+    /// Validate that constants inside hash bracket access work correctly.
+    /// Tests the scenario where a constant is used as a key in hash bracket access like hash[Constant].
+    #[tokio::test]
+    async fn goto_constant_in_hash_key() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/constant_in_hash_key.rb").await;
+
+        // Constant in hash bracket access `hash[Constant]` → Constant definition
+        // Line 3, character 6 is on "Constant" in "hash[Constant] = 1"
+        snapshot_definitions(
+            &harness,
+            "goto/constant_in_hash_key.rb",
+            3,
+            6,
+            "constant_in_hash_key",
+        )
+        .await;
+    }
 }

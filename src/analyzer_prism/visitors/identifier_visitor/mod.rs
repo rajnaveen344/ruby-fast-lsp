@@ -235,6 +235,12 @@ impl Visit<'_> for IdentifierVisitor {
         visit_back_reference_read_node(self, node);
         self.process_back_reference_read_node_exit(node);
     }
+
+    fn visit_hash_node(&mut self, node: &HashNode) {
+        // Hash nodes don't need special processing - just recursively visit children
+        // This ensures constants inside hash values are properly visited
+        visit_hash_node(self, node);
+    }
 }
 
 #[cfg(test)]
