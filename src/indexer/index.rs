@@ -261,10 +261,7 @@ impl RubyIndex {
 
     /// Get class definition locations for classes that use a module
     /// Returns a vector of Location objects pointing to class definitions
-    pub fn get_class_definition_locations(
-        &self,
-        module_fqn: &FullyQualifiedName,
-    ) -> Vec<Location> {
+    pub fn get_class_definition_locations(&self, module_fqn: &FullyQualifiedName) -> Vec<Location> {
         let transitive_classes = self.get_transitive_mixin_classes(module_fqn);
         let mut locations = Vec::new();
 
@@ -384,7 +381,10 @@ impl RubyIndex {
                     location: call_location.clone(), // Use the call location, not the class definition
                 };
 
-                let usages = self.mixin_usages.entry(resolved_fqn).or_insert_with(Vec::new);
+                let usages = self
+                    .mixin_usages
+                    .entry(resolved_fqn)
+                    .or_insert_with(Vec::new);
 
                 // Avoid duplicates
                 if !usages.contains(&usage) {
@@ -421,6 +421,25 @@ impl RubyIndex {
                 debug!("Removed entry from prefix tree: {}", key);
             }
         }
+    }
+
+    /// Resolve all mixin references and populate reverse_mixins and mixin_usages
+    /// This should be called after all definitions have been indexed
+    pub fn resolve_all_mixins(&mut self) {
+        debug!("Resolving all mixin references");
+
+        // Collect all entries that have mixins (to avoid borrowing issues)
+        let entries_with_mixins: Vec<_> = self.definitions.values().flatten().cloned().collect();
+
+        for entry in entries_with_mixins {
+            // Call the existing update_reverse_mixins method which resolves and stores the mixins
+            self.update_reverse_mixins(&entry);
+        }
+
+        debug!(
+            "Resolved mixins: {} modules have usages tracked",
+            self.mixin_usages.len()
+        );
     }
 }
 

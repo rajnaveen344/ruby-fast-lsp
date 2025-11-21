@@ -52,6 +52,10 @@ impl IndexerProject {
         self.index_definitions_and_track_dependencies(&ruby_files, server)
             .await?;
 
+        // Resolve all mixin references now that all definitions are indexed
+        info!("Resolving mixin references");
+        server.index().lock().resolve_all_mixins();
+
         // Update dependency tracker with discovered dependencies
         self.update_dependency_tracker();
 

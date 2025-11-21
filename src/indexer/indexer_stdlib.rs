@@ -58,6 +58,10 @@ impl IndexerStdlib {
         // Index required stdlib modules
         self.index_required_modules(server).await?;
 
+        // Resolve all mixin references now that all stdlib definitions are indexed
+        info!("Resolving stdlib mixin references");
+        server.index().lock().resolve_all_mixins();
+
         info!("Stdlib indexing completed in {:?}", start_time.elapsed());
         Ok(())
     }

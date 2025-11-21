@@ -54,6 +54,9 @@ pub fn process_content_for_definitions(
     let mut visitor = IndexVisitor::new(server, uri.clone());
     visitor.visit(&parse_result.node());
 
+    // Resolve mixins for entries that were just added
+    server.index().lock().resolve_all_mixins();
+
     // Update the document in the server's cache with the visitor's modified document
     if let Some(doc_arc) = server.docs.lock().get(&uri) {
         *doc_arc.write() = visitor.document;

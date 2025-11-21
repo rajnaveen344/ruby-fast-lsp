@@ -120,6 +120,10 @@ impl IndexingCoordinator {
         // Step 6: Index definitions from gems
         self.index_gems().await?;
 
+        // Step 7: Resolve all mixin references across all indexed files
+        info!("Resolving all mixin references across project, stdlib, and gems");
+        server.index().lock().resolve_all_mixins();
+
         info!("Phase 1 completed in {:?}", phase1_start.elapsed());
 
         // PHASE 2: Index all references (now that definitions are available)
