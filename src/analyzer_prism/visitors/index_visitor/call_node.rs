@@ -36,9 +36,20 @@ impl IndexVisitor {
                 return;
             }
 
+            // Determine the mixin type first
+            let mixin_type_opt = match method_name.as_str() {
+                "include" => Some(crate::indexer::entry::MixinType::Include),
+                "extend" => Some(crate::indexer::entry::MixinType::Extend),
+                "prepend" => Some(crate::indexer::entry::MixinType::Prepend),
+                _ => None,
+            };
+
             let mut index = self.index.lock();
             if let Some(entries) = index.get_mut(&current_fqn) {
                 if let Some(entry) = entries.last_mut() {
+                    // Clone mixin_refs before moving it
+                    let mixin_refs_clone = mixin_refs.clone();
+
                     let should_update_reverse_mixins = match method_name.as_str() {
                         "include" => {
                             entry.add_includes(mixin_refs);
@@ -57,10 +68,24 @@ impl IndexVisitor {
 
                     // Update reverse mixin tracking after adding mixins
                     if should_update_reverse_mixins {
-                        // Clone the entry to avoid borrow checker issues
-                        let entry_clone = entry.clone();
-                        let _ = entries; // Release the mutable borrow on entries
-                        index.update_reverse_mixins(&entry_clone);
+                        if let Some(mixin_type) = mixin_type_opt {
+                            // Clone the entry to avoid borrow checker issues
+                            let entry_clone = entry.clone();
+                            let _ = entries; // Release the mutable borrow on entries
+
+                            // Get the location of the call node (include/prepend/extend)
+                            let call_location = self
+                                .document
+                                .prism_location_to_lsp_location(&node.location());
+
+                            // Update reverse mixins with the call location
+                            index.update_reverse_mixins_with_location(
+                                &entry_clone,
+                                &mixin_refs_clone,
+                                mixin_type,
+                                call_location,
+                            );
+                        }
                     }
                 }
             }

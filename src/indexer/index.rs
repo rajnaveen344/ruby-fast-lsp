@@ -3,9 +3,20 @@ use std::collections::HashMap;
 use log::debug;
 use tower_lsp::lsp_types::{Location, Url};
 
-use crate::indexer::entry::{entry_kind::EntryKind, Entry};
+use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
 use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+
+/// Represents a single mixin usage with its type and location
+#[derive(Debug, Clone, PartialEq)]
+pub struct MixinUsage {
+    /// The class/module that uses the mixin
+    pub user_fqn: FullyQualifiedName,
+    /// The type of mixin (include, prepend, extend)
+    pub mixin_type: MixinType,
+    /// Location of the mixin call
+    pub location: Location,
+}
 
 #[derive(Debug)]
 pub struct RubyIndex {
@@ -28,6 +39,10 @@ pub struct RubyIndex {
     // For example, if class Foo includes module Bar, then reverse_mixins[Bar] contains Foo
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
 
+    // Detailed mixin usage tracking: module FQN -> list of usages with type and location
+    // For CodeLens feature: shows where and how a module is used (include/prepend/extend)
+    pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
+
     // Prefix tree for auto-completion
     // Single prefix tree that holds all entries for fast lookup during completion
     pub prefix_tree: PrefixTree,
@@ -41,6 +56,7 @@ impl RubyIndex {
             references: HashMap::new(),
             methods_by_name: HashMap::new(),
             reverse_mixins: HashMap::new(),
+            mixin_usages: HashMap::new(),
             prefix_tree: PrefixTree::new(),
         }
     }
@@ -123,6 +139,12 @@ impl RubyIndex {
             }
         }
 
+        // Remove mixin usages from this URI
+        for usages in self.mixin_usages.values_mut() {
+            usages.retain(|usage| usage.location.uri != *uri);
+        }
+        self.mixin_usages.retain(|_, usages| !usages.is_empty());
+
         // Remove entries from prefix trees
         self.remove_from_prefix_trees(&entries, uri);
     }
@@ -162,21 +184,48 @@ impl RubyIndex {
                 ..
             } => {
                 debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
-                // Process includes, extends, and prepends
-                for mixin_refs in [includes, extends, prepends] {
+                // Process includes, extends, and prepends with their types
+                let mixin_groups = [
+                    (includes, MixinType::Include),
+                    (extends, MixinType::Extend),
+                    (prepends, MixinType::Prepend),
+                ];
+
+                for (mixin_refs, mixin_type) in mixin_groups {
                     for mixin_ref in mixin_refs {
                         debug!("Processing mixin ref: {:?}", mixin_ref);
                         if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
-                            debug!("Resolved mixin ref {:?} to {:?}, adding reverse mapping: {:?} -> {:?}", 
+                            debug!("Resolved mixin ref {:?} to {:?}, adding reverse mapping: {:?} -> {:?}",
                                    mixin_ref, resolved_fqn, resolved_fqn, entry.fqn);
+
+                            // Update reverse_mixins (legacy, for backward compatibility)
                             let including_classes = self
                                 .reverse_mixins
-                                .entry(resolved_fqn)
+                                .entry(resolved_fqn.clone())
                                 .or_insert_with(Vec::new);
 
                             // Avoid duplicates
                             if !including_classes.contains(&entry.fqn) {
                                 including_classes.push(entry.fqn.clone());
+                            }
+
+                            // Update mixin_usages with detailed information
+                            // Note: We use entry.location which is the module/class definition location
+                            // In the future, we could track the actual call location separately
+                            let usage = MixinUsage {
+                                user_fqn: entry.fqn.clone(),
+                                mixin_type,
+                                location: entry.location.clone(),
+                            };
+
+                            let usages = self
+                                .mixin_usages
+                                .entry(resolved_fqn)
+                                .or_insert_with(Vec::new);
+
+                            // Avoid duplicates
+                            if !usages.contains(&usage) {
+                                usages.push(usage);
                             }
                         } else {
                             debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
@@ -200,6 +249,62 @@ impl RubyIndex {
             .unwrap_or_default();
         debug!("get_including_classes for {:?}: {:?}", module_fqn, result);
         result
+    }
+
+    /// Get all mixin usages for a given module (for CodeLens)
+    pub fn get_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
+        self.mixin_usages
+            .get(module_fqn)
+            .map(|usages| usages.clone())
+            .unwrap_or_default()
+    }
+
+    /// Update reverse mixin tracking with specific call location
+    pub fn update_reverse_mixins_with_location(
+        &mut self,
+        entry: &Entry,
+        mixin_refs: &[crate::indexer::entry::MixinRef],
+        mixin_type: MixinType,
+        call_location: Location,
+    ) {
+        use crate::indexer::ancestor_chain::resolve_mixin_ref;
+
+        for mixin_ref in mixin_refs {
+            debug!("Processing mixin ref: {:?}", mixin_ref);
+            if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
+                debug!(
+                    "Resolved mixin ref {:?} to {:?}, adding reverse mapping with call location",
+                    mixin_ref, resolved_fqn
+                );
+
+                // Update reverse_mixins (legacy, for backward compatibility)
+                let including_classes = self
+                    .reverse_mixins
+                    .entry(resolved_fqn.clone())
+                    .or_insert_with(Vec::new);
+
+                // Avoid duplicates
+                if !including_classes.contains(&entry.fqn) {
+                    including_classes.push(entry.fqn.clone());
+                }
+
+                // Update mixin_usages with the actual call location
+                let usage = MixinUsage {
+                    user_fqn: entry.fqn.clone(),
+                    mixin_type,
+                    location: call_location.clone(), // Use the call location, not the class definition
+                };
+
+                let usages = self.mixin_usages.entry(resolved_fqn).or_insert_with(Vec::new);
+
+                // Avoid duplicates
+                if !usages.contains(&usage) {
+                    usages.push(usage);
+                }
+            } else {
+                debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
+            }
+        }
     }
 
     /// Add entry to appropriate prefix trees for auto-completion

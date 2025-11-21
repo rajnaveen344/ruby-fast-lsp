@@ -38,7 +38,7 @@ class RubyNamespaceTreeProvider {
                 const response = await client.sendRequest('ruby/namespaceTree', {
                     uri: vscode.window.activeTextEditor?.document.uri.toString() || ''
                 });
-                
+
                 if (response && response.namespaces) {
                     return this.buildTreeItems(response.namespaces);
                 }
@@ -49,7 +49,7 @@ class RubyNamespaceTreeProvider {
         } catch (error) {
             outputChannel.appendLine(`Ruby Fast LSP Namespace Tree Error: ${error.message}`);
         }
-        
+
         return [];
     }
 
@@ -60,7 +60,7 @@ class RubyNamespaceTreeProvider {
                 ns.name,
                 hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
             );
-            
+
             // Build detailed tooltip with mixin information
             let tooltip = `${ns.kind}: ${ns.fqn}`;
             if (ns.superclass) {
@@ -75,18 +75,18 @@ class RubyNamespaceTreeProvider {
             if (ns.extends && ns.extends.length > 0) {
                 tooltip += `\nExtends: ${ns.extends.join(', ')}`;
             }
-            
+
             item.tooltip = tooltip;
             item.description = ns.kind;
             item.children = ns.children || [];
-            
+
             // Set icon based on kind
             if (ns.kind === 'Class') {
                 item.iconPath = new vscode.ThemeIcon('symbol-class');
             } else if (ns.kind === 'Module') {
                 item.iconPath = new vscode.ThemeIcon('symbol-module');
             }
-            
+
             // Add location information for navigation
             if (ns.location && ns.location.range && ns.location.range.start && ns.location.range.end) {
                 item.command = {
@@ -105,7 +105,7 @@ class RubyNamespaceTreeProvider {
                     ]
                 };
             }
-            
+
             return item;
         });
     }
@@ -151,9 +151,9 @@ function activate(context) {
     // Create output channel for extension logs
     outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP Extension');
     context.subscriptions.push(outputChannel);
-    
+
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
-    
+
     const serverOptions = {
         command: getServerPath(),
         args: [],
@@ -212,7 +212,26 @@ function activate(context) {
         namespaceTreeProvider.refresh();
     });
 
-    context.subscriptions.push(treeView, refreshCommand);
+    // Register wrapper command for showReferences to handle LSP JSON serialization
+    const showReferencesCommand = vscode.commands.registerCommand('ruby-fast-lsp.showReferences',
+        (uriStr, position, locations) => {
+            // Convert JSON arguments to proper VS Code types
+            const uri = vscode.Uri.parse(uriStr);
+            const pos = new vscode.Position(position.line, position.character);
+            const locs = locations.map(loc => new vscode.Location(
+                vscode.Uri.parse(loc.uri),
+                new vscode.Range(
+                    new vscode.Position(loc.range.start.line, loc.range.start.character),
+                    new vscode.Position(loc.range.end.line, loc.range.end.character)
+                )
+            ));
+
+            // Call the built-in showReferences command with proper types
+            return vscode.commands.executeCommand('editor.action.showReferences', uri, pos, locs);
+        }
+    );
+
+    context.subscriptions.push(treeView, refreshCommand, showReferencesCommand);
 
     // Start the client and initialize namespace tree when ready
     client.start().then(() => {

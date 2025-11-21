@@ -56,6 +56,9 @@ pub async fn handle_initialize(
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        code_lens_provider: Some(CodeLensOptions {
+            resolve_provider: Some(false),
+        }),
         inlay_hint_provider: Some(OneOf::Right(
             capabilities::inlay_hints::get_inlay_hints_capability(),
         )),

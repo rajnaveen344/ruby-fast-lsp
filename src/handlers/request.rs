@@ -1,5 +1,5 @@
 use crate::capabilities::{
-    completion, definitions, document_symbols, folding_range, formatting, inlay_hints,
+    code_lens, completion, definitions, document_symbols, folding_range, formatting, inlay_hints,
     namespace_tree, references, semantic_tokens, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
@@ -137,5 +137,16 @@ pub async fn handle_namespace_tree(
         "[PERF] Namespace tree completed in {:?}",
         start_time.elapsed()
     );
+    Ok(result)
+}
+
+pub async fn handle_code_lens(
+    lang_server: &RubyLanguageServer,
+    params: CodeLensParams,
+) -> LspResult<Option<Vec<CodeLens>>> {
+    info!("CodeLens request received for {:?}", params.text_document.uri.path());
+    let start_time = std::time::Instant::now();
+    let result = code_lens::handle_code_lens(lang_server, params).await;
+    info!("[PERF] CodeLens completed in {:?}", start_time.elapsed());
     Ok(result)
 }

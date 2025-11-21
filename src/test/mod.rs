@@ -1,4 +1,5 @@
 // Re-export the integration test module
+pub mod code_lens;
 pub mod coordinator_test;
 pub mod definitions;
 pub mod inlay_hints_integration;

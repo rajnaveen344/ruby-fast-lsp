@@ -1,3 +1,4 @@
+pub mod code_lens;
 pub mod completion;
 pub mod definitions;
 pub mod diagnostics;

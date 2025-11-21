@@ -97,3 +97,11 @@ pub struct MixinRef {
     /// True if the constant path began with `::`, indicating it's an absolute path.
     pub absolute: bool,
 }
+
+/// Type of mixin operation (include, prepend, extend)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MixinType {
+    Include,
+    Prepend,
+    Extend,
+}

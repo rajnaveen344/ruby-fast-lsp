@@ -14,13 +14,14 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, CompletionResponse, Diagnostic, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentOnTypeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-    InitializedParams, InlayHintParams, Location, ReferenceParams, SemanticTokensParams,
-    SemanticTokensResult, SymbolInformation, TextEdit, Url, WorkspaceSymbolParams,
+    CodeLens, CodeLensParams, CompletionItem, CompletionParams, CompletionResponse, Diagnostic,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
+    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
+    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
+    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, Url,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -398,6 +399,20 @@ impl LanguageServer for RubyLanguageServer {
             "[PERF] Folding range completed in {:?}",
             start_time.elapsed()
         );
+
+        result
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> LspResult<Option<Vec<CodeLens>>> {
+        info!(
+            "CodeLens request received for {:?}",
+            params.text_document.uri.path()
+        );
+
+        let start_time = Instant::now();
+        let result = request::handle_code_lens(self, params).await;
+
+        info!("[PERF] CodeLens completed in {:?}", start_time.elapsed());
 
         result
     }

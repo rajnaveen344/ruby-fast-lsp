@@ -9,6 +9,9 @@ pub struct RubyFastLspConfig {
 
     #[serde(rename = "extensionPath")]
     pub extension_path: Option<String>,
+
+    #[serde(rename = "codeLens.modules.enabled")]
+    pub code_lens_modules_enabled: Option<bool>,
 }
 
 impl Default for RubyFastLspConfig {
@@ -16,6 +19,7 @@ impl Default for RubyFastLspConfig {
         Self {
             ruby_version: "auto".to_string(),
             extension_path: None,
+            code_lens_modules_enabled: Some(true),
         }
     }
 }
