@@ -165,12 +165,29 @@ impl IndexerStdlib {
         // Try to find stubs relative to the current executable
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
+                // Try: exe_dir/stubs/rubystubsXX (e.g., bin/macos-arm64/stubs/rubystubs30)
                 let stubs_path = exe_dir.join("stubs").join(&stub_dir);
                 if stubs_path.exists() {
                     return Some(stubs_path);
                 }
 
-                // Try one level up (for development)
+                // Try: exe_dir/../stubs/rubystubsXX (e.g., bin/stubs/rubystubs30)
+                if let Some(parent) = exe_dir.parent() {
+                    let stubs_path = parent.join("stubs").join(&stub_dir);
+                    if stubs_path.exists() {
+                        return Some(stubs_path);
+                    }
+
+                    // Try: exe_dir/../../stubs/rubystubsXX (for VS Code extension: extension_root/stubs/rubystubs30)
+                    if let Some(grandparent) = parent.parent() {
+                        let stubs_path = grandparent.join("stubs").join(&stub_dir);
+                        if stubs_path.exists() {
+                            return Some(stubs_path);
+                        }
+                    }
+                }
+
+                // Try one level up (for development in workspace)
                 let stubs_path = exe_dir.parent()?.join("vsix").join("stubs").join(&stub_dir);
                 if stubs_path.exists() {
                     return Some(stubs_path);

@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, info};
 use tower_lsp::lsp_types::Location;
 
 use crate::analyzer_prism::Identifier;
@@ -41,6 +41,27 @@ pub fn find_constant_definitions(
 
         // Pop the last namespace and try again
         search_namespaces.pop();
+    }
+
+    // If not found in any ancestor namespace, search at the root level
+    // This handles built-in constants like String, Array, Hash, etc.
+    let root_search_fqn = Identifier::RubyConstant {
+        namespace: vec![],
+        iden: ns.to_vec(),
+    };
+
+    info!(
+        "Searching for constant at root level: {:?}",
+        root_search_fqn
+    );
+
+    if let Some(entries) = index.definitions.get(&root_search_fqn.into()) {
+        if !entries.is_empty() {
+            for entry in entries {
+                found_locations.push(entry.location.clone());
+            }
+            return Some(found_locations);
+        }
     }
 
     if !found_locations.is_empty() {

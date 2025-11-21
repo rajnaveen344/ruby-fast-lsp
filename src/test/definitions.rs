@@ -410,7 +410,9 @@ mod tests {
     #[tokio::test]
     async fn goto_constant_in_hash_key() {
         let harness = TestHarness::new().await;
-        harness.open_fixture_dir("goto/constant_in_hash_key.rb").await;
+        harness
+            .open_fixture_dir("goto/constant_in_hash_key.rb")
+            .await;
 
         // Constant in hash bracket access `hash[Constant]` → Constant definition
         // Line 3, character 6 is on "Constant" in "hash[Constant] = 1"
@@ -420,6 +422,45 @@ mod tests {
             3,
             6,
             "constant_in_hash_key",
+        )
+        .await;
+    }
+
+    /// Validate that top-level constants are resolved correctly
+    /// even when referenced from within nested modules/classes.
+    /// This tests Ruby's constant lookup fallback to the root namespace.
+    #[tokio::test]
+    async fn goto_toplevel_constant_from_nested_context() {
+        let harness = TestHarness::new().await;
+        harness.open_fixture_dir("goto/builtin_constant.rb").await;
+
+        // TopLevelClass constant in module B → TopLevelClass definition
+        snapshot_definitions(
+            &harness,
+            "goto/builtin_constant.rb",
+            10,
+            7,
+            "toplevel_in_module_b",
+        )
+        .await;
+
+        // TopLevelClass constant in class C_A → TopLevelClass definition
+        snapshot_definitions(
+            &harness,
+            "goto/builtin_constant.rb",
+            16,
+            7,
+            "toplevel_in_class_c_a",
+        )
+        .await;
+
+        // TopLevelClass constant in conditional → TopLevelClass definition
+        snapshot_definitions(
+            &harness,
+            "goto/builtin_constant.rb",
+            19,
+            19,
+            "toplevel_in_conditional",
         )
         .await;
     }
