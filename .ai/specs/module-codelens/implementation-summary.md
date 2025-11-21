@@ -224,6 +224,42 @@ The references now point to the exact `include`/`prepend`/`extend` call lines, n
 
 **Implementation**: Modified `IndexVisitor` to track the `CallNode` location when processing mixin calls, storing the precise location in `MixinUsage`.
 
+### ✅ Transitive Class Usage Tracking (Implemented)
+
+The CodeLens now shows how many classes use the module, including transitive usage through other modules. This helps understand the full impact of a module across the codebase.
+
+**Example**:
+
+```ruby
+module A
+end
+
+module B
+  include A  # A is included in B
+end
+
+class MyClass
+  include B  # B is included in MyClass (which transitively includes A)
+end
+```
+
+For module `A`, the CodeLens shows: **`1 include • 1 class`**
+
+- Direct usage: 1 include (in module B)
+- Transitive usage: 1 class (MyClass, via B)
+
+For module `B`, the CodeLens shows: **`1 include • 1 class`**
+
+- Direct usage: 1 include (in MyClass)
+- Classes using it: 1 class (MyClass)
+
+**Implementation**:
+
+- Added `get_transitive_mixin_classes()` method to `RubyIndex`
+- Recursively traverses the mixin graph to find all classes
+- Tracks the path through which each class includes the module
+- Updates CodeLens label format to show: `X include | Y prepend | Z extend • N classes`
+
 ## Future Enhancements
 
 Potential improvements for future versions:
@@ -262,3 +298,178 @@ Potential improvements for future versions:
 - Zero-count categories are omitted
 - Cross-file usages are counted
 - Nested/namespaced modules resolve properly
+
+## Enhancement: Separate CodeLens for Each Mixin Type
+
+**Date**: November 21, 2025
+
+### Problem
+
+Previously, a single CodeLens was displayed for each module showing all mixin types combined (e.g., "2 includes | 3 prepends • 2 classes"). When clicked, this would show all references regardless of type, making it difficult to view only specific mixin types.
+
+### Solution
+
+Modified the CodeLens generation to create **separate CodeLens items** for each mixin type (include, prepend, extend). Now each module can have up to 3 CodeLens items displayed, one for each type that has usages.
+
+### Implementation Changes
+
+1. **`src/capabilities/code_lens.rs`**:
+
+   - Modified `generate_code_lens_for_module` to group usages by type using `HashMap<MixinType, Vec<Location>>`
+   - Create separate `CodeLens` items for each mixin type that has usages
+   - Label format:
+     - For `include` (first item): `"N include • M classes"` (shows class count)
+     - For `prepend` and `extend`: `"N prepend"` or `"N extend"` (no class count)
+   - Removed the now-unused `format_code_lens_label` helper function
+
+2. **`src/test/code_lens.rs`**:
+   - Updated `test_basic_prepend` to expect label `"1 prepend"` instead of `"1 prepend • 1 class"`
+   - Updated `test_basic_extend` to expect label `"1 extend"` instead of `"1 extend • 1 class"`
+   - Updated `test_multiple_categories` to expect 3 separate CodeLens items instead of 1 combined item
+   - Verified each CodeLens has the correct label for its type
+
+### Benefits
+
+- **Better UX**: Users can click on a specific mixin type to see only those references
+- **Clearer Intent**: Each CodeLens is focused on a single action
+- **More Actionable**: Reduces noise when investigating specific mixin patterns
+- **Consistent with VS Code Patterns**: Similar to how other LSPs show multiple CodeLens items for different reference types
+
+### Example
+
+For the following code:
+
+```ruby
+module A
+end
+
+class C_A
+  include A
+  prepend A
+  prepend A
+  include B
+end
+
+class C_B
+  include A
+  prepend A
+end
+```
+
+Module `A` now displays **2 separate CodeLens items**:
+
+- `2 include • 2 classes` - clicking shows only the 2 include references
+- `3 prepend` - clicking shows only the 3 prepend references
+
+### Testing
+
+All existing tests pass with updated expectations:
+
+- ✅ `test_basic_include` - single CodeLens for include
+- ✅ `test_basic_prepend` - single CodeLens for prepend
+- ✅ `test_basic_extend` - single CodeLens for extend
+- ✅ `test_multiple_categories` - 3 separate CodeLens items
+- ✅ `test_nested_module` - works with nested modules
+- ✅ `test_no_usages` - no CodeLens when no usages
+
+## Enhancement: Separate CodeLens for Class Definitions
+
+**Date**: November 21, 2025
+
+### Problem
+
+The class count was arbitrarily attached to the "include" CodeLens (e.g., "2 include • 2 classes"), which was:
+
+1. **Inconsistent**: Only "include" showed class count, not "prepend" or "extend"
+2. **Semantically Mixed**: Clicking showed mixin call sites, but the label mentioned classes
+3. **Less Flexible**: Users couldn't view class definitions separately from mixin call sites
+
+### Solution
+
+Created a **4th separate CodeLens** specifically for class definitions. Now each module can display up to 4 CodeLens items:
+
+- `"N include"` - shows include call sites
+- `"N prepend"` - shows prepend call sites
+- `"N extend"` - shows extend call sites
+- `"N classes"` - shows class definition locations
+
+### Implementation Changes
+
+1. **`src/indexer/index.rs`**:
+
+   - Added `get_class_definition_locations()` method
+   - Takes a module FQN and returns `Vec<Location>` of class definitions
+   - Uses existing `get_transitive_mixin_classes()` to get class FQNs
+   - Looks up each class FQN in `definitions` HashMap to get its `Location`
+   - Filters to only include `EntryKind::Class` entries
+
+2. **`src/capabilities/code_lens.rs`**:
+
+   - Removed class count from the "include" CodeLens label
+   - Changed condition from `usages.is_empty()` to `usages.is_empty() && class_locations.is_empty()`
+   - Added separate CodeLens generation for classes after mixin types
+   - All mixin CodeLens now have uniform format: `"N type"` (no bullet separator)
+   - Classes CodeLens format: `"N class"` or `"N classes"` (singular/plural)
+
+3. **`src/test/code_lens.rs`**:
+   - Updated `test_basic_include` to expect 2 CodeLens items: `"1 include"` + `"1 class"`
+   - Updated `test_basic_prepend` to expect 2 CodeLens items: `"1 prepend"` + `"1 class"`
+   - Updated `test_basic_extend` to expect 2 CodeLens items: `"1 extend"` + `"1 class"`
+   - Updated `test_multiple_categories` to expect 4 CodeLens items: include, prepend, extend, classes
+
+### Semantic Difference (Feature, Not Bug!)
+
+- **Mixin CodeLens** (include/prepend/extend): Clicking jumps to **mixin call sites**
+
+  - Example: `include MyModule` on line 10 of `user.rb`
+
+- **Classes CodeLens**: Clicking jumps to **class definition locations**
+  - Example: `class User` on line 5 of `user.rb`
+
+This provides two complementary views:
+
+- "Where is this module being mixed in?" → Click mixin type
+- "Which classes use this module?" → Click classes
+
+### Benefits
+
+✅ **Consistency**: All CodeLens items follow the same simple format
+✅ **Semantic Clarity**: Call sites vs definitions are clearly separated
+✅ **More Flexible**: Users can choose which view they want
+✅ **Better UX**: Each CodeLens has exactly one focused purpose
+
+### Example
+
+For the following code:
+
+```ruby
+module Loggable
+end
+
+class User
+  include Loggable
+  prepend Loggable
+end
+
+class Product
+  extend Loggable
+end
+```
+
+Module `Loggable` now displays **4 separate CodeLens items**:
+
+- `2 include` - clicking shows the 2 include call sites (line 5, 6)
+- `1 prepend` - clicking shows the 1 prepend call site (line 6)
+- `1 extend` - clicking shows the 1 extend call site (line 10)
+- `2 classes` - clicking shows the 2 class definitions (User on line 4, Product on line 9)
+
+### Testing
+
+All tests pass with new expectations:
+
+- ✅ `test_basic_include` - 2 CodeLens items (include + classes)
+- ✅ `test_basic_prepend` - 2 CodeLens items (prepend + classes)
+- ✅ `test_basic_extend` - 2 CodeLens items (extend + classes)
+- ✅ `test_multiple_categories` - 4 CodeLens items (all types + classes)
+- ✅ `test_nested_module` - works with nested modules
+- ✅ `test_no_usages` - no CodeLens when no usages

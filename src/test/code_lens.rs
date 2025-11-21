@@ -53,14 +53,17 @@ end
     assert!(result.is_some());
     let lenses = result.unwrap();
 
-    // Should have one CodeLens for MyModule
-    assert_eq!(lenses.len(), 1);
+    // Should have two CodeLens for MyModule (include + classes)
+    assert_eq!(lenses.len(), 2);
 
-    // Verify the label
-    let lens = &lenses[0];
-    assert!(lens.command.is_some());
-    let command = lens.command.as_ref().unwrap();
-    assert_eq!(command.title, "1 include");
+    // Verify the labels
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    assert!(titles.contains(&"1 include".to_string()));
+    assert!(titles.contains(&"1 class".to_string()));
 }
 
 #[tokio::test]
@@ -86,12 +89,16 @@ end
 
     assert!(result.is_some());
     let lenses = result.unwrap();
-    assert_eq!(lenses.len(), 1);
+    // Should have two CodeLens for MyModule (prepend + classes)
+    assert_eq!(lenses.len(), 2);
 
-    let lens = &lenses[0];
-    assert!(lens.command.is_some());
-    let command = lens.command.as_ref().unwrap();
-    assert_eq!(command.title, "1 prepend");
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    assert!(titles.contains(&"1 prepend".to_string()));
+    assert!(titles.contains(&"1 class".to_string()));
 }
 
 #[tokio::test]
@@ -117,12 +124,16 @@ end
 
     assert!(result.is_some());
     let lenses = result.unwrap();
-    assert_eq!(lenses.len(), 1);
+    // Should have two CodeLens for MyModule (extend + classes)
+    assert_eq!(lenses.len(), 2);
 
-    let lens = &lenses[0];
-    assert!(lens.command.is_some());
-    let command = lens.command.as_ref().unwrap();
-    assert_eq!(command.title, "1 extend");
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    assert!(titles.contains(&"1 extend".to_string()));
+    assert!(titles.contains(&"1 class".to_string()));
 }
 
 #[tokio::test]
@@ -156,12 +167,20 @@ end
 
     assert!(result.is_some());
     let lenses = result.unwrap();
-    assert_eq!(lenses.len(), 1);
+    // Should have 4 CodeLens items for MyModule (include, prepend, extend, classes)
+    assert_eq!(lenses.len(), 4);
 
-    let lens = &lenses[0];
-    assert!(lens.command.is_some());
-    let command = lens.command.as_ref().unwrap();
-    assert_eq!(command.title, "1 include | 1 prepend | 1 extend");
+    // Verify each CodeLens
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    // Check that we have all four types
+    assert!(titles.contains(&"1 include".to_string()));
+    assert!(titles.contains(&"1 prepend".to_string()));
+    assert!(titles.contains(&"1 extend".to_string()));
+    assert!(titles.contains(&"2 classes".to_string()));
 }
 
 #[tokio::test]

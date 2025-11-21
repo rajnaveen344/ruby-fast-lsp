@@ -259,6 +259,95 @@ impl RubyIndex {
             .unwrap_or_default()
     }
 
+    /// Get class definition locations for classes that use a module
+    /// Returns a vector of Location objects pointing to class definitions
+    pub fn get_class_definition_locations(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<Location> {
+        let transitive_classes = self.get_transitive_mixin_classes(module_fqn);
+        let mut locations = Vec::new();
+
+        for class_fqn in transitive_classes.keys() {
+            // Look up the class definition in the index
+            if let Some(entries) = self.definitions.get(class_fqn) {
+                // Get the first entry (primary definition)
+                if let Some(entry) = entries.first() {
+                    // Only include if it's actually a class
+                    if matches!(entry.kind, EntryKind::Class { .. }) {
+                        locations.push(entry.location.clone());
+                    }
+                }
+            }
+        }
+
+        locations
+    }
+
+    /// Get all classes that transitively include/extend/prepend a module
+    /// Returns a map of class FQN -> path of modules through which it's included
+    pub fn get_transitive_mixin_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>> {
+        let mut result: HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>> = HashMap::new();
+        let mut visited = std::collections::HashSet::new();
+
+        self.collect_transitive_users(module_fqn, &mut result, &mut visited, vec![]);
+
+        result
+    }
+
+    /// Recursively collect all classes/modules that use this module
+    fn collect_transitive_users(
+        &self,
+        module_fqn: &FullyQualifiedName,
+        result: &mut HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>>,
+        visited: &mut std::collections::HashSet<FullyQualifiedName>,
+        path: Vec<FullyQualifiedName>,
+    ) {
+        // Avoid infinite loops
+        if visited.contains(module_fqn) {
+            return;
+        }
+        visited.insert(module_fqn.clone());
+
+        // Get direct users of this module
+        if let Some(usages) = self.mixin_usages.get(module_fqn) {
+            for usage in usages {
+                // Check if the user is a class or module
+                if let Some(entries) = self.definitions.get(&usage.user_fqn) {
+                    if let Some(entry) = entries.first() {
+                        let mut current_path = path.clone();
+                        current_path.push(module_fqn.clone());
+
+                        match &entry.kind {
+                            EntryKind::Class { .. } => {
+                                // This is a class - add it to results
+                                result
+                                    .entry(usage.user_fqn.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(current_path);
+                            }
+                            EntryKind::Module { .. } => {
+                                // This is a module - recurse to find classes that include it
+                                self.collect_transitive_users(
+                                    &usage.user_fqn,
+                                    result,
+                                    visited,
+                                    current_path,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        visited.remove(module_fqn);
+    }
+
     /// Update reverse mixin tracking with specific call location
     pub fn update_reverse_mixins_with_location(
         &mut self,

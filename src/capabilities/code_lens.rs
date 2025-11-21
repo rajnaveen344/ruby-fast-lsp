@@ -104,21 +104,25 @@ impl<'a> ModuleCodeLensVisitor<'a> {
         // Query the index for mixin usages
         let index = self.lang_server.index.lock();
         let usages = index.get_mixin_usages(&fqn);
+
+        // Get class definition locations
+        let class_locations = index.get_class_definition_locations(&fqn);
+
         drop(index);
 
-        if usages.is_empty() {
-            debug!("No usages found for module: {:?}", fqn);
+        if usages.is_empty() && class_locations.is_empty() {
+            debug!("No usages or classes found for module: {:?}", fqn);
             return;
         }
 
-        // Count usages by type
-        let mut counts: HashMap<MixinType, usize> = HashMap::new();
+        // Group usages by type
+        let mut usages_by_type: HashMap<MixinType, Vec<Location>> = HashMap::new();
         for usage in &usages {
-            *counts.entry(usage.mixin_type).or_insert(0) += 1;
+            usages_by_type
+                .entry(usage.mixin_type)
+                .or_insert_with(Vec::new)
+                .push(usage.location.clone());
         }
-
-        // Build the label
-        let label = format_code_lens_label(&counts);
 
         // Get the range for the module keyword
         let start_offset = node.location().start_offset();
@@ -132,25 +136,57 @@ impl<'a> ModuleCodeLensVisitor<'a> {
             end: end_position,
         };
 
-        // Create the CodeLens with a command to show references
-        // Collect the locations from usages
-        let locations: Vec<Location> = usages.iter().map(|u| u.location.clone()).collect();
+        // Create separate CodeLens for each mixin type
+        let mixin_types = [
+            (MixinType::Include, "include"),
+            (MixinType::Prepend, "prepend"),
+            (MixinType::Extend, "extend"),
+        ];
 
-        let code_lens = CodeLens {
-            range,
-            command: Some(Command {
-                title: label,
-                command: "ruby-fast-lsp.showReferences".to_string(), // Use our custom wrapper command
-                arguments: Some(vec![
-                    serde_json::to_value(self.uri.as_str()).unwrap(), // Pass URI as string
-                    serde_json::to_value(start_position).unwrap(),
-                    serde_json::to_value(locations).unwrap(),
-                ]),
-            }),
-            data: None,
-        };
+        for (mixin_type, type_name) in &mixin_types {
+            if let Some(locations) = usages_by_type.get(mixin_type) {
+                let count = locations.len();
+                let label = format!("{} {}", count, type_name);
 
-        self.code_lenses.push(code_lens);
+                let code_lens = CodeLens {
+                    range,
+                    command: Some(Command {
+                        title: label,
+                        command: "ruby-fast-lsp.showReferences".to_string(),
+                        arguments: Some(vec![
+                            serde_json::to_value(self.uri.as_str()).unwrap(),
+                            serde_json::to_value(start_position).unwrap(),
+                            serde_json::to_value(locations).unwrap(),
+                        ]),
+                    }),
+                    data: None,
+                };
+
+                self.code_lenses.push(code_lens);
+            }
+        }
+
+        // Create separate CodeLens for classes
+        if !class_locations.is_empty() {
+            let count = class_locations.len();
+            let label = format!("{} {}", count, if count == 1 { "class" } else { "classes" });
+
+            let code_lens = CodeLens {
+                range,
+                command: Some(Command {
+                    title: label,
+                    command: "ruby-fast-lsp.showReferences".to_string(),
+                    arguments: Some(vec![
+                        serde_json::to_value(self.uri.as_str()).unwrap(),
+                        serde_json::to_value(start_position).unwrap(),
+                        serde_json::to_value(class_locations).unwrap(),
+                    ]),
+                }),
+                data: None,
+            };
+
+            self.code_lenses.push(code_lens);
+        }
     }
 
     /// Extract constant name from a node
@@ -233,31 +269,6 @@ impl<'a> Visit<'_> for ModuleCodeLensVisitor<'a> {
             self.namespace_stack.pop();
         }
     }
-}
-
-/// Format the CodeLens label based on usage counts
-fn format_code_lens_label(counts: &HashMap<MixinType, usize>) -> String {
-    let mut parts = Vec::new();
-
-    if let Some(&count) = counts.get(&MixinType::Include) {
-        if count > 0 {
-            parts.push(format!("{} include", count));
-        }
-    }
-
-    if let Some(&count) = counts.get(&MixinType::Prepend) {
-        if count > 0 {
-            parts.push(format!("{} prepend", count));
-        }
-    }
-
-    if let Some(&count) = counts.get(&MixinType::Extend) {
-        if count > 0 {
-            parts.push(format!("{} extend", count));
-        }
-    }
-
-    parts.join(" | ")
 }
 
 /// Convert byte offset to LSP Position
