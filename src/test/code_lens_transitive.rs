@@ -46,38 +46,45 @@ end
     assert!(result.is_some());
     let lenses = result.unwrap();
 
-    // Should have CodeLens for both module A and module B
-    assert!(lenses.len() >= 2);
+    // Should have CodeLens for both module A and module B (2 modules × 2 CodeLens each = 4)
+    assert!(lenses.len() >= 4);
 
     // Find CodeLens for module A (should show it's used in B and transitively in MyClass)
-    let module_a_lens = lenses.iter().find(|l| {
+    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| {
         l.range.start.line == 1 // module A is on line 1
-    });
+    }).collect();
 
-    assert!(module_a_lens.is_some());
-    let lens = module_a_lens.unwrap();
-    assert!(lens.command.is_some());
-    let command = lens.command.as_ref().unwrap();
+    assert!(module_a_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
 
-    // Should show: "1 include • 1 class"
-    println!("Module A CodeLens: {}", command.title);
-    assert!(command.title.contains("1 include"));
-    assert!(command.title.contains("1 class"));
+    // Get all titles for module A
+    let module_a_titles: Vec<String> = module_a_lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    println!("Module A CodeLens: {:?}", module_a_titles);
+
+    // Should have separate CodeLens for "1 include" and "1 class"
+    assert!(module_a_titles.iter().any(|t| t == "1 include"));
+    assert!(module_a_titles.iter().any(|t| t == "1 class"));
 
     // Find CodeLens for module B
-    let module_b_lens = lenses.iter().find(|l| {
+    let module_b_lenses: Vec<_> = lenses.iter().filter(|l| {
         l.range.start.line == 4 // module B is on line 4
-    });
+    }).collect();
 
-    assert!(module_b_lens.is_some());
-    let lens_b = module_b_lens.unwrap();
-    assert!(lens_b.command.is_some());
-    let command_b = lens_b.command.as_ref().unwrap();
+    assert!(module_b_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
 
-    // Should show: "1 include • 1 class"
-    println!("Module B CodeLens: {}", command_b.title);
-    assert!(command_b.title.contains("1 include"));
-    assert!(command_b.title.contains("1 class"));
+    let module_b_titles: Vec<String> = module_b_lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
+
+    println!("Module B CodeLens: {:?}", module_b_titles);
+
+    // Should have separate CodeLens for "1 include" and "1 class"
+    assert!(module_b_titles.iter().any(|t| t == "1 include"));
+    assert!(module_b_titles.iter().any(|t| t == "1 class"));
 }
 
 #[tokio::test]
@@ -131,18 +138,21 @@ end
     let lenses = result.unwrap();
 
     // Find CodeLens for module A
-    let module_a_lens = lenses.iter().find(|l| {
+    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| {
         l.range.start.line == 1
-    });
+    }).collect();
 
-    assert!(module_a_lens.is_some());
-    let lens = module_a_lens.unwrap();
-    let command = lens.command.as_ref().unwrap();
+    assert!(module_a_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
+
+    let module_a_titles: Vec<String> = module_a_lenses
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect();
 
     // Module A is used in B and Class3 directly, and transitively in Class1 and Class2
-    // Should show: "2 include • 3 classes"
-    println!("Module A CodeLens: {}", command.title);
-    assert!(command.title.contains("2 include"));
-    assert!(command.title.contains("3 classes"));
+    // Should have separate CodeLens for "2 include" and "3 classes"
+    println!("Module A CodeLens: {:?}", module_a_titles);
+    assert!(module_a_titles.iter().any(|t| t == "2 include"));
+    assert!(module_a_titles.iter().any(|t| t == "3 classes"));
 }
 
