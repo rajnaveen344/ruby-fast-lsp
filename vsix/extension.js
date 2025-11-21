@@ -181,6 +181,34 @@ function activate(context) {
         clientOptions
     );
 
+    // Create status bar item for indexing progress
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    context.subscriptions.push(statusBarItem);
+
+    // Listen for progress notifications from the LSP server
+    client.onNotification('$/progress', (params) => {
+        if (params.token === 'indexing') {
+            const value = params.value;
+            if (value.kind === 'begin') {
+                statusBarItem.text = `$(sync~spin) ${value.title}: ${value.message || 'Starting...'}`;
+                statusBarItem.show();
+                outputChannel.appendLine(`[Ruby Fast LSP] ${value.title}: ${value.message || 'Starting...'}`);
+            } else if (value.kind === 'report') {
+                const message = value.message || 'Processing...';
+                const percentage = value.percentage !== undefined ? ` (${value.percentage}%)` : '';
+                statusBarItem.text = `$(sync~spin) ${message}${percentage}`;
+                outputChannel.appendLine(`[Ruby Fast LSP] ${message}${percentage}`);
+            } else if (value.kind === 'end') {
+                statusBarItem.text = `$(check) Ruby Fast LSP: ${value.message || 'Ready'}`;
+                outputChannel.appendLine(`[Ruby Fast LSP] ${value.message || 'Ready'}`);
+                // Hide the status bar after a brief delay
+                setTimeout(() => {
+                    statusBarItem.hide();
+                }, 3000);
+            }
+        }
+    });
+
     // Handle configuration changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(event => {

@@ -8,7 +8,6 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::scope::LVScopeStack;
 
 /// Find all references to a symbol at the given position.
 pub async fn find_references_at_position(

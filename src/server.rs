@@ -33,6 +33,7 @@ pub struct RubyLanguageServer {
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
     pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
+    pub workspace_uri: Arc<Mutex<Option<Url>>>,
 }
 
 impl RubyLanguageServer {
@@ -46,7 +47,16 @@ impl RubyLanguageServer {
             config: Arc::new(Mutex::new(config)),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
+            workspace_uri: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn set_workspace_uri(&self, uri: Option<Url>) {
+        *self.workspace_uri.lock() = uri;
+    }
+
+    pub fn get_workspace_uri(&self) -> Option<Url> {
+        self.workspace_uri.lock().clone()
     }
 
     pub fn index(&self) -> Arc<Mutex<RubyIndex>> {
@@ -144,6 +154,7 @@ impl Default for RubyLanguageServer {
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
+            workspace_uri: Arc::new(Mutex::new(None)),
         }
     }
 }

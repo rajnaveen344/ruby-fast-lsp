@@ -1,4 +1,5 @@
 use crate::indexer::indexer_core::IndexerCore;
+use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ impl IndexerGem {
     /// Index gems based on project requirements
     /// If selective is true, only index required gems
     /// If selective is false, index all discovered gems
-    pub async fn index_gems(&mut self, selective: bool) -> Result<Vec<Url>> {
+    pub async fn index_gems(&mut self, selective: bool, server: &RubyLanguageServer) -> Result<Vec<Url>> {
         info!("Starting gem indexing (selective: {})", selective);
 
         // Discover available gems
@@ -77,11 +78,13 @@ impl IndexerGem {
         let indexed_files;
 
         if selective && !self.required_gems.is_empty() {
+            let total_gems = self.required_gems.len();
             // Index only required gems
-            indexed_files = self.index_required_gems().await?;
+            indexed_files = self.index_required_gems(server, total_gems).await?;
         } else {
+            let total_gems = self.discovered_gems.len();
             // Index all discovered gems
-            indexed_files = self.index_all_gems().await?;
+            indexed_files = self.index_all_gems(server, total_gems).await?;
         }
 
         info!("Indexed {} files from gems", indexed_files.len());
@@ -89,10 +92,20 @@ impl IndexerGem {
     }
 
     /// Index only the gems required by the project
-    async fn index_required_gems(&self) -> Result<Vec<Url>> {
+    async fn index_required_gems(&self, server: &RubyLanguageServer, total_gems: usize) -> Result<Vec<Url>> {
+        use crate::indexer::coordinator::IndexingCoordinator;
         let mut indexed_files = Vec::new();
+        let mut current = 0;
 
         for gem_name in &self.required_gems {
+            current += 1;
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Indexing Gems".to_string(),
+                current,
+                total_gems,
+            ).await;
+
             if let Some(gem_versions) = self.discovered_gems.get(gem_name) {
                 if let Some(gem_info) = self.select_preferred_gem_version(gem_versions) {
                     debug!(
@@ -111,10 +124,20 @@ impl IndexerGem {
     }
 
     /// Index all discovered gems
-    async fn index_all_gems(&self) -> Result<Vec<Url>> {
+    async fn index_all_gems(&self, server: &RubyLanguageServer, total_gems: usize) -> Result<Vec<Url>> {
+        use crate::indexer::coordinator::IndexingCoordinator;
         let mut indexed_files = Vec::new();
+        let mut current = 0;
 
         for gem_versions in self.discovered_gems.values() {
+            current += 1;
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Indexing Gems".to_string(),
+                current,
+                total_gems,
+            ).await;
+
             if let Some(gem_info) = self.select_preferred_gem_version(gem_versions) {
                 debug!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
                 let gem_files = self.index_gem(gem_info).await?;
@@ -234,18 +257,18 @@ impl IndexerGem {
             r#"
             require 'bundler'
             require 'json'
-            
+
             begin
               # Change to the directory containing the Gemfile
               Dir.chdir('{}')
-              
+
               # Check if we're in a bundler project
               Bundler.root
-              
+
               gems = []
               Bundler.load.specs.each do |spec|
                 next if spec.name.nil? || spec.version.nil?
-                
+
                 gem_info = {{
                   name: spec.name,
                   version: spec.version.to_s,
@@ -257,7 +280,7 @@ impl IndexerGem {
                 }}
                 gems << gem_info
               end
-              
+
               puts JSON.generate(gems)
             rescue Bundler::GemfileNotFound
               exit 1
@@ -314,11 +337,11 @@ impl IndexerGem {
         let ruby_script = r#"
             require 'rubygems'
             require 'json'
-            
+
             gems = []
             Gem::Specification.each do |spec|
               next if spec.name.nil? || spec.version.nil?
-              
+
               gem_info = {
                 name: spec.name,
                 version: spec.version.to_s,
@@ -330,7 +353,7 @@ impl IndexerGem {
               }
               gems << gem_info
             end
-            
+
             puts JSON.generate(gems)
         "#;
 

@@ -46,10 +46,11 @@ impl IndexerProject {
 
         // Collect all Ruby files in the project
         let ruby_files = self.collect_project_files();
-        info!("Found {} Ruby files in project", ruby_files.len());
+        let total_files = ruby_files.len();
+        info!("Found {} Ruby files in project", total_files);
 
         // Index definitions from project files and track dependencies
-        self.index_definitions_and_track_dependencies(&ruby_files, server)
+        self.index_definitions_and_track_dependencies(&ruby_files, server, total_files)
             .await?;
 
         // Resolve all mixin references now that all definitions are indexed
@@ -79,13 +80,14 @@ impl IndexerProject {
 
         // Collect all Ruby files in the project
         let ruby_files = self.collect_project_files();
+        let total_files = ruby_files.len();
         info!(
             "Indexing references from {} Ruby files in project",
-            ruby_files.len()
+            total_files
         );
 
         // Index references from project files
-        self.index_references_only(&ruby_files, server).await?;
+        self.index_references_only(&ruby_files, server, total_files).await?;
 
         info!(
             "Project references indexing completed in {:?}",
@@ -107,8 +109,19 @@ impl IndexerProject {
         &self,
         files: &[PathBuf],
         server: &RubyLanguageServer,
+        total_files: usize,
     ) -> Result<()> {
-        for file_path in files {
+        use crate::indexer::coordinator::IndexingCoordinator;
+
+        for (index, file_path) in files.iter().enumerate() {
+            // Report progress
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Indexing".to_string(),
+                index + 1,
+                total_files
+            ).await;
+
             // Index only definitions from the file
             if let Err(e) = self.core.index_file_definitions(file_path, server).await {
                 warn!(
@@ -130,8 +143,19 @@ impl IndexerProject {
         &self,
         files: &[PathBuf],
         server: &RubyLanguageServer,
+        total_files: usize,
     ) -> Result<()> {
-        for file_path in files {
+        use crate::indexer::coordinator::IndexingCoordinator;
+
+        for (index, file_path) in files.iter().enumerate() {
+            // Report progress
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Collecting References".to_string(),
+                index + 1,
+                total_files
+            ).await;
+
             // Index only references from the file
             if let Err(e) = self.core.index_file_references(file_path, server).await {
                 warn!(

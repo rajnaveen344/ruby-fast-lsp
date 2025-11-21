@@ -56,7 +56,8 @@ impl IndexerStdlib {
         self.index_core_stubs(server).await?;
 
         // Index required stdlib modules
-        self.index_required_modules(server).await?;
+        let total_modules = self.required_modules.len();
+        self.index_required_modules(server, total_modules).await?;
 
         // Resolve all mixin references now that all stdlib definitions are indexed
         info!("Resolving stdlib mixin references");
@@ -202,7 +203,9 @@ impl IndexerStdlib {
     }
 
     /// Index only the required stdlib modules
-    async fn index_required_modules(&self, server: &RubyLanguageServer) -> Result<()> {
+    async fn index_required_modules(&self, server: &RubyLanguageServer, total_modules: usize) -> Result<()> {
+        use crate::indexer::coordinator::IndexingCoordinator;
+
         if self.required_modules.is_empty() {
             debug!("No required stdlib modules to index");
             return Ok(());
@@ -214,8 +217,17 @@ impl IndexerStdlib {
         );
 
         let mut indexed_count = 0;
+        let mut current = 0;
 
         for module_name in &self.required_modules {
+            current += 1;
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Indexing Stdlib".to_string(),
+                current,
+                total_modules,
+            ).await;
+
             if let Some(module_files) = self.find_stdlib_module_files(module_name) {
                 debug!(
                     "Indexing stdlib module '{}' with {} files",

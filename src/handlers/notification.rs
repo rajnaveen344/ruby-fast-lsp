@@ -22,6 +22,7 @@ pub async fn handle_initialize(
     params: InitializeParams,
 ) -> LspResult<InitializeResult> {
     let workspace_folders = params.workspace_folders;
+    let root_uri = params.root_uri;
 
     // Process initialization options for configuration
     if let Some(init_options) = params.initialization_options {
@@ -33,18 +34,20 @@ pub async fn handle_initialize(
         }
     }
 
+    // Store the workspace folder/root URI for later use in initialized
+    // We'll start indexing there, but not block initialization
     if let Some(folder) = workspace_folders.and_then(|folders| folders.first().cloned()) {
-        debug!(
-            "Indexing workspace folder using workspace folder: {:?}",
+        info!(
+            "Will index workspace folder after initialization: {:?}",
             folder.uri.as_str()
         );
-        let _ = init_workspace(lang_server, folder.uri.clone()).await;
-    } else if let Some(root_uri) = params.root_uri {
-        debug!(
-            "Indexing workspace folder using root URI: {:?}",
-            root_uri.as_str()
+        lang_server.set_workspace_uri(Some(folder.uri.clone()));
+    } else if let Some(root) = root_uri {
+        info!(
+            "Will index workspace folder after initialization: {:?}",
+            root.as_str()
         );
-        let _ = init_workspace(lang_server, root_uri.clone()).await;
+        lang_server.set_workspace_uri(Some(root.clone()));
     } else {
         warn!("No workspace folder or root URI provided. A workspace folder is required to function properly");
     }
@@ -106,6 +109,79 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
     };
 
     info!("Using Ruby version: {}.{}", ruby_version.0, ruby_version.1);
+
+    // Run workspace indexing in the background so it doesn't block other LSP features
+    if let Some(workspace_uri) = server.get_workspace_uri() {
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            info!("Starting background workspace indexing");
+
+            // Send progress notification to client
+            if let Some(client) = &server_clone.client {
+                let _ = client.send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                    tower_lsp::lsp_types::ProgressParams {
+                        token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
+                        value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                            tower_lsp::lsp_types::WorkDoneProgress::Begin(
+                                tower_lsp::lsp_types::WorkDoneProgressBegin {
+                                    title: "Ruby Fast LSP".to_string(),
+                                    message: Some("Indexing workspace...".to_string()),
+                                    percentage: Some(0),
+                                    cancellable: Some(false),
+                                }
+                            )
+                        ),
+                    }
+                ).await;
+            }
+
+            let result = init_workspace(&server_clone, workspace_uri.clone()).await;
+
+            // Send completion notification
+            if let Some(client) = &server_clone.client {
+                match result {
+                    Ok(_) => {
+                        info!("Background workspace indexing completed successfully");
+                        let _ = client.send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                            tower_lsp::lsp_types::ProgressParams {
+                                token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
+                                value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                                    tower_lsp::lsp_types::WorkDoneProgress::End(
+                                        tower_lsp::lsp_types::WorkDoneProgressEnd {
+                                            message: Some("Indexing complete".to_string()),
+                                        }
+                                    )
+                                ),
+                            }
+                        ).await;
+
+                        // Show a status message
+                        let _ = client.show_message(
+                            tower_lsp::lsp_types::MessageType::INFO,
+                            "Ruby Fast LSP: Workspace indexing complete"
+                        ).await;
+                    }
+                    Err(e) => {
+                        warn!("Background workspace indexing failed: {}", e);
+                        let _ = client.send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                            tower_lsp::lsp_types::ProgressParams {
+                                token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
+                                value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                                    tower_lsp::lsp_types::WorkDoneProgress::End(
+                                        tower_lsp::lsp_types::WorkDoneProgressEnd {
+                                            message: Some(format!("Indexing failed: {}", e)),
+                                        }
+                                    )
+                                ),
+                            }
+                        ).await;
+                    }
+                }
+            }
+        });
+
+        info!("Background workspace indexing task spawned, LSP is now ready for requests");
+    }
 }
 
 /// Simple system Ruby version detection without workspace context

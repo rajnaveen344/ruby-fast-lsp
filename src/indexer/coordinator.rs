@@ -118,9 +118,10 @@ impl IndexingCoordinator {
         self.index_standard_library(server, &ruby_version).await?;
 
         // Step 6: Index definitions from gems
-        self.index_gems().await?;
+        self.index_gems(server).await?;
 
         // Step 7: Resolve all mixin references across all indexed files
+        Self::send_progress_report(server, "Resolving mixins...".to_string(), 0, 0).await;
         info!("Resolving all mixin references across project, stdlib, and gems");
         server.index().lock().resolve_all_mixins();
 
@@ -140,6 +141,38 @@ impl IndexingCoordinator {
             start_time.elapsed()
         );
         Ok(())
+    }
+
+    /// Helper function to send progress report updates to the client
+    pub async fn send_progress_report(server: &RubyLanguageServer, message: String, current: usize, total: usize) {
+        if let Some(client) = &server.client {
+            let percentage = if total > 0 {
+                ((current as f64 / total as f64) * 100.0) as u32
+            } else {
+                0
+            };
+
+            let full_message = if total > 0 {
+                format!("{}: {}/{}", message, current, total)
+            } else {
+                message
+            };
+
+            let _ = client.send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                tower_lsp::lsp_types::ProgressParams {
+                    token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
+                    value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                        tower_lsp::lsp_types::WorkDoneProgress::Report(
+                            tower_lsp::lsp_types::WorkDoneProgressReport {
+                                message: Some(full_message),
+                                percentage: Some(percentage),
+                                cancellable: Some(false),
+                            }
+                        )
+                    ),
+                }
+            ).await;
+        }
     }
 
     /// Step 1: Detect which Ruby version we're working with
@@ -197,7 +230,7 @@ impl IndexingCoordinator {
     }
 
     /// Step 6: Index the gems (external libraries)
-    async fn index_gems(&mut self) -> Result<()> {
+    async fn index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let required_gems = self.get_required_gems();
 
         let mut gem_indexer = IndexerGem::new(
@@ -208,7 +241,7 @@ impl IndexingCoordinator {
         );
 
         gem_indexer.set_required_gems(required_gems.into_iter().collect());
-        gem_indexer.index_gems(true).await?; // selective = true
+        gem_indexer.index_gems(true, server).await?; // selective = true
         self.gem_indexer = Some(gem_indexer);
         Ok(())
     }
