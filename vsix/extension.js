@@ -148,8 +148,8 @@ function getServerPath() {
 }
 
 function activate(context) {
-    // Create output channel for extension logs
-    outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP Extension');
+    // Create single output channel for both extension and LSP server logs
+    outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP');
     context.subscriptions.push(outputChannel);
 
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
@@ -170,7 +170,8 @@ function activate(context) {
             rubyVersion: config.get('rubyVersion', 'auto'),
             stubsPath: config.get('stubsPath', ''),
             extensionPath: context.extensionPath
-        }
+        },
+        outputChannel: outputChannel
     };
 
     client = new LanguageClient(
