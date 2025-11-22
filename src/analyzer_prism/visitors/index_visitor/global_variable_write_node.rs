@@ -27,7 +27,16 @@ impl IndexVisitor {
         }
 
         // Global variables are not associated with any namespace or method
-        let fqn = FullyQualifiedName::global_variable(variable_name.clone()).unwrap();
+        let fqn = match FullyQualifiedName::global_variable(variable_name.clone()) {
+            Ok(fqn) => fqn,
+            Err(err) => {
+                error!(
+                    "Invalid global variable name '{}': {}. Skipping indexing.",
+                    variable_name, err
+                );
+                return;
+            }
+        };
 
         debug!("Adding global variable entry: {:?}", fqn);
 

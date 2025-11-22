@@ -146,10 +146,20 @@ impl FullyQualifiedName {
             return Err("Global variable name cannot be just $");
         }
 
-        // Special global variables like $1, $2, $_, $&, etc. are valid
+        // Special single-character global variables like $1, $2, $_, $&, etc. are valid
         if name_without_prefix.len() == 1 {
             let c = name_without_prefix.chars().next().unwrap();
-            if c.is_ascii_digit() || "_~*$?!\"'&+`.@/;\\=:<>|".contains(c) {
+            if c.is_ascii_digit() || "_~*$?!\"'&+`.@/;\\=:<>|,".contains(c) {
+                return Ok(());
+            }
+        }
+
+        // Special multi-character global variables with dash prefix like $-0, $-a, $-d, etc.
+        // These are command-line option flags and special variables
+        if name_without_prefix.starts_with('-') && name_without_prefix.len() == 2 {
+            let c = name_without_prefix.chars().nth(1).unwrap();
+            // Allow any alphanumeric character after the dash
+            if c.is_ascii_alphanumeric() {
                 return Ok(());
             }
         }
@@ -351,5 +361,54 @@ mod tests {
         ]);
 
         assert_eq!(fqn.to_string(), "Foo::Bar");
+    }
+
+    #[test]
+    fn test_global_variable_special_single_char() {
+        // Test single-character special global variables
+        assert!(FullyQualifiedName::global_variable("$1".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$_".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$!".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$$".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$?".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$&".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$~".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$*".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$0".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$+".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$,".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_global_variable_special_dash_prefix() {
+        // Test multi-character special global variables with dash prefix
+        assert!(FullyQualifiedName::global_variable("$-0".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-F".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-I".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-W".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-a".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-d".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-i".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-l".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-p".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-v".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$-w".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_global_variable_regular() {
+        // Test regular global variables
+        assert!(FullyQualifiedName::global_variable("$global_var".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$LOAD_PATH".to_string()).is_ok());
+        assert!(FullyQualifiedName::global_variable("$DEBUG".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_global_variable_invalid() {
+        // Test invalid global variables
+        assert!(FullyQualifiedName::global_variable("global".to_string()).is_err());
+        assert!(FullyQualifiedName::global_variable("$".to_string()).is_err());
+        assert!(FullyQualifiedName::global_variable("$-".to_string()).is_err());
+        assert!(FullyQualifiedName::global_variable("$-xyz".to_string()).is_err());
     }
 }
