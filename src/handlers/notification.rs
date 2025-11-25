@@ -25,6 +25,25 @@ pub async fn handle_initialize(
     let workspace_folders = params.workspace_folders;
     let root_uri = params.root_uri;
 
+    // Extract and monitor parent process ID to detect when VS Code dies
+    // This ensures the LSP server exits when the extension is uninstalled/reloaded
+    if let Some(process_id) = params.process_id {
+        if process_id > 0 {
+            info!(
+                "Parent process ID received: {}. Starting process monitor.",
+                process_id
+            );
+            lang_server.set_parent_process_id(Some(process_id as u32));
+        } else {
+            info!(
+                "Invalid parent process ID received ({}), skipping process monitoring",
+                process_id
+            );
+        }
+    } else {
+        info!("No parent process ID received, skipping process monitoring");
+    }
+
     // Process initialization options for configuration
     if let Some(init_options) = params.initialization_options {
         if let Ok(config) = serde_json::from_value::<RubyFastLspConfig>(init_options) {

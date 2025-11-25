@@ -5,10 +5,11 @@ use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
-use log::{debug, info};
+use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::Visit;
 use std::collections::HashMap;
+use std::process::exit;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -25,6 +26,45 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer};
 
+/// Check if a process with the given PID is still running.
+/// Returns true if the process is alive, false if it has exited.
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    // On Unix, sending signal 0 to a process checks if it exists without actually sending a signal
+    // kill(pid, 0) returns 0 if the process exists and we have permission to send it signals
+    // It returns -1 with ESRCH if the process doesn't exist
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    use std::ptr::null_mut;
+
+    // On Windows, we try to open the process with minimal access rights
+    // If the process doesn't exist, OpenProcess returns NULL
+    unsafe {
+        let handle = windows_sys::Win32::System::Threading::OpenProcess(
+            windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
+            0, // bInheritHandle = FALSE
+            pid,
+        );
+
+        if handle.is_null() {
+            return false;
+        }
+
+        // Check if the process has exited
+        let mut exit_code: u32 = 0;
+        let result =
+            windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut exit_code);
+
+        windows_sys::Win32::Foundation::CloseHandle(handle);
+
+        // STILL_ACTIVE (259) means the process is still running
+        result != 0 && exit_code == windows_sys::Win32::System::Threading::STILL_ACTIVE
+    }
+}
+
 #[derive(Clone)]
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
@@ -34,6 +74,9 @@ pub struct RubyLanguageServer {
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
     pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
     pub workspace_uri: Arc<Mutex<Option<Url>>>,
+    /// The process ID of the parent process (VS Code extension host).
+    /// Used to detect when the parent process dies so we can exit cleanly.
+    pub parent_process_id: Arc<Mutex<Option<u32>>>,
 }
 
 impl RubyLanguageServer {
@@ -48,7 +91,41 @@ impl RubyLanguageServer {
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
+            parent_process_id: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Set the parent process ID and start monitoring it.
+    /// If the parent process dies, the LSP server will exit.
+    pub fn set_parent_process_id(&self, pid: Option<u32>) {
+        *self.parent_process_id.lock() = pid;
+        if let Some(pid) = pid {
+            self.start_parent_process_monitor(pid);
+        }
+    }
+
+    /// Start a background task that monitors the parent process.
+    /// If the parent process is no longer running, exit the server.
+    fn start_parent_process_monitor(&self, parent_pid: u32) {
+        info!("Starting parent process monitor for PID: {}", parent_pid);
+
+        tokio::spawn(async move {
+            let check_interval = Duration::from_secs(5);
+
+            loop {
+                sleep(check_interval).await;
+
+                if !is_process_alive(parent_pid) {
+                    warn!(
+                        "Parent process (PID: {}) is no longer running. Exiting LSP server.",
+                        parent_pid
+                    );
+                    // Give a moment for any pending operations to complete
+                    sleep(Duration::from_millis(100)).await;
+                    exit(0);
+                }
+            }
+        });
     }
 
     pub fn set_workspace_uri(&self, uri: Option<Url>) {
@@ -155,6 +232,7 @@ impl Default for RubyLanguageServer {
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
+            parent_process_id: Arc::new(Mutex::new(None)),
         }
     }
 }
