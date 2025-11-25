@@ -4,48 +4,50 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 
 ## Features
 
-### Core Features (in no particular order)
+### Core Features
 
-- **Syntax Highlighting** - Accurate syntax highlighting for Ruby files
-- **Workspace Indexing** - Automatic workspace indexing on initialization
-  - Project ruby files 🎉
-  - Gems/Gemfile ❗
-- **Code Navigation** - Fast navigation to definitions and references
-  - Go to definition 🎉
-    - Modules 🎉
-    - Classes 🎉
-    - Constants 🎉
-    - Methods (limited support) 🚧
-    - Local variables 🎉
-    - Class/Instance variables 🚧
-    - Global variables 🚧
-  - Find references 🎉
-    - Modules 🎉
-    - Classes 🎉
-    - Constants 🎉
-    - Methods (limited support) 🚧
-    - Local variables 🎉
-    - Class/Instance variables 🚧
-    - Global variables 🚧
-- **Code Completions** - Intelligent suggestions for:
-  - Local variables 🎉
-  - Method names and parameters ❗
-  - Class and module names ❗
-  - Snippets (class, module, def, do, while, until, if, unless) ❗
-- **Inlay Hints** - Helpful inline hints for better code understanding
-  - class/module/method "end" hints 🎉
-  - method parameter hints ❗
-- **Code Diagnostics (TODO)** - Code diagnostics for code warnings, errors and issues
-- **Code Lens (TODO)** - Code lens for better contextual information
-- **Run/Debug Support (TODO)**
-- **Code Actions (TODO)**
-- **Code Folding (TODO)**
-- **Documents Symbol (TODO)** - Document symbols for document outline
-- **Workspace Symbol (TODO)** - Workspace symbols for workspace wide constant and method navigation
-- **Hover Information (TODO)**
-- **Code Formatting (TODO)** - Automatic code formatting based of config (Rubocop, etc.)
-- **Type Inference (TODO)**
-- **Meta Programming Support (TODO)**
+| Feature                 | Status | Details                                                       |
+| ----------------------- | ------ | ------------------------------------------------------------- |
+| **Syntax Highlighting** | ✅     | Full semantic token-based highlighting                        |
+| **Workspace Indexing**  | ✅     | Project files, stdlib stubs, gem dependencies                 |
+| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods (basic) |
+| **Find References**     | ✅     | Classes, modules, constants, local variables                  |
+| **Code Completion**     | ✅     | Variables, constants, classes, modules, snippets              |
+| **Document Symbols**    | ✅     | Nested hierarchy with visibility info                         |
+| **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                         |
+| **Inlay Hints**         | ✅     | End keyword hints for blocks                                  |
+| **Code Folding**        | ✅     | Classes, modules, methods, control flow                       |
+| **Diagnostics**         | ✅     | Syntax errors and warnings                                    |
+| **Code Lens**           | ✅     | Module mixin usage counts                                     |
+| **On-Type Formatting**  | ✅     | Auto-insert `end` keyword                                     |
+
+### Navigation Details
+
+- **Go to Definition**
+
+  - Modules ✅
+  - Classes ✅
+  - Constants ✅
+  - Local variables ✅
+  - Methods (limited) 🚧
+  - Instance/Class/Global variables 🚧
+
+- **Find References**
+  - Modules ✅
+  - Classes ✅
+  - Constants ✅
+  - Local variables ✅
+  - Methods (limited) 🚧
+
+### Planned Features
+
+- Hover information ❌
+- Code actions / Quick fixes ❌
+- Rename support ❌
+- Formatting integration (Rubocop) ❌
+- Full type inference ❌
+- Meta-programming support ❌
+- Run/Debug support ❌
 
 ## Getting Started
 
@@ -57,8 +59,24 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
    - Support navigation across your entire project
 
 ### Requirements
+
 - VS Code 1.86.0 or later
 - Ruby project (single file or workspace)
+
+## Configuration
+
+The extension supports the following settings:
+
+- `ruby-fast-lsp.codeLensModulesEnabled` - Enable/disable code lens for module mixin counts (default: true)
+
+## Performance
+
+Ruby Fast LSP is designed for speed:
+
+- Written in Rust for native performance
+- Incremental indexing on file changes
+- Efficient symbol lookups using trie data structures
+- Optimized for large codebases
 
 ## Known Issues
 
@@ -66,4 +84,10 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 - Large workspaces may take time to index initially
 - Some edge cases in Ruby syntax may not be fully supported yet
 
+## Contributing
+
 Please report any issues or feature requests on our [GitHub repository](https://github.com/rajnaveen344/ruby-fast-lsp).
+
+## License
+
+MIT
