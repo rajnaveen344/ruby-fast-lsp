@@ -155,6 +155,10 @@ use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use std::collections::HashSet;
 
+// ============================================================================
+// Mixin Resolution
+// ============================================================================
+
 /// Resolves a mixin reference (include/prepend/extend) to a fully qualified name
 /// Uses Ruby's constant lookup rules to resolve the reference in the given context
 pub fn resolve_mixin_ref(
@@ -164,6 +168,10 @@ pub fn resolve_mixin_ref(
 ) -> Option<FullyQualifiedName> {
     utils::resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
 }
+
+// ============================================================================
+// Ancestor Chain Building
+// ============================================================================
 
 /// Builds the complete ancestor chain for a given class or module
 ///
@@ -187,6 +195,10 @@ pub fn get_ancestor_chain(
 
     chain
 }
+
+// ============================================================================
+// Internal Helpers
+// ============================================================================
 
 /// Builds ancestor chain for class methods
 /// Includes extends (for class methods) + normal instance method chain

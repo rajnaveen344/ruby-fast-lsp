@@ -136,6 +136,11 @@ impl IndexingCoordinator {
 
         info!("Phase 2 completed in {:?}", phase2_start.elapsed());
 
+        // PHASE 3: Publish diagnostics for unresolved constants
+        info!("Phase 3: Publishing diagnostics for unresolved constants");
+        Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
+        self.publish_unresolved_constant_diagnostics(server).await;
+
         info!(
             "Complete two-phase indexing finished in {:?}",
             start_time.elapsed()
@@ -144,7 +149,12 @@ impl IndexingCoordinator {
     }
 
     /// Helper function to send progress report updates to the client
-    pub async fn send_progress_report(server: &RubyLanguageServer, message: String, current: usize, total: usize) {
+    pub async fn send_progress_report(
+        server: &RubyLanguageServer,
+        message: String,
+        current: usize,
+        total: usize,
+    ) {
         if let Some(client) = &server.client {
             let percentage = if total > 0 {
                 ((current as f64 / total as f64) * 100.0) as u32
@@ -158,20 +168,22 @@ impl IndexingCoordinator {
                 message
             };
 
-            let _ = client.send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                tower_lsp::lsp_types::ProgressParams {
-                    token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
-                    value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
-                        tower_lsp::lsp_types::WorkDoneProgress::Report(
-                            tower_lsp::lsp_types::WorkDoneProgressReport {
-                                message: Some(full_message),
-                                percentage: Some(percentage),
-                                cancellable: Some(false),
-                            }
-                        )
-                    ),
-                }
-            ).await;
+            let _ = client
+                .send_notification::<tower_lsp::lsp_types::notification::Progress>(
+                    tower_lsp::lsp_types::ProgressParams {
+                        token: tower_lsp::lsp_types::NumberOrString::String("indexing".to_string()),
+                        value: tower_lsp::lsp_types::ProgressParamsValue::WorkDone(
+                            tower_lsp::lsp_types::WorkDoneProgress::Report(
+                                tower_lsp::lsp_types::WorkDoneProgressReport {
+                                    message: Some(full_message),
+                                    percentage: Some(percentage),
+                                    cancellable: Some(false),
+                                },
+                            ),
+                        ),
+                    },
+                )
+                .await;
         }
     }
 
@@ -210,6 +222,36 @@ impl IndexingCoordinator {
         Ok(())
     }
 
+    /// Phase 3: Publish diagnostics for unresolved constants across all indexed files
+    async fn publish_unresolved_constant_diagnostics(&self, server: &RubyLanguageServer) {
+        use crate::handlers::helpers::get_unresolved_constant_diagnostics;
+
+        // Collect all URIs with unresolved constants while holding the lock
+        let uris: Vec<_> = {
+            let index_arc = server.index();
+            let index = index_arc.lock();
+            let count = index.unresolved_constants.len();
+            info!(
+                "Publishing diagnostics for {} files with unresolved constants",
+                count
+            );
+            index.unresolved_constants.keys().cloned().collect()
+        };
+
+        // Publish diagnostics for each file (lock released, safe to await)
+        for uri in uris {
+            let diagnostics = get_unresolved_constant_diagnostics(server, &uri);
+            if !diagnostics.is_empty() {
+                debug!(
+                    "Publishing {} unresolved constant diagnostics for {}",
+                    diagnostics.len(),
+                    uri.path()
+                );
+                server.publish_diagnostics(uri, diagnostics).await;
+            }
+        }
+    }
+
     /// Step 5: Index the Ruby standard library
     async fn index_standard_library(
         &mut self,
@@ -234,9 +276,7 @@ impl IndexingCoordinator {
         let required_gems = self.get_required_gems();
 
         let mut gem_indexer = IndexerGem::new(
-            Arc::new(std::sync::Mutex::new(
-                self.core_indexer.as_ref().unwrap().clone(),
-            )),
+            Arc::new(Mutex::new(self.core_indexer.as_ref().unwrap().clone())),
             Some(self.workspace_root.clone()),
         );
 

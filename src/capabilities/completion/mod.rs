@@ -276,7 +276,7 @@ end
 "#;
 
         // Explicitly call processing function to ensure local variables are indexed
-        use crate::handlers::helpers::process_content_for_definitions;
+        use crate::handlers::helpers::{process_definitions, DefinitionOptions};
         use crate::types::ruby_document::RubyDocument;
         use parking_lot::RwLock;
         use std::sync::Arc;
@@ -287,7 +287,7 @@ end
         server.docs.lock().insert(uri.clone(), doc_arc);
 
         // Process for definitions (which includes local variables)
-        let _ = process_content_for_definitions(&server, uri.clone(), content);
+        let _ = process_definitions(&server, uri.clone(), content, DefinitionOptions::default());
 
         // Give a small delay to ensure processing completes
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -408,7 +408,7 @@ end"#;
         let content = r#"
 def test_method
   local_var = 42
-  
+
 end
 "#;
 
@@ -507,15 +507,15 @@ end
         let content = r#"
 class TestClass
   MY_CONSTANT = 42
-  
+
   # Same constant defined again (could happen in real code)
   MY_CONSTANT = 100
-  
+
   # Another context where the same constant might be referenced
   def some_method
     MY_CONSTANT = 200  # Local redefinition
   end
-  
+
   MY
 end
 "#;
@@ -748,13 +748,13 @@ module OuterModule
         ::
       end
     end
-    
+
     module DeepModule
       class DeepClass
       end
     end
   end
-  
+
   class OuterClass
   end
 end
@@ -939,7 +939,7 @@ end
                 r#"
 class TestClass
   def method
-    :: 
+    ::
   end
 end
 "#,
@@ -1170,7 +1170,7 @@ module A
         module E
           class DeepClass
             DEEP_CONSTANT = "deep"
-            
+
             def deep_method
               ::
             end
@@ -1319,7 +1319,7 @@ end
 module MyModule
   class MyClass
   end
-  
+
   module MySubModule
     class MySubClass
     end

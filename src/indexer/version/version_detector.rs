@@ -1,3 +1,12 @@
+//! Ruby Version Detector
+//!
+//! Detects Ruby version from various workspace sources in priority order:
+//! 1. `.ruby-version` file
+//! 2. `Gemfile` ruby directive
+//! 3. rbenv configuration
+//! 4. rvm configuration
+//! 5. System Ruby
+
 use log::{debug, warn};
 use std::fs;
 use std::path::PathBuf;
@@ -5,12 +14,20 @@ use tower_lsp::lsp_types::Url;
 
 use crate::types::ruby_version::RubyVersion;
 
+// ============================================================================
+// RubyVersionDetector
+// ============================================================================
+
 /// Detects Ruby version from various workspace sources
 pub struct RubyVersionDetector {
     workspace_root: PathBuf,
 }
 
 impl RubyVersionDetector {
+    // ========================================================================
+    // Constructors
+    // ========================================================================
+
     pub fn new(workspace_uri: &Url) -> Option<Self> {
         let workspace_root = workspace_uri.to_file_path().ok()?;
         Some(Self { workspace_root })
@@ -20,10 +37,13 @@ impl RubyVersionDetector {
         Self { workspace_root }
     }
 
+    // ========================================================================
+    // Version Detection
+    // ========================================================================
+
     /// Detect Ruby version from workspace, trying multiple sources in priority order
     pub fn detect_version(&self) -> Option<RubyVersion> {
-        // Priority order for version detection
-        let detection_methods: Vec<(&str, fn(&Self) -> Option<RubyVersion>)> = vec![
+        let detection_methods: &[(&str, fn(&Self) -> Option<RubyVersion>)] = &[
             ("ruby-version file", Self::detect_from_ruby_version),
             ("Gemfile", Self::detect_from_gemfile),
             ("rbenv version", Self::detect_from_rbenv),
@@ -43,6 +63,54 @@ impl RubyVersionDetector {
         warn!("Could not detect Ruby version from workspace");
         None
     }
+
+    /// Get all available Ruby versions from version managers
+    pub fn get_available_versions(&self) -> Vec<RubyVersion> {
+        let mut versions = Vec::new();
+
+        // Get versions from rbenv
+        if let Ok(output) = std::process::Command::new("rbenv")
+            .args(["versions", "--bare"])
+            .output()
+        {
+            if output.status.success() {
+                let versions_output = String::from_utf8_lossy(&output.stdout);
+                for line in versions_output.lines() {
+                    if let Some(version) = RubyVersion::from_full_version(line.trim()) {
+                        if !versions.contains(&version) {
+                            versions.push(version);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get versions from rvm
+        if let Ok(output) = std::process::Command::new("rvm")
+            .args(["list", "strings"])
+            .output()
+        {
+            if output.status.success() {
+                let versions_output = String::from_utf8_lossy(&output.stdout);
+                for line in versions_output.lines() {
+                    if let Some(version_str) = line.trim().strip_prefix("ruby-") {
+                        if let Some(version) = RubyVersion::from_full_version(version_str) {
+                            if !versions.contains(&version) {
+                                versions.push(version);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        versions.sort();
+        versions
+    }
+
+    // ========================================================================
+    // Detection Methods
+    // ========================================================================
 
     /// Detect version from .ruby-version file
     fn detect_from_ruby_version(&self) -> Option<RubyVersion> {
@@ -67,14 +135,10 @@ impl RubyVersionDetector {
 
         let content = fs::read_to_string(&gemfile_path).ok()?;
 
-        // Look for ruby version specification in Gemfile
         for line in content.lines() {
             let line = line.trim();
             if line.starts_with("ruby ") {
-                // Extract version from patterns like:
-                // ruby "3.0.0"
-                // ruby '2.7.4'
-                // ruby "~> 3.0"
+                // Extract version from patterns like: ruby "3.0.0", ruby '2.7.4', ruby "~> 3.0"
                 if let Some(version_part) = line.split_whitespace().nth(1) {
                     let version_str = version_part.trim_matches(|c| {
                         c == '"' || c == '\'' || c == '~' || c == '>' || c == ' '
@@ -106,7 +170,7 @@ impl RubyVersionDetector {
 
         // Try rbenv version command
         if let Ok(output) = std::process::Command::new("rbenv")
-            .args(&["version"])
+            .args(["version"])
             .current_dir(&self.workspace_root)
             .output()
         {
@@ -131,7 +195,6 @@ impl RubyVersionDetector {
         let rvmrc_file = self.workspace_root.join(".rvmrc");
         if rvmrc_file.exists() {
             if let Ok(content) = fs::read_to_string(&rvmrc_file) {
-                // Look for ruby version in .rvmrc
                 for line in content.lines() {
                     if line.contains("ruby-") {
                         // Extract version from patterns like "rvm use ruby-3.0.0"
@@ -149,7 +212,7 @@ impl RubyVersionDetector {
 
         // Try rvm current command
         if let Ok(output) = std::process::Command::new("rvm")
-            .args(&["current"])
+            .args(["current"])
             .current_dir(&self.workspace_root)
             .output()
         {
@@ -172,7 +235,7 @@ impl RubyVersionDetector {
     /// Detect version from system ruby
     fn detect_from_system(&self) -> Option<RubyVersion> {
         if let Ok(output) = std::process::Command::new("ruby")
-            .args(&["--version"])
+            .args(["--version"])
             .current_dir(&self.workspace_root)
             .output()
         {
@@ -180,12 +243,12 @@ impl RubyVersionDetector {
                 let version_output = String::from_utf8_lossy(&output.stdout);
                 debug!("System ruby version output: {}", version_output);
 
-                // Use the new comprehensive version parsing that handles MRI, JRuby, and TruffleRuby
+                // Use comprehensive version parsing for MRI, JRuby, TruffleRuby
                 if let Some(version) = RubyVersion::parse_from_version_output(&version_output) {
                     return Some(version);
                 }
 
-                // Fallback to old parsing for compatibility
+                // Fallback to simple parsing
                 if let Some(version_part) = version_output.split_whitespace().nth(1) {
                     debug!("Fallback parsing for version: {}", version_part);
                     if let Some(version) = RubyVersion::from_full_version(version_part) {
@@ -197,58 +260,15 @@ impl RubyVersionDetector {
 
         None
     }
-
-    /// Get all available Ruby versions from version managers
-    pub fn get_available_versions(&self) -> Vec<RubyVersion> {
-        let mut versions = Vec::new();
-
-        // Get versions from rbenv
-        if let Ok(output) = std::process::Command::new("rbenv")
-            .args(&["versions", "--bare"])
-            .output()
-        {
-            if output.status.success() {
-                let versions_output = String::from_utf8_lossy(&output.stdout);
-                for line in versions_output.lines() {
-                    let version_str = line.trim();
-                    if let Some(version) = RubyVersion::from_full_version(version_str) {
-                        if !versions.contains(&version) {
-                            versions.push(version);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Get versions from rvm
-        if let Ok(output) = std::process::Command::new("rvm")
-            .args(&["list", "strings"])
-            .output()
-        {
-            if output.status.success() {
-                let versions_output = String::from_utf8_lossy(&output.stdout);
-                for line in versions_output.lines() {
-                    let line = line.trim();
-                    if let Some(version_str) = line.strip_prefix("ruby-") {
-                        if let Some(version) = RubyVersion::from_full_version(version_str) {
-                            if !versions.contains(&version) {
-                                versions.push(version);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        versions.sort();
-        versions
-    }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     fn create_test_workspace() -> (TempDir, RubyVersionDetector) {
@@ -262,7 +282,6 @@ mod tests {
     fn test_detect_from_ruby_version_file() {
         let (temp_dir, detector) = create_test_workspace();
 
-        // Create .ruby-version file
         let ruby_version_path = temp_dir.path().join(".ruby-version");
         fs::write(&ruby_version_path, "3.0.4").unwrap();
 
@@ -274,7 +293,6 @@ mod tests {
     fn test_detect_from_gemfile() {
         let (temp_dir, detector) = create_test_workspace();
 
-        // Create Gemfile with ruby directive
         let gemfile_path = temp_dir.path().join("Gemfile");
         fs::write(
             &gemfile_path,
@@ -296,7 +314,6 @@ gem 'rails', '~> 7.0'
     fn test_detect_from_rbenv_version_file() {
         let (temp_dir, detector) = create_test_workspace();
 
-        // Create .rbenv-version file
         let rbenv_version_path = temp_dir.path().join(".rbenv-version");
         fs::write(&rbenv_version_path, "3.1.0").unwrap();
 

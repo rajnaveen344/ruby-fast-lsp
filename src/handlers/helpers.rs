@@ -4,6 +4,7 @@ use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
+use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
@@ -13,12 +14,68 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
-
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
-/// Initialize workspace
+// ============================================================================
+// Processing Options
+// ============================================================================
+
+/// Options for processing definitions
+#[derive(Default, Clone)]
+pub struct DefinitionOptions {
+    pub dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
+}
+
+impl DefinitionOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_dependency_tracker(mut self, tracker: Arc<Mutex<DependencyTracker>>) -> Self {
+        self.dependency_tracker = Some(tracker);
+        self
+    }
+}
+
+/// Options for processing references
+#[derive(Clone, Copy)]
+pub struct ReferenceOptions {
+    pub include_local_vars: bool,
+    pub track_unresolved: bool,
+}
+
+impl Default for ReferenceOptions {
+    fn default() -> Self {
+        Self {
+            include_local_vars: true,
+            track_unresolved: false,
+        }
+    }
+}
+
+impl ReferenceOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_local_vars(mut self, include: bool) -> Self {
+        self.include_local_vars = include;
+        self
+    }
+
+    pub fn with_unresolved_tracking(mut self, track: bool) -> Self {
+        self.track_unresolved = track;
+        self
+    }
+}
+
+// ============================================================================
+// Workspace Initialization
+// ============================================================================
+
+/// Initialize workspace and run complete indexing
 pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Result<()> {
     let workspace_path = folder_uri
         .to_file_path()
@@ -32,26 +89,34 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
     Ok(())
 }
 
-// Helper function to process content for definitions without reading from filesystem
-pub fn process_content_for_definitions(
+// ============================================================================
+// Core Processing Functions (Content-based)
+// ============================================================================
+
+/// Process content for definitions (in-memory content)
+pub fn process_definitions(
     server: &RubyLanguageServer,
     uri: Url,
     content: &str,
+    options: DefinitionOptions,
 ) -> Result<(), String> {
     let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
+    if parse_result.errors().count() > 0 {
         debug!(
             "Parse errors in content for URI {:?}: {} errors",
-            uri, errors_count
+            uri,
+            parse_result.errors().count()
         );
-        return Ok(()); // Continue processing despite parse errors
+        return Ok(());
     }
 
     // Remove existing entries for this URI before adding new ones
     server.index().lock().remove_entries_for_uri(&uri);
 
     let mut visitor = IndexVisitor::new(server, uri.clone());
+    if let Some(tracker) = options.dependency_tracker {
+        visitor = visitor.with_dependency_tracker(tracker);
+    }
     visitor.visit(&parse_result.node());
 
     // Resolve mixins for entries that were just added
@@ -65,34 +130,43 @@ pub fn process_content_for_definitions(
     Ok(())
 }
 
-// Helper function to process content for references without reading from filesystem
-pub fn process_content_for_references(
+/// Process content for references (in-memory content)
+pub fn process_references(
     server: &RubyLanguageServer,
     uri: Url,
     content: &str,
-    include_local_vars: bool,
+    options: ReferenceOptions,
 ) -> Result<(), String> {
     let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
+    if parse_result.errors().count() > 0 {
         debug!(
             "Parse errors in content for URI {:?}: {} errors",
-            uri, errors_count
+            uri,
+            parse_result.errors().count()
         );
-        return Ok(()); // Continue processing despite parse errors
+        return Ok(());
     }
 
-    // Remove existing references for this URI before adding new ones
-    server.index().lock().remove_references_for_uri(&uri);
+    // Remove existing references and optionally unresolved constants
+    {
+        let index_arc = server.index();
+        let mut index = index_arc.lock();
+        index.remove_references_for_uri(&uri);
+        if options.track_unresolved {
+            index.remove_unresolved_constants_for_uri(&uri);
+        }
+    }
 
-    let mut visitor = if include_local_vars {
+    let mut visitor = if options.track_unresolved {
+        ReferenceVisitor::with_unresolved_tracking(server, uri.clone(), options.include_local_vars)
+    } else if options.include_local_vars {
         ReferenceVisitor::new(server, uri.clone())
     } else {
         ReferenceVisitor::with_options(server, uri.clone(), false)
     };
     visitor.visit(&parse_result.node());
 
-    // Update the document in the server's cache with the visitor's modified document
+    // Update the document in the server's cache
     if let Some(doc_arc) = server.docs.lock().get(&uri) {
         *doc_arc.write() = visitor.document;
     }
@@ -100,36 +174,120 @@ pub fn process_content_for_references(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ProcessingMode {
-    /// Index only definitions (classes, methods, constants, etc.)
-    Definitions,
-    /// Index references to symbols
-    References { include_local_vars: bool },
+// ============================================================================
+// File-based Processing Functions
+// ============================================================================
+
+/// Process a file for definitions (reads from disk)
+pub fn process_file_definitions(
+    server: &RubyLanguageServer,
+    uri: Url,
+    options: DefinitionOptions,
+) -> Result<(), String> {
+    let file_path = uri
+        .to_file_path()
+        .map_err(|_| format!("Failed to convert URI to file path: {}", uri))?;
+
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
+
+    let parse_result = parse(content.as_bytes());
+    if parse_result.errors().count() > 0 {
+        debug!(
+            "Parse errors in file {:?}: {} errors",
+            file_path,
+            parse_result.errors().count()
+        );
+        return Ok(());
+    }
+
+    // Remove existing entries for this URI before adding new ones
+    server.index().lock().remove_entries_for_uri(&uri);
+
+    // Create document and add to cache
+    let document = RubyDocument::new(uri.clone(), content.clone(), 0);
+    server
+        .docs
+        .lock()
+        .insert(uri.clone(), Arc::new(RwLock::new(document)));
+
+    let mut visitor = IndexVisitor::new(server, uri.clone());
+    if let Some(tracker) = options.dependency_tracker {
+        visitor = visitor.with_dependency_tracker(tracker);
+    }
+    visitor.visit(&parse_result.node());
+
+    Ok(())
 }
 
-impl ProcessingMode {
-    pub fn include_local_vars(&self) -> bool {
-        match self {
-            ProcessingMode::Definitions => false,
-            ProcessingMode::References { include_local_vars } => *include_local_vars,
+/// Process a file for references (reads from disk)
+pub fn process_file_references(
+    server: &RubyLanguageServer,
+    uri: Url,
+    options: ReferenceOptions,
+) -> Result<(), String> {
+    let file_path = uri
+        .to_file_path()
+        .map_err(|_| format!("Failed to convert URI to file path: {}", uri))?;
+
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
+
+    let parse_result = parse(content.as_bytes());
+    if parse_result.errors().count() > 0 {
+        debug!(
+            "Parse errors in file {:?}: {} errors",
+            file_path,
+            parse_result.errors().count()
+        );
+        return Ok(());
+    }
+
+    // Remove existing references and optionally unresolved constants
+    {
+        let index_arc = server.index();
+        let mut index = index_arc.lock();
+        index.remove_references_for_uri(&uri);
+        if options.track_unresolved {
+            index.remove_unresolved_constants_for_uri(&uri);
         }
     }
+
+    // Create document and add to cache
+    let document = RubyDocument::new(uri.clone(), content.clone(), 0);
+    server
+        .docs
+        .lock()
+        .insert(uri.clone(), Arc::new(RwLock::new(document)));
+
+    let mut visitor = if options.track_unresolved {
+        ReferenceVisitor::with_unresolved_tracking(server, uri.clone(), options.include_local_vars)
+    } else if options.include_local_vars {
+        ReferenceVisitor::new(server, uri.clone())
+    } else {
+        ReferenceVisitor::with_options(server, uri.clone(), false)
+    };
+    visitor.visit(&parse_result.node());
+
+    Ok(())
 }
 
+// ============================================================================
+// Parallel Processing
+// ============================================================================
+
+/// Processing mode for parallel file processing
+#[derive(Clone)]
+pub enum ProcessingMode {
+    Definitions(DefinitionOptions),
+    References(ReferenceOptions),
+}
+
+/// Process multiple files in parallel
 pub async fn process_files_parallel(
     server: &RubyLanguageServer,
     files: Vec<PathBuf>,
     mode: ProcessingMode,
-) -> Result<()> {
-    process_files_parallel_with_tracker(server, files, mode, None).await
-}
-
-pub async fn process_files_parallel_with_tracker(
-    server: &RubyLanguageServer,
-    files: Vec<PathBuf>,
-    mode: ProcessingMode,
-    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
 ) -> Result<()> {
     if files.is_empty() {
         return Ok(());
@@ -138,213 +296,162 @@ pub async fn process_files_parallel_with_tracker(
     let total_files = files.len();
     let start_time = Instant::now();
 
-    match mode {
-        ProcessingMode::Definitions => {
+    let mode_str = match &mode {
+        ProcessingMode::Definitions(_) => {
             debug!("Processing {} files for definitions", total_files);
+            "definitions"
         }
-        ProcessingMode::References { include_local_vars } => {
+        ProcessingMode::References(opts) => {
             debug!(
-                "Processing {} files for references (include_local_vars: {})",
-                total_files, include_local_vars
+                "Processing {} files for references (include_local_vars: {}, track_unresolved: {})",
+                total_files, opts.include_local_vars, opts.track_unresolved
             );
+            "references"
         }
-    }
+    };
 
     // Determine optimal concurrency based on system capabilities
-    let max_concurrent_files = thread::available_parallelism()
+    let max_concurrent = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::new(4).unwrap())
         .get()
-        .min(32); // Cap at 32 to avoid overwhelming the system
+        .min(32);
 
-    let semaphore = Arc::new(Semaphore::new(max_concurrent_files));
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let mut join_set = JoinSet::new();
 
     for file_path in files {
         let server_clone = server.clone();
         let semaphore_clone = semaphore.clone();
-        let dependency_tracker_clone = dependency_tracker.clone();
+        let mode_clone = mode.clone();
 
         join_set.spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
 
-            let file_uri = match Url::from_file_path(&file_path) {
-                Ok(uri) => uri,
-                Err(_) => {
-                    error!("Failed to convert file path to URI: {:?}", file_path);
-                    return Err(format!(
-                        "Failed to convert file path to URI: {:?}",
-                        file_path
-                    ));
-                }
-            };
+            let file_uri = Url::from_file_path(&file_path)
+                .map_err(|_| format!("Failed to convert file path to URI: {:?}", file_path))?;
 
-            match mode {
-                ProcessingMode::Definitions => process_file_for_definitions_with_tracker(
-                    &server_clone,
-                    file_uri,
-                    dependency_tracker_clone,
-                ),
-                ProcessingMode::References { include_local_vars } => {
-                    process_file_for_references(&server_clone, file_uri, include_local_vars)
+            match mode_clone {
+                ProcessingMode::Definitions(opts) => {
+                    process_file_definitions(&server_clone, file_uri, opts)
+                }
+                ProcessingMode::References(opts) => {
+                    process_file_references(&server_clone, file_uri, opts)
                 }
             }
         });
     }
 
-    // Collect results and handle errors
-    let mut successful_files = 0;
-    let mut failed_files = 0;
+    // Collect results
+    let mut successful = 0;
+    let mut failed = 0;
 
     while let Some(result) = join_set.join_next().await {
         match result {
-            Ok(Ok(())) => {
-                successful_files += 1;
-            }
+            Ok(Ok(())) => successful += 1,
             Ok(Err(e)) => {
                 debug!("File processing error: {}", e);
-                failed_files += 1;
+                failed += 1;
             }
             Err(e) => {
                 error!("Task join error: {}", e);
-                failed_files += 1;
+                failed += 1;
             }
         }
     }
 
     let duration = start_time.elapsed();
-    let mode_str = match mode {
-        ProcessingMode::Definitions => "definitions",
-        ProcessingMode::References { .. } => "references",
-    };
-
     info!(
         "Completed {} indexing: {}/{} files successful in {:.2}s (avg: {:.2}ms/file)",
         mode_str,
-        successful_files,
+        successful,
         total_files,
         duration.as_secs_f64(),
         duration.as_millis() as f64 / total_files as f64
     );
 
-    if failed_files > 0 {
+    if failed > 0 {
         warn!(
             "{} files failed to process during {} indexing",
-            failed_files, mode_str
+            failed, mode_str
         );
     }
 
     Ok(())
 }
 
-pub fn find_ruby_files_sync(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut ruby_files = Vec::new();
+// ============================================================================
+// Diagnostic Helpers
+// ============================================================================
 
-    fn visit_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
+/// Get diagnostics for unresolved constants from the index
+pub fn get_unresolved_constant_diagnostics(
+    server: &RubyLanguageServer,
+    uri: &Url,
+) -> Vec<Diagnostic> {
+    let index_arc = server.index();
+    let index = index_arc.lock();
+    let unresolved_list = index.get_unresolved_constants(uri);
 
-            if path.is_dir() {
-                visit_dir(&path, files)?;
-            } else if let Some(ext) = path.extension() {
-                if ext == "rb" {
-                    files.push(path);
-                }
-            }
-        }
-        Ok(())
+    unresolved_list
+        .iter()
+        .map(|unresolved| Diagnostic {
+            range: unresolved.location.range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("unresolved-constant".to_string())),
+            code_description: None,
+            source: Some("ruby-fast-lsp".to_string()),
+            message: format!("Unresolved constant `{}`", unresolved.name),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+        .collect()
+}
+
+// ============================================================================
+// Ruby Version Detection
+// ============================================================================
+
+/// Detect system Ruby version without workspace context
+pub fn detect_system_ruby_version() -> Option<(u8, u8)> {
+    let output = std::process::Command::new("ruby")
+        .args(["--version"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
     }
 
-    visit_dir(dir, &mut ruby_files)?;
+    let version_output = String::from_utf8_lossy(&output.stdout);
+    // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
+    let version_part = version_output.split_whitespace().nth(1)?;
+    debug!("System ruby version output: {}", version_part);
+    let version = RubyVersion::from_full_version(version_part)?;
+    Some((version.major, version.minor))
+}
+
+// ============================================================================
+// File Discovery
+// ============================================================================
+
+/// Find all Ruby files in a directory (recursive)
+pub fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut ruby_files = Vec::new();
+    collect_ruby_files(dir, &mut ruby_files)?;
     Ok(ruby_files)
 }
 
-pub async fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    // Use the synchronous version to avoid async recursion issues
-    find_ruby_files_sync(dir)
-}
+fn collect_ruby_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
 
-pub fn process_file_for_definitions(server: &RubyLanguageServer, uri: Url) -> Result<(), String> {
-    process_file_for_definitions_with_tracker(server, uri, None)
-}
-
-pub fn process_file_for_definitions_with_tracker(
-    server: &RubyLanguageServer,
-    uri: Url,
-    dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
-) -> Result<(), String> {
-    let file_path = uri
-        .to_file_path()
-        .map_err(|_| format!("Failed to convert URI to file path: {}", uri))?;
-
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
-
-    let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
-        debug!(
-            "Parse errors in file {:?}: {} errors",
-            file_path, errors_count
-        );
-        return Ok(()); // Continue processing despite parse errors
+        if path.is_dir() {
+            collect_ruby_files(&path, files)?;
+        } else if path.extension().map_or(false, |ext| ext == "rb") {
+            files.push(path);
+        }
     }
-
-    // Remove existing entries for this URI before adding new ones
-    server.index().lock().remove_entries_for_uri(&uri);
-
-    let document = RubyDocument::new(uri.clone(), content.clone(), 0);
-    server
-        .docs
-        .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document)));
-
-    let mut visitor = IndexVisitor::new(server, uri.clone());
-    if let Some(tracker) = dependency_tracker {
-        visitor = visitor.with_dependency_tracker(tracker);
-    }
-    visitor.visit(&parse_result.node());
-
-    Ok(())
-}
-
-pub fn process_file_for_references(
-    server: &RubyLanguageServer,
-    uri: Url,
-    include_local_vars: bool,
-) -> Result<(), String> {
-    let file_path = uri
-        .to_file_path()
-        .map_err(|_| format!("Failed to convert URI to file path: {}", uri))?;
-
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
-
-    let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
-        debug!(
-            "Parse errors in file {:?}: {} errors",
-            file_path, errors_count
-        );
-        return Ok(()); // Continue processing despite parse errors
-    }
-
-    // Remove existing references for this URI before adding new ones
-    server.index().lock().remove_references_for_uri(&uri);
-
-    let document = RubyDocument::new(uri.clone(), content.clone(), 0);
-    server
-        .docs
-        .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document)));
-
-    let mut visitor = if include_local_vars {
-        ReferenceVisitor::new(server, uri.clone())
-    } else {
-        ReferenceVisitor::with_options(server, uri.clone(), false)
-    };
-    visitor.visit(&parse_result.node());
-
     Ok(())
 }

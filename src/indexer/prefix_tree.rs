@@ -1,8 +1,19 @@
+//! Prefix Tree (Trie)
+//!
+//! A data structure for fast prefix-based searches, primarily used for auto-completion.
+//! Uses the `trie-rs` crate for efficient memory usage and lookup.
+//!
+//! See https://en.wikipedia.org/wiki/Trie for more information.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use trie_rs::map::{Trie, TrieBuilder};
 
 use crate::indexer::entry::Entry;
+
+// ============================================================================
+// PrefixTree
+// ============================================================================
 
 /// A PrefixTree is a data structure that allows searching for partial strings fast. The tree is similar to a nested
 /// hash structure, where the keys are the characters of the inserted strings.
@@ -133,6 +144,10 @@ impl Default for PrefixTree {
         Self::new()
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {

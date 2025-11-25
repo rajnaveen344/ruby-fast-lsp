@@ -26,6 +26,8 @@ pub struct ReferenceVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub include_local_vars: bool,
+    /// When true, track unresolved constants in the index for diagnostics
+    pub track_unresolved: bool,
 }
 
 impl ReferenceVisitor {
@@ -42,6 +44,25 @@ impl ReferenceVisitor {
             document,
             scope_tracker,
             include_local_vars,
+            track_unresolved: false,
+        }
+    }
+
+    /// Create a visitor that tracks unresolved constants
+    pub fn with_unresolved_tracking(
+        server: &RubyLanguageServer,
+        uri: Url,
+        include_local_vars: bool,
+    ) -> Self {
+        let index = server.index();
+        let document = server.get_doc(&uri).unwrap();
+        let scope_tracker = ScopeTracker::new(&document);
+        Self {
+            index,
+            document,
+            scope_tracker,
+            include_local_vars,
+            track_unresolved: true,
         }
     }
 }

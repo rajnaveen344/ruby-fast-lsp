@@ -1,9 +1,17 @@
+//! Entry Builder
+//!
+//! Provides a builder pattern for constructing `Entry` objects with validation.
+
 use tower_lsp::lsp_types::Location;
 
+use super::{Entry, EntryKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
-use super::{Entry, EntryKind};
+// ============================================================================
+// EntryBuilder
+// ============================================================================
 
+/// Builder for creating `Entry` objects with required field validation
 pub struct EntryBuilder {
     fqn: Option<FullyQualifiedName>,
     location: Option<Location>,
@@ -32,7 +40,7 @@ impl EntryBuilder {
         self
     }
 
-    /// Set the entry type (required)
+    /// Set the entry kind (required)
     pub fn kind(mut self, kind: EntryKind) -> Self {
         self.kind = Some(kind);
         self
@@ -49,5 +57,11 @@ impl EntryBuilder {
             location,
             kind,
         })
+    }
+}
+
+impl Default for EntryBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }

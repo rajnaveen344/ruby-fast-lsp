@@ -1,5 +1,5 @@
 use crate::indexer::dependency_tracker::DependencyTracker;
-use crate::indexer::indexer_core::IndexerCore;
+use crate::indexer::indexer_core::{IndexerCore, ReferenceIndexOptions};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::{debug, info, warn};
@@ -87,7 +87,8 @@ impl IndexerProject {
         );
 
         // Index references from project files
-        self.index_references_only(&ruby_files, server, total_files).await?;
+        self.index_references_only(&ruby_files, server, total_files)
+            .await?;
 
         info!(
             "Project references indexing completed in {:?}",
@@ -119,8 +120,9 @@ impl IndexerProject {
                 server,
                 "Indexing".to_string(),
                 index + 1,
-                total_files
-            ).await;
+                total_files,
+            )
+            .await;
 
             // Index only definitions from the file
             if let Err(e) = self.core.index_file_definitions(file_path, server).await {
@@ -138,7 +140,7 @@ impl IndexerProject {
         Ok(())
     }
 
-    /// Index only references from files
+    /// Index only references from files with unresolved constant tracking
     async fn index_references_only(
         &self,
         files: &[PathBuf],
@@ -147,17 +149,24 @@ impl IndexerProject {
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
 
+        let options = ReferenceIndexOptions::new().with_unresolved_tracking(true);
+
         for (index, file_path) in files.iter().enumerate() {
             // Report progress
             IndexingCoordinator::send_progress_report(
                 server,
                 "Collecting References".to_string(),
                 index + 1,
-                total_files
-            ).await;
+                total_files,
+            )
+            .await;
 
-            // Index only references from the file
-            if let Err(e) = self.core.index_file_references(file_path, server).await {
+            // Index only references from the file with unresolved constant tracking enabled
+            if let Err(e) = self
+                .core
+                .index_file_references(file_path, server, options)
+                .await
+            {
                 warn!(
                     "Failed to index references from file {:?}: {}",
                     file_path, e

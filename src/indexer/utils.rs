@@ -1,10 +1,16 @@
-//! Utility functions shared across indexer modules
+//! Indexer Utilities
 //!
-//! This module contains common functionality used by multiple indexer components,
-//! such as file collection, Ruby file detection, and path utilities.
+//! Common utility functions shared across indexer modules:
+//! - File collection and filtering
+//! - Ruby file detection
+//! - Path utilities for distinguishing project vs external files
 
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
+
+// ============================================================================
+// File Detection
+// ============================================================================
 
 /// Check if a file should be indexed based on its extension and name
 ///
@@ -26,6 +32,10 @@ pub fn should_index_file(path: &Path) -> bool {
         }
     }
 }
+
+// ============================================================================
+// File Collection
+// ============================================================================
 
 /// Collect Ruby files recursively from a directory
 ///
@@ -67,6 +77,10 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+// ============================================================================
+// Path Classification
+// ============================================================================
+
 /// Check if a URI belongs to a project file (not stdlib or gem)
 ///
 /// This function helps distinguish between project files and external dependencies
@@ -90,6 +104,10 @@ pub fn is_project_file(uri: &Url) -> bool {
         true
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {

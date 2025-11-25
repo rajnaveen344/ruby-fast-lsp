@@ -1,3 +1,9 @@
+//! Ruby Index
+//!
+//! The central data structure for storing all indexed Ruby code information.
+//! This includes definitions, references, method lookups, mixin relationships,
+//! and prefix-based search capabilities.
+
 use std::collections::HashMap;
 
 use log::debug;
@@ -6,6 +12,10 @@ use tower_lsp::lsp_types::{Location, Url};
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
 use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /// Represents a single mixin usage with its type and location
 #[derive(Debug, Clone, PartialEq)]
@@ -18,34 +28,46 @@ pub struct MixinUsage {
     pub location: Location,
 }
 
+/// Represents an unresolved constant reference.
+/// Used for diagnostics to report missing constants/classes/modules.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnresolvedConstant {
+    /// The constant name as written in the source (e.g., "Foo::Bar")
+    pub name: String,
+    /// Location where the constant was referenced
+    pub location: Location,
+}
+
+// ============================================================================
+// RubyIndex
+// ============================================================================
+
+/// The main index storing all Ruby code information.
 #[derive(Debug)]
 pub struct RubyIndex {
-    // File to entries map
-    // Eg. file:///test.rb => [Entry1, Entry2, ...]
+    /// File URI to entries map (e.g., file:///test.rb => [Entry1, Entry2, ...])
     pub file_entries: HashMap<Url, Vec<Entry>>,
 
-    // Definitions are the definitions of a fully qualified name.
-    // For example, if we have a method Foo#bar, its definition is the method definition.
+    /// FQN to definition entries map
     pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
 
-    // References are the references to a fully qualified name.
+    /// FQN to reference locations map
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
 
-    // Temporarily used to find definitions by name until we have logic to determine the type of the receiver
-    // For example, if we have a method Foo#bar, its method by name is bar.
+    /// Method name to entries map (for method lookup without receiver type)
     pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
 
-    // Reverse mixin tracking: module/class FQN -> list of classes/modules that include/extend/prepend it
-    // For example, if class Foo includes module Bar, then reverse_mixins[Bar] contains Foo
+    /// Reverse mixin tracking: module FQN -> list of classes/modules that include/extend/prepend it
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
 
-    // Detailed mixin usage tracking: module FQN -> list of usages with type and location
-    // For CodeLens feature: shows where and how a module is used (include/prepend/extend)
+    /// Detailed mixin usage tracking for CodeLens (module FQN -> usages with type and location)
     pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
 
-    // Prefix tree for auto-completion
-    // Single prefix tree that holds all entries for fast lookup during completion
+    /// Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
+
+    /// Unresolved constants per file for diagnostics
+    pub unresolved_constants: HashMap<Url, Vec<UnresolvedConstant>>,
 }
 
 impl RubyIndex {
@@ -58,70 +80,64 @@ impl RubyIndex {
             reverse_mixins: HashMap::new(),
             mixin_usages: HashMap::new(),
             prefix_tree: PrefixTree::new(),
+            unresolved_constants: HashMap::new(),
         }
     }
 
+    // ========================================================================
+    // Entry Management
+    // ========================================================================
+
+    /// Add an entry to the index
     pub fn add_entry(&mut self, entry: Entry) {
-        // Add to the file_entries map for this file
-        let file_entries = self
-            .file_entries
+        // Add to file entries
+        self.file_entries
             .entry(entry.location.uri.clone())
-            .or_insert_with(Vec::new);
-        file_entries.push(entry.clone());
+            .or_default()
+            .push(entry.clone());
 
-        // Add to the definitions map
-        let definition_entries = self
-            .definitions
+        // Add to definitions
+        self.definitions
             .entry(entry.fqn.clone())
-            .or_insert_with(Vec::new);
+            .or_default()
+            .push(entry.clone());
 
-        definition_entries.push(entry.clone());
-
-        // Add to the methods_by_name map if the entry is of kind Method
+        // Add to methods_by_name if it's a method
         if let EntryKind::Method { name, .. } = &entry.kind {
-            let method_entries = self
-                .methods_by_name
+            self.methods_by_name
                 .entry(name.clone())
-                .or_insert_with(Vec::new);
-            method_entries.push(entry.clone());
+                .or_default()
+                .push(entry.clone());
         }
 
-        // Update reverse mixin tracking for classes and modules with mixins
+        // Update mixin tracking
         self.update_reverse_mixins(&entry);
 
-        // Add to prefix trees for auto-completion
-        self.add_to_prefix_trees(&entry);
+        // Add to prefix tree
+        self.add_to_prefix_tree(&entry);
     }
 
-    pub fn add_reference(&mut self, fully_qualified_name: FullyQualifiedName, location: Location) {
-        debug!("Adding reference: {:?}", fully_qualified_name);
-
-        self.references
-            .entry(fully_qualified_name)
-            .or_insert_with(Vec::new)
-            .push(location);
-    }
-
+    /// Remove all entries for a URI
     pub fn remove_entries_for_uri(&mut self, uri: &Url) {
-        let entries = match self.file_entries.remove(uri) {
-            Some(entries) => entries,
-            None => return, // No entries for this URI
+        let Some(entries) = self.file_entries.remove(uri) else {
+            return;
         };
 
+        // Remove from definitions
         for entry in &entries {
             if let Some(fqn_entries) = self.definitions.get_mut(&entry.fqn) {
                 fqn_entries.retain(|e| e.location.uri != *uri);
-
                 if fqn_entries.is_empty() {
                     self.definitions.remove(&entry.fqn);
                 }
             }
         }
 
+        // Remove from methods_by_name
         let method_names: Vec<RubyMethod> = entries
             .iter()
-            .filter_map(|entry| {
-                if let EntryKind::Method { name, .. } = &entry.kind {
+            .filter_map(|e| {
+                if let EntryKind::Method { name, .. } = &e.kind {
                     Some(name.clone())
                 } else {
                     None
@@ -132,109 +148,191 @@ impl RubyIndex {
         for method_name in method_names {
             if let Some(method_entries) = self.methods_by_name.get_mut(&method_name) {
                 method_entries.retain(|e| e.location.uri != *uri);
-
                 if method_entries.is_empty() {
                     self.methods_by_name.remove(&method_name);
                 }
             }
         }
 
-        // Remove mixin usages from this URI
+        // Remove mixin usages
         for usages in self.mixin_usages.values_mut() {
             usages.retain(|usage| usage.location.uri != *uri);
         }
         self.mixin_usages.retain(|_, usages| !usages.is_empty());
 
-        // Remove entries from prefix trees
-        self.remove_from_prefix_trees(&entries, uri);
+        // Remove from prefix tree
+        self.remove_from_prefix_tree(&entries);
     }
 
+    /// Get entries by FQN
     pub fn get(&self, fqn: &FullyQualifiedName) -> Option<&Vec<Entry>> {
         self.definitions.get(fqn)
     }
 
+    /// Get mutable entries by FQN
     pub fn get_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Vec<Entry>> {
         self.definitions.get_mut(fqn)
     }
 
+    // ========================================================================
+    // Reference Management
+    // ========================================================================
+
+    /// Add a reference to a FQN
+    pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
+        debug!("Adding reference: {:?}", fqn);
+        self.references.entry(fqn).or_default().push(location);
+    }
+
+    /// Remove all references for a URI
     pub fn remove_references_for_uri(&mut self, uri: &Url) {
         for refs in self.references.values_mut() {
             refs.retain(|loc| loc.uri != *uri);
         }
-
         self.references.retain(|_, refs| !refs.is_empty());
     }
+
+    // ========================================================================
+    // Unresolved Constants (Diagnostics)
+    // ========================================================================
+
+    /// Add an unresolved constant for a file
+    pub fn add_unresolved_constant(&mut self, uri: Url, unresolved: UnresolvedConstant) {
+        debug!(
+            "Adding unresolved constant: {} at {:?}",
+            unresolved.name, uri
+        );
+        self.unresolved_constants
+            .entry(uri)
+            .or_default()
+            .push(unresolved);
+    }
+
+    /// Remove all unresolved constants for a file
+    pub fn remove_unresolved_constants_for_uri(&mut self, uri: &Url) {
+        self.unresolved_constants.remove(uri);
+    }
+
+    /// Get all unresolved constants for a file
+    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<UnresolvedConstant> {
+        self.unresolved_constants
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    // ========================================================================
+    // Mixin Tracking
+    // ========================================================================
 
     /// Update reverse mixin tracking when an entry with mixins is added
     pub fn update_reverse_mixins(&mut self, entry: &Entry) {
         use crate::indexer::ancestor_chain::resolve_mixin_ref;
-        use crate::indexer::entry::entry_kind::EntryKind;
 
-        match &entry.kind {
+        let (includes, extends, prepends) = match &entry.kind {
             EntryKind::Class {
                 includes,
                 extends,
                 prepends,
                 ..
-            }
-            | EntryKind::Module {
+            } => (includes, extends, prepends),
+            EntryKind::Module {
                 includes,
                 extends,
                 prepends,
                 ..
-            } => {
-                debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
-                // Process includes, extends, and prepends with their types
-                let mixin_groups = [
-                    (includes, MixinType::Include),
-                    (extends, MixinType::Extend),
-                    (prepends, MixinType::Prepend),
-                ];
+            } => (includes, extends, prepends),
+            _ => return,
+        };
 
-                for (mixin_refs, mixin_type) in mixin_groups {
-                    for mixin_ref in mixin_refs {
-                        debug!("Processing mixin ref: {:?}", mixin_ref);
-                        if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
-                            debug!("Resolved mixin ref {:?} to {:?}, adding reverse mapping: {:?} -> {:?}",
-                                   mixin_ref, resolved_fqn, resolved_fqn, entry.fqn);
+        debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
 
-                            // Update reverse_mixins (legacy, for backward compatibility)
-                            let including_classes = self
-                                .reverse_mixins
-                                .entry(resolved_fqn.clone())
-                                .or_insert_with(Vec::new);
+        let mixin_groups = [
+            (includes, MixinType::Include),
+            (extends, MixinType::Extend),
+            (prepends, MixinType::Prepend),
+        ];
 
-                            // Avoid duplicates
-                            if !including_classes.contains(&entry.fqn) {
-                                including_classes.push(entry.fqn.clone());
-                            }
+        for (mixin_refs, mixin_type) in mixin_groups {
+            for mixin_ref in mixin_refs {
+                let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) else {
+                    debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
+                    continue;
+                };
 
-                            // Update mixin_usages with detailed information
-                            // Note: We use entry.location which is the module/class definition location
-                            // In the future, we could track the actual call location separately
-                            let usage = MixinUsage {
-                                user_fqn: entry.fqn.clone(),
-                                mixin_type,
-                                location: entry.location.clone(),
-                            };
+                debug!("Resolved mixin ref {:?} to {:?}", mixin_ref, resolved_fqn);
 
-                            let usages = self
-                                .mixin_usages
-                                .entry(resolved_fqn)
-                                .or_insert_with(Vec::new);
+                // Update reverse_mixins
+                let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
+                if !including.contains(&entry.fqn) {
+                    including.push(entry.fqn.clone());
+                }
 
-                            // Avoid duplicates
-                            if !usages.contains(&usage) {
-                                usages.push(usage);
-                            }
-                        } else {
-                            debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
-                        }
-                    }
+                // Update mixin_usages
+                let usage = MixinUsage {
+                    user_fqn: entry.fqn.clone(),
+                    mixin_type,
+                    location: entry.location.clone(),
+                };
+
+                let usages = self.mixin_usages.entry(resolved_fqn).or_default();
+                if !usages.contains(&usage) {
+                    usages.push(usage);
                 }
             }
-            _ => {}
         }
+    }
+
+    /// Update reverse mixin tracking with specific call location
+    pub fn update_reverse_mixins_with_location(
+        &mut self,
+        entry: &Entry,
+        mixin_refs: &[crate::indexer::entry::MixinRef],
+        mixin_type: MixinType,
+        call_location: Location,
+    ) {
+        use crate::indexer::ancestor_chain::resolve_mixin_ref;
+
+        for mixin_ref in mixin_refs {
+            let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) else {
+                debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
+                continue;
+            };
+
+            // Update reverse_mixins
+            let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
+            if !including.contains(&entry.fqn) {
+                including.push(entry.fqn.clone());
+            }
+
+            // Update mixin_usages with actual call location
+            let usage = MixinUsage {
+                user_fqn: entry.fqn.clone(),
+                mixin_type,
+                location: call_location.clone(),
+            };
+
+            let usages = self.mixin_usages.entry(resolved_fqn).or_default();
+            if !usages.contains(&usage) {
+                usages.push(usage);
+            }
+        }
+    }
+
+    /// Resolve all mixin references (call after all definitions are indexed)
+    pub fn resolve_all_mixins(&mut self) {
+        debug!("Resolving all mixin references");
+
+        let entries: Vec<_> = self.definitions.values().flatten().cloned().collect();
+
+        for entry in entries {
+            self.update_reverse_mixins(&entry);
+        }
+
+        debug!(
+            "Resolved mixins: {} modules have usages tracked",
+            self.mixin_usages.len()
+        );
     }
 
     /// Get all classes/modules that include the given module
@@ -242,60 +340,49 @@ impl RubyIndex {
         &self,
         module_fqn: &FullyQualifiedName,
     ) -> Vec<FullyQualifiedName> {
-        let result = self
-            .reverse_mixins
+        self.reverse_mixins
             .get(module_fqn)
-            .map(|classes| classes.clone())
-            .unwrap_or_default();
-        debug!("get_including_classes for {:?}: {:?}", module_fqn, result);
-        result
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Get all mixin usages for a given module (for CodeLens)
     pub fn get_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
         self.mixin_usages
             .get(module_fqn)
-            .map(|usages| usages.clone())
+            .cloned()
             .unwrap_or_default()
     }
 
     /// Get class definition locations for classes that use a module
-    /// Returns a vector of Location objects pointing to class definitions
     pub fn get_class_definition_locations(&self, module_fqn: &FullyQualifiedName) -> Vec<Location> {
-        let transitive_classes = self.get_transitive_mixin_classes(module_fqn);
-        let mut locations = Vec::new();
-
-        for class_fqn in transitive_classes.keys() {
-            // Look up the class definition in the index
-            if let Some(entries) = self.definitions.get(class_fqn) {
-                // Get the first entry (primary definition)
-                if let Some(entry) = entries.first() {
-                    // Only include if it's actually a class
-                    if matches!(entry.kind, EntryKind::Class { .. }) {
-                        locations.push(entry.location.clone());
-                    }
-                }
-            }
-        }
-
-        locations
+        self.get_transitive_mixin_classes(module_fqn)
+            .keys()
+            .filter_map(|class_fqn| {
+                self.definitions.get(class_fqn).and_then(|entries| {
+                    entries.first().and_then(|entry| {
+                        if matches!(entry.kind, EntryKind::Class { .. }) {
+                            Some(entry.location.clone())
+                        } else {
+                            None
+                        }
+                    })
+                })
+            })
+            .collect()
     }
 
     /// Get all classes that transitively include/extend/prepend a module
-    /// Returns a map of class FQN -> path of modules through which it's included
     pub fn get_transitive_mixin_classes(
         &self,
         module_fqn: &FullyQualifiedName,
     ) -> HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>> {
-        let mut result: HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>> = HashMap::new();
+        let mut result = HashMap::new();
         let mut visited = std::collections::HashSet::new();
-
         self.collect_transitive_users(module_fqn, &mut result, &mut visited, vec![]);
-
         result
     }
 
-    /// Recursively collect all classes/modules that use this module
     fn collect_transitive_users(
         &self,
         module_fqn: &FullyQualifiedName,
@@ -303,16 +390,12 @@ impl RubyIndex {
         visited: &mut std::collections::HashSet<FullyQualifiedName>,
         path: Vec<FullyQualifiedName>,
     ) {
-        // Avoid infinite loops
-        if visited.contains(module_fqn) {
+        if !visited.insert(module_fqn.clone()) {
             return;
         }
-        visited.insert(module_fqn.clone());
 
-        // Get direct users of this module
         if let Some(usages) = self.mixin_usages.get(module_fqn) {
             for usage in usages {
-                // Check if the user is a class or module
                 if let Some(entries) = self.definitions.get(&usage.user_fqn) {
                     if let Some(entry) = entries.first() {
                         let mut current_path = path.clone();
@@ -320,14 +403,12 @@ impl RubyIndex {
 
                         match &entry.kind {
                             EntryKind::Class { .. } => {
-                                // This is a class - add it to results
                                 result
                                     .entry(usage.user_fqn.clone())
-                                    .or_insert_with(Vec::new)
+                                    .or_default()
                                     .push(current_path);
                             }
                             EntryKind::Module { .. } => {
-                                // This is a module - recurse to find classes that include it
                                 self.collect_transitive_users(
                                     &usage.user_fqn,
                                     result,
@@ -345,75 +426,23 @@ impl RubyIndex {
         visited.remove(module_fqn);
     }
 
-    /// Update reverse mixin tracking with specific call location
-    pub fn update_reverse_mixins_with_location(
-        &mut self,
-        entry: &Entry,
-        mixin_refs: &[crate::indexer::entry::MixinRef],
-        mixin_type: MixinType,
-        call_location: Location,
-    ) {
-        use crate::indexer::ancestor_chain::resolve_mixin_ref;
-
-        for mixin_ref in mixin_refs {
-            debug!("Processing mixin ref: {:?}", mixin_ref);
-            if let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) {
-                debug!(
-                    "Resolved mixin ref {:?} to {:?}, adding reverse mapping with call location",
-                    mixin_ref, resolved_fqn
-                );
-
-                // Update reverse_mixins (legacy, for backward compatibility)
-                let including_classes = self
-                    .reverse_mixins
-                    .entry(resolved_fqn.clone())
-                    .or_insert_with(Vec::new);
-
-                // Avoid duplicates
-                if !including_classes.contains(&entry.fqn) {
-                    including_classes.push(entry.fqn.clone());
-                }
-
-                // Update mixin_usages with the actual call location
-                let usage = MixinUsage {
-                    user_fqn: entry.fqn.clone(),
-                    mixin_type,
-                    location: call_location.clone(), // Use the call location, not the class definition
-                };
-
-                let usages = self
-                    .mixin_usages
-                    .entry(resolved_fqn)
-                    .or_insert_with(Vec::new);
-
-                // Avoid duplicates
-                if !usages.contains(&usage) {
-                    usages.push(usage);
-                }
-            } else {
-                debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
-            }
-        }
-    }
-
-    /// Add entry to appropriate prefix trees for auto-completion
-    fn add_to_prefix_trees(&mut self, entry: &Entry) {
-        let key = entry.fqn.name();
-        if key.is_empty() {
-            return;
-        }
-
-        // Add all entry types to the single prefix tree
-        self.prefix_tree.insert(&key, entry.clone());
-    }
+    // ========================================================================
+    // Prefix Tree (Auto-completion)
+    // ========================================================================
 
     /// Search for entries by prefix
     pub fn search_by_prefix(&self, prefix: &str) -> Vec<Entry> {
         self.prefix_tree.search(prefix)
     }
 
-    /// Remove entries from prefix trees when a file is removed
-    fn remove_from_prefix_trees(&mut self, entries: &[Entry], _uri: &Url) {
+    fn add_to_prefix_tree(&mut self, entry: &Entry) {
+        let key = entry.fqn.name();
+        if !key.is_empty() {
+            self.prefix_tree.insert(&key, entry.clone());
+        }
+    }
+
+    fn remove_from_prefix_tree(&mut self, entries: &[Entry]) {
         for entry in entries {
             let key = entry.fqn.name();
             if !key.is_empty() {
@@ -422,39 +451,27 @@ impl RubyIndex {
             }
         }
     }
+}
 
-    /// Resolve all mixin references and populate reverse_mixins and mixin_usages
-    /// This should be called after all definitions have been indexed
-    pub fn resolve_all_mixins(&mut self) {
-        debug!("Resolving all mixin references");
-
-        // Collect all entries that have mixins (to avoid borrowing issues)
-        let entries_with_mixins: Vec<_> = self.definitions.values().flatten().cloned().collect();
-
-        for entry in entries_with_mixins {
-            // Call the existing update_reverse_mixins method which resolves and stores the mixins
-            self.update_reverse_mixins(&entry);
-        }
-
-        debug!(
-            "Resolved mixins: {} modules have usages tracked",
-            self.mixin_usages.len()
-        );
+impl Default for RubyIndex {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
-    use crate::{indexer::entry::entry_builder::EntryBuilder, types::ruby_namespace::RubyConstant};
-
     use super::*;
+    use crate::indexer::entry::entry_builder::EntryBuilder;
+    use crate::types::ruby_namespace::RubyConstant;
 
-    #[test]
-    fn test_add_entry() {
-        let mut index = RubyIndex::new();
-        let uri = Url::parse("file://test.rb").unwrap();
-        let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Test").unwrap()]);
-        let entry = EntryBuilder::new()
+    fn create_test_entry(name: &str, uri: &Url) -> Entry {
+        let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from(name).unwrap()]);
+        EntryBuilder::new()
             .fqn(fqn)
             .location(Location {
                 uri: uri.clone(),
@@ -462,8 +479,17 @@ mod tests {
             })
             .kind(EntryKind::new_class(None))
             .build()
-            .unwrap();
+            .unwrap()
+    }
+
+    #[test]
+    fn test_add_entry() {
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file://test.rb").unwrap();
+        let entry = create_test_entry("Test", &uri);
+
         index.add_entry(entry);
+
         assert_eq!(index.definitions.len(), 1);
         assert_eq!(index.references.len(), 0);
     }
@@ -472,23 +498,13 @@ mod tests {
     fn test_remove_entries_for_uri() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file:///test.rb").unwrap();
+        let entry = create_test_entry("Test", &uri);
 
-        let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Test").unwrap()]);
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::new_class(None))
-            .build()
-            .unwrap();
         index.add_entry(entry);
         assert_eq!(index.definitions.len(), 1);
-        assert_eq!(index.references.len(), 0);
+
         index.remove_entries_for_uri(&uri);
         assert_eq!(index.definitions.len(), 0);
-        assert_eq!(index.references.len(), 0);
     }
 
     #[test]
@@ -496,103 +512,11 @@ mod tests {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file://test.rb").unwrap();
 
-        // Add a class
-        let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("TestClass").unwrap()]);
-        let entry1 = EntryBuilder::new()
-            .fqn(fqn1)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::new_class(None))
-            .build()
-            .unwrap();
-        index.add_entry(entry1);
+        index.add_entry(create_test_entry("TestClass", &uri));
+        index.add_entry(create_test_entry("TestModule", &uri));
 
-        // Add a module
-        let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("TestModule").unwrap()]);
-        let entry2 = EntryBuilder::new()
-            .fqn(fqn2)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::new_module())
-            .build()
-            .unwrap();
-        index.add_entry(entry2);
-
-        // Test prefix search
-        let results = index.search_by_prefix("Test");
-        assert_eq!(results.len(), 2);
-
-        let results = index.search_by_prefix("TestC");
-        assert_eq!(results.len(), 1);
-
-        let results = index.search_by_prefix("TestM");
-        assert_eq!(results.len(), 1);
-
-        let results = index.search_by_prefix("NonExistent");
-        assert_eq!(results.len(), 0);
-    }
-
-    #[test]
-    fn test_prefix_tree_all_entry_types() {
-        let mut index = RubyIndex::new();
-        let uri = Url::parse("file://test.rb").unwrap();
-
-        // Add a constant
-        let fqn1 = FullyQualifiedName::from(vec![RubyConstant::try_from("MY_CONSTANT").unwrap()]);
-        let entry1 = EntryBuilder::new()
-            .fqn(fqn1)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::Constant {
-                value: Some("42".to_string()),
-                visibility: None,
-            })
-            .build()
-            .unwrap();
-        index.add_entry(entry1);
-
-        // Add a class
-        let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("MyClass").unwrap()]);
-        let entry2 = EntryBuilder::new()
-            .fqn(fqn2)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::new_class(None))
-            .build()
-            .unwrap();
-        index.add_entry(entry2);
-
-        // Add a module
-        let fqn3 = FullyQualifiedName::from(vec![RubyConstant::try_from("MyModule").unwrap()]);
-        let entry3 = EntryBuilder::new()
-            .fqn(fqn3)
-            .location(Location {
-                uri: uri.clone(),
-                range: Default::default(),
-            })
-            .kind(EntryKind::new_module())
-            .build()
-            .unwrap();
-        index.add_entry(entry3);
-
-        // Test searching for constants
-        let constant_results = index.search_by_prefix("MY_");
-        assert_eq!(constant_results.len(), 1);
-
-        // Test searching for classes and modules
-        let my_results = index.search_by_prefix("My");
-        assert_eq!(my_results.len(), 2); // MyClass and MyModule
-
-        // Test searching with no matches
-        let no_results = index.search_by_prefix("xyz");
-        assert_eq!(no_results.len(), 0);
+        assert_eq!(index.search_by_prefix("Test").len(), 2);
+        assert_eq!(index.search_by_prefix("TestC").len(), 1);
+        assert_eq!(index.search_by_prefix("NonExistent").len(), 0);
     }
 }

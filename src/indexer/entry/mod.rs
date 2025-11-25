@@ -1,3 +1,13 @@
+//! Entry Types
+//!
+//! Defines the data structures for representing indexed Ruby entities.
+//!
+//! ## Components
+//!
+//! - **`Entry`**: The main indexed item containing FQN, location, and kind
+//! - **`EntryKind`**: Type-specific metadata (Class, Module, Method, etc.)
+//! - **`EntryBuilder`**: Builder pattern for constructing entries
+
 pub mod entry_builder;
 pub mod entry_kind;
 
@@ -9,14 +19,17 @@ use tower_lsp::lsp_types::Location;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 
+// ============================================================================
+// Entry
+// ============================================================================
+
+/// An indexed Ruby entity (class, module, method, constant, variable)
 #[derive(Debug, Clone)]
 pub struct Entry {
     /// The fully qualified name of this entity
     pub fqn: FullyQualifiedName,
-
     /// Location of the definition in source code
     pub location: Location,
-
     /// Type-specific metadata
     pub kind: EntryKind,
 }
@@ -39,25 +52,22 @@ impl Entry {
     }
 }
 
+// ============================================================================
+// Method Types
+// ============================================================================
+
+/// Distinguishes between instance and class methods
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MethodKind {
-    /// Instance method defined in a class/module.
-    /// Called on instances: `obj.method`
-    /// Example: `def foo; end` in class body
+    /// Instance method called on objects: `obj.method`
     Instance,
-
-    /// Class method defined on a class/module.
-    /// Called on the class itself: `MyClass.method`
-    /// Example: `def self.bar; end` or `class << self; def bar; end`
+    /// Class method called on the class: `MyClass.method`
     Class,
-
-    /// Unknown method kind - could be either instance or class method.
-    /// Used when the identifier visitor cannot determine the method kind
-    /// and the definition handler should search for both.
-    /// Example: `(some_expr).method` could be either class or instance method
+    /// Unknown kind - search for both
     Unknown,
 }
 
+/// How a method was obtained (directly defined or inherited/mixed in)
 #[derive(Debug, Clone, PartialEq)]
 pub enum MethodOrigin {
     /// Defined directly on the owner
@@ -80,6 +90,10 @@ pub enum MethodVisibility {
     Private,
 }
 
+// ============================================================================
+// Constant Types
+// ============================================================================
+
 /// Constant visibility in Ruby
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ConstVisibility {
@@ -87,18 +101,21 @@ pub enum ConstVisibility {
     Private,
 }
 
-/// A purely textual reference to a mixin constant, captured before it is resolved.
-/// This allows the indexer to remain single-pass and resolve the constant later,
-/// during an on-demand query.
+// ============================================================================
+// Mixin Types
+// ============================================================================
+
+/// A textual reference to a mixin constant, captured before resolution.
+/// Allows single-pass indexing with lazy resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MixinRef {
-    /// The constant parts of the name, e.g., `["Foo", "Bar"]` for `Foo::Bar`.
+    /// The constant parts of the name (e.g., `["Foo", "Bar"]` for `Foo::Bar`)
     pub parts: Vec<RubyConstant>,
-    /// True if the constant path began with `::`, indicating it's an absolute path.
+    /// True if the path began with `::` (absolute path)
     pub absolute: bool,
 }
 
-/// Type of mixin operation (include, prepend, extend)
+/// Type of mixin operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MixinType {
     Include,
