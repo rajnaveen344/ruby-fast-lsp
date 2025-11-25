@@ -19,7 +19,7 @@ impl ReferenceVisitor {
         };
 
         // Check from current namespace to root namespace
-        let mut ancestors = current_namespace;
+        let mut ancestors = current_namespace.clone();
         while !ancestors.is_empty() {
             let mut combined_ns = ancestors.clone();
             combined_ns.push(constant.clone());
@@ -49,14 +49,21 @@ impl ReferenceVisitor {
             debug!("Adding reference: {}", fqn);
             index.add_reference(fqn, location);
         } else if self.track_unresolved {
-            // Constant not found - track as unresolved
+            // Constant not found - track as unresolved with namespace context
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
-            debug!("Adding unresolved constant: {}", name);
+            let namespace_context: Vec<String> = current_namespace
+                .iter()
+                .map(|c| c.to_string())
+                .collect();
+            debug!(
+                "Adding unresolved constant: {} in context {:?}",
+                name, namespace_context
+            );
             index.add_unresolved_entry(
                 self.document.uri.clone(),
-                UnresolvedEntry::constant(name.clone(), location),
+                UnresolvedEntry::constant_with_context(name.clone(), namespace_context, location),
             );
         }
         drop(index);

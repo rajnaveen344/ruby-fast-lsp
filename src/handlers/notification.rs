@@ -209,12 +209,17 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
-    let _ = process_definitions(
+    // Process definitions and get affected URIs for cross-file diagnostics
+    let affected_uris = match process_definitions(
         lang_server,
         uri.clone(),
         &content,
         DefinitionOptions::default(),
-    );
+    ) {
+        Ok(result) => result.affected_uris,
+        Err(_) => std::collections::HashSet::new(),
+    };
+
     let _ = process_references(
         lang_server,
         uri.clone(),
@@ -229,7 +234,19 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     // Generate and publish diagnostics (syntax errors + unresolved entries)
     let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&document);
     diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
-    lang_server.publish_diagnostics(uri, diagnostics).await;
+    lang_server
+        .publish_diagnostics(uri.clone(), diagnostics)
+        .await;
+
+    // Publish diagnostics for files affected by removed definitions (cross-file propagation)
+    for affected_uri in affected_uris {
+        if affected_uri != uri {
+            let affected_diagnostics = get_unresolved_diagnostics(lang_server, &affected_uri);
+            lang_server
+                .publish_diagnostics(affected_uri, affected_diagnostics)
+                .await;
+        }
+    }
 }
 
 pub async fn handle_did_change(
@@ -259,12 +276,17 @@ pub async fn handle_did_change(
         }
     };
 
-    let _ = process_definitions(
+    // Process definitions and get affected URIs for cross-file diagnostics
+    let affected_uris = match process_definitions(
         lang_server,
         uri.clone(),
         &final_content,
         DefinitionOptions::default(),
-    );
+    ) {
+        Ok(result) => result.affected_uris,
+        Err(_) => std::collections::HashSet::new(),
+    };
+
     let _ = process_references(
         lang_server,
         uri.clone(),
@@ -282,6 +304,16 @@ pub async fn handle_did_change(
     lang_server
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
+
+    // Publish diagnostics for files affected by removed definitions (cross-file propagation)
+    for affected_uri in affected_uris {
+        if affected_uri != uri {
+            let affected_diagnostics = get_unresolved_diagnostics(lang_server, &affected_uri);
+            lang_server
+                .publish_diagnostics(affected_uri, affected_diagnostics)
+                .await;
+        }
+    }
 }
 
 pub async fn handle_did_close(

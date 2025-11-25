@@ -93,13 +93,21 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> Res
 // Core Processing Functions (Content-based)
 // ============================================================================
 
+/// Result of processing definitions, including affected URIs for diagnostic propagation
+pub struct ProcessDefinitionsResult {
+    /// URIs of files that reference definitions that were removed
+    /// These files need their diagnostics updated
+    pub affected_uris: std::collections::HashSet<Url>,
+}
+
 /// Process content for definitions (in-memory content)
+/// Returns information about affected files for cross-file diagnostic propagation
 pub fn process_definitions(
     server: &RubyLanguageServer,
     uri: Url,
     content: &str,
     options: DefinitionOptions,
-) -> Result<(), String> {
+) -> Result<ProcessDefinitionsResult, String> {
     let parse_result = parse(content.as_bytes());
     if parse_result.errors().count() > 0 {
         debug!(
@@ -107,11 +115,15 @@ pub fn process_definitions(
             uri,
             parse_result.errors().count()
         );
-        return Ok(());
+        return Ok(ProcessDefinitionsResult {
+            affected_uris: std::collections::HashSet::new(),
+        });
     }
 
     // Remove existing entries for this URI before adding new ones
-    server.index().lock().remove_entries_for_uri(&uri);
+    // This returns FQNs that were completely removed (no definitions left in other files)
+    let removed_fqns = server.index().lock().remove_entries_for_uri(&uri);
+    let removed_fqn_set: std::collections::HashSet<_> = removed_fqns.into_iter().collect();
 
     let mut visitor = IndexVisitor::new(server, uri.clone());
     if let Some(tracker) = options.dependency_tracker {
@@ -119,15 +131,51 @@ pub fn process_definitions(
     }
     visitor.visit(&parse_result.node());
 
-    // Resolve mixins for entries that were just added
-    server.index().lock().resolve_all_mixins();
+    // Resolve mixins only for entries in this file (not the entire index)
+    server.index().lock().resolve_mixins_for_uri(&uri);
+
+    // Get the FQNs of entries that were just added to this file
+    let added_fqns: Vec<_> = {
+        let index = server.index();
+        let index_guard = index.lock();
+        index_guard
+            .file_entries
+            .get(&uri)
+            .map(|entries| entries.iter().map(|e| e.fqn.clone()).collect())
+            .unwrap_or_default()
+    };
+    let added_fqn_set: std::collections::HashSet<_> = added_fqns.iter().cloned().collect();
+
+    let mut affected_uris = std::collections::HashSet::new();
+
+    // Only mark as unresolved FQNs that were TRULY removed (removed but not re-added)
+    // This prevents adding unresolved entries for FQNs that are just being re-indexed
+    let truly_removed: Vec<_> = removed_fqn_set
+        .difference(&added_fqn_set)
+        .cloned()
+        .collect();
+
+    if !truly_removed.is_empty() {
+        let removed_affected = server
+            .index()
+            .lock()
+            .mark_references_as_unresolved(&truly_removed);
+        affected_uris.extend(removed_affected);
+    }
+
+    // Clear unresolved entries for ALL added FQNs (new or re-added)
+    // because they might resolve previously unresolved references
+    if !added_fqns.is_empty() {
+        let resolved_affected = server.index().lock().clear_resolved_entries(&added_fqns);
+        affected_uris.extend(resolved_affected);
+    }
 
     // Update the document in the server's cache with the visitor's modified document
     if let Some(doc_arc) = server.docs.lock().get(&uri) {
         *doc_arc.write() = visitor.document;
     }
 
-    Ok(())
+    Ok(ProcessDefinitionsResult { affected_uris })
 }
 
 /// Process content for references (in-memory content)
@@ -394,7 +442,7 @@ pub fn get_unresolved_diagnostics(server: &RubyLanguageServer, uri: &Url) -> Vec
     unresolved_list
         .iter()
         .map(|entry| match entry {
-            UnresolvedEntry::Constant { name, location } => Diagnostic {
+            UnresolvedEntry::Constant { name, location, .. } => Diagnostic {
                 range: location.range,
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: Some(NumberOrString::String("unresolved-constant".to_string())),

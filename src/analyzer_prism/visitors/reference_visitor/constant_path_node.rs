@@ -39,7 +39,7 @@ impl ReferenceVisitor {
         let mut found = false;
 
         // Check from current namespace to root namespace
-        let mut ancestors = current_namespace;
+        let mut ancestors = current_namespace.clone();
         while !ancestors.is_empty() {
             let mut combined_ns = ancestors.clone();
             combined_ns.extend(namespaces.clone());
@@ -81,10 +81,17 @@ impl ReferenceVisitor {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
-            debug!("Adding unresolved constant path: {}", name);
+            let namespace_context: Vec<String> = current_namespace
+                .iter()
+                .map(|c| c.to_string())
+                .collect();
+            debug!(
+                "Adding unresolved constant path: {} in context {:?}",
+                name, namespace_context
+            );
             index.add_unresolved_entry(
                 self.document.uri.clone(),
-                UnresolvedEntry::constant(name, location),
+                UnresolvedEntry::constant_with_context(name, namespace_context, location),
             );
         }
 
