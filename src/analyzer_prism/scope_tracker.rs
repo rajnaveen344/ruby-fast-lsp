@@ -33,9 +33,9 @@ pub enum ScopeFrame {
 
 impl ScopeTracker {
     pub fn new(document: &RubyDocument) -> Self {
-        let mut frames = Vec::new();
-        let top_namespace = vec![RubyConstant::new("Object").unwrap()];
-        frames.push(ScopeFrame::Namespace(top_namespace));
+        let frames = Vec::new();
+        // We start with an empty namespace stack. Top-level constants are stored
+        // without any prefix, matching Ruby's internal representation.
         let mut lv_stack = LVScopeStack::new();
         let top_lv_scope = LVScope::new(
             0,
@@ -156,20 +156,14 @@ mod tests {
     #[test]
     fn test_new_initial_state() {
         // ensure that a fresh `ScopeTracker` contains:
-        //   * exactly one `Namespace` frame with `Object`
+        //   * no namespace frames (top-level has no artificial prefix)
         //   * an `LVScopeStack` with a single `Constant` scope spanning the file
         let doc = dummy_document();
         let tracker = ScopeTracker::new(&doc);
 
-        // Check namespace frames
-        assert_eq!(tracker.frames.len(), 1);
-        match &tracker.frames[0] {
-            ScopeFrame::Namespace(constants) => {
-                assert_eq!(constants.len(), 1);
-                assert_eq!(constants[0].to_string(), "Object");
-            }
-            _ => panic!("Expected a Namespace frame"),
-        }
+        // Check namespace frames - should be empty at start
+        assert_eq!(tracker.frames.len(), 0);
+        assert!(tracker.get_ns_stack().is_empty());
 
         // Check LV scope stack
         let lv_stack = tracker.get_lv_stack();
@@ -191,52 +185,42 @@ mod tests {
     fn test_push_and_pop_ns_scope() {
         let mut tracker = ScopeTracker::new(&dummy_document());
 
+        // Initially empty namespace
+        assert_eq!(tracker.frames.len(), 0);
+        assert!(tracker.get_ns_stack().is_empty());
+
         // Push a single scope
         let const_a = RubyConstant::new("A").unwrap();
         tracker.push_ns_scope(const_a.clone());
-        assert_eq!(tracker.frames.len(), 2);
-        assert_eq!(
-            tracker.get_ns_stack(),
-            vec![RubyConstant::new("Object").unwrap(), const_a.clone()]
-        );
+        assert_eq!(tracker.frames.len(), 1);
+        assert_eq!(tracker.get_ns_stack(), vec![const_a.clone()]);
 
         // Push multiple scopes
         let const_b = RubyConstant::new("B").unwrap();
         let const_c = RubyConstant::new("C").unwrap();
         tracker.push_ns_scopes(vec![const_b.clone(), const_c.clone()]);
-        assert_eq!(tracker.frames.len(), 3);
+        assert_eq!(tracker.frames.len(), 2);
         assert_eq!(
             tracker.get_ns_stack(),
-            vec![
-                RubyConstant::new("Object").unwrap(),
-                const_a.clone(),
-                const_b.clone(),
-                const_c.clone()
-            ]
+            vec![const_a.clone(), const_b.clone(), const_c.clone()]
         );
 
         // Pop a namespace scope
         tracker.pop_ns_scope();
-        assert_eq!(tracker.frames.len(), 2);
-        assert_eq!(
-            tracker.get_ns_stack(),
-            vec![RubyConstant::new("Object").unwrap(), const_a.clone()]
-        );
+        assert_eq!(tracker.frames.len(), 1);
+        assert_eq!(tracker.get_ns_stack(), vec![const_a.clone()]);
 
         // Try to pop a namespace scope when a singleton is on top (should not pop)
         tracker.enter_singleton();
-        assert_eq!(tracker.frames.len(), 3);
+        assert_eq!(tracker.frames.len(), 2);
         tracker.pop_ns_scope(); // This should be a no-op
-        assert_eq!(tracker.frames.len(), 3);
+        assert_eq!(tracker.frames.len(), 2);
 
         // Pop the singleton, then the namespace
         tracker.exit_singleton();
         tracker.pop_ns_scope();
-        assert_eq!(tracker.frames.len(), 1);
-        assert_eq!(
-            tracker.get_ns_stack(),
-            vec![RubyConstant::new("Object").unwrap()]
-        );
+        assert_eq!(tracker.frames.len(), 0);
+        assert!(tracker.get_ns_stack().is_empty());
     }
 
     #[test]
@@ -250,12 +234,7 @@ mod tests {
         tracker.enter_singleton(); // This should be ignored by get_ns_stack
         tracker.push_ns_scopes(vec![const_b.clone(), const_c.clone()]);
 
-        let expected_stack = vec![
-            RubyConstant::new("Object").unwrap(),
-            const_a,
-            const_b,
-            const_c,
-        ];
+        let expected_stack = vec![const_a, const_b, const_c];
 
         assert_eq!(tracker.get_ns_stack(), expected_stack);
     }
@@ -314,18 +293,15 @@ mod tests {
 
         // Enter singleton
         tracker.enter_singleton();
-        assert_eq!(tracker.frames.len(), 2);
+        assert_eq!(tracker.frames.len(), 1);
         assert!(matches!(tracker.frames.last(), Some(ScopeFrame::Singleton)));
 
-        // Should not affect namespace stack
-        assert_eq!(
-            tracker.get_ns_stack(),
-            vec![RubyConstant::new("Object").unwrap()]
-        );
+        // Should not affect namespace stack (empty at top level)
+        assert!(tracker.get_ns_stack().is_empty());
 
         // Exit singleton
         tracker.exit_singleton();
-        assert_eq!(tracker.frames.len(), 1);
+        assert_eq!(tracker.frames.len(), 0);
         assert!(!matches!(
             tracker.frames.last(),
             Some(ScopeFrame::Singleton)
@@ -333,7 +309,7 @@ mod tests {
 
         // Exit again should be a no-op
         tracker.exit_singleton();
-        assert_eq!(tracker.frames.len(), 1);
+        assert_eq!(tracker.frames.len(), 0);
     }
 
     #[test]

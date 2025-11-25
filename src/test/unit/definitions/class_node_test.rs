@@ -13,10 +13,8 @@ fn class_node_with_body() {
     let visitor = visit_code(code);
 
     // Build the expected fully-qualified name for `Foo`.
-    let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
-        RubyConstant::try_from("Foo").unwrap(),
-    ]);
+    let expected_fqn =
+        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     // The `RubyIndex` stores definitions keyed by FQN → Vec<Entry>.
     let index_lock = visitor.index.lock();
@@ -27,9 +25,8 @@ fn class_node_with_body() {
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
 
-    // Scope tracker – after visitor completion the namespace stack must be
-    // empty (it is popped during `process_class_node_exit`).
-    assert!(visitor.scope_tracker.get_ns_stack().len() == 1);
+    // Scope tracker – after visitor completion the namespace stack must be empty.
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -41,7 +38,6 @@ fn class_node_namespaced_constant_path_with_body() {
     let visitor = visit_code(code);
 
     let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
         RubyConstant::try_from("A").unwrap(),
         RubyConstant::try_from("B").unwrap(),
     ]);
@@ -55,8 +51,8 @@ fn class_node_namespaced_constant_path_with_body() {
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
 
-    // After exit only top-level Object should remain in namespace stack
-    assert_eq!(visitor.scope_tracker.get_ns_stack().len(), 1);
+    // After exit the namespace stack should be empty (no artificial prefix)
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +64,6 @@ fn class_node_deep_namespaced_constant_path() {
     let visitor = visit_code(code);
 
     let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
         RubyConstant::try_from("A").unwrap(),
         RubyConstant::try_from("B").unwrap(),
         RubyConstant::try_from("C").unwrap(),
@@ -82,7 +77,7 @@ fn class_node_deep_namespaced_constant_path() {
 
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
-    assert_eq!(visitor.scope_tracker.get_ns_stack().len(), 1);
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -93,10 +88,8 @@ fn class_node_without_body() {
     let code = "class Foo; end";
     let visitor = visit_code(code);
 
-    let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
-        RubyConstant::try_from("Foo").unwrap(),
-    ]);
+    let expected_fqn =
+        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
     let index_lock = visitor.index.lock();
 
     let entries = index_lock

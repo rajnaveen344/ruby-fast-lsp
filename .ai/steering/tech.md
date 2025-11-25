@@ -140,8 +140,8 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 ```
 
 ### FQN (Fully Qualified Name) Convention
-- All top-level constants are prefixed with `Object::`
-- Example: `String` → `Object::String`, `MyModule::MyClass` → `Object::MyModule::MyClass`
+- Top-level constants are stored without any artificial prefix (matches Ruby's internal representation)
+- Example: `String` → `String`, `MyModule::MyClass` → `MyModule::MyClass`
 - FQN parsing handles both absolute (`::Foo`) and relative (`Foo`) references
 
 ### Testing Best Practices

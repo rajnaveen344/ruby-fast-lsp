@@ -198,7 +198,7 @@ fn process_mixin(index: &mut RubyIndex, target: &FullyQualifiedName, mixin: Mixi
 graph BT
     Foo::Bar::Baz --> Foo::Bar
     Foo::Bar --> Foo
-    Foo --> Object
+    Foo --> (top-level)
 ```
 
 #### Storage:

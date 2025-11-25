@@ -285,7 +285,7 @@ mod tests {
 
         // Use helper function for cleaner assertion
         assert_constant_identifier(&identifier, &["CONST_A"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -306,7 +306,7 @@ end
 
         // Use helper functions for cleaner assertions
         assert_constant_identifier(&identifier, &["CONST_B"]);
-        assert_namespace_context(&ancestors, &["Object", "Outer"]);
+        assert_namespace_context(&ancestors, &["Outer"]);
     }
 
     #[test]
@@ -344,9 +344,8 @@ end
         }
 
         // Ancestor stack should be [Outer] because the lookup Inner::CONST_A happens within Outer
-        assert_eq!(ancestors.len(), 2);
-        assert_eq!(ancestors[0].to_string(), "Object");
-        assert_eq!(ancestors[1].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 1);
+        assert_eq!(ancestors[0].to_string(), "Outer");
     }
 
     #[test]
@@ -376,10 +375,9 @@ end
         }
 
         // Namespace stack should be [Outer, Inner]
-        assert_eq!(ancestors.len(), 3);
-        assert_eq!(ancestors[0].to_string(), "Object");
-        assert_eq!(ancestors[1].to_string(), "Outer");
-        assert_eq!(ancestors[2].to_string(), "Inner");
+        assert_eq!(ancestors.len(), 2);
+        assert_eq!(ancestors[0].to_string(), "Outer");
+        assert_eq!(ancestors[1].to_string(), "Inner");
     }
 
     #[test]
@@ -415,8 +413,8 @@ val = ::Outer::Inner::CONST_A
 
         assert_eq!(
             ancestors.len(),
-            1,
-            "Namespace stack should have one entry for absolute reference at global scope"
+            0,
+            "Namespace stack should be empty for absolute reference at global scope"
         );
 
         // Test position at "Inner" in the "::Outer::Inner::CONST_A" reference
@@ -437,8 +435,8 @@ val = ::Outer::Inner::CONST_A
 
         assert_eq!(
             ancestors.len(),
-            1,
-            "Namespace stack should have one entry for absolute reference at global scope"
+            0,
+            "Namespace stack should be empty for absolute reference at global scope"
         );
 
         // Test position at "Outer" in the "::Outer::Inner::CONST_A" reference
@@ -458,8 +456,8 @@ val = ::Outer::Inner::CONST_A
 
         assert_eq!(
             ancestors.len(),
-            1,
-            "Namespace stack should have one entry for absolute reference at global scope"
+            0,
+            "Namespace stack should be empty for absolute reference at global scope"
         );
     }
 
@@ -493,9 +491,8 @@ end
         }
 
         // There should be one namespace in the stack (Outer) as we're inside it
-        assert_eq!(ancestors.len(), 2);
-        assert_eq!(ancestors[0].to_string(), "Object");
-        assert_eq!(ancestors[1].to_string(), "Outer");
+        assert_eq!(ancestors.len(), 1);
+        assert_eq!(ancestors[0].to_string(), "Outer");
     }
 
     #[test]
@@ -509,7 +506,7 @@ end
 
         // Demonstrate constant helper usage
         assert_constant_identifier(&identifier, &["Foo", "Bar", "BAZ"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
 
         // Test method helper (this would need a method call context)
         let method_content = r#"
@@ -527,7 +524,7 @@ end
         if let Some(method_identifier) = method_identifier_opt {
             // Demonstrate method helper usage
             assert_method_identifier(&method_identifier, "some_method", ReceiverKind::None);
-            assert_namespace_context(&method_ancestors, &["Object", "TestClass"]);
+            assert_namespace_context(&method_ancestors, &["TestClass"]);
         }
 
         // Test variable helper
@@ -566,7 +563,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "simple_method", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -584,7 +581,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "method_with_args", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -602,7 +599,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "method_with_block", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -620,7 +617,7 @@ global_method
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "global_method", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -638,7 +635,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "helper_method", ReceiverKind::SelfReceiver);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -656,7 +653,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "helper_method", ReceiverKind::SelfReceiver);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -674,7 +671,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "second_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -694,7 +691,7 @@ MyClass.class_method
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -716,7 +713,7 @@ MyModule::MyClass.nested_method
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "nested_method", ReceiverKind::Constant);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -736,7 +733,7 @@ MyModule.module_method
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "module_method", ReceiverKind::Constant);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -762,7 +759,7 @@ A::B::C::D.deep_method
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "deep_method", ReceiverKind::Constant);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -781,7 +778,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "instance_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -799,7 +796,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "second_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -817,7 +814,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "result_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -835,7 +832,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "array_element_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -853,7 +850,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "hash_value_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -871,7 +868,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "instance_var_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -889,7 +886,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "class_var_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
@@ -907,7 +904,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "global_var_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     // ===== Variable Identifier Scope Context Tests =====
@@ -928,7 +925,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "local_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify the variable has proper local variable scope context
         match identifier {
@@ -968,7 +965,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "outer_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Test access to inner_var within block
         let position = Position::new(8, 12); // Position at "inner_var" in block
@@ -976,7 +973,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "inner_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify both have proper local variable scope context
         match identifier {
@@ -1015,7 +1012,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "block_local");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify it has proper local variable scope context with explicit block local scope
         match identifier {
@@ -1053,7 +1050,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "error_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify it has proper local variable scope context with rescue scope
         match identifier {
@@ -1093,7 +1090,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "class_local");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify it has proper local variable scope context with constant scope
         match identifier {
@@ -1131,7 +1128,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "module_local");
-        assert_namespace_context(&namespace, &["Object", "TestModule"]);
+        assert_namespace_context(&namespace, &["TestModule"]);
 
         // Verify it has proper local variable scope context with constant scope
         match identifier {
@@ -1168,7 +1165,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@instance_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify it has proper instance variable type (no additional scope context needed)
         match identifier {
@@ -1208,7 +1205,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@inner_instance");
-        assert_namespace_context(&namespace, &["Object", "OuterClass", "InnerClass"]);
+        assert_namespace_context(&namespace, &["OuterClass", "InnerClass"]);
 
         // Verify it has proper instance variable type with correct namespace context
         match identifier {
@@ -1242,7 +1239,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@class_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Test access to class variable from instance method
         let position = Position::new(9, 10); // Position at "@@class_var" in instance method
@@ -1250,7 +1247,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@class_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Verify it has proper class variable type (namespace context determines scope)
         match identifier {
@@ -1286,7 +1283,7 @@ end
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@shared_var");
-        assert_namespace_context(&namespace, &["Object", "ChildClass"]);
+        assert_namespace_context(&namespace, &["ChildClass"]);
 
         // Verify it has proper class variable type
         match identifier {
@@ -1324,7 +1321,7 @@ puts $global_var
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
-        assert_namespace_context(&namespace, &["Object", "TestClass"]);
+        assert_namespace_context(&namespace, &["TestClass"]);
 
         // Test access to global variable from module method
         let position = Position::new(11, 10); // Position at "$global_var" in module
@@ -1332,7 +1329,7 @@ puts $global_var
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
-        assert_namespace_context(&namespace, &["Object", "TestModule"]);
+        assert_namespace_context(&namespace, &["TestModule"]);
 
         // Test access to global variable from top level
         let position = Position::new(15, 5); // Position at "$global_var" at top level
@@ -1340,7 +1337,7 @@ puts $global_var
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
-        assert_namespace_context(&namespace, &["Object"]);
+        assert_namespace_context(&namespace, &[]);
 
         // Verify it has proper global variable type (no additional context)
         match identifier {
@@ -1381,7 +1378,7 @@ end
                 expected_name
             ));
             assert_variable_identifier(&identifier, expected_name);
-            assert_namespace_context(&namespace, &["Object"]);
+            assert_namespace_context(&namespace, &[]);
 
             // Verify it has proper global variable type
             match identifier {
@@ -1469,7 +1466,7 @@ end
                 expected_name
             ));
             assert_variable_identifier(&identifier, expected_name);
-            assert_namespace_context(&namespace, &["Object"]);
+            assert_namespace_context(&namespace, &[]);
 
             // Verify it has proper global variable type
             match identifier {
@@ -1503,7 +1500,7 @@ end
 
         if let Some(identifier) = identifier_opt {
             assert_variable_identifier(&identifier, "$global_var");
-            assert_namespace_context(&namespace, &["Object"]);
+            assert_namespace_context(&namespace, &[]);
 
             // Verify it has proper global variable type
             match identifier {
@@ -1520,7 +1517,7 @@ end
 
         if let Some(identifier) = identifier_opt {
             assert_variable_identifier(&identifier, "$LOAD_PATH");
-            assert_namespace_context(&namespace, &["Object"]);
+            assert_namespace_context(&namespace, &[]);
 
             // Verify it has proper global variable type
             match identifier {
@@ -1580,19 +1577,19 @@ end
         // Test variables within class context
         let class_context_test_cases = vec![
             // Local variables
-            (14, 5, "result", &["Object", "ComplexClass"]),
-            (17, 7, "local_result", &["Object", "ComplexClass"]),
-            (16, 30, "item", &["Object", "ComplexClass"]),
-            (16, 36, "index", &["Object", "ComplexClass"]),
+            (14, 5, "result", &["ComplexClass"]),
+            (17, 7, "local_result", &["ComplexClass"]),
+            (16, 30, "item", &["ComplexClass"]),
+            (16, 36, "index", &["ComplexClass"]),
             // Instance variables
-            (7, 4, "@name", &["Object", "ComplexClass"]),
-            (24, 25, "@name", &["Object", "ComplexClass"]),
-            (8, 4, "@instance_id", &["Object", "ComplexClass"]),
+            (7, 4, "@name", &["ComplexClass"]),
+            (24, 25, "@name", &["ComplexClass"]),
+            (8, 4, "@instance_id", &["ComplexClass"]),
             // Class variables
-            (4, 2, "@@class_counter", &["Object", "ComplexClass"]),
-            (25, 23, "@@class_counter", &["Object", "ComplexClass"]),
+            (4, 2, "@@class_counter", &["ComplexClass"]),
+            (25, 23, "@@class_counter", &["ComplexClass"]),
             // Global variables within class
-            (26, 24, "$global_counter", &["Object", "ComplexClass"]),
+            (26, 24, "$global_counter", &["ComplexClass"]),
         ];
 
         for (line, col, expected_name, expected_namespace) in class_context_test_cases {
@@ -1659,8 +1656,9 @@ end
             }
         }
 
-        // Test top-level global variable (Object namespace only)
-        let top_level_test_cases = vec![(1, 0, "$global_counter", &["Object"])];
+        // Test top-level global variable (empty namespace at top level)
+        let top_level_test_cases: Vec<(u32, u32, &str, &[&str])> =
+            vec![(1, 0, "$global_counter", &[])];
 
         for (line, col, expected_name, expected_namespace) in top_level_test_cases {
             let position = Position::new(line, col);
@@ -1713,7 +1711,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["DEEP_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "Level1", "Level2", "Level3"]);
+        assert_namespace_context(&ancestors, &["Level1", "Level2", "Level3"]);
 
         // Test 2: Level3::DEEP_CONST accessed within Level2
         let position = Position::new(12, 20);
@@ -1722,7 +1720,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Level3", "DEEP_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "Level1", "Level2"]);
+        assert_namespace_context(&ancestors, &["Level1", "Level2"]);
 
         // Test 3: Level2::Level3::DEEP_CONST accessed within Level1
         let position = Position::new(17, 25); // Adjusted position for DEEP_CONST
@@ -1731,7 +1729,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Level2", "Level3", "DEEP_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "Level1"]);
+        assert_namespace_context(&ancestors, &["Level1"]);
     }
 
     #[test]
@@ -1758,7 +1756,7 @@ TopLevelConst = "top level"
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer", "Inner", "CONST_VALUE"]);
-        assert_namespace_context(&ancestors, &["Object", "Outer", "AnotherModule"]);
+        assert_namespace_context(&ancestors, &["Outer", "AnotherModule"]);
 
         // Test 2: Absolute reference ::Outer::Inner
         let position = Position::new(7, 20);
@@ -1766,7 +1764,7 @@ TopLevelConst = "top level"
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer", "Inner"]);
-        assert_namespace_context(&ancestors, &["Object", "Outer", "AnotherModule"]);
+        assert_namespace_context(&ancestors, &["Outer", "AnotherModule"]);
 
         // Test 3: Absolute reference ::Outer
         let position = Position::new(7, 14);
@@ -1774,7 +1772,7 @@ TopLevelConst = "top level"
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer"]);
-        assert_namespace_context(&ancestors, &["Object", "Outer", "AnotherModule"]);
+        assert_namespace_context(&ancestors, &["Outer", "AnotherModule"]);
 
         // Test 4: Absolute reference to top-level constant ::TopLevelConst
         let position = Position::new(8, 18);
@@ -1782,7 +1780,7 @@ TopLevelConst = "top level"
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["TopLevelConst"]);
-        assert_namespace_context(&ancestors, &["Object", "Outer", "AnotherModule"]);
+        assert_namespace_context(&ancestors, &["Outer", "AnotherModule"]);
     }
 
     #[test]
@@ -1806,7 +1804,7 @@ result = Alpha::Beta::Gamma::DELTA
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
 
         // Test 2: Cursor on Beta
         let position = Position::new(9, 18);
@@ -1814,7 +1812,7 @@ result = Alpha::Beta::Gamma::DELTA
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
 
         // Test 3: Cursor on Gamma
         let position = Position::new(9, 25);
@@ -1822,7 +1820,7 @@ result = Alpha::Beta::Gamma::DELTA
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta", "Gamma"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
 
         // Test 4: Cursor on DELTA
         let position = Position::new(9, 32);
@@ -1830,7 +1828,7 @@ result = Alpha::Beta::Gamma::DELTA
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta", "Gamma", "DELTA"]);
-        assert_namespace_context(&ancestors, &["Object"]);
+        assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
@@ -1873,7 +1871,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["GLOBAL_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 2: OUTER_CONST accessed from instance method in OuterClass
         let position = Position::new(11, 18);
@@ -1881,7 +1879,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OUTER_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 3: CLASS_CONST accessed from instance method in OuterClass
         let position = Position::new(12, 18);
@@ -1889,7 +1887,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["CLASS_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 4: Qualified access OuterModule::OUTER_CONST
         let position = Position::new(13, 35);
@@ -1897,7 +1895,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OuterModule", "OUTER_CONST"]);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 5: GLOBAL_CONST accessed from InnerModule
         let position = Position::new(20, 18);
@@ -1905,10 +1903,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["GLOBAL_CONST"]);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 6: INNER_CONST accessed from InnerModule
         let position = Position::new(23, 18);
@@ -1916,10 +1911,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["INNER_CONST"]);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 7: Fully qualified access OuterModule::OuterClass::CLASS_CONST
         let position = Position::new(24, 50);
@@ -1927,10 +1919,7 @@ end
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OuterModule", "OuterClass", "CLASS_CONST"]);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
     }
 
     // ===== Method Identifier Context and Receiver Kind Tests =====
@@ -1997,7 +1986,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "helper_method", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 2: Self receiver method call within OuterClass
         let position = Position::new(8, 17); // Position at "instance_helper"
@@ -2005,7 +1994,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "instance_helper", ReceiverKind::SelfReceiver);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 3: Constant receiver method call within OuterClass
         let position = Position::new(11, 22); // Position at "class_method"
@@ -2013,7 +2002,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 4: Expression receiver method call within OuterClass
         let position = Position::new(14, 12); // Position at "expression_method"
@@ -2021,7 +2010,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "expression_method", ReceiverKind::Expr);
-        assert_namespace_context(&ancestors, &["Object", "OuterModule", "OuterClass"]);
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 5: No receiver method call within InnerModule
         let position = Position::new(28, 10); // Position at "nested_helper"
@@ -2029,10 +2018,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "nested_helper", ReceiverKind::None);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 6: Self receiver method call within InnerModule
         let position = Position::new(31, 17); // Position at "module_helper"
@@ -2040,10 +2026,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "module_helper", ReceiverKind::SelfReceiver);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 7: Complex constant receiver method call within InnerModule
         let position = Position::new(34, 42); // Position at "class_method"
@@ -2051,10 +2034,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 8: Expression receiver method call within InnerModule
         let position = Position::new(37, 12); // Position at "nested_expression_method"
@@ -2062,10 +2042,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "nested_expression_method", ReceiverKind::Expr);
-        assert_namespace_context(
-            &ancestors,
-            &["Object", "OuterModule", "OuterClass", "InnerModule"],
-        );
+        assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
     }
 
     #[test]
@@ -2128,7 +2105,7 @@ end
         assert_method_identifier(&identifier, "level1_instance_method", ReceiverKind::None);
         assert_namespace_context(
             &ancestors,
-            &["Object", "Level1", "Level1Class", "Level2", "Level2Class"],
+            &["Level1", "Level1Class", "Level2", "Level2Class"],
         );
 
         // Test 2: Self method call within Level2Class
@@ -2143,7 +2120,7 @@ end
         );
         assert_namespace_context(
             &ancestors,
-            &["Object", "Level1", "Level1Class", "Level2", "Level2Class"],
+            &["Level1", "Level1Class", "Level2", "Level2Class"],
         );
 
         // Test 3: Constant receiver method call to parent class
@@ -2154,7 +2131,7 @@ end
         assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
         assert_namespace_context(
             &ancestors,
-            &["Object", "Level1", "Level1Class", "Level2", "Level2Class"],
+            &["Level1", "Level1Class", "Level2", "Level2Class"],
         );
 
         // Test 4: Constant receiver method call to same level class
@@ -2165,7 +2142,7 @@ end
         assert_method_identifier(&identifier, "level2_class_method", ReceiverKind::Constant);
         assert_namespace_context(
             &ancestors,
-            &["Object", "Level1", "Level1Class", "Level2", "Level2Class"],
+            &["Level1", "Level1Class", "Level2", "Level2Class"],
         );
 
         // Test 5: Fully qualified constant receiver method call
@@ -2176,7 +2153,7 @@ end
         assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
         assert_namespace_context(
             &ancestors,
-            &["Object", "Level1", "Level1Class", "Level2", "Level2Class"],
+            &["Level1", "Level1Class", "Level2", "Level2Class"],
         );
 
         // Test 6: Method call within Level3 module (deeply nested)
@@ -2187,14 +2164,7 @@ end
         assert_method_identifier(&identifier, "nested_call", ReceiverKind::None);
         assert_namespace_context(
             &ancestors,
-            &[
-                "Object",
-                "Level1",
-                "Level1Class",
-                "Level2",
-                "Level2Class",
-                "Level3",
-            ],
+            &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
         );
 
         // Test 7: Self method call within Level3 module
@@ -2205,14 +2175,7 @@ end
         assert_method_identifier(&identifier, "level3_helper", ReceiverKind::SelfReceiver);
         assert_namespace_context(
             &ancestors,
-            &[
-                "Object",
-                "Level1",
-                "Level1Class",
-                "Level2",
-                "Level2Class",
-                "Level3",
-            ],
+            &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
         );
 
         // Test 8: Fully qualified method call from deeply nested context
@@ -2223,14 +2186,7 @@ end
         assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
         assert_namespace_context(
             &ancestors,
-            &[
-                "Object",
-                "Level1",
-                "Level1Class",
-                "Level2",
-                "Level2Class",
-                "Level3",
-            ],
+            &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
         );
 
         // Test 9: Relative constant receiver from deeply nested context
@@ -2241,14 +2197,7 @@ end
         assert_method_identifier(&identifier, "level2_class_method", ReceiverKind::Constant);
         assert_namespace_context(
             &ancestors,
-            &[
-                "Object",
-                "Level1",
-                "Level1Class",
-                "Level2",
-                "Level2Class",
-                "Level3",
-            ],
+            &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
         );
     }
 
@@ -2281,7 +2230,7 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "helper_method", ReceiverKind::None);
-        assert_namespace_context(&ancestors, &["Object", "TestModule", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestModule", "TestClass"]);
 
         // Test 2: Self receiver method call
         let position = Position::new(5, 17); // Position at "other_method"
@@ -2289,6 +2238,6 @@ end
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "other_method", ReceiverKind::SelfReceiver);
-        assert_namespace_context(&ancestors, &["Object", "TestModule", "TestClass"]);
+        assert_namespace_context(&ancestors, &["TestModule", "TestClass"]);
     }
 }

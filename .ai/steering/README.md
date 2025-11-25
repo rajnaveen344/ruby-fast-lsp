@@ -111,7 +111,7 @@ cargo build --release         # Release build
 
 ## Key Concepts
 
-1. **FullyQualifiedName (FQN)**: All symbols are tracked with fully qualified names rooted at `Object::` (e.g., `Object::MyModule::MyClass`)
+1. **FullyQualifiedName (FQN)**: All symbols are tracked with fully qualified names (e.g., `MyModule::MyClass`)
 
 2. **Visitor Pattern**: AST traversal uses visitors for different concerns (indexing, references, tokens)
 
@@ -123,6 +123,5 @@ cargo build --release         # Release build
 
 - **LSP positions are 0-indexed** - Common source of bugs in tests
 - **Prism AST nodes use byte offsets** - Must convert to LSP positions
-- **Index uses `Object::` prefix** - All top-level constants are under `Object::`
 - **Snapshot tests** - Many tests use `insta` for snapshot testing
 - **Cross-platform** - Code must work on macOS, Linux, and Windows

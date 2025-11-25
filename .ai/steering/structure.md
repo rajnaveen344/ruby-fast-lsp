@@ -17,11 +17,13 @@
 ## Core Source Structure (`src/`)
 
 ### Main Components
+
 - `main.rs` - Application entry point, CLI parsing, server startup
 - `server.rs` - LSP server implementation, request routing, document cache
 - `config.rs` - Configuration management
 
 ### Core Modules
+
 - `analyzer_prism/` - Ruby code analysis using Prism parser
 - `indexer/` - Symbol indexing and workspace tracking
 - `capabilities/` - LSP feature implementations
@@ -130,7 +132,7 @@ capabilities/
 ```
 types/
 ├── mod.rs                    # Module exports
-├── fully_qualified_name.rs   # FQN handling (Object::Module::Class)
+├── fully_qualified_name.rs   # FQN handling (Module::Class)
 ├── ruby_document.rs          # Document representation
 ├── ruby_method.rs            # Method metadata
 ├── ruby_namespace.rs         # Namespace/constant types
@@ -171,11 +173,13 @@ test/
 ## Naming Conventions
 
 ### Files and Modules
+
 - Snake_case for file names: `ruby_document.rs`, `index_visitor.rs`
 - Module names match file names without extension
 - Visitor files named after AST node type: `class_node.rs`, `def_node.rs`
 
 ### Code Structure
+
 - Each visitor handles one specific AST node type
 - Capabilities combine indexer and analyzer functionality
 - Types are shared across modules but defined centrally

@@ -55,7 +55,7 @@ impl<'a> ModuleCodeLensVisitor<'a> {
             lang_server,
             uri,
             code_lenses: Vec::new(),
-            namespace_stack: vec!["Object".to_string()], // Start with Object as the top-level namespace
+            namespace_stack: Vec::new(), // Start with empty namespace (no artificial prefix)
         }
     }
 

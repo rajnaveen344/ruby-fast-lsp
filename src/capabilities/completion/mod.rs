@@ -536,8 +536,8 @@ end
             let index_arc = server.index();
             let mut index_guard = index_arc.lock();
 
-            // Use the same FQN structure as the indexed constant (Object::TestClass::MY_CONSTANT)
-            let fqn = FullyQualifiedName::try_from("Object::TestClass::MY_CONSTANT").unwrap();
+            // Use the same FQN structure as the indexed constant (TestClass::MY_CONSTANT)
+            let fqn = FullyQualifiedName::try_from("TestClass::MY_CONSTANT").unwrap();
 
             // Add the same constant multiple times (simulating multiple definitions)
             let entry1 = Entry {
@@ -652,9 +652,9 @@ end
             let index_arc = server.index();
             let mut index_guard = index_arc.lock();
 
-            // Create proper top-level entries with Object:: prefix
+            // Create top-level entries
             let string_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
+                fqn: FullyQualifiedName::try_from("String").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -672,7 +672,7 @@ end
             index_guard.add_entry(string_entry);
 
             let array_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::Array").unwrap(),
+                fqn: FullyQualifiedName::try_from("Array").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -782,7 +782,7 @@ end
 
             // Top-level modules and classes
             let outer_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::OuterModule").unwrap(),
+                fqn: FullyQualifiedName::try_from("OuterModule").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -796,7 +796,7 @@ end
             index_guard.add_entry(outer_module_entry);
 
             let another_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::AnotherModule").unwrap(),
+                fqn: FullyQualifiedName::try_from("AnotherModule").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -811,7 +811,7 @@ end
 
             // Nested modules and classes
             let middle_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::OuterModule::MiddleModule").unwrap(),
+                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -825,7 +825,7 @@ end
             index_guard.add_entry(middle_module_entry);
 
             let inner_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::OuterModule::MiddleModule::InnerClass")
+                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule::InnerClass")
                     .unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
@@ -845,7 +845,7 @@ end
 
             // Add some built-in Ruby classes
             let string_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
+                fqn: FullyQualifiedName::try_from("String").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -863,7 +863,7 @@ end
             index_guard.add_entry(string_entry);
 
             let hash_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::Hash").unwrap(),
+                fqn: FullyQualifiedName::try_from("Hash").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1014,7 +1014,7 @@ end
                 let mut index_guard = index_arc.lock();
 
                 let string_entry = Entry {
-                    fqn: FullyQualifiedName::try_from("Object::String").unwrap(),
+                    fqn: FullyQualifiedName::try_from("String").unwrap(),
                     kind: EntryKind::Class {
                         superclass: Some(MixinRef {
                             parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1032,7 +1032,7 @@ end
                 index_guard.add_entry(string_entry);
 
                 let test_class_entry = Entry {
-                    fqn: FullyQualifiedName::try_from("Object::TestClass").unwrap(),
+                    fqn: FullyQualifiedName::try_from("TestClass").unwrap(),
                     kind: EntryKind::Class {
                         superclass: Some(MixinRef {
                             parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1206,13 +1206,13 @@ end
 
             // Create the full nested hierarchy
             let modules = vec![
-                "Object::A",
-                "Object::A::B",
-                "Object::A::B::C",
-                "Object::A::B::C::D",
-                "Object::A::B::C::D::E",
-                "Object::X",
-                "Object::X::Y",
+                "A",
+                "A::B",
+                "A::B::C",
+                "A::B::C::D",
+                "A::B::C::D::E",
+                "X",
+                "X::Y",
             ];
 
             for module_fqn in modules {
@@ -1232,7 +1232,7 @@ end
             }
 
             // Add classes
-            let classes = vec!["Object::A::B::C::D::E::DeepClass", "Object::X::Y::YClass"];
+            let classes = vec!["A::B::C::D::E::DeepClass", "X::Y::YClass"];
 
             for class_fqn in classes {
                 let entry = Entry {
@@ -1256,7 +1256,7 @@ end
 
             // Add some built-in classes for comparison
             let builtin_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::Array").unwrap(),
+                fqn: FullyQualifiedName::try_from("Array").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1350,7 +1350,7 @@ end
             let mut index_guard = index_arc.lock();
 
             let my_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::MyModule").unwrap(),
+                fqn: FullyQualifiedName::try_from("MyModule").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1364,7 +1364,7 @@ end
             index_guard.add_entry(my_module_entry);
 
             let my_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::MyModule::MyClass").unwrap(),
+                fqn: FullyQualifiedName::try_from("MyModule::MyClass").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1382,7 +1382,7 @@ end
             index_guard.add_entry(my_class_entry);
 
             let my_top_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::MyTopClass").unwrap(),
+                fqn: FullyQualifiedName::try_from("MyTopClass").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1458,7 +1458,7 @@ A::B::"#;
 
             // Add the A module and its nested modules
             let a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A").unwrap(),
+                fqn: FullyQualifiedName::try_from("A").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1472,7 +1472,7 @@ A::B::"#;
             index_guard.add_entry(a_module_entry);
 
             let a_b_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A::B").unwrap(),
+                fqn: FullyQualifiedName::try_from("A::B").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1486,7 +1486,7 @@ A::B::"#;
             index_guard.add_entry(a_b_module_entry);
 
             let a_b_c_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A::B::C").unwrap(),
+                fqn: FullyQualifiedName::try_from("A::B::C").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1500,7 +1500,7 @@ A::B::"#;
             index_guard.add_entry(a_b_c_module_entry);
 
             // Add some other modules for comparison
-            let other_modules = vec!["Object::Array", "Object::ActionController"];
+            let other_modules = vec!["Array", "ActionController"];
 
             for module_fqn in other_modules {
                 let entry = Entry {
@@ -1608,7 +1608,7 @@ A::"#;
 
             // Add the A module and its nested modules
             let a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A").unwrap(),
+                fqn: FullyQualifiedName::try_from("A").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1622,7 +1622,7 @@ A::"#;
             index_guard.add_entry(a_module_entry);
 
             let a_b_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A::B").unwrap(),
+                fqn: FullyQualifiedName::try_from("A::B").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1636,7 +1636,7 @@ A::"#;
             index_guard.add_entry(a_b_module_entry);
 
             let a_a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Object::A::A").unwrap(),
+                fqn: FullyQualifiedName::try_from("A::A").unwrap(),
                 kind: EntryKind::Module {
                     includes: vec![],
                     extends: vec![],
@@ -1651,21 +1651,21 @@ A::"#;
 
             // Add some common Rails/Ruby classes that start with A
             let rails_classes = vec![
-                "Object::ABA",
-                "Object::ACH",
-                "Object::ActionCable",
-                "Object::ActionController",
-                "Object::ActionDispatch",
-                "Object::ActionMailer",
-                "Object::ActionPack",
-                "Object::ActionView",
-                "Object::ActiveJob",
-                "Object::ActiveModel",
-                "Object::ActiveRecord",
-                "Object::ActiveStorage",
-                "Object::ActiveSupport",
-                "Object::Array",
-                "Object::Arel",
+                "ABA",
+                "ACH",
+                "ActionCable",
+                "ActionController",
+                "ActionDispatch",
+                "ActionMailer",
+                "ActionPack",
+                "ActionView",
+                "ActiveJob",
+                "ActiveModel",
+                "ActiveRecord",
+                "ActiveStorage",
+                "ActiveSupport",
+                "Array",
+                "Arel",
             ];
 
             for class_fqn in rails_classes {

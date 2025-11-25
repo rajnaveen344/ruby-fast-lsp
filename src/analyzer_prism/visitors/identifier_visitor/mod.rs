@@ -456,9 +456,8 @@ mod tests {
                 receiver,
                 iden: method,
             } => {
-                // The namespace should contain the current location (top-level = [Object])
-                assert_eq!(parts.len(), 1);
-                assert_eq!(parts[0].to_string(), "Object");
+                // The namespace should be empty at top-level (no artificial prefix)
+                assert_eq!(parts.len(), 0);
                 // The receiver kind should be Constant since we have Foo::Bar.baz
                 assert_eq!(receiver_kind, ReceiverKind::Constant);
                 // The receiver should contain [Foo, Bar]

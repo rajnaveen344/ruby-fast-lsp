@@ -5,10 +5,7 @@ use tower_lsp::lsp_types::{
 use crate::{
     analyzer_prism::RubyPrismAnalyzer,
     indexer::{entry::entry_kind::EntryKind, entry::Entry, index::RubyIndex},
-    types::{
-        fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant,
-        scope::LVScope as Scope,
-    },
+    types::{fully_qualified_name::FullyQualifiedName, scope::LVScope as Scope},
 };
 
 use super::{
@@ -276,34 +273,13 @@ impl ConstantCompletionEngine {
                 if context.is_qualified {
                     if let Some(ref namespace_prefix) = context.namespace_prefix {
                         // Check if this constant is a direct child of the namespace
-                        // We need to check both the direct namespace and the Object-prefixed version
-                        let is_direct_child =
-                            self.is_direct_child_of_namespace(fqn, namespace_prefix);
-
-                        // Also check if the namespace might be under Object
-                        let is_object_prefixed_child =
-                            if namespace_prefix.namespace_parts().len() == 1 {
-                                // Try creating Object::namespace_prefix and check if fqn is a child of that
-                                let object_prefixed_namespace = {
-                                    let mut parts = vec![RubyConstant::new("Object").unwrap()];
-                                    parts.extend(namespace_prefix.namespace_parts());
-                                    FullyQualifiedName::Constant(parts)
-                                };
-                                self.is_direct_child_of_namespace(fqn, &object_prefixed_namespace)
-                            } else {
-                                false
-                            };
-
-                        if !is_direct_child && !is_object_prefixed_child {
+                        if !self.is_direct_child_of_namespace(fqn, namespace_prefix) {
                             continue;
                         }
                     } else {
                         // Handle the "::" case - show only top-level constants
-                        // In Ruby, top-level constants are typically under Object namespace
                         let parts = fqn.namespace_parts();
-                        if parts.len() == 2 && parts[0].to_string() == "Object" {
-                            // This is a top-level constant like Object::String -> show as String
-                        } else if parts.len() > 1 {
+                        if parts.len() > 1 {
                             // This is a nested constant, skip it for top-level completion
                             continue;
                         }
@@ -341,33 +317,7 @@ impl ConstantCompletionEngine {
         let fqn_parts = fqn.namespace_parts();
         let namespace_parts = namespace.namespace_parts();
 
-        // Try direct match first
-        if self.is_direct_match(&fqn_parts, &namespace_parts) {
-            return true;
-        }
-
-        // Try Object-prefixed match: if namespace doesn't start with Object,
-        // try matching against Object::namespace
-        if !namespace_parts.is_empty() && namespace_parts[0].to_string() != "Object" {
-            // Check if FQN starts with Object and then matches the namespace
-            if fqn_parts.len() == namespace_parts.len() + 2 && fqn_parts[0].to_string() == "Object"
-            {
-                // Check if the rest of the FQN matches the namespace
-                let mut matches = true;
-                for (i, namespace_part) in namespace_parts.iter().enumerate() {
-                    if fqn_parts.get(i + 1) != Some(namespace_part) {
-                        matches = false;
-                        break;
-                    }
-                }
-
-                if matches {
-                    return true;
-                }
-            }
-        }
-
-        false
+        self.is_direct_match(&fqn_parts, &namespace_parts)
     }
 
     /// Helper function to check direct namespace match

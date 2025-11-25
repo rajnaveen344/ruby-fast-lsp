@@ -12,10 +12,8 @@ fn module_node_with_body() {
     let code = r#"module Foo\n  def bar; end\nend\n"#;
     let visitor = visit_code(code);
 
-    let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
-        RubyConstant::try_from("Foo").unwrap(),
-    ]);
+    let expected_fqn =
+        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     let index_lock = visitor.index.lock();
     let defs = &index_lock.definitions;
@@ -24,8 +22,8 @@ fn module_node_with_body() {
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
 
-    // After visitor completion the namespace stack must contain only Object
-    assert_eq!(visitor.scope_tracker.get_ns_stack().len(), 1);
+    // After visitor completion the namespace stack must be empty (no artificial prefix)
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +35,6 @@ fn module_node_namespaced_constant_path_with_body() {
     let visitor = visit_code(code);
 
     let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
         RubyConstant::try_from("A").unwrap(),
         RubyConstant::try_from("B").unwrap(),
     ]);
@@ -51,8 +48,8 @@ fn module_node_namespaced_constant_path_with_body() {
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
 
-    // Namespace stack should be reset to just Object after visiting
-    assert_eq!(visitor.scope_tracker.get_ns_stack().len(), 1);
+    // Namespace stack should be empty after visiting (no artificial prefix)
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +61,6 @@ fn module_node_deep_namespaced_constant_path() {
     let visitor = visit_code(code);
 
     let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
         RubyConstant::try_from("A").unwrap(),
         RubyConstant::try_from("B").unwrap(),
         RubyConstant::try_from("C").unwrap(),
@@ -78,7 +74,7 @@ fn module_node_deep_namespaced_constant_path() {
 
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
-    assert_eq!(visitor.scope_tracker.get_ns_stack().len(), 1);
+    assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -89,10 +85,8 @@ fn module_node_without_body() {
     let code = "module Foo; end";
     let visitor = visit_code(code);
 
-    let expected_fqn = FullyQualifiedName::from(vec![
-        RubyConstant::new("Object").unwrap(),
-        RubyConstant::try_from("Foo").unwrap(),
-    ]);
+    let expected_fqn =
+        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     let index_lock = visitor.index.lock();
     let entries = index_lock

@@ -89,7 +89,7 @@ The project follows a modular architecture with clear separation of concerns:
 - **Indexer**: Tracks symbol locations across the workspace
 
   - Supports project files, stdlib stubs, and gem dependencies
-  - Uses fully qualified names (FQN) rooted at `Object::`
+  - Uses fully qualified names (FQN) without artificial prefixes
   - Maintains method-by-name index for quick lookups
 
 - **Analyzer**: Understands Ruby code structure and semantics using Prism parser

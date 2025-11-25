@@ -161,8 +161,8 @@ fn find_method_references(
                         resolved_ns.extend(receiver_ns[1..].iter().cloned());
                         FullyQualifiedName::Constant(resolved_ns)
                     } else {
-                        // Not found in ancestors, treat as absolute from Object
-                        let mut full_ns = vec![ancestors[0].clone()]; // Object
+                        // Not found in ancestors, treat as absolute from root
+                        let mut full_ns = vec![ancestors[0].clone()];
                         full_ns.extend(receiver_ns.clone());
                         FullyQualifiedName::Constant(full_ns)
                     }
