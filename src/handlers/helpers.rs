@@ -100,6 +100,139 @@ pub struct ProcessDefinitionsResult {
     pub affected_uris: std::collections::HashSet<Url>,
 }
 
+/// Process both definitions and references with a single parse (more efficient for large files)
+/// This is the preferred method for did_open and did_change handlers.
+pub fn process_file(
+    server: &RubyLanguageServer,
+    uri: Url,
+    content: &str,
+    def_options: DefinitionOptions,
+    ref_options: ReferenceOptions,
+) -> Result<ProcessDefinitionsResult, String> {
+    let total_start = Instant::now();
+
+    // Parse once, use for both visitors
+    let parse_start = Instant::now();
+    let parse_result = parse(content.as_bytes());
+    debug!("[PERF] Single parse took {:?}", parse_start.elapsed());
+
+    if parse_result.errors().count() > 0 {
+        debug!(
+            "Parse errors in content for URI {:?}: {} errors",
+            uri,
+            parse_result.errors().count()
+        );
+        return Ok(ProcessDefinitionsResult {
+            affected_uris: std::collections::HashSet::new(),
+        });
+    }
+
+    // === DEFINITIONS PHASE ===
+    let def_start = Instant::now();
+
+    // Remove existing entries for this URI before adding new ones
+    let step = Instant::now();
+    let removed_fqns = server.index().lock().remove_entries_for_uri(&uri);
+    let removed_fqn_set: std::collections::HashSet<_> = removed_fqns.into_iter().collect();
+    debug!("[PERF]   - Remove entries took {:?}", step.elapsed());
+
+    let step = Instant::now();
+    let mut index_visitor = IndexVisitor::new(server, uri.clone());
+    if let Some(tracker) = def_options.dependency_tracker {
+        index_visitor = index_visitor.with_dependency_tracker(tracker);
+    }
+    index_visitor.visit(&parse_result.node());
+    debug!("[PERF]   - Index visitor took {:?}", step.elapsed());
+
+    // Resolve mixins only for entries in this file
+    let step = Instant::now();
+    server.index().lock().resolve_mixins_for_uri(&uri);
+    debug!("[PERF]   - Resolve mixins took {:?}", step.elapsed());
+
+    // Get the FQNs of entries that were just added
+    let added_fqns: Vec<_> = {
+        let index = server.index();
+        let index_guard = index.lock();
+        index_guard
+            .file_entries
+            .get(&uri)
+            .map(|entries| entries.iter().map(|e| e.fqn.clone()).collect())
+            .unwrap_or_default()
+    };
+    let added_fqn_set: std::collections::HashSet<_> = added_fqns.iter().cloned().collect();
+
+    let mut affected_uris = std::collections::HashSet::new();
+
+    // Only mark as unresolved FQNs that were TRULY removed
+    let truly_removed: Vec<_> = removed_fqn_set
+        .difference(&added_fqn_set)
+        .cloned()
+        .collect();
+
+    let step = Instant::now();
+    if !truly_removed.is_empty() {
+        let removed_affected = server
+            .index()
+            .lock()
+            .mark_references_as_unresolved(&truly_removed);
+        affected_uris.extend(removed_affected);
+    }
+
+    if !added_fqns.is_empty() {
+        let resolved_affected = server.index().lock().clear_resolved_entries(&added_fqns);
+        affected_uris.extend(resolved_affected);
+    }
+    debug!(
+        "[PERF]   - Cross-file diagnostics took {:?}",
+        step.elapsed()
+    );
+
+    // Update document with index visitor's changes
+    if let Some(doc_arc) = server.docs.lock().get(&uri) {
+        *doc_arc.write() = index_visitor.document;
+    }
+    debug!("[PERF] Definitions phase took {:?}", def_start.elapsed());
+
+    // === REFERENCES PHASE ===
+    let ref_start = Instant::now();
+
+    // Remove existing references
+    let step = Instant::now();
+    {
+        let index_arc = server.index();
+        let mut index = index_arc.lock();
+        index.remove_references_for_uri(&uri);
+        if ref_options.track_unresolved {
+            index.remove_unresolved_entries_for_uri(&uri);
+        }
+    }
+    debug!("[PERF]   - Remove references took {:?}", step.elapsed());
+
+    let step = Instant::now();
+    let mut ref_visitor = if ref_options.track_unresolved {
+        ReferenceVisitor::with_unresolved_tracking(
+            server,
+            uri.clone(),
+            ref_options.include_local_vars,
+        )
+    } else if ref_options.include_local_vars {
+        ReferenceVisitor::new(server, uri.clone())
+    } else {
+        ReferenceVisitor::with_options(server, uri.clone(), false)
+    };
+    ref_visitor.visit(&parse_result.node());
+    debug!("[PERF]   - Reference visitor took {:?}", step.elapsed());
+
+    // Update document with reference visitor's changes
+    if let Some(doc_arc) = server.docs.lock().get(&uri) {
+        *doc_arc.write() = ref_visitor.document;
+    }
+    debug!("[PERF] References phase took {:?}", ref_start.elapsed());
+
+    debug!("[PERF] Total process_file took {:?}", total_start.elapsed());
+    Ok(ProcessDefinitionsResult { affected_uris })
+}
+
 /// Process content for definitions (in-memory content)
 /// Returns information about affected files for cross-file diagnostic propagation
 pub fn process_definitions(

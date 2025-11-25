@@ -18,6 +18,9 @@ impl ReferenceVisitor {
             }
         };
 
+        // Acquire lock once for all lookups (avoid lock thrashing)
+        let mut index = self.index.lock();
+
         // Check from current namespace to root namespace
         let mut ancestors = current_namespace.clone();
         while !ancestors.is_empty() {
@@ -25,23 +28,19 @@ impl ReferenceVisitor {
             combined_ns.push(constant.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let mut index = self.index.lock();
             if index.definitions.contains_key(&fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
                 debug!("Adding reference: {}", fqn);
                 index.add_reference(fqn, location);
-                drop(index);
                 return;
             }
-            drop(index);
             ancestors.pop();
         }
 
         // Check in root namespace
         let fqn = FullyQualifiedName::namespace(vec![constant]);
-        let mut index = self.index.lock();
         if index.definitions.contains_key(&fqn) {
             let location = self
                 .document
@@ -53,10 +52,8 @@ impl ReferenceVisitor {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
-            let namespace_context: Vec<String> = current_namespace
-                .iter()
-                .map(|c| c.to_string())
-                .collect();
+            let namespace_context: Vec<String> =
+                current_namespace.iter().map(|c| c.to_string()).collect();
             debug!(
                 "Adding unresolved constant: {} in context {:?}",
                 name, namespace_context
@@ -66,7 +63,6 @@ impl ReferenceVisitor {
                 UnresolvedEntry::constant_with_context(name.clone(), namespace_context, location),
             );
         }
-        drop(index);
     }
 
     pub fn process_constant_read_node_exit(&mut self, _node: &ConstantReadNode) {

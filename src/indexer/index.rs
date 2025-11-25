@@ -123,6 +123,10 @@ pub struct RubyIndex {
     /// FQN to reference locations map
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
 
+    /// Reverse index: URI to FQNs that have references from that file
+    /// Used for O(1) removal of references when a file changes
+    references_by_uri: HashMap<Url, std::collections::HashSet<FullyQualifiedName>>,
+
     /// Method name to entries map (for method lookup without receiver type)
     pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
 
@@ -131,6 +135,10 @@ pub struct RubyIndex {
 
     /// Detailed mixin usage tracking for CodeLens (module FQN -> usages with type and location)
     pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
+
+    /// Reverse index: URI to module FQNs that have mixin usages from that file
+    /// Used for O(1) removal of mixin usages when a file changes
+    mixin_usages_by_uri: HashMap<Url, std::collections::HashSet<FullyQualifiedName>>,
 
     /// Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
@@ -145,9 +153,11 @@ impl RubyIndex {
             file_entries: HashMap::new(),
             definitions: HashMap::new(),
             references: HashMap::new(),
+            references_by_uri: HashMap::new(),
             methods_by_name: HashMap::new(),
             reverse_mixins: HashMap::new(),
             mixin_usages: HashMap::new(),
+            mixin_usages_by_uri: HashMap::new(),
             prefix_tree: PrefixTree::new(),
             unresolved_entries: HashMap::new(),
         }
@@ -236,11 +246,17 @@ impl RubyIndex {
             }
         }
 
-        // Remove mixin usages
-        for usages in self.mixin_usages.values_mut() {
-            usages.retain(|usage| usage.location.uri != *uri);
+        // Remove mixin usages - O(usages_in_file) instead of O(total_usages)
+        if let Some(module_fqns) = self.mixin_usages_by_uri.remove(uri) {
+            for module_fqn in module_fqns {
+                if let Some(usages) = self.mixin_usages.get_mut(&module_fqn) {
+                    usages.retain(|usage| usage.location.uri != *uri);
+                    if usages.is_empty() {
+                        self.mixin_usages.remove(&module_fqn);
+                    }
+                }
+            }
         }
-        self.mixin_usages.retain(|_, usages| !usages.is_empty());
 
         // Remove from prefix tree
         self.remove_from_prefix_tree(&entries);
@@ -390,15 +406,27 @@ impl RubyIndex {
     /// Add a reference to a FQN
     pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
         debug!("Adding reference: {:?}", fqn);
+        // Track which FQNs have references from this URI (for fast removal)
+        self.references_by_uri
+            .entry(location.uri.clone())
+            .or_default()
+            .insert(fqn.clone());
         self.references.entry(fqn).or_default().push(location);
     }
 
-    /// Remove all references for a URI
+    /// Remove all references for a URI - O(refs_in_file) instead of O(total_refs)
     pub fn remove_references_for_uri(&mut self, uri: &Url) {
-        for refs in self.references.values_mut() {
-            refs.retain(|loc| loc.uri != *uri);
+        // Use the reverse index to only touch FQNs that have references from this URI
+        if let Some(fqns) = self.references_by_uri.remove(uri) {
+            for fqn in fqns {
+                if let Some(refs) = self.references.get_mut(&fqn) {
+                    refs.retain(|loc| loc.uri != *uri);
+                    if refs.is_empty() {
+                        self.references.remove(&fqn);
+                    }
+                }
+            }
         }
-        self.references.retain(|_, refs| !refs.is_empty());
     }
 
     // ========================================================================
@@ -510,6 +538,12 @@ impl RubyIndex {
                     location: entry.location.clone(),
                 };
 
+                // Track which modules have usages from this URI (for fast removal)
+                self.mixin_usages_by_uri
+                    .entry(entry.location.uri.clone())
+                    .or_default()
+                    .insert(resolved_fqn.clone());
+
                 let usages = self.mixin_usages.entry(resolved_fqn).or_default();
                 if !usages.contains(&usage) {
                     usages.push(usage);
@@ -547,6 +581,12 @@ impl RubyIndex {
                 location: call_location.clone(),
             };
 
+            // Track which modules have usages from this URI (for fast removal)
+            self.mixin_usages_by_uri
+                .entry(call_location.uri.clone())
+                .or_default()
+                .insert(resolved_fqn.clone());
+
             let usages = self.mixin_usages.entry(resolved_fqn).or_default();
             if !usages.contains(&usage) {
                 usages.push(usage);
@@ -573,19 +613,27 @@ impl RubyIndex {
     /// Resolve mixin references only for entries in a specific file
     /// This is more efficient than resolve_all_mixins for incremental updates
     pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
-        // Collect entries from definitions that belong to this URI
-        // We use definitions (not file_entries) because mixins are mutated
-        // on entries in definitions after they're added via get_mut()
-        let entries_to_resolve: Vec<_> = self
-            .definitions
-            .values()
-            .flatten()
-            .filter(|e| e.location.uri == *uri)
-            .cloned()
-            .collect();
+        // Get FQNs from file_entries (O(1) lookup), then fetch from definitions
+        let fqns_to_resolve: Vec<_> = self
+            .file_entries
+            .get(uri)
+            .map(|entries| entries.iter().map(|e| e.fqn.clone()).collect())
+            .unwrap_or_default();
 
-        for entry in entries_to_resolve {
-            self.update_reverse_mixins(&entry);
+        self.resolve_mixins_for_fqns(&fqns_to_resolve);
+    }
+
+    /// Resolve mixin references for specific FQNs
+    /// More efficient than iterating all definitions
+    pub fn resolve_mixins_for_fqns(&mut self, fqns: &[FullyQualifiedName]) {
+        for fqn in fqns {
+            // Look up the entry in definitions (where mixins have been added)
+            if let Some(entries) = self.definitions.get(fqn) {
+                // Get the last entry (most recent definition)
+                if let Some(entry) = entries.last().cloned() {
+                    self.update_reverse_mixins(&entry);
+                }
+            }
         }
     }
 

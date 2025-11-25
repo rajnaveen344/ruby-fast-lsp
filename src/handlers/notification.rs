@@ -8,8 +8,8 @@ use std::sync::Arc;
 use crate::capabilities;
 use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
-    detect_system_ruby_version, get_unresolved_diagnostics, init_workspace, process_definitions,
-    process_references, DefinitionOptions, ReferenceOptions,
+    detect_system_ruby_version, get_unresolved_diagnostics, init_workspace, process_file,
+    DefinitionOptions, ReferenceOptions,
 };
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
@@ -209,23 +209,17 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
-    // Process definitions and get affected URIs for cross-file diagnostics
-    let affected_uris = match process_definitions(
+    // Process file with single parse (definitions + references)
+    let affected_uris = match process_file(
         lang_server,
         uri.clone(),
         &content,
         DefinitionOptions::default(),
+        ReferenceOptions::default().with_unresolved_tracking(true),
     ) {
         Ok(result) => result.affected_uris,
         Err(_) => std::collections::HashSet::new(),
     };
-
-    let _ = process_references(
-        lang_server,
-        uri.clone(),
-        &content,
-        ReferenceOptions::default().with_unresolved_tracking(true),
-    );
 
     // Invalidate namespace tree cache with debouncing
     lang_server.invalidate_namespace_tree_cache_debounced();
@@ -262,7 +256,7 @@ pub async fn handle_did_change(
         None => return,
     };
 
-    // Update or create the document atomically
+    // Update or create the document atomically (lightweight - always do this)
     let doc = {
         let mut docs = lang_server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
@@ -276,44 +270,15 @@ pub async fn handle_did_change(
         }
     };
 
-    // Process definitions and get affected URIs for cross-file diagnostics
-    let affected_uris = match process_definitions(
-        lang_server,
-        uri.clone(),
-        &final_content,
-        DefinitionOptions::default(),
-    ) {
-        Ok(result) => result.affected_uris,
-        Err(_) => std::collections::HashSet::new(),
-    };
-
-    let _ = process_references(
-        lang_server,
-        uri.clone(),
-        &final_content,
-        ReferenceOptions::default().with_unresolved_tracking(true),
-    );
-
-    // Invalidate namespace tree cache with debouncing
-    lang_server.invalidate_namespace_tree_cache_debounced();
-    debug!("Namespace tree cache invalidation scheduled due to index change");
-
-    // Generate and publish diagnostics (syntax errors + unresolved entries)
-    let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
-    diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
+    // Lightweight: Only generate syntax diagnostics (fast - no index lookup)
+    let diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
     lang_server
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
 
-    // Publish diagnostics for files affected by removed definitions (cross-file propagation)
-    for affected_uri in affected_uris {
-        if affected_uri != uri {
-            let affected_diagnostics = get_unresolved_diagnostics(lang_server, &affected_uri);
-            lang_server
-                .publish_diagnostics(affected_uri, affected_diagnostics)
-                .await;
-        }
-    }
+    // Invalidate namespace tree cache with debouncing
+    lang_server.invalidate_namespace_tree_cache_debounced();
+    debug!("Namespace tree cache invalidation scheduled due to index change");
 }
 
 pub async fn handle_did_close(
@@ -332,16 +297,63 @@ pub async fn handle_did_close(
 }
 
 pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
+    let start_time = std::time::Instant::now();
     let uri = params.text_document.uri;
-    debug!("Document saved: {}", uri.path());
+    info!("Document saved: {}", uri.path());
 
-    if uri.path().ends_with(".rb") {
-        lang_server.invalidate_namespace_tree_cache_debounced();
-        debug!(
-            "Scheduled namespace tree cache invalidation for saved file: {}",
-            uri.path()
-        );
+    if !uri.path().ends_with(".rb") {
+        return;
     }
+
+    // Get the current document content
+    let (doc, content) = {
+        let docs = lang_server.docs.lock();
+        match docs.get(&uri) {
+            Some(doc_arc) => {
+                let doc = doc_arc.read().clone();
+                let content = doc.content.clone();
+                (doc, content)
+            }
+            None => return,
+        }
+    };
+
+    // Do full indexing on save (heavy work deferred from did_change)
+    let affected_uris = match process_file(
+        lang_server,
+        uri.clone(),
+        &content,
+        DefinitionOptions::default(),
+        ReferenceOptions::default().with_unresolved_tracking(true),
+    ) {
+        Ok(result) => result.affected_uris,
+        Err(_) => std::collections::HashSet::new(),
+    };
+
+    // Invalidate namespace tree cache
+    lang_server.invalidate_namespace_tree_cache_debounced();
+
+    // Generate and publish full diagnostics (syntax + unresolved)
+    let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
+    diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
+    lang_server
+        .publish_diagnostics(uri.clone(), diagnostics)
+        .await;
+
+    // Publish diagnostics for files affected by removed definitions
+    for affected_uri in affected_uris {
+        if affected_uri != uri {
+            let affected_diagnostics = get_unresolved_diagnostics(lang_server, &affected_uri);
+            lang_server
+                .publish_diagnostics(affected_uri, affected_diagnostics)
+                .await;
+        }
+    }
+
+    info!(
+        "[PERF] Document save handler completed in {:?}",
+        start_time.elapsed()
+    );
 }
 
 pub async fn handle_did_change_watched_files(

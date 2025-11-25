@@ -38,6 +38,9 @@ impl ReferenceVisitor {
 
         let mut found = false;
 
+        // Acquire lock once for all lookups (avoid lock thrashing)
+        let mut index = self.index.lock();
+
         // Check from current namespace to root namespace
         let mut ancestors = current_namespace.clone();
         while !ancestors.is_empty() {
@@ -45,7 +48,6 @@ impl ReferenceVisitor {
             combined_ns.extend(namespaces.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let mut index = self.index.lock();
             let entries = index.definitions.get(&fqn);
             if entries.is_some() {
                 let location = self
@@ -54,14 +56,12 @@ impl ReferenceVisitor {
                 index.add_reference(fqn.clone(), location);
                 found = true;
             }
-            drop(index);
 
             ancestors.pop();
         }
 
         // Check from root namespace
         let fqn = FullyQualifiedName::namespace(namespaces.clone());
-        let mut index = self.index.lock();
         let entries = index.definitions.get(&fqn);
         if entries.is_some() {
             let location = self
@@ -81,10 +81,8 @@ impl ReferenceVisitor {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
-            let namespace_context: Vec<String> = current_namespace
-                .iter()
-                .map(|c| c.to_string())
-                .collect();
+            let namespace_context: Vec<String> =
+                current_namespace.iter().map(|c| c.to_string()).collect();
             debug!(
                 "Adding unresolved constant path: {} in context {:?}",
                 name, namespace_context
@@ -94,8 +92,6 @@ impl ReferenceVisitor {
                 UnresolvedEntry::constant_with_context(name, namespace_context, location),
             );
         }
-
-        drop(index);
     }
 
     pub fn process_constant_path_node_exit(&mut self, _node: &ConstantPathNode) {
