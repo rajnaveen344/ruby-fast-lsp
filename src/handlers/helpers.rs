@@ -147,13 +147,13 @@ pub fn process_references(
         return Ok(());
     }
 
-    // Remove existing references and optionally unresolved constants
+    // Remove existing references and optionally unresolved entries
     {
         let index_arc = server.index();
         let mut index = index_arc.lock();
         index.remove_references_for_uri(&uri);
         if options.track_unresolved {
-            index.remove_unresolved_constants_for_uri(&uri);
+            index.remove_unresolved_entries_for_uri(&uri);
         }
     }
 
@@ -243,13 +243,13 @@ pub fn process_file_references(
         return Ok(());
     }
 
-    // Remove existing references and optionally unresolved constants
+    // Remove existing references and optionally unresolved entries
     {
         let index_arc = server.index();
         let mut index = index_arc.lock();
         index.remove_references_for_uri(&uri);
         if options.track_unresolved {
-            index.remove_unresolved_constants_for_uri(&uri);
+            index.remove_unresolved_entries_for_uri(&uri);
         }
     }
 
@@ -383,27 +383,50 @@ pub async fn process_files_parallel(
 // Diagnostic Helpers
 // ============================================================================
 
-/// Get diagnostics for unresolved constants from the index
-pub fn get_unresolved_constant_diagnostics(
-    server: &RubyLanguageServer,
-    uri: &Url,
-) -> Vec<Diagnostic> {
+/// Get diagnostics for unresolved entries (constants and methods) from the index
+pub fn get_unresolved_diagnostics(server: &RubyLanguageServer, uri: &Url) -> Vec<Diagnostic> {
+    use crate::indexer::index::UnresolvedEntry;
+
     let index_arc = server.index();
     let index = index_arc.lock();
-    let unresolved_list = index.get_unresolved_constants(uri);
+    let unresolved_list = index.get_unresolved_entries(uri);
 
     unresolved_list
         .iter()
-        .map(|unresolved| Diagnostic {
-            range: unresolved.location.range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("unresolved-constant".to_string())),
-            code_description: None,
-            source: Some("ruby-fast-lsp".to_string()),
-            message: format!("Unresolved constant `{}`", unresolved.name),
-            related_information: None,
-            tags: None,
-            data: None,
+        .map(|entry| match entry {
+            UnresolvedEntry::Constant { name, location } => Diagnostic {
+                range: location.range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("unresolved-constant".to_string())),
+                code_description: None,
+                source: Some("ruby-fast-lsp".to_string()),
+                message: format!("Unresolved constant `{}`", name),
+                related_information: None,
+                tags: None,
+                data: None,
+            },
+            UnresolvedEntry::Method {
+                name,
+                receiver,
+                location,
+            } => {
+                let message = match receiver {
+                    Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
+                    None => format!("Unresolved method `{}`", name),
+                };
+
+                Diagnostic {
+                    range: location.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unresolved-method".to_string())),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message,
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
         })
         .collect()
 }

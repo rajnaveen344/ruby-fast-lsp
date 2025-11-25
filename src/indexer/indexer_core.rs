@@ -121,9 +121,9 @@ impl IndexerCore {
             uri, options.track_unresolved
         );
 
-        // Remove existing unresolved constants if tracking
+        // Remove existing unresolved entries if tracking
         if options.track_unresolved {
-            self.index.lock().remove_unresolved_constants_for_uri(uri);
+            self.index.lock().remove_unresolved_entries_for_uri(uri);
         }
 
         // Parse and visit AST for references

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use crate::capabilities;
 use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
-    detect_system_ruby_version, get_unresolved_constant_diagnostics, init_workspace,
-    process_definitions, process_references, DefinitionOptions, ReferenceOptions,
+    detect_system_ruby_version, get_unresolved_diagnostics, init_workspace, process_definitions,
+    process_references, DefinitionOptions, ReferenceOptions,
 };
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
@@ -226,9 +226,9 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
-    // Generate and publish diagnostics (syntax errors + unresolved constants)
+    // Generate and publish diagnostics (syntax errors + unresolved entries)
     let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&document);
-    diagnostics.extend(get_unresolved_constant_diagnostics(lang_server, &uri));
+    diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
     lang_server.publish_diagnostics(uri, diagnostics).await;
 }
 
@@ -276,9 +276,9 @@ pub async fn handle_did_change(
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to index change");
 
-    // Generate and publish diagnostics (syntax errors + unresolved constants)
+    // Generate and publish diagnostics (syntax errors + unresolved entries)
     let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
-    diagnostics.extend(get_unresolved_constant_diagnostics(lang_server, &uri));
+    diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
     lang_server
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
@@ -294,8 +294,8 @@ pub async fn handle_did_close(
     lang_server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
-    // Keep unresolved constant diagnostics visible (project-wide diagnostics like rust-analyzer)
-    let diagnostics = get_unresolved_constant_diagnostics(lang_server, &uri);
+    // Keep unresolved entry diagnostics visible (project-wide diagnostics like rust-analyzer)
+    let diagnostics = get_unresolved_diagnostics(lang_server, &uri);
     lang_server.publish_diagnostics(uri, diagnostics).await;
 }
 

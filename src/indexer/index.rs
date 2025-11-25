@@ -28,14 +28,61 @@ pub struct MixinUsage {
     pub location: Location,
 }
 
-/// Represents an unresolved constant reference.
-/// Used for diagnostics to report missing constants/classes/modules.
+/// Represents an unresolved reference for diagnostics.
+/// Used to report missing constants/classes/modules/methods.
 #[derive(Debug, Clone, PartialEq)]
-pub struct UnresolvedConstant {
-    /// The constant name as written in the source (e.g., "Foo::Bar")
-    pub name: String,
-    /// Location where the constant was referenced
-    pub location: Location,
+pub enum UnresolvedEntry {
+    /// An unresolved constant reference (e.g., `Foo::Bar`)
+    Constant {
+        /// The constant name as written in the source (e.g., "Foo::Bar")
+        name: String,
+        /// Location where the constant was referenced
+        location: Location,
+    },
+    /// An unresolved method call (e.g., `foo.bar` or `bar`)
+    Method {
+        /// The method name as written in the source
+        name: String,
+        /// The receiver type if known (e.g., "Foo::Bar" for `Foo::Bar.method`)
+        /// None for method calls without explicit receiver
+        receiver: Option<String>,
+        /// Location where the method was called
+        location: Location,
+    },
+}
+
+impl UnresolvedEntry {
+    /// Create an unresolved constant entry
+    pub fn constant(name: String, location: Location) -> Self {
+        Self::Constant { name, location }
+    }
+
+    /// Create an unresolved method entry
+    pub fn method(name: String, receiver: Option<String>, location: Location) -> Self {
+        Self::Method {
+            name,
+            receiver,
+            location,
+        }
+    }
+
+    /// Get the location of this unresolved entry
+    pub fn location(&self) -> &Location {
+        match self {
+            Self::Constant { location, .. } => location,
+            Self::Method { location, .. } => location,
+        }
+    }
+
+    /// Check if this is a constant entry
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Self::Constant { .. })
+    }
+
+    /// Check if this is a method entry
+    pub fn is_method(&self) -> bool {
+        matches!(self, Self::Method { .. })
+    }
 }
 
 // ============================================================================
@@ -66,8 +113,8 @@ pub struct RubyIndex {
     /// Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
 
-    /// Unresolved constants per file for diagnostics
-    pub unresolved_constants: HashMap<Url, Vec<UnresolvedConstant>>,
+    /// Unresolved entries per file for diagnostics (constants and methods)
+    pub unresolved_entries: HashMap<Url, Vec<UnresolvedEntry>>,
 }
 
 impl RubyIndex {
@@ -80,7 +127,7 @@ impl RubyIndex {
             reverse_mixins: HashMap::new(),
             mixin_usages: HashMap::new(),
             prefix_tree: PrefixTree::new(),
-            unresolved_constants: HashMap::new(),
+            unresolved_entries: HashMap::new(),
         }
     }
 
@@ -193,31 +240,52 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // Unresolved Constants (Diagnostics)
+    // Unresolved Entries (Diagnostics)
     // ========================================================================
 
-    /// Add an unresolved constant for a file
-    pub fn add_unresolved_constant(&mut self, uri: Url, unresolved: UnresolvedConstant) {
-        debug!(
-            "Adding unresolved constant: {} at {:?}",
-            unresolved.name, uri
-        );
-        self.unresolved_constants
-            .entry(uri)
-            .or_default()
-            .push(unresolved);
+    /// Add an unresolved entry for a file
+    pub fn add_unresolved_entry(&mut self, uri: Url, entry: UnresolvedEntry) {
+        match &entry {
+            UnresolvedEntry::Constant { name, .. } => {
+                debug!("Adding unresolved constant: {} at {:?}", name, uri);
+            }
+            UnresolvedEntry::Method { name, receiver, .. } => {
+                if let Some(recv) = receiver {
+                    debug!("Adding unresolved method: {}.{} at {:?}", recv, name, uri);
+                } else {
+                    debug!("Adding unresolved method: {} at {:?}", name, uri);
+                }
+            }
+        }
+        self.unresolved_entries.entry(uri).or_default().push(entry);
     }
 
-    /// Remove all unresolved constants for a file
-    pub fn remove_unresolved_constants_for_uri(&mut self, uri: &Url) {
-        self.unresolved_constants.remove(uri);
+    /// Remove all unresolved entries for a file
+    pub fn remove_unresolved_entries_for_uri(&mut self, uri: &Url) {
+        self.unresolved_entries.remove(uri);
+    }
+
+    /// Get all unresolved entries for a file
+    pub fn get_unresolved_entries(&self, uri: &Url) -> Vec<UnresolvedEntry> {
+        self.unresolved_entries
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Get all unresolved constants for a file
-    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<UnresolvedConstant> {
-        self.unresolved_constants
+    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<&UnresolvedEntry> {
+        self.unresolved_entries
             .get(uri)
-            .cloned()
+            .map(|entries| entries.iter().filter(|e| e.is_constant()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all unresolved methods for a file
+    pub fn get_unresolved_methods(&self, uri: &Url) -> Vec<&UnresolvedEntry> {
+        self.unresolved_entries
+            .get(uri)
+            .map(|entries| entries.iter().filter(|e| e.is_method()).collect())
             .unwrap_or_default()
     }
 

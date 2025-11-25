@@ -139,7 +139,7 @@ impl IndexingCoordinator {
         // PHASE 3: Publish diagnostics for unresolved constants
         info!("Phase 3: Publishing diagnostics for unresolved constants");
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
-        self.publish_unresolved_constant_diagnostics(server).await;
+        self.publish_unresolved_diagnostics(server).await;
 
         info!(
             "Complete two-phase indexing finished in {:?}",
@@ -222,28 +222,28 @@ impl IndexingCoordinator {
         Ok(())
     }
 
-    /// Phase 3: Publish diagnostics for unresolved constants across all indexed files
-    async fn publish_unresolved_constant_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::handlers::helpers::get_unresolved_constant_diagnostics;
+    /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
+    async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
+        use crate::handlers::helpers::get_unresolved_diagnostics;
 
-        // Collect all URIs with unresolved constants while holding the lock
+        // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
             let index_arc = server.index();
             let index = index_arc.lock();
-            let count = index.unresolved_constants.len();
+            let count = index.unresolved_entries.len();
             info!(
-                "Publishing diagnostics for {} files with unresolved constants",
+                "Publishing diagnostics for {} files with unresolved entries",
                 count
             );
-            index.unresolved_constants.keys().cloned().collect()
+            index.unresolved_entries.keys().cloned().collect()
         };
 
         // Publish diagnostics for each file (lock released, safe to await)
         for uri in uris {
-            let diagnostics = get_unresolved_constant_diagnostics(server, &uri);
+            let diagnostics = get_unresolved_diagnostics(server, &uri);
             if !diagnostics.is_empty() {
                 debug!(
-                    "Publishing {} unresolved constant diagnostics for {}",
+                    "Publishing {} unresolved diagnostics for {}",
                     diagnostics.len(),
                     uri.path()
                 );

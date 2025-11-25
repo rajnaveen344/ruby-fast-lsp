@@ -17,7 +17,7 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 | **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                         |
 | **Inlay Hints**         | ✅     | End keyword hints for blocks                                  |
 | **Code Folding**        | ✅     | Classes, modules, methods, control flow                       |
-| **Diagnostics**         | ✅     | Syntax errors and warnings                                    |
+| **Diagnostics**         | ✅     | Syntax errors, warnings, unresolved constants/methods         |
 | **Code Lens**           | ✅     | Module mixin usage counts                                     |
 | **On-Type Formatting**  | ✅     | Auto-insert `end` keyword                                     |
 

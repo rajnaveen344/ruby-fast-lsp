@@ -1,7 +1,7 @@
 use log::debug;
 use ruby_prism::ConstantReadNode;
 
-use crate::indexer::index::UnresolvedConstant;
+use crate::indexer::index::UnresolvedEntry;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::ReferenceVisitor;
@@ -54,12 +54,9 @@ impl ReferenceVisitor {
                 .document
                 .prism_location_to_lsp_location(&node.location());
             debug!("Adding unresolved constant: {}", name);
-            index.add_unresolved_constant(
+            index.add_unresolved_entry(
                 self.document.uri.clone(),
-                UnresolvedConstant {
-                    name: name.clone(),
-                    location,
-                },
+                UnresolvedEntry::constant(name.clone(), location),
             );
         }
         drop(index);
