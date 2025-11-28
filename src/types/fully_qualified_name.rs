@@ -251,6 +251,17 @@ impl From<Identifier> for FullyQualifiedName {
             }
             Identifier::RubyClassVariable { name, .. } => FullyQualifiedName::ClassVariable(name),
             Identifier::RubyGlobalVariable { name, .. } => FullyQualifiedName::GlobalVariable(name),
+            Identifier::YardType { type_name, .. } => {
+                // Try to parse type name as a constant path
+                let parts: Vec<&str> = type_name.split("::").collect();
+                let mut namespace = Vec::new();
+                for part in parts {
+                    if let Ok(constant) = RubyConstant::try_from(part.trim()) {
+                        namespace.push(constant);
+                    }
+                }
+                FullyQualifiedName::Constant(namespace)
+            }
         }
     }
 }

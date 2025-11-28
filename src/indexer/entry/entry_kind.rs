@@ -90,10 +90,15 @@ pub enum EntryKind {
         visibility: MethodVisibility,
         origin: MethodOrigin,
         origin_visibility: Option<MethodVisibility>,
-        /// YARD documentation with type annotations
+        /// YARD documentation with type annotations (raw strings for display)
         yard_doc: Option<YardMethodDoc>,
         /// Position for return type hint (after closing paren or last param)
         return_type_position: Option<Position>,
+        /// Inferred or documented return type as RubyType (for type inference)
+        return_type: Option<RubyType>,
+        /// Parameter types as RubyType (for type inference within method body)
+        /// Maps parameter name to its type
+        param_types: Vec<(String, RubyType)>,
     },
     Constant {
         value: Option<String>,

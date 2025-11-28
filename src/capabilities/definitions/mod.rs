@@ -1,6 +1,7 @@
 pub mod constant;
 pub mod method;
 pub mod variable;
+pub mod yard_type;
 
 use log::info;
 use tower_lsp::lsp_types::{Location, Position, Url};
@@ -8,6 +9,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::yard::YardParser;
 
 pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
@@ -15,6 +17,13 @@ pub async fn find_definition_at_position(
     position: Position,
     content: &str,
 ) -> Option<Vec<Location>> {
+    // First, check if we're in a YARD comment type reference
+    if let Some(yard_type) = YardParser::find_type_at_position(content, position) {
+        info!("Found YARD type at position: {}", yard_type.type_name);
+        let index = server.index.lock();
+        return yard_type::find_yard_type_definitions(&yard_type.type_name, &index);
+    }
+
     let analyzer = RubyPrismAnalyzer::new(uri, content.to_string());
     let (identifier, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
@@ -62,6 +71,9 @@ pub async fn find_definition_at_position(
         }
         Identifier::RubyGlobalVariable { name, .. } => {
             variable::find_global_variable_definitions(name, &index, &ancestors)
+        }
+        Identifier::YardType { type_name, .. } => {
+            yard_type::find_yard_type_definitions(type_name, &index)
         }
     };
 

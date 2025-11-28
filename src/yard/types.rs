@@ -17,6 +17,9 @@ pub struct YardParam {
     /// The range of the @param tag in the source (for diagnostics)
     /// This covers the entire @param line
     pub range: Option<Range>,
+    /// The range of just the [Type] portion (for type-specific diagnostics)
+    /// Used to highlight only the type when it's unknown
+    pub types_range: Option<Range>,
 }
 
 impl YardParam {
@@ -27,6 +30,7 @@ impl YardParam {
             types,
             description,
             range: None,
+            types_range: None,
         }
     }
 
@@ -42,6 +46,24 @@ impl YardParam {
             types,
             description,
             range: Some(range),
+            types_range: None,
+        }
+    }
+
+    /// Create a new YARD parameter with both line range and types range
+    pub fn with_ranges(
+        name: String,
+        types: Vec<String>,
+        description: Option<String>,
+        range: Range,
+        types_range: Range,
+    ) -> Self {
+        Self {
+            name,
+            types,
+            description,
+            range: Some(range),
+            types_range: Some(types_range),
         }
     }
 

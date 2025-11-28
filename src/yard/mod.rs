@@ -27,8 +27,10 @@
 //! - Arrays: `Array<String>` or `Array<String, Integer>`
 //! - Hashes: `Hash{Symbol => String}` or `Hash<Symbol, String>`
 
+pub mod converter;
 pub mod parser;
 pub mod types;
 
-pub use parser::YardParser;
+pub use converter::{TypeConversionResult, UnresolvedType, YardTypeConverter};
+pub use parser::{YardParser, YardTypeAtPosition};
 pub use types::{YardMethodDoc, YardOption, YardParam, YardReturn};

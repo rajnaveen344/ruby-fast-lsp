@@ -85,6 +85,14 @@ pub enum Identifier {
         namespace: Vec<RubyConstant>,
         name: String,
     },
+
+    /// YARD type reference in documentation comment
+    /// - type_name: The type name being referenced (e.g., "String", "MyClass")
+    /// - namespace: Current namespace stack (where the cursor is located)
+    YardType {
+        type_name: String,
+        namespace: Vec<RubyConstant>,
+    },
 }
 
 impl fmt::Display for Identifier {
@@ -113,6 +121,9 @@ impl fmt::Display for Identifier {
             }
             Identifier::RubyGlobalVariable { name, .. } => {
                 write!(f, "{}", name)
+            }
+            Identifier::YardType { type_name, .. } => {
+                write!(f, "{}", type_name)
             }
         }
     }

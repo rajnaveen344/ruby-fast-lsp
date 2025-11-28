@@ -193,23 +193,30 @@ async fn test_yard_mismatched_param_diagnostics() {
         messages
     );
 
-    // Check that diagnostics have correct severity (warning)
-    for diag in &diagnostics {
+    // Filter to only param mismatch diagnostics (not type resolution diagnostics)
+    let param_diagnostics: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code
+                == Some(tower_lsp::lsp_types::NumberOrString::String(
+                    "yard-unknown-param".to_string(),
+                ))
+        })
+        .collect();
+
+    // Should have at least 2 param mismatch diagnostics (wrong_name and another_wrong)
+    assert!(
+        param_diagnostics.len() >= 2,
+        "Should have at least 2 param mismatch diagnostics, got {}",
+        param_diagnostics.len()
+    );
+
+    // Check that param mismatch diagnostics have correct severity (warning)
+    for diag in &param_diagnostics {
         assert_eq!(
             diag.severity,
             Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
             "YARD param mismatch should be a warning"
-        );
-    }
-
-    // Check that diagnostics have the correct code
-    for diag in &diagnostics {
-        assert_eq!(
-            diag.code,
-            Some(tower_lsp::lsp_types::NumberOrString::String(
-                "yard-unknown-param".to_string()
-            )),
-            "YARD diagnostic should have 'yard-unknown-param' code"
         );
     }
 }

@@ -67,6 +67,14 @@ pub async fn find_references_at_position(
             let fqn = FullyQualifiedName::global_variable(name.clone()).unwrap();
             find_non_local_variable_references(&fqn, &index)
         }
+        Identifier::YardType { type_name, .. } => {
+            // For YARD types, find references to the class/module
+            if let Some(fqn) = crate::yard::YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
+                find_constant_references(&fqn, &index)
+            } else {
+                None
+            }
+        }
     }
 }
 

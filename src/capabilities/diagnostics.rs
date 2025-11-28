@@ -1,6 +1,7 @@
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
+use crate::yard::YardTypeConverter;
 use log::{debug, warn};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 
@@ -95,7 +96,9 @@ pub fn generate_diagnostics(document: &RubyDocument) -> Vec<Diagnostic> {
 }
 
 /// Generate diagnostics for YARD documentation issues
-/// This checks for @param tags that reference non-existent parameters
+/// This checks for:
+/// - @param tags that reference non-existent parameters
+/// - Type references that don't exist in the index (classes/modules)
 pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -132,6 +135,53 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
                         data: None,
                     };
                     diagnostics.push(diagnostic);
+                }
+
+                // Check for unresolved types in @param tags
+                for param in &yard_doc.params {
+                    let result = YardTypeConverter::convert_multiple_with_validation(
+                        &param.types,
+                        Some(index),
+                    );
+                    for unresolved in result.unresolved_types {
+                        // Prefer types_range (just the [Type] portion) over range (entire line)
+                        let diagnostic_range = param.types_range.or(param.range);
+                        if let Some(range) = diagnostic_range {
+                            let diagnostic = Diagnostic {
+                                range,
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                                    "yard-unknown-type".to_string(),
+                                )),
+                                code_description: None,
+                                source: Some("ruby-fast-lsp".to_string()),
+                                message: format!(
+                                    "Unknown type '{}' in YARD @param documentation",
+                                    unresolved.type_name
+                                ),
+                                related_information: None,
+                                tags: None,
+                                data: None,
+                            };
+                            diagnostics.push(diagnostic);
+                        }
+                    }
+                }
+
+                // Check for unresolved types in @return tags
+                for return_doc in &yard_doc.returns {
+                    let result = YardTypeConverter::convert_multiple_with_validation(
+                        &return_doc.types,
+                        Some(index),
+                    );
+                    for unresolved in result.unresolved_types {
+                        // For return types, we don't have a specific range stored
+                        // We could add range tracking to YardReturn in the future
+                        debug!(
+                            "Unresolved return type '{}' (no range available for diagnostic)",
+                            unresolved.type_name
+                        );
+                    }
                 }
             }
         }

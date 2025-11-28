@@ -64,13 +64,23 @@
   - ParamKind enum (Required, Optional, Rest, Keyword, etc.)
   - yard_doc and return_type_position fields
 
-### 🔄 In Progress
+### ✅ Completed
 
 #### Phase 1: Variable Type Tracking ✅ COMPLETED
 
 - [x] Track types from literal assignments in IndexVisitor
 - [x] Populate variable types during indexing
 - [x] Show inlay hints for typed variables (via EntryKind storage)
+
+#### Phase 1.5: YARD Type Infrastructure ✅ COMPLETED
+
+- [x] YardTypeConverter to convert YARD strings to RubyType
+- [x] Method return_type and param_types stored as RubyType
+- [x] Diagnostics for unresolved YARD types
+- [x] Go-to-definition for types in YARD comments
+- [x] Type validation against index (warns if class/module doesn't exist)
+
+### 🔄 In Progress
 
 ### 📋 Planned Features
 
@@ -1771,47 +1781,46 @@ count = 42      # Inlay hint: count: Integer
 items = [1, 2]  # Inlay hint: items: Array<Integer>
 ```
 
-### Milestone 2: Method Parameter Types from YARD
+### Milestone 2: Method Parameter Types from YARD ✅ COMPLETED
 
 **Goal**: Method parameters documented with YARD @param get their types tracked.
 
-| Step | Task                                                             | Files to Modify                        | Test                       |
-| ---- | ---------------------------------------------------------------- | -------------------------------------- | -------------------------- |
-| 2.1  | Create TypeContext struct to hold scope-local type info          | `type_inference/type_context.rs` (new) | Unit tests                 |
-| 2.2  | Populate TypeContext with YARD @param types when entering method | `index_visitor/def_node.rs`            | Test param types available |
-| 2.3  | Look up variable types from TypeContext during indexing          | `index_visitor/mod.rs`                 | Test variable lookup       |
-| 2.4  | Add integration tests for YARD parameter type propagation        | `test/`                                | Test type propagation      |
+| Step | Task                                                              | Files to Modify             | Status |
+| ---- | ----------------------------------------------------------------- | --------------------------- | ------ |
+| 2.1  | Create YardTypeConverter to convert YARD type strings to RubyType | `yard/converter.rs` (new)   | ✅     |
+| 2.2  | Add `param_types: Vec<(String, RubyType)>` to EntryKind::Method   | `entry_kind.rs`             | ✅     |
+| 2.3  | Convert YARD @param types during indexing                         | `index_visitor/def_node.rs` | ✅     |
+| 2.4  | Add diagnostics for unresolved YARD types                         | `diagnostics.rs`            | ✅     |
+| 2.5  | Add go-to-definition for types in YARD comments                   | `definitions/yard_type.rs`  | ✅     |
+
+**Features implemented**:
+
+- YARD type strings are converted to `RubyType` enum values
+- Type validation against the index (warns if type doesn't exist)
+- Go-to-definition works for types in YARD comments
+- Supports built-in types, custom classes, generics, and union types
+
+### Milestone 3: Method Return Type Storage ✅ COMPLETED
+
+**Goal**: Store and expose method return types from YARD @return.
+
+| Step | Task                                                           | Files to Modify             | Status |
+| ---- | -------------------------------------------------------------- | --------------------------- | ------ |
+| 3.1  | Add `return_type: Option<RubyType>` field to EntryKind::Method | `entry_kind.rs`             | ✅     |
+| 3.2  | Convert YARD @return types to RubyType during indexing         | `index_visitor/def_node.rs` | ✅     |
+| 3.3  | YardTypeConverter utility created                              | `yard/converter.rs`         | ✅     |
 
 **Example outcome**:
 
 ```ruby
 # @param name [String] User's name
-# @param age [Integer] User's age
-def greet(name, age)
-  # name is known to be String
-  # age is known to be Integer
-end
-```
-
-### Milestone 3: Method Return Type Storage
-
-**Goal**: Store and expose method return types from YARD @return.
-
-| Step | Task                                                           | Files to Modify             | Test            |
-| ---- | -------------------------------------------------------------- | --------------------------- | --------------- |
-| 3.1  | Add `return_type: Option<RubyType>` field to EntryKind::Method | `entry_kind.rs`             | Compile check   |
-| 3.2  | Convert YARD @return types to RubyType during indexing         | `index_visitor/def_node.rs` | Test conversion |
-| 3.3  | Create YardTypeConverter utility                               | `yard/converter.rs` (new)   | Unit tests      |
-| 3.4  | Add method to get return type from method entry                | `entry_kind.rs`             | Test getter     |
-
-**Example outcome**:
-
-```ruby
 # @return [String] The greeting message
 def greet(name)
   "Hello, #{name}"
 end
-# Method entry now has return_type: RubyType::string()
+# Method entry now has:
+#   param_types: [("name", RubyType::string())]
+#   return_type: Some(RubyType::string())
 ```
 
 ### Milestone 4: Simple Return Type Inference

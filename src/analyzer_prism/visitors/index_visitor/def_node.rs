@@ -5,9 +5,10 @@ use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
     Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
+use crate::type_inference::ruby_type::RubyType;
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
-use crate::yard::YardParser;
+use crate::yard::{YardParser, YardTypeConverter};
 
 use super::IndexVisitor;
 
@@ -97,6 +98,42 @@ impl IndexVisitor {
 
         let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
 
+        // Convert YARD types to RubyType for type inference
+        let (return_type, param_types) = if let Some(ref doc) = yard_doc {
+            // Convert return type
+            let return_type = if !doc.returns.is_empty() {
+                let all_return_types: Vec<String> =
+                    doc.returns.iter().flat_map(|r| r.types.clone()).collect();
+                if all_return_types.is_empty() {
+                    None
+                } else {
+                    Some(YardTypeConverter::convert_multiple(&all_return_types))
+                }
+            } else {
+                None
+            };
+
+            // Convert parameter types
+            let param_types: Vec<(String, RubyType)> = doc
+                .params
+                .iter()
+                .filter_map(|p| {
+                    if p.types.is_empty() {
+                        None
+                    } else {
+                        Some((
+                            p.name.clone(),
+                            YardTypeConverter::convert_multiple(&p.types),
+                        ))
+                    }
+                })
+                .collect();
+
+            (return_type, param_types)
+        } else {
+            (None, Vec::new())
+        };
+
         let entry = Entry {
             fqn: fqn.clone(),
             location,
@@ -109,6 +146,8 @@ impl IndexVisitor {
                 origin_visibility: None,
                 yard_doc,
                 return_type_position,
+                return_type,
+                param_types,
             },
         };
 

@@ -87,10 +87,152 @@ struct CommentLineInfo<'a> {
 // Parser
 // =============================================================================
 
+/// Information about a YARD type reference at a specific position
+#[derive(Debug, Clone)]
+pub struct YardTypeAtPosition {
+    /// The type name at the position
+    pub type_name: String,
+    /// The range of the type name in the document
+    pub range: Range,
+}
+
+/// Regex to find type references within square brackets
+static TYPE_BRACKET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[([^\]]+)\]").expect("Invalid type bracket regex")
+});
+
 /// Parser for YARD documentation comments
 pub struct YardParser;
 
 impl YardParser {
+    /// Find the YARD type at a specific position in the source code.
+    /// Returns the type name and its range if the position is on a type in a YARD comment.
+    pub fn find_type_at_position(content: &str, position: Position) -> Option<YardTypeAtPosition> {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_idx = position.line as usize;
+
+        if line_idx >= lines.len() {
+            return None;
+        }
+
+        let line = lines[line_idx];
+
+        // Check if this line is a comment
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('#') {
+            return None;
+        }
+
+        // Look for type brackets [Type] on this line
+        for caps in TYPE_BRACKET_REGEX.captures_iter(line) {
+            let full_match = caps.get(0)?;
+            let types_match = caps.get(1)?;
+
+            let bracket_start = full_match.start();
+            let bracket_end = full_match.end();
+
+            // Check if position is within the brackets
+            let char_pos = position.character as usize;
+            if char_pos >= bracket_start && char_pos < bracket_end {
+                // Position is inside [Type], find which type
+                let types_str = types_match.as_str();
+                let types_start = types_match.start();
+
+                // Parse individual types (handling commas for union types)
+                let relative_pos = if char_pos > types_start {
+                    char_pos - types_start
+                } else {
+                    0
+                };
+
+                // Split by comma but track positions
+                let mut current_pos = 0;
+                for type_part in Self::split_types_with_positions(types_str) {
+                    let type_start = type_part.0;
+                    let type_end = type_part.1;
+                    let type_name = type_part.2.trim();
+
+                    if relative_pos >= type_start && relative_pos < type_end {
+                        // Found the type at position
+                        // Extract just the base type name (without generics)
+                        let base_type = Self::extract_base_type(type_name);
+
+                        if !base_type.is_empty() {
+                            let range = Range::new(
+                                Position::new(position.line, (types_start + type_start) as u32),
+                                Position::new(position.line, (types_start + type_end) as u32),
+                            );
+                            return Some(YardTypeAtPosition {
+                                type_name: base_type,
+                                range,
+                            });
+                        }
+                    }
+
+                    current_pos = type_end;
+                }
+
+                // If we're past all types but still in brackets, check last type
+                if relative_pos >= current_pos && !types_str.is_empty() {
+                    let base_type = Self::extract_base_type(types_str.trim());
+                    if !base_type.is_empty() {
+                        let range = Range::new(
+                            Position::new(position.line, types_start as u32),
+                            Position::new(position.line, (types_start + types_str.len()) as u32),
+                        );
+                        return Some(YardTypeAtPosition {
+                            type_name: base_type,
+                            range,
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Split type string by commas, tracking positions
+    fn split_types_with_positions(types_str: &str) -> Vec<(usize, usize, &str)> {
+        let mut result = Vec::new();
+        let mut start = 0;
+        let mut depth = 0;
+
+        for (i, c) in types_str.char_indices() {
+            match c {
+                '<' | '{' => depth += 1,
+                '>' | '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    result.push((start, i, &types_str[start..i]));
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Add last part
+        if start < types_str.len() {
+            result.push((start, types_str.len(), &types_str[start..]));
+        }
+
+        result
+    }
+
+    /// Extract base type name from a type string (removes generics)
+    /// "Array<String>" -> "Array"
+    /// "Hash{Symbol => String}" -> "Hash"
+    /// "String" -> "String"
+    fn extract_base_type(type_str: &str) -> String {
+        let trimmed = type_str.trim();
+
+        // Find the first < or {
+        if let Some(pos) = trimmed.find(|c| c == '<' || c == '{') {
+            trimmed[..pos].trim().to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     /// Parse YARD documentation from a comment string.
     /// The comment should be the raw comment text including # characters.
     /// This method does NOT track positions (for simple parsing use cases).
@@ -189,22 +331,7 @@ impl YardParser {
 
             if line.starts_with('@') {
                 in_description = false;
-                let range = if track_positions {
-                    Some(Range {
-                        start: Position {
-                            line: line_info.line_number,
-                            character: line_info.content_start_char,
-                        },
-                        end: Position {
-                            line: line_info.line_number,
-                            character: line_info.line_length,
-                        },
-                    })
-                } else {
-                    None
-                };
-
-                Self::parse_tag(line, &mut doc, range);
+                Self::parse_tag(line, &mut doc, line_info, track_positions);
             } else if in_description {
                 description_lines.push(line);
             }
@@ -219,7 +346,28 @@ impl YardParser {
     }
 
     /// Parse a single YARD tag line and add it to the document.
-    fn parse_tag(line: &str, doc: &mut YardMethodDoc, range: Option<Range>) {
+    fn parse_tag(
+        line: &str,
+        doc: &mut YardMethodDoc,
+        line_info: &CommentLineInfo,
+        track_positions: bool,
+    ) {
+        // Calculate line range (entire @param line)
+        let line_range = if track_positions {
+            Some(Range {
+                start: Position {
+                    line: line_info.line_number,
+                    character: line_info.content_start_char,
+                },
+                end: Position {
+                    line: line_info.line_number,
+                    character: line_info.line_length,
+                },
+            })
+        } else {
+            None
+        };
+
         if let Some(caps) = PARAM_REGEX.captures(line) {
             let name = caps
                 .get(1)
@@ -228,7 +376,31 @@ impl YardParser {
             let types = parse_type_list(caps.get(2).map(|m| m.as_str()).unwrap_or(""));
             let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
 
-            if let Some(r) = range {
+            // Calculate types range (just the [Type] portion)
+            let types_range = if track_positions {
+                caps.get(2).map(|m| {
+                    // m.start() and m.end() are byte offsets within `line`
+                    // We need to account for the opening [ and include the closing ]
+                    let bracket_start = m.start().saturating_sub(1); // include '['
+                    let bracket_end = m.end() + 1; // include ']'
+                    Range {
+                        start: Position {
+                            line: line_info.line_number,
+                            character: line_info.content_start_char + bracket_start as u32,
+                        },
+                        end: Position {
+                            line: line_info.line_number,
+                            character: line_info.content_start_char + bracket_end as u32,
+                        },
+                    }
+                })
+            } else {
+                None
+            };
+
+            if let (Some(r), Some(tr)) = (line_range, types_range) {
+                doc.params.push(YardParam::with_ranges(name, types, desc, r, tr));
+            } else if let Some(r) = line_range {
                 doc.params.push(YardParam::with_range(name, types, desc, r));
             } else {
                 doc.params.push(YardParam::new(name, types, desc));
@@ -246,7 +418,7 @@ impl YardParser {
             let default = non_empty_string(caps.get(4).map(|m| m.as_str().trim()));
             let desc = non_empty_string(caps.get(5).map(|m| m.as_str().trim()));
 
-            if let Some(r) = range {
+            if let Some(r) = line_range {
                 doc.options.push(YardOption::with_range(
                     param_name, key_name, types, default, desc, r,
                 ));
@@ -317,7 +489,9 @@ fn parse_type_list(types_str: &str) -> Vec<String> {
                 angle_depth += 1;
                 current.push(ch);
             }
-            '>' => {
+            '>' if angle_depth > 0 => {
+                // Only treat > as closing bracket if we're inside angle brackets
+                // This prevents `=>` in Hash{K => V} from being misinterpreted
                 angle_depth -= 1;
                 current.push(ch);
             }
@@ -325,7 +499,8 @@ fn parse_type_list(types_str: &str) -> Vec<String> {
                 brace_depth += 1;
                 current.push(ch);
             }
-            '}' => {
+            '}' if brace_depth > 0 => {
+                // Only treat } as closing bracket if we're inside braces
                 brace_depth -= 1;
                 current.push(ch);
             }
