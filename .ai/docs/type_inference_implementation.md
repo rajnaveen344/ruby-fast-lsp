@@ -1,8 +1,87 @@
 # Type Inference Implementation for Ruby Fast LSP
 
+## Implementation Status
+
+### ✅ Completed Features
+
+#### Phase 0: Foundation (DONE)
+
+- [x] **RubyType enum** - `src/type_inference/ruby_type.rs`
+
+  - Class, Module, ClassReference, ModuleReference types
+  - Array and Hash with polymorphic type support
+  - Union types with flattening and deduplication
+  - Unknown and Any special types
+  - Helper constructors (string(), integer(), etc.)
+  - Subtype checking, nilability operations
+
+- [x] **Literal Analyzer** - `src/type_inference/literal_analyzer.rs`
+
+  - String, Integer, Float, Symbol, Boolean, Nil literals
+  - Array literals with element type inference
+  - Hash literals with key/value type inference
+  - Regex, Range, Lambda literals
+  - Rational, Complex number literals
+
+- [x] **Collection Analyzer** - `src/type_inference/collection_analyzer.rs`
+
+  - ArrayTypeInfo and HashTypeInfo structs
+  - Polymorphic collection type handling
+
+- [x] **Method Signature Types** - `src/type_inference/method_signature.rs`
+  - Parameter struct with type, optional, keyword, splat info
+  - MethodSignature with visibility and confidence
+
+#### Phase 0.5: YARD Integration (DONE)
+
+- [x] **YARD Parser** - `src/yard/parser.rs`
+
+  - @param, @return, @option tags
+  - @yieldparam, @yieldreturn for blocks
+  - @raise, @deprecated tags
+  - Generic type parsing (Array<T>, Hash<K,V>)
+  - Union type parsing (String | Integer)
+  - Position tracking for diagnostics
+
+- [x] **YARD Types** - `src/yard/types.rs`
+
+  - YardParam, YardReturn, YardOption structs
+  - YardMethodDoc aggregate type
+  - Type formatting for display
+
+- [x] **YARD Inlay Hints** - `src/capabilities/inlay_hints.rs`
+
+  - Parameter type hints from YARD docs
+  - Return type hints (-> Type)
+  - Tooltip with descriptions
+
+- [x] **YARD Diagnostics** - `src/capabilities/diagnostics.rs`
+
+  - Warning for @param tags with non-existent parameters
+
+- [x] **Entry Kind Updates** - `src/indexer/entry/entry_kind.rs`
+  - MethodParamInfo with name, position, kind
+  - ParamKind enum (Required, Optional, Rest, Keyword, etc.)
+  - yard_doc and return_type_position fields
+
+### 🔄 In Progress
+
+#### Phase 1: Variable Type Tracking ✅ COMPLETED
+
+- [x] Track types from literal assignments in IndexVisitor
+- [x] Populate variable types during indexing
+- [x] Show inlay hints for typed variables (via EntryKind storage)
+
+### 📋 Planned Features
+
+See **Detailed Implementation Roadmap** section below.
+
+---
+
 ## Requirements
 
 ### Core Requirements
+
 - **Union Types**: Variables can have multiple possible types (e.g., `String | Integer | nil`)
 - **Type Flow Analysis**: Track how types flow through method calls, assignments, and control structures
 - **Method Return Type Inference**: Infer return types based on method body analysis
@@ -11,6 +90,7 @@
 - **Performance**: Maintain LSP responsiveness with incremental type analysis
 
 ### Integration Requirements
+
 - Build on existing `RubyPrismAnalyzer` and indexing infrastructure
 - Extend current `Identifier` enum to include type information
 - Integrate with existing completion system
@@ -30,11 +110,11 @@ pub enum RubyType {
     ClassReference(FullyQualifiedName),
     // Module reference - represents a module object that can be used for inclusion/extension
     ModuleReference(FullyQualifiedName),
-    
+
     // Parameterized collection types with union type support
     Array(Vec<RubyType>),
     Hash(Vec<RubyType>, Vec<RubyType>),
-    
+
     // Special types for type system
     Union(Vec<RubyType>),
     Unknown,
@@ -46,52 +126,52 @@ impl RubyType {
     pub fn string() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("String").unwrap())
     }
-    
+
     pub fn integer() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("Integer").unwrap())
     }
-    
+
     pub fn float() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("Float").unwrap())
     }
-    
+
     pub fn nil_class() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("NilClass").unwrap())
     }
-    
+
     pub fn symbol() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("Symbol").unwrap())
     }
-    
+
     pub fn true_class() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("TrueClass").unwrap())
     }
-    
+
     pub fn false_class() -> Self {
         RubyType::Class(FullyQualifiedName::from_str("FalseClass").unwrap())
     }
-    
+
     pub fn boolean() -> Self {
         RubyType::Union(vec![Self::true_class(), Self::false_class()])
     }
-    
+
     pub fn array_of(element_type: RubyType) -> Self {
         RubyType::Array(vec![element_type])
     }
-    
+
     pub fn hash_of(key_type: RubyType, value_type: RubyType) -> Self {
         RubyType::Hash(vec![key_type], vec![value_type])
     }
-    
+
     // Helper for class and module references
     pub fn class_reference(class_name: &str) -> Self {
         RubyType::ClassReference(FullyQualifiedName::from_str(class_name).unwrap())
     }
-    
+
     pub fn module_reference(module_name: &str) -> Self {
         RubyType::ModuleReference(FullyQualifiedName::from_str(module_name).unwrap())
     }
-    
+
     // For polymorphic collections, use Vec types directly:
     // Example: RubyType::Array(vec![integer(), string()])
     // Example: RubyType::Hash(
@@ -161,14 +241,16 @@ completion/
 
 ## Implementation Plan
 
-### Phase 1: Core Type System (Weeks 1-2)
+### Phase 1: Core Type System (Weeks 1-2) ✅ COMPLETED
 
-1. **Create Type System Foundation**
+1. **Create Type System Foundation** ✅
+
    - Implement `RubyType` enum with basic types
    - Create `TypedVariable` and related structures
    - Add union type operations (merge, intersect, narrow)
 
-2. **Literal Type Detection**
+2. **Literal Type Detection** ✅
+
    - String literals → `RubyType::string()` (String class)
    - Numeric literals → `RubyType::integer()`/`RubyType::float()` (Integer/Float classes)
    - Boolean literals → `RubyType::true_class()`/`RubyType::false_class()` (TrueClass/FalseClass)
@@ -186,52 +268,54 @@ completion/
      - Mixed symbol/string keys: `{:name => "app", "debug" => true}` → `RubyType::Hash(vec![symbol(), string()], vec![string(), true_class()])`
      - Empty: `{}` → `RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any])`
 
-3. **Basic Assignment Tracking**
+3. **Basic Assignment Tracking** 🔄 IN PROGRESS
+
    - Track variable assignments with literal types
    - Store type information in scope tracker
    - Handle local variable type propagation
 
 4. **Class and Module Reference Type Inference Examples**
+
    ```ruby
    # Class reference assignment
    klass = String
    # Type: RubyType::class_reference("String")
-   
+
    my_class = MyCustomClass
    # Type: RubyType::class_reference("MyCustomClass")
-   
+
    # Module reference assignment
    mod = Enumerable
    # Type: RubyType::module_reference("Enumerable")
-   
+
    my_module = MyCustomModule
    # Type: RubyType::module_reference("MyCustomModule")
-   
+
    # Class instantiation
    instance = klass.new
    # Type: RubyType::Class("String") - instance of String class
-   
+
    custom_instance = my_class.new
    # Type: RubyType::Class("MyCustomClass") - instance of MyCustomClass
-   
+
    # Class methods on references
    class_name = klass.name
    # Type: RubyType::string() - "String"
-   
+
    parent = klass.superclass
    # Type: RubyType::class_reference("Object")
-   
+
    # Module methods on references
    module_name = mod.name
    # Type: RubyType::string() - "Enumerable"
-   
+
    # Dynamic class assignment
    klass = condition ? String : Integer
    # Type: RubyType::Union(vec![class_reference("String"), class_reference("Integer")])
-   
+
    instance = klass.new
    # Type: RubyType::Union(vec![Class("String"), Class("Integer")])
-   
+
    # Array of classes
    classes = [String, Integer, Float]
    # Type: RubyType::Array(vec![
@@ -239,21 +323,21 @@ completion/
    #     class_reference("Integer"),
    #     class_reference("Float")
    # ])
-   
+
    instances = classes.map(&:new)
    # Type: RubyType::Array(vec![
    #     Class("String"),
    #     Class("Integer"),
    #     Class("Float")
    # ])
-   
+
    # Array of modules
    modules = [Enumerable, Comparable]
    # Type: RubyType::Array(vec![
    #     module_reference("Enumerable"),
    #     module_reference("Comparable")
    # ])
-   
+
    # Mixed class and module references
    mixed_refs = [String, Enumerable, Integer]
    # Type: RubyType::Array(vec![
@@ -264,35 +348,36 @@ completion/
    ```
 
 5. **Polymorphic Type Inference Examples**
+
    ```ruby
    # Homogeneous array
    numbers = [1, 2, 3]  # Array<Integer>
    # RubyType::Array(vec![RubyType::integer()])
-   
+
    # Polymorphic array (your example)
    mixed = [1, 'a']  # Array<Integer | String>
    # RubyType::Array(vec![RubyType::integer(), RubyType::string()])
-   
+
    # Array operations preserve polymorphism
    mixed.push(3.14)  # Array<Integer | String | Float>
    # RubyType::Array(vec![RubyType::integer(), RubyType::string(), RubyType::float()])
    first_item = mixed.first  # Integer | String | Float | NilClass
-   
+
    # Homogeneous hash
    scores = {"alice" => 95, "bob" => 87}  # Hash<String, Integer>
    # RubyType::Hash(vec![RubyType::string()], vec![RubyType::integer()])
-   
+
    # Polymorphic hash (your example)
    config = {a: 1, 'abc': 'abc'}  # Hash<Symbol | String, Integer | String>
    # RubyType::Hash(
    #   vec![RubyType::symbol(), RubyType::string()],
    #   vec![RubyType::integer(), RubyType::string()]
    # )
-   
+
    # Hash operations
    keys = config.keys    # Array<Symbol | String>
    values = config.values  # Array<Integer | String>
-   
+
    # Method chaining with type flow
    result = [1, "2", 3.0]
      .map(&:to_s)        # Array<String>
@@ -300,14 +385,36 @@ completion/
      .first              # String | NilClass
    ```
 
+### Phase 1.5: YARD Integration ✅ COMPLETED
+
+1. **YARD Parser** ✅
+
+   - Parse @param, @return, @option tags
+   - Parse @yieldparam, @yieldreturn for blocks
+   - Parse @raise, @deprecated tags
+   - Handle generic types (Array<T>, Hash<K,V>)
+   - Handle union types (String | Integer)
+   - Track positions for diagnostics
+
+2. **YARD Inlay Hints** ✅
+
+   - Display parameter types from YARD docs
+   - Display return types (-> Type)
+   - Show descriptions in tooltips
+
+3. **YARD Diagnostics** ✅
+   - Warn when @param references non-existent parameter
+
 ### Phase 2: Method and Flow Analysis (Weeks 3-4)
 
-1. **Method Return Type Inference**
+1. **Method Return Type Inference** 🔜 NEXT
+
    - Analyze method bodies to infer return types
    - Handle multiple return paths with union types
    - Cache method signatures for performance
 
 2. **Method Call Type Resolution**
+
    - Resolve receiver types for method calls
    - Infer result types based on known method signatures
    - Handle built-in Ruby method types
@@ -324,12 +431,14 @@ completion/
 While Ruby's dynamic nature makes it challenging to apply classical type inference algorithms like Hindley-Milner directly, we can adapt some of its principles:
 
 #### Core Concepts from Hindley-Milner:
+
 1. **Unification**: Combining type constraints to find the most general type
 2. **Type Variables**: Representing unknown types that can be unified later
 3. **Constraint Generation**: Collecting type equations from the program
 4. **Constraint Solving**: Resolving type variables through unification
 
 #### Adaptation for Ruby:
+
 ```rust
 // Type variables for unknown types
 #[derive(Debug, Clone, PartialEq)]
@@ -366,7 +475,7 @@ impl TypeInference {
             }
         }
     }
-    
+
     pub fn generate_constraints(&mut self, node: &AstNode) -> Vec<TypeConstraint> {
         match node {
             AstNode::MethodCall { receiver, method, args } => {
@@ -385,18 +494,21 @@ impl TypeInference {
 ```
 
 #### Benefits of HM-inspired approach:
+
 - **Correctness**: Systematic constraint solving reduces type errors
 - **Completeness**: Can infer more precise types through unification
 - **Consistency**: Type variables ensure coherent type assignments
 - **Gradual Typing**: Can handle partially-typed Ruby code
 
 #### Challenges for Ruby:
+
 - **Duck Typing**: Ruby's structural typing doesn't map directly to HM
 - **Runtime Flexibility**: Method definitions can change at runtime
 - **Metaprogramming**: Dynamic method creation complicates static analysis
 - **Performance**: Full constraint solving may be too slow for LSP
 
 #### Hybrid Approach:
+
 We can combine HM principles with Ruby-specific heuristics:
 
 ```rust
@@ -415,7 +527,7 @@ impl HybridTypeInference {
         if let Some(simple_type) = self.simple_inference.try_infer(node) {
             return simple_type;
         }
-        
+
         // Fall back to constraint-based inference
         let constraints = self.generate_constraints(node);
         self.constraint_solver.solve(constraints)
@@ -428,6 +540,7 @@ This approach provides the benefits of formal type inference while maintaining t
 ### Other Relevant Algorithms
 
 #### Flow-Sensitive Type Analysis
+
 For Ruby's dynamic nature, flow-sensitive analysis can track type changes:
 
 ```ruby
@@ -439,6 +552,7 @@ end
 ```
 
 #### Cartesian Product Algorithm (CPA)
+
 Useful for analyzing method calls with multiple possible receiver types:
 
 ```ruby
@@ -452,6 +566,7 @@ process([1,2])   # Array#to_s -> String
 ```
 
 #### Abstract Interpretation
+
 Can handle Ruby's dynamic features through abstract domains:
 
 - **Value Domain**: Track possible values (useful for constants)
@@ -460,6 +575,7 @@ Can handle Ruby's dynamic features through abstract domains:
 - **Effect Domain**: Track side effects and mutations
 
 #### Gradual Typing (Siek & Taha)
+
 Perfect fit for Ruby's optional typing:
 
 ```ruby
@@ -474,6 +590,7 @@ end
 ```
 
 #### Type State Analysis
+
 Track object state changes through method calls:
 
 ```ruby
@@ -497,15 +614,15 @@ pub struct RubyTypeInference {
     // Phase 1: Basic inference
     literal_inference: LiteralTypeInference,
     method_signatures: MethodSignatureDatabase,
-    
+
     // Phase 2: Constraint-based
     type_variables: HashMap<String, RubyType>,
     constraints: Vec<TypeConstraint>,
-    
+
     // Phase 3: Flow-sensitive
     control_flow: ControlFlowGraph,
     type_states: HashMap<VariableId, Vec<RubyType>>,
-    
+
     // Phase 4: Advanced
     abstract_interpreter: AbstractInterpreter,
     shape_analyzer: ShapeAnalyzer,
@@ -530,6 +647,7 @@ Instead of inferring types purely from method usage patterns, we can adopt a **s
 ### Signature Definition Formats
 
 #### RBS-style Signatures
+
 ```ruby
 # @sig (String, Integer) -> String
 def format_message(message, count)
@@ -543,6 +661,7 @@ end
 ```
 
 #### Sorbet-style Signatures
+
 ```ruby
 sig { params(message: String, count: Integer).returns(String) }
 def format_message(message, count)
@@ -556,6 +675,7 @@ end
 ```
 
 #### YARD-style Documentation
+
 ```ruby
 # @param [String] message The message to format
 # @param [Integer] count The count to include
@@ -631,13 +751,13 @@ impl SignatureBasedTypeInference {
         self.signatures.insert(fqn, signature);
     }
 
-    pub fn infer_method_call(&self, 
-        receiver_type: &RubyType, 
-        method_name: &str, 
+    pub fn infer_method_call(&self,
+        receiver_type: &RubyType,
+        method_name: &str,
         args: &[RubyType]
     ) -> TypeInferenceResult {
         let method_fqn = self.resolve_method_fqn(receiver_type, method_name);
-        
+
         if let Some(signature) = self.signatures.get(&method_fqn) {
             // Validate call against signature
             match self.validate_call(signature, args) {
@@ -654,14 +774,14 @@ impl SignatureBasedTypeInference {
         // Validate argument count
         let required_params = signature.parameters.iter().filter(|p| !p.optional).count();
         let max_params = signature.parameters.len();
-        
+
         if args.len() < required_params {
             return Err(TypeError::TooFewArguments {
                 expected: required_params,
                 actual: args.len(),
             });
         }
-        
+
         if args.len() > max_params && !signature.parameters.iter().any(|p| p.splat || p.double_splat) {
             return Err(TypeError::TooManyArguments {
                 expected: max_params,
@@ -685,8 +805,8 @@ impl SignatureBasedTypeInference {
         Ok(())
     }
 
-    pub fn validate_return_type(&self, 
-        method_fqn: &FullyQualifiedName, 
+    pub fn validate_return_type(&self,
+        method_fqn: &FullyQualifiedName,
         actual_return: &RubyType
     ) -> Result<(), TypeError> {
         if let Some(signature) = self.signatures.get(method_fqn) {
@@ -704,12 +824,12 @@ impl SignatureBasedTypeInference {
         match (from, to) {
             // Exact match
             (a, b) if a == b => true,
-            
+
             // Nil can be assigned to any nilable type
             (RubyType::NilClass, RubyType::Union(types)) => {
                 types.contains(&RubyType::NilClass)
             },
-            
+
             // Union type assignment
             (RubyType::Union(from_types), to) => {
                 from_types.iter().all(|t| self.is_assignable(t, to))
@@ -717,18 +837,18 @@ impl SignatureBasedTypeInference {
             (from, RubyType::Union(to_types)) => {
                 to_types.iter().any(|t| self.is_assignable(from, t))
             },
-            
+
             // Class hierarchy (simplified)
             (RubyType::Class(from_class), RubyType::Class(to_class)) => {
                 self.is_subclass(from_class, to_class)
             },
-            
+
             // Generic types
             (RubyType::Array(from_elem), RubyType::Array(to_elem)) => {
                 from_elem.iter().zip(to_elem.iter())
                     .all(|(f, t)| self.is_assignable(f, t))
             },
-            
+
             _ => false,
         }
     }
@@ -759,7 +879,7 @@ impl TypeInferenceResult {
             warnings: vec![],
         }
     }
-    
+
     pub fn error(error: TypeError) -> Self {
         Self {
             inferred_type: None,
@@ -809,6 +929,7 @@ end
 5. **Phase 5**: Provide signature generation suggestions for unsigned methods
 
 #### RBS (Ruby Signature)
+
 RBS is Ruby's official type signature format that should be a primary source for type information:
 
 ```ruby
@@ -816,7 +937,7 @@ RBS is Ruby's official type signature format that should be a primary source for
 class User
   attr_reader name: String
   attr_reader age: Integer
-  
+
   def initialize: (name: String, age: Integer) -> void
   def greet: () -> String
   def adult?: () -> bool
@@ -829,6 +950,7 @@ end
 ```
 
 **Integration Strategy:**
+
 ```rust
 pub struct RBSTypeProvider {
     signatures: HashMap<FullyQualifiedName, RBSClassSignature>,
@@ -862,19 +984,19 @@ impl TypeInference {
     pub fn load_rbs_signatures(&mut self, rbs_path: &Path) -> Result<(), RBSError> {
         let rbs_content = std::fs::read_to_string(rbs_path)?;
         let signatures = self.rbs_parser.parse(&rbs_content)?;
-        
+
         for signature in signatures {
             self.rbs_provider.register_signature(signature);
         }
         Ok(())
     }
-    
+
     pub fn infer_with_rbs(&mut self, node: &AstNode) -> RubyType {
         // First try RBS signatures
         if let Some(rbs_type) = self.try_rbs_inference(node) {
             return self.convert_rbs_to_ruby_type(rbs_type);
         }
-        
+
         // Fall back to structural inference
         self.infer_type_structural(node)
     }
@@ -882,6 +1004,7 @@ impl TypeInference {
 ```
 
 #### Sorbet Type System
+
 Sorbet provides runtime and static type checking with inline type annotations:
 
 ```ruby
@@ -889,18 +1012,18 @@ Sorbet provides runtime and static type checking with inline type annotations:
 # typed: strict
 class User
   extend T::Sig
-  
+
   sig { params(name: String, age: Integer).void }
   def initialize(name, age)
     @name = T.let(name, String)
     @age = T.let(age, Integer)
   end
-  
+
   sig { returns(String) }
   def greet
     "Hello, #{@name}!"
   end
-  
+
   sig { returns(T::Boolean) }
   def adult?
     @age >= 18
@@ -915,6 +1038,7 @@ end
 ```
 
 **Sorbet Integration:**
+
 ```rust
 pub struct SorbetTypeProvider {
     sig_database: HashMap<MethodId, SorbetSignature>,
@@ -969,6 +1093,7 @@ impl TypeInference {
 ```
 
 #### Unified Type System Integration
+
 Combine RBS, Sorbet, and structural inference:
 
 ```rust
@@ -985,7 +1110,7 @@ impl UnifiedTypeInference {
         if let Some(cached_type) = self.type_cache.get(&node.id()) {
             return cached_type.clone();
         }
-        
+
         let inferred_type = match node {
             AstNode::MethodCall { receiver, method, .. } => {
                 // Priority order: Sorbet sig > RBS signature > structural inference
@@ -1009,15 +1134,15 @@ impl UnifiedTypeInference {
             }
             _ => self.structural_inference.infer_type(node)
         };
-        
+
         // Cache the result
         self.type_cache.insert(node.id(), inferred_type.clone());
         inferred_type
     }
-    
+
     pub fn validate_type_consistency(&self) -> Vec<TypeInconsistency> {
         let mut inconsistencies = Vec::new();
-        
+
         // Check RBS vs Sorbet conflicts
         for (method_id, rbs_sig) in &self.rbs_provider.method_signatures {
             if let Some(sorbet_sig) = self.sorbet_provider.sig_database.get(method_id) {
@@ -1030,13 +1155,14 @@ impl UnifiedTypeInference {
                 }
             }
         }
-        
+
         inconsistencies
     }
 }
 ```
 
 #### Benefits of Integration:
+
 1. **Accuracy**: Leverage explicit type annotations from developers
 2. **Completeness**: RBS covers standard library, Sorbet covers application code
 3. **Consistency**: Validate type annotations against inferred types
@@ -1044,6 +1170,7 @@ impl UnifiedTypeInference {
 5. **Gradual Adoption**: Works with partially typed codebases
 
 #### Implementation Priority:
+
 1. **RBS Integration**: Start with standard library signatures
 2. **Sorbet Parsing**: Extract sig blocks and T.let annotations
 3. **Type Conversion**: Map RBS/Sorbet types to internal representation
@@ -1053,11 +1180,13 @@ impl UnifiedTypeInference {
 ### Phase 3: Advanced Features (Weeks 5-6)
 
 1. **Class and Module Types**
+
    - Track class inheritance for type relationships
    - Handle module inclusion/extension
    - Instance variable type tracking
 
 2. **Collection Types**
+
    - Array element type inference
    - Hash key/value type tracking
    - Enumerable method type propagation
@@ -1070,6 +1199,7 @@ impl UnifiedTypeInference {
 ### Phase 4: Performance and Polish (Week 7)
 
 1. **Performance Optimization**
+
    - Incremental type analysis
    - Type cache implementation
    - Memory usage optimization
@@ -1095,22 +1225,22 @@ impl TypeInferenceVisitor {
     fn visit_local_variable_write(&mut self, node: &LocalVariableWriteNode) {
         let var_name = node.name();
         let value_type = self.infer_expression_type(&node.value());
-        
+
         // Create typed variable
         let variable = RubyVariable::new(var_name, RubyVariableType::Local(self.scope_tracker.get_lv_stack()));
-        
+
         // Store type information
         self.variable_types.insert(variable, value_type);
     }
-    
+
     fn visit_call_node(&mut self, node: &CallNode) -> RubyType {
         let receiver_type = self.infer_receiver_type(node.receiver());
         let method_name = node.name();
-        
+
         // Look up method signature or infer from receiver type
         self.resolve_method_return_type(receiver_type, method_name)
     }
-    
+
     fn infer_method_call(&mut self, receiver: &RubyType, method_name: &str, args: &[RubyType]) -> RubyType {
         // Special handling for class reference instantiation
         if let RubyType::ClassReference(class_name) = receiver {
@@ -1119,7 +1249,7 @@ impl TypeInferenceVisitor {
                 return RubyType::Class(class_name.clone());
             }
         }
-        
+
         // Special handling for union of class references
         if let RubyType::Union(types) = receiver {
             if method_name == "new" && types.iter().all(|t| matches!(t, RubyType::ClassReference(_))) {
@@ -1135,7 +1265,7 @@ impl TypeInferenceVisitor {
                 return RubyType::Union(instance_types);
             }
         }
-        
+
         // Special handling for array element access
         if let RubyType::Array(element_types) = receiver {
             if method_name == "first" || method_name == "last" || method_name == "[]" {
@@ -1148,17 +1278,17 @@ impl TypeInferenceVisitor {
                 }
             }
         }
-        
+
         // Check built-in method signatures
         if let Some(signature) = self.builtin_signatures.get_signature(receiver, method_name) {
             return signature.return_type.clone();
         }
-        
+
         // Fall back to indexed method information
         if let Some(method_info) = self.index.get_method(receiver, method_name) {
             return method_info.return_type.clone();
         }
-        
+
         RubyType::Unknown
     }
 }
@@ -1182,14 +1312,14 @@ impl RubyType {
             (type1, type2) => RubyType::Union(vec![type1, type2]),
         }
     }
-    
+
     pub fn narrow_to(self, target_type: RubyType) -> RubyType {
         match self {
             RubyType::Union(types) => {
                 let narrowed: Vec<_> = types.into_iter()
                     .filter(|t| t.is_compatible_with(&target_type))
                     .collect();
-                    
+
                 match narrowed.len() {
                     0 => RubyType::Unknown,
                     1 => narrowed.into_iter().next().unwrap(),
@@ -1214,18 +1344,18 @@ impl UnionTypeOps {
                 _ => flattened.push(ty),
             }
         }
-        
+
         // Remove duplicates
         flattened.sort();
         flattened.dedup();
-        
+
         match flattened.len() {
             0 => RubyType::Unknown,
             1 => flattened.into_iter().next().unwrap(),
             _ => RubyType::Union(flattened),
         }
     }
-    
+
     pub fn intersect(a: &RubyType, b: &RubyType) -> RubyType {
         // Type narrowing logic
         match (a, b) {
@@ -1240,7 +1370,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     // Handle polymorphic collection operations
     pub fn merge_array_element_types(arr1: &RubyType, arr2: &RubyType) -> RubyType {
         match (arr1, arr2) {
@@ -1252,7 +1382,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     pub fn merge_hash_types(hash1: &RubyType, hash2: &RubyType) -> RubyType {
         match (hash1, hash2) {
             (RubyType::Hash(k1, v1), RubyType::Hash(k2, v2)) => {
@@ -1265,7 +1395,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     // Extract element type from polymorphic array
     pub fn array_element_type(array_type: &RubyType) -> RubyType {
         match array_type {
@@ -1279,7 +1409,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     // Extract key/value types from polymorphic hash
     pub fn hash_key_type(hash_type: &RubyType) -> RubyType {
         match hash_type {
@@ -1293,7 +1423,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     pub fn hash_value_type(hash_type: &RubyType) -> RubyType {
         match hash_type {
             RubyType::Hash(_, value_types) => {
@@ -1306,7 +1436,7 @@ impl UnionTypeOps {
             _ => RubyType::Unknown,
         }
     }
-    
+
     fn is_assignable_to(from: &RubyType, to: &RubyType) -> bool {
         // Simplified assignability check
         match (from, to) {
@@ -1329,7 +1459,7 @@ pub struct BuiltinSignatures {
 impl BuiltinSignatures {
     pub fn new() -> Self {
         let mut signatures = HashMap::new();
-        
+
         // String methods
         signatures.insert(
             (RubyType::string(), "length".to_string()),
@@ -1355,7 +1485,7 @@ impl BuiltinSignatures {
             (RubyType::string(), "to_sym".to_string()),
             MethodSignature::new(vec![], RubyType::symbol())
         );
-        
+
         // Integer methods
         signatures.insert(
             (RubyType::integer(), "to_s".to_string()),
@@ -1365,7 +1495,7 @@ impl BuiltinSignatures {
             (RubyType::integer(), "to_f".to_string()),
             MethodSignature::new(vec![], RubyType::float())
         );
-        
+
         // Float methods
         signatures.insert(
             (RubyType::float(), "to_s".to_string()),
@@ -1375,7 +1505,7 @@ impl BuiltinSignatures {
             (RubyType::float(), "to_i".to_string()),
             MethodSignature::new(vec![], RubyType::integer())
         );
-        
+
         // Array methods (generic over element type T)
         // Note: In practice, we'd need a more sophisticated system to handle generics
         // For now, we'll register common array operations
@@ -1403,7 +1533,7 @@ impl BuiltinSignatures {
             (RubyType::Array(vec![RubyType::Any]), "push".to_string()),
             MethodSignature::new(vec![RubyType::Any], RubyType::Array(vec![RubyType::Any]))
         );
-        
+
         // Hash methods (generic over key type K and value type V)
         signatures.insert(
             (RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]), "length".to_string()),
@@ -1425,15 +1555,15 @@ impl BuiltinSignatures {
             (RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]), "values".to_string()),
             MethodSignature::new(vec![], RubyType::Array(vec![RubyType::Any]))
         );
-        
+
         // Symbol methods
         signatures.insert(
             (RubyType::symbol(), "to_s".to_string()),
             MethodSignature::new(vec![], RubyType::string())
         );
-        
+
         // Object methods (available on all classes)
-        for ruby_type in [RubyType::string(), RubyType::integer(), RubyType::float(), 
+        for ruby_type in [RubyType::string(), RubyType::integer(), RubyType::float(),
                          RubyType::nil_class(), RubyType::symbol()] {
             signatures.insert(
                 (ruby_type.clone(), "class".to_string()),
@@ -1448,7 +1578,7 @@ impl BuiltinSignatures {
                 MethodSignature::new(vec![], RubyType::string())
             );
         }
-        
+
         // Class methods (available on class references)
         // Note: The `new` method should return an instance of the class
         // This is handled specially in the type inference engine's infer_method_call method
@@ -1461,7 +1591,7 @@ impl BuiltinSignatures {
             (RubyType::class_reference("Class"), "superclass".to_string()),
             MethodSignature::new(vec![], RubyType::class_reference("Class"))
         );
-        
+
         Self { signatures }
     }
 }
@@ -1479,10 +1609,10 @@ pub async fn find_typed_completion_at_position(
 ) -> CompletionResponse {
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
     let (identifier, namespace, lv_stack) = analyzer.get_identifier(position);
-    
+
     // Get type information for the identifier
     let type_info = server.type_inference_engine.get_type_at_position(&uri, position);
-    
+
     match identifier {
         Some(Identifier::RubyMethod { receiver_kind: ReceiverKind::Expr, .. }) => {
             // Use type information to provide method completions
@@ -1496,7 +1626,7 @@ pub async fn find_typed_completion_at_position(
         }
         _ => {}
     }
-    
+
     // Fall back to existing completion logic
     find_completion_at_position(server, uri, position, context).await
 }
@@ -1505,12 +1635,14 @@ pub async fn find_typed_completion_at_position(
 ## Testing Strategy
 
 ### Unit Tests
+
 - Type inference for literals
 - Union type operations
 - Method signature resolution
 - Control flow type narrowing
 
 ### Integration Tests
+
 - End-to-end type inference scenarios
 - Performance benchmarks
 - Real Ruby code analysis
@@ -1547,7 +1679,7 @@ class User
   def initialize(name)
     @name = name  # @name: String
   end
-  
+
   def greet
     "Hello, #{@name}"  # Returns: String
   end
@@ -1560,16 +1692,19 @@ greeting = user.greet     # greeting: String
 ## Performance Considerations
 
 ### Incremental Analysis
+
 - Only re-analyze changed files and their dependencies
 - Cache type information between analysis runs
 - Use dependency tracking to minimize re-computation
 
 ### Memory Management
+
 - Limit type cache size with LRU eviction
 - Use weak references for cross-file type dependencies
 - Optimize union type storage to avoid duplication
 
 ### Lazy Evaluation
+
 - Defer complex type inference until needed
 - Prioritize visible code over background files
 - Use progressive enhancement for type accuracy
@@ -1577,17 +1712,20 @@ greeting = user.greet     # greeting: String
 ## Future Enhancements
 
 ### Type Annotations
+
 - Support for RBS (Ruby Signature) files
 - Inline type comments (e.g., `# @type [String]`)
 - Gradual typing integration
 
 ### Advanced Features
+
 - Generic type parameters
 - Structural typing for duck typing
 - Type-based refactoring suggestions
 - Cross-file type propagation
 
 ### IDE Integration
+
 - Type information in hover tooltips
 - Type-aware error detection
 - Smart refactoring based on types
@@ -1596,15 +1734,259 @@ greeting = user.greet     # greeting: String
 ## Migration Strategy
 
 ### Backward Compatibility
+
 - All existing LSP features continue to work
 - Type inference is additive, not replacing existing logic
 - Graceful degradation when type inference fails
 
 ### Rollout Plan
+
 1. **Alpha**: Basic literal type inference
 2. **Beta**: Method call type resolution
 3. **Stable**: Full union type support with performance optimization
 4. **Enhanced**: Advanced features and IDE integration
+
+## Detailed Implementation Roadmap
+
+This roadmap breaks down the remaining work into small, independently implementable steps. Each step should take 1-2 hours and provide incremental value.
+
+### Milestone 1: Variable Type Inference from Literals ✅ COMPLETED
+
+**Goal**: When a variable is assigned a literal value, infer and store its type.
+
+| Step | Task                                                           | Files to Modify                         | Status |
+| ---- | -------------------------------------------------------------- | --------------------------------------- | ------ |
+| 1.1  | Add LiteralAnalyzer to IndexVisitor for LocalVariableWriteNode | `local_variable_write_node.rs`          | ✅     |
+| 1.2  | Handle InstanceVariableWriteNode with literal inference        | `instance_variable_write_node.rs`       | ✅     |
+| 1.3  | Handle ClassVariableWriteNode with literal inference           | `class_variable_write_node.rs`          | ✅     |
+| 1.4  | Handle GlobalVariableWriteNode with literal inference          | `global_variable_write_node.rs`         | ✅     |
+| 1.5  | Add integration tests for variable type inference              | Each variable write node file has tests | ✅     |
+| 1.6  | Verify inlay hints display for typed variables                 | `inlay_hints.rs` (already implemented)  | ✅     |
+
+**Example outcome**:
+
+```ruby
+x = "hello"     # Inlay hint: x: String
+count = 42      # Inlay hint: count: Integer
+items = [1, 2]  # Inlay hint: items: Array<Integer>
+```
+
+### Milestone 2: Method Parameter Types from YARD
+
+**Goal**: Method parameters documented with YARD @param get their types tracked.
+
+| Step | Task                                                             | Files to Modify                        | Test                       |
+| ---- | ---------------------------------------------------------------- | -------------------------------------- | -------------------------- |
+| 2.1  | Create TypeContext struct to hold scope-local type info          | `type_inference/type_context.rs` (new) | Unit tests                 |
+| 2.2  | Populate TypeContext with YARD @param types when entering method | `index_visitor/def_node.rs`            | Test param types available |
+| 2.3  | Look up variable types from TypeContext during indexing          | `index_visitor/mod.rs`                 | Test variable lookup       |
+| 2.4  | Add integration tests for YARD parameter type propagation        | `test/`                                | Test type propagation      |
+
+**Example outcome**:
+
+```ruby
+# @param name [String] User's name
+# @param age [Integer] User's age
+def greet(name, age)
+  # name is known to be String
+  # age is known to be Integer
+end
+```
+
+### Milestone 3: Method Return Type Storage
+
+**Goal**: Store and expose method return types from YARD @return.
+
+| Step | Task                                                           | Files to Modify             | Test            |
+| ---- | -------------------------------------------------------------- | --------------------------- | --------------- |
+| 3.1  | Add `return_type: Option<RubyType>` field to EntryKind::Method | `entry_kind.rs`             | Compile check   |
+| 3.2  | Convert YARD @return types to RubyType during indexing         | `index_visitor/def_node.rs` | Test conversion |
+| 3.3  | Create YardTypeConverter utility                               | `yard/converter.rs` (new)   | Unit tests      |
+| 3.4  | Add method to get return type from method entry                | `entry_kind.rs`             | Test getter     |
+
+**Example outcome**:
+
+```ruby
+# @return [String] The greeting message
+def greet(name)
+  "Hello, #{name}"
+end
+# Method entry now has return_type: RubyType::string()
+```
+
+### Milestone 4: Simple Return Type Inference
+
+**Goal**: Infer return types from simple method bodies (no YARD needed).
+
+| Step | Task                                                  | Files to Modify             | Test                      |
+| ---- | ----------------------------------------------------- | --------------------------- | ------------------------- |
+| 4.1  | Detect single-expression method bodies                | `index_visitor/def_node.rs` | Test detection            |
+| 4.2  | Infer return type from last expression (literal case) | `index_visitor/def_node.rs` | Test `def foo; "hi"; end` |
+| 4.3  | Handle explicit `return` statements                   | `index_visitor/def_node.rs` | Test `return "hi"`        |
+| 4.4  | Create union for multiple return paths                | `index_visitor/def_node.rs` | Test conditional returns  |
+| 4.5  | Add tests for return type inference                   | `test/`                     | Comprehensive tests       |
+
+**Example outcome**:
+
+```ruby
+def answer
+  42
+end
+# Inferred return type: Integer (no YARD needed)
+```
+
+### Milestone 5: Method Call Type Resolution
+
+**Goal**: When calling a method, resolve the return type.
+
+| Step | Task                                                | Files to Modify                           | Test                  |
+| ---- | --------------------------------------------------- | ----------------------------------------- | --------------------- |
+| 5.1  | Create MethodResolver struct                        | `type_inference/method_resolver.rs` (new) | Unit tests            |
+| 5.2  | Implement receiver type resolution for method calls | `method_resolver.rs`                      | Test receiver types   |
+| 5.3  | Look up method by receiver type and name            | `method_resolver.rs`                      | Test method lookup    |
+| 5.4  | Return method's return type as call result type     | `method_resolver.rs`                      | Test return type      |
+| 5.5  | Integrate with IndexVisitor for assignment tracking | `index_visitor/mod.rs`                    | Test `x = obj.method` |
+| 5.6  | Add integration tests                               | `test/`                                   | Comprehensive tests   |
+
+**Example outcome**:
+
+```ruby
+# @return [String]
+def greet; "hi"; end
+
+message = greet  # message inferred as String
+```
+
+### Milestone 6: Built-in Method Signatures
+
+**Goal**: Provide type information for Ruby standard library methods.
+
+| Step | Task                                | Files to Modify                    | Test                      |
+| ---- | ----------------------------------- | ---------------------------------- | ------------------------- |
+| 6.1  | Create BuiltinSignatures struct     | `type_inference/builtins.rs` (new) | Unit tests                |
+| 6.2  | Add String method signatures        | `builtins.rs`                      | Test String methods       |
+| 6.3  | Add Integer/Float method signatures | `builtins.rs`                      | Test numeric methods      |
+| 6.4  | Add Array method signatures         | `builtins.rs`                      | Test Array methods        |
+| 6.5  | Add Hash method signatures          | `builtins.rs`                      | Test Hash methods         |
+| 6.6  | Add Object/Kernel method signatures | `builtins.rs`                      | Test common methods       |
+| 6.7  | Integrate with MethodResolver       | `method_resolver.rs`               | Test fallback to builtins |
+
+**Key methods to implement**:
+
+```rust
+// String
+"length" -> Integer
+"upcase" -> String
+"to_i" -> Integer
+"split" -> Array<String>
+
+// Integer
+"to_s" -> String
+"times" -> yields Integer
+
+// Array
+"first" -> T | nil
+"last" -> T | nil
+"length" -> Integer
+"map" -> Array<U>
+"select" -> Array<T>
+"push" -> Array<T>
+
+// Hash
+"keys" -> Array<K>
+"values" -> Array<V>
+"[]" -> V | nil
+```
+
+### Milestone 7: Control Flow Type Narrowing
+
+**Goal**: Narrow types based on conditional guards.
+
+| Step | Task                                      | Files to Modify                         | Test                |
+| ---- | ----------------------------------------- | --------------------------------------- | ------------------- |
+| 7.1  | Detect `is_a?` / `kind_of?` method calls  | `type_inference/flow_analyzer.rs` (new) | Test detection      |
+| 7.2  | Extract type argument from is_a? call     | `flow_analyzer.rs`                      | Test extraction     |
+| 7.3  | Create narrowed TypeContext for if-branch | `flow_analyzer.rs`                      | Test narrowing      |
+| 7.4  | Handle `nil?` checks                      | `flow_analyzer.rs`                      | Test nil narrowing  |
+| 7.5  | Handle `respond_to?` checks               | `flow_analyzer.rs`                      | Test duck typing    |
+| 7.6  | Handle negated conditions (unless, if !x) | `flow_analyzer.rs`                      | Test negation       |
+| 7.7  | Add integration tests                     | `test/`                                 | Comprehensive tests |
+
+**Example outcome**:
+
+```ruby
+def process(value)  # value: String | Integer | nil
+  if value.nil?
+    return  # value: nil here
+  end
+  # value: String | Integer here (nil removed)
+
+  if value.is_a?(String)
+    value.upcase  # value: String here
+  end
+end
+```
+
+### Milestone 8: Type-Aware Completion
+
+**Goal**: Use inferred types to provide better completions.
+
+| Step | Task                                     | Files to Modify              | Test                |
+| ---- | ---------------------------------------- | ---------------------------- | ------------------- |
+| 8.1  | Get receiver type at completion position | `capabilities/completion.rs` | Test type retrieval |
+| 8.2  | Filter methods by receiver type          | `completion.rs`              | Test filtering      |
+| 8.3  | Add type info to completion item detail  | `completion.rs`              | Test display        |
+| 8.4  | Sort completions by type relevance       | `completion.rs`              | Test sorting        |
+| 8.5  | Add integration tests                    | `test/`                      | Comprehensive tests |
+
+**Example outcome**:
+
+```ruby
+name = "hello"
+name.  # Completions show String methods: upcase, downcase, length, etc.
+```
+
+### Milestone 9: RBS Integration (Future)
+
+**Goal**: Load type information from .rbs files.
+
+| Step | Task                                       | Files to Modify          | Test                |
+| ---- | ------------------------------------------ | ------------------------ | ------------------- |
+| 9.1  | Add RBS file detection                     | `indexer/`               | Test file detection |
+| 9.2  | Create RBS parser (or use existing crate)  | `rbs/parser.rs` (new)    | Test parsing        |
+| 9.3  | Convert RBS types to RubyType              | `rbs/converter.rs` (new) | Test conversion     |
+| 9.4  | Load RBS signatures into BuiltinSignatures | `builtins.rs`            | Test loading        |
+| 9.5  | Handle RBS generics                        | `rbs/`                   | Test generics       |
+| 9.6  | Add integration tests                      | `test/`                  | Comprehensive tests |
+
+### Milestone 10: Type Diagnostics (Future)
+
+**Goal**: Show warnings/errors for type mismatches.
+
+| Step | Task                                          | Files to Modify   | Test                |
+| ---- | --------------------------------------------- | ----------------- | ------------------- |
+| 10.1 | Detect argument type mismatches at call sites | `diagnostics.rs`  | Test detection      |
+| 10.2 | Detect return type mismatches                 | `diagnostics.rs`  | Test detection      |
+| 10.3 | Add diagnostic codes and messages             | `diagnostics.rs`  | Test messages       |
+| 10.4 | Add quick-fix suggestions                     | `code_actions.rs` | Test fixes          |
+| 10.5 | Add integration tests                         | `test/`           | Comprehensive tests |
+
+---
+
+## Next Steps
+
+**Recommended starting point**: Milestone 1 (Variable Type Inference from Literals)
+
+This milestone:
+
+- Builds on existing LiteralAnalyzer
+- Provides immediate visible value (inlay hints)
+- Has no external dependencies
+- Is relatively simple to implement and test
+
+After completing Milestone 1, proceed to Milestone 3 (Method Return Type Storage) as it enables Milestone 5 (Method Call Resolution) which provides significant value.
+
+---
 
 ## Conclusion
 
