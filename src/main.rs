@@ -8,6 +8,7 @@ pub mod server;
 pub mod test;
 pub mod type_inference;
 pub mod types;
+pub mod yard;
 
 use std::process::exit;
 

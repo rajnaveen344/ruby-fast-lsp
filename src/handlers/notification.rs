@@ -225,9 +225,16 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
-    // Generate and publish diagnostics (syntax errors + unresolved entries)
+    // Generate and publish diagnostics (syntax errors + unresolved entries + YARD issues)
     let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&document);
     diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
+    // Add YARD documentation diagnostics (e.g., @param for non-existent parameters)
+    {
+        let index = lang_server.index.lock();
+        diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
+            &index, &uri,
+        ));
+    }
     lang_server
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
@@ -333,9 +340,16 @@ pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTe
     // Invalidate namespace tree cache
     lang_server.invalidate_namespace_tree_cache_debounced();
 
-    // Generate and publish full diagnostics (syntax + unresolved)
+    // Generate and publish full diagnostics (syntax + unresolved + YARD)
     let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
     diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
+    // Add YARD documentation diagnostics
+    {
+        let index = lang_server.index.lock();
+        diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
+            &index, &uri,
+        ));
+    }
     lang_server
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;

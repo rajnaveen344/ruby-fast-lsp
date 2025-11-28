@@ -2,10 +2,12 @@ use log::warn;
 use ruby_prism::DefNode;
 
 use crate::indexer::entry::{
-    entry_kind::EntryKind, Entry, MethodKind, MethodOrigin, MethodVisibility,
+    entry_kind::{EntryKind, MethodParamInfo, ParamKind},
+    Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+use crate::yard::YardParser;
 
 use super::IndexVisitor;
 
@@ -68,6 +70,27 @@ impl IndexVisitor {
         let name_location = node.name_loc();
         let location = self.document.prism_location_to_lsp_location(&name_location);
 
+        // Extract YARD documentation from comments preceding the method
+        let method_start_offset = node.location().start_offset();
+        let yard_doc = YardParser::extract_from_source(&self.document.content, method_start_offset);
+
+        // Extract parameter info with positions for inlay hints
+        let params = self.extract_method_params(node);
+
+        // Determine return type position (after closing paren or after method name if no params)
+        let return_type_position = if let Some(rparen_loc) = node.rparen_loc() {
+            Some(self.document.offset_to_position(rparen_loc.end_offset()))
+        } else if let Some(params_node) = node.parameters() {
+            // No parentheses, put after the last parameter
+            Some(
+                self.document
+                    .offset_to_position(params_node.location().end_offset()),
+            )
+        } else {
+            // No params at all, put after method name
+            Some(self.document.offset_to_position(name_location.end_offset()))
+        };
+
         let namespace_parts = self.scope_tracker.get_ns_stack();
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
@@ -79,11 +102,13 @@ impl IndexVisitor {
             location,
             kind: EntryKind::Method {
                 name: method.clone().into(),
-                parameters: vec![],
+                params,
                 owner: owner_fqn,
                 visibility: MethodVisibility::Public,
                 origin: MethodOrigin::Direct,
                 origin_visibility: None,
+                yard_doc,
+                return_type_position,
             },
         };
 
@@ -112,5 +137,118 @@ impl IndexVisitor {
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.scope_tracker.pop_lv_scope();
+    }
+
+    /// Extract parameter information from a DefNode for inlay hints
+    fn extract_method_params(&self, node: &DefNode) -> Vec<MethodParamInfo> {
+        let mut params = Vec::new();
+
+        let Some(params_node) = node.parameters() else {
+            return params;
+        };
+
+        // Process required parameters
+        for required in params_node.requireds().iter() {
+            if let Some(param) = required.as_required_parameter_node() {
+                let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                let end_pos = self
+                    .document
+                    .offset_to_position(param.location().end_offset());
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    end_pos,
+                    ParamKind::Required,
+                ));
+            }
+        }
+
+        // Process optional parameters (with default values)
+        for optional in params_node.optionals().iter() {
+            if let Some(param) = optional.as_optional_parameter_node() {
+                let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                // For optional params, position after the name, not after the default value
+                let end_pos = self
+                    .document
+                    .offset_to_position(param.name_loc().end_offset());
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    end_pos,
+                    ParamKind::Optional,
+                ));
+            }
+        }
+
+        // Process rest parameter (*args)
+        if let Some(rest) = params_node.rest() {
+            if let Some(param) = rest.as_rest_parameter_node() {
+                if let Some(name) = param.name() {
+                    let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                    if let Some(name_loc) = param.name_loc() {
+                        let end_pos = self.document.offset_to_position(name_loc.end_offset());
+                        params.push(MethodParamInfo::new(param_name, end_pos, ParamKind::Rest));
+                    }
+                }
+            }
+        }
+
+        // Process keyword parameters (name: or name: default)
+        // These already have a colon in the syntax, so we don't add another
+        for keyword in params_node.keywords().iter() {
+            if let Some(param) = keyword.as_required_keyword_parameter_node() {
+                let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                // Remove trailing colon from keyword param name for matching with YARD
+                let param_name = param_name.trim_end_matches(':').to_string();
+                let end_pos = self
+                    .document
+                    .offset_to_position(param.name_loc().end_offset());
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    end_pos,
+                    ParamKind::Keyword,
+                ));
+            } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
+                let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                // Remove trailing colon from keyword param name for matching with YARD
+                let param_name = param_name.trim_end_matches(':').to_string();
+                let end_pos = self
+                    .document
+                    .offset_to_position(param.name_loc().end_offset());
+                params.push(MethodParamInfo::new(
+                    param_name,
+                    end_pos,
+                    ParamKind::Keyword,
+                ));
+            }
+        }
+
+        // Process keyword rest parameter (**kwargs)
+        if let Some(kwrest) = params_node.keyword_rest() {
+            if let Some(param) = kwrest.as_keyword_rest_parameter_node() {
+                if let Some(name) = param.name() {
+                    let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                    if let Some(name_loc) = param.name_loc() {
+                        let end_pos = self.document.offset_to_position(name_loc.end_offset());
+                        params.push(MethodParamInfo::new(
+                            param_name,
+                            end_pos,
+                            ParamKind::KeywordRest,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Process block parameter (&block)
+        if let Some(block) = params_node.block() {
+            if let Some(name) = block.name() {
+                let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                if let Some(name_loc) = block.name_loc() {
+                    let end_pos = self.document.offset_to_position(name_loc.end_offset());
+                    params.push(MethodParamInfo::new(param_name, end_pos, ParamKind::Block));
+                }
+            }
+        }
+
+        params
     }
 }

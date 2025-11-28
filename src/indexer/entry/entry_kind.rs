@@ -5,13 +5,64 @@
 
 use std::fmt::Display;
 
+use tower_lsp::lsp_types::Position;
+
 use crate::indexer::entry::MixinRef;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeStack,
 };
+use crate::yard::YardMethodDoc;
 
 use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
+
+// ============================================================================
+// Method Parameter Info
+// ============================================================================
+
+/// The kind of method parameter for proper inlay hint formatting
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamKind {
+    /// Regular positional parameter: `def foo(name)`
+    Required,
+    /// Optional parameter with default: `def foo(name = "default")`
+    Optional,
+    /// Rest/splat parameter: `def foo(*args)`
+    Rest,
+    /// Keyword parameter: `def foo(name:)` or `def foo(name: "default")`
+    /// Already has a colon, so inlay hint should NOT add another
+    Keyword,
+    /// Keyword rest/double-splat: `def foo(**kwargs)`
+    KeywordRest,
+    /// Block parameter: `def foo(&block)`
+    Block,
+}
+
+/// Information about a method parameter including its position for inlay hints
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodParamInfo {
+    /// Parameter name
+    pub name: String,
+    /// Position at the end of the parameter name (for inlay hints)
+    pub end_position: Position,
+    /// The kind of parameter (affects hint formatting)
+    pub kind: ParamKind,
+}
+
+impl MethodParamInfo {
+    pub fn new(name: String, end_position: Position, kind: ParamKind) -> Self {
+        Self {
+            name,
+            end_position,
+            kind,
+        }
+    }
+
+    /// Returns true if this parameter already has a colon (keyword params)
+    pub fn has_colon(&self) -> bool {
+        self.kind == ParamKind::Keyword
+    }
+}
 
 // ============================================================================
 // EntryKind
@@ -33,11 +84,16 @@ pub enum EntryKind {
     },
     Method {
         name: RubyMethod,
-        parameters: Vec<String>,
+        /// Parameter info with names and positions for inlay hints
+        params: Vec<MethodParamInfo>,
         owner: FullyQualifiedName,
         visibility: MethodVisibility,
         origin: MethodOrigin,
         origin_visibility: Option<MethodVisibility>,
+        /// YARD documentation with type annotations
+        yard_doc: Option<YardMethodDoc>,
+        /// Position for return type hint (after closing paren or last param)
+        return_type_position: Option<Position>,
     },
     Constant {
         value: Option<String>,

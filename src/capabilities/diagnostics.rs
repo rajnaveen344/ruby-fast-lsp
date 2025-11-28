@@ -1,6 +1,8 @@
+use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::index::RubyIndex;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, warn};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 
 /// Generate diagnostics for a Ruby document using ruby-prism
 ///
@@ -89,6 +91,52 @@ pub fn generate_diagnostics(document: &RubyDocument) -> Vec<Diagnostic> {
         "Generated {} total diagnostics for document",
         diagnostics.len()
     );
+    diagnostics
+}
+
+/// Generate diagnostics for YARD documentation issues
+/// This checks for @param tags that reference non-existent parameters
+pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Some(entries) = index.file_entries.get(uri) {
+        for entry in entries {
+            if let EntryKind::Method {
+                yard_doc: Some(yard_doc),
+                params: method_params,
+                ..
+            } = &entry.kind
+            {
+                // Get actual parameter names from the method
+                let actual_param_names: Vec<&str> =
+                    method_params.iter().map(|p| p.name.as_str()).collect();
+
+                // Find YARD @param tags that don't match any actual parameter
+                let unmatched = yard_doc.find_unmatched_params(&actual_param_names);
+
+                for (yard_param, range) in unmatched {
+                    let diagnostic = Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                            "yard-unknown-param".to_string(),
+                        )),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message: format!(
+                            "YARD @param '{}' does not match any method parameter",
+                            yard_param.name
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    };
+                    diagnostics.push(diagnostic);
+                }
+            }
+        }
+    }
+
     diagnostics
 }
 
