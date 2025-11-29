@@ -283,6 +283,9 @@ pub async fn handle_did_change(
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
 
+    // Schedule debounced reindex for type inference (500ms delay)
+    lang_server.schedule_reindex_debounced(uri.clone(), final_content);
+
     // Invalidate namespace tree cache with debouncing
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to index change");
@@ -363,6 +366,9 @@ pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTe
                 .await;
         }
     }
+
+    // Request the client to refresh inlay hints after save
+    lang_server.refresh_inlay_hints().await;
 
     info!(
         "[PERF] Document save handler completed in {:?}",

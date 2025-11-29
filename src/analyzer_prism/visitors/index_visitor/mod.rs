@@ -9,6 +9,8 @@ use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
+use crate::type_inference::method_resolver::MethodResolver;
+use crate::type_inference::ruby_type::RubyType;
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
@@ -53,6 +55,26 @@ impl IndexVisitor {
     ) -> Self {
         self.dependency_tracker = Some(dependency_tracker);
         self
+    }
+
+    /// Infer type from a value node during indexing.
+    /// This is the shared type inference logic used by all variable write nodes.
+    pub fn infer_type_from_value(&self, value_node: &Node) -> RubyType {
+        // Try literal analysis first
+        if let Some(literal_type) = self.literal_analyzer.analyze_literal(value_node) {
+            return literal_type;
+        }
+
+        // Try method call resolution
+        if let Some(call_node) = value_node.as_call_node() {
+            let resolver = MethodResolver::new(self.index.clone());
+            if let Some(return_type) = resolver.resolve_call_type(&call_node) {
+                return return_type;
+            }
+        }
+
+        // Default to unknown type
+        RubyType::Unknown
     }
 }
 

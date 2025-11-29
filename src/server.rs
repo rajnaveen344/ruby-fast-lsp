@@ -73,6 +73,8 @@ pub struct RubyLanguageServer {
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
     pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
+    /// Timer for debounced reindexing on document changes
+    pub reindex_timer: Arc<Mutex<Option<(Instant, Url)>>>,
     pub workspace_uri: Arc<Mutex<Option<Url>>>,
     /// The process ID of the parent process (VS Code extension host).
     /// Used to detect when the parent process dies so we can exit cleanly.
@@ -90,6 +92,7 @@ impl RubyLanguageServer {
             config: Arc::new(Mutex::new(config)),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
+            reindex_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
         })
@@ -181,6 +184,16 @@ impl RubyLanguageServer {
         }
     }
 
+    /// Request the client to refresh inlay hints
+    pub async fn refresh_inlay_hints(&self) {
+        if let Some(client) = &self.client {
+            // Send workspace/inlayHint/refresh request to client
+            let _ = client
+                .send_request::<tower_lsp::lsp_types::request::InlayHintRefreshRequest>(())
+                .await;
+        }
+    }
+
     pub async fn handle_namespace_tree_request(
         &self,
         params: NamespaceTreeParams,
@@ -220,6 +233,55 @@ impl RubyLanguageServer {
             }
         });
     }
+
+    /// Schedule a debounced reindex for the given URI (500ms delay)
+    /// This allows type inference to work while typing without blocking
+    pub fn schedule_reindex_debounced(&self, uri: Url, content: String) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            // Set the timer to current time with the URI
+            {
+                let mut timer = server.reindex_timer.lock();
+                *timer = Some((Instant::now(), uri.clone()));
+            }
+
+            // Wait for the debounce period (500ms - longer than cache invalidation)
+            sleep(Duration::from_millis(500)).await;
+
+            // Check if we should still reindex (no newer timer was set for this URI)
+            let should_reindex = {
+                let timer = server.reindex_timer.lock();
+                if let Some((timer_instant, timer_uri)) = timer.as_ref() {
+                    timer_instant.elapsed() >= Duration::from_millis(500) && *timer_uri == uri
+                } else {
+                    false
+                }
+            };
+
+            if should_reindex {
+                use crate::handlers::helpers::{process_file, DefinitionOptions, ReferenceOptions};
+
+                debug!("Debounced reindex triggered for {}", uri.path());
+
+                // Do the reindex
+                let _ = process_file(
+                    &server,
+                    uri.clone(),
+                    &content,
+                    DefinitionOptions::default(),
+                    ReferenceOptions::default(),
+                );
+
+                // Clear the timer
+                *server.reindex_timer.lock() = None;
+
+                // Request the client to refresh inlay hints
+                server.refresh_inlay_hints().await;
+
+                debug!("Debounced reindex completed for {}", uri.path());
+            }
+        });
+    }
 }
 
 impl Default for RubyLanguageServer {
@@ -231,6 +293,7 @@ impl Default for RubyLanguageServer {
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
+            reindex_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
         }

@@ -11,17 +11,6 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use super::IndexVisitor;
 
 impl IndexVisitor {
-    /// Infer type from a value node during indexing
-    fn infer_type_from_value(&self, value_node: &Node) -> RubyType {
-        // Try literal analysis first
-        if let Some(literal_type) = self.literal_analyzer.analyze_literal(value_node) {
-            return literal_type;
-        }
-
-        // Default to unknown type
-        RubyType::Unknown
-    }
-
     /// Process local variable write with type inference
     fn process_local_variable_write(
         &mut self,

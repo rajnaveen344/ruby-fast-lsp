@@ -80,6 +80,16 @@
 - [x] Go-to-definition for types in YARD comments
 - [x] Type validation against index (warns if class/module doesn't exist)
 
+#### Phase 2: Method Call Type Resolution ✅ COMPLETED
+
+- [x] **Method Resolver** - `src/type_inference/method_resolver.rs`
+  - Resolves method call return types
+  - Handles receiver type resolution (literals, constants, variables)
+  - Looks up methods by owner FQN and method name
+  - Special handling for `.new` calls (returns instance type)
+  - Supports chained method calls
+  - Integrated with IndexVisitor for variable assignments
+
 ### 🔄 In Progress
 
 ### 📋 Planned Features
@@ -1865,68 +1875,93 @@ end
 # Inferred return type: NilClass | String | Integer
 ```
 
-### Milestone 5: Method Call Type Resolution
+### Milestone 5: Method Call Type Resolution ✅ COMPLETED
 
 **Goal**: When calling a method, resolve the return type.
 
-| Step | Task                                                | Files to Modify                           | Test                  |
-| ---- | --------------------------------------------------- | ----------------------------------------- | --------------------- |
-| 5.1  | Create MethodResolver struct                        | `type_inference/method_resolver.rs` (new) | Unit tests            |
-| 5.2  | Implement receiver type resolution for method calls | `method_resolver.rs`                      | Test receiver types   |
-| 5.3  | Look up method by receiver type and name            | `method_resolver.rs`                      | Test method lookup    |
-| 5.4  | Return method's return type as call result type     | `method_resolver.rs`                      | Test return type      |
-| 5.5  | Integrate with IndexVisitor for assignment tracking | `index_visitor/mod.rs`                    | Test `x = obj.method` |
-| 5.6  | Add integration tests                               | `test/`                                   | Comprehensive tests   |
+| Step | Task                                                | Files to Modify                           | Status |
+| ---- | --------------------------------------------------- | ----------------------------------------- | ------ |
+| 5.1  | Create MethodResolver struct                        | `type_inference/method_resolver.rs` (new) | ✅     |
+| 5.2  | Implement receiver type resolution for method calls | `method_resolver.rs`                      | ✅     |
+| 5.3  | Look up method by receiver type and name            | `method_resolver.rs`                      | ✅     |
+| 5.4  | Return method's return type as call result type     | `method_resolver.rs`                      | ✅     |
+| 5.5  | Integrate with IndexVisitor for assignment tracking | `index_visitor/mod.rs`                    | ✅     |
+| 5.6  | Add integration tests                               | `test/`                                   | ✅     |
+
+**Features implemented**:
+
+- MethodResolver struct for resolving method call return types
+- Receiver type resolution for: literals, constants, constant paths, variables, chained calls
+- Special handling for `.new` calls (returns instance of the class)
+- Method lookup by owner FQN and method name
+- Fallback to alternate method kind (instance vs class) if not found
+- Integration with IndexVisitor's `infer_type_from_value` for all variable types
+- Comprehensive unit tests (7 tests) and integration test
 
 **Example outcome**:
 
 ```ruby
-# @return [String]
-def greet; "hi"; end
+class User
+  # @return [String]
+  def name; @name; end
+end
 
-message = greet  # message inferred as String
+user = User.new      # user: User (instance type)
+name = user.name     # name: String (from method return type)
 ```
 
-### Milestone 6: Built-in Method Signatures
+### Milestone 6: RBS Support for Standard Library Types
 
-**Goal**: Provide type information for Ruby standard library methods.
+**Goal**: Parse RBS files from Ruby's standard library to provide type information for built-in methods.
 
-| Step | Task                                | Files to Modify                    | Test                      |
-| ---- | ----------------------------------- | ---------------------------------- | ------------------------- |
-| 6.1  | Create BuiltinSignatures struct     | `type_inference/builtins.rs` (new) | Unit tests                |
-| 6.2  | Add String method signatures        | `builtins.rs`                      | Test String methods       |
-| 6.3  | Add Integer/Float method signatures | `builtins.rs`                      | Test numeric methods      |
-| 6.4  | Add Array method signatures         | `builtins.rs`                      | Test Array methods        |
-| 6.5  | Add Hash method signatures          | `builtins.rs`                      | Test Hash methods         |
-| 6.6  | Add Object/Kernel method signatures | `builtins.rs`                      | Test common methods       |
-| 6.7  | Integrate with MethodResolver       | `method_resolver.rs`               | Test fallback to builtins |
+**Why RBS instead of hardcoded signatures?**
 
-**Key methods to implement**:
+- Ruby 3.0+ ships with RBS files containing type signatures for all core classes
+- Complete coverage of standard library methods
+- Maintained by the Ruby team - always up to date
+- Located at: `<rbs_gem_path>/core/` and `<rbs_gem_path>/stdlib/`
 
-```rust
-// String
-"length" -> Integer
-"upcase" -> String
-"to_i" -> Integer
-"split" -> Array<String>
+| Step | Task                                       | Files to Modify          | Test                      |
+| ---- | ------------------------------------------ | ------------------------ | ------------------------- |
+| 6.1  | Create RBS parser module                   | `rbs/parser.rs` (new)    | Unit tests for RBS syntax |
+| 6.2  | Parse class/module definitions             | `rbs/parser.rs`          | Test class parsing        |
+| 6.3  | Parse method signatures with return types  | `rbs/parser.rs`          | Test method parsing       |
+| 6.4  | Parse generic types (Array[T], Hash[K, V]) | `rbs/parser.rs`          | Test generic parsing      |
+| 6.5  | Convert RBS types to RubyType              | `rbs/converter.rs` (new) | Test type conversion      |
+| 6.6  | Discover RBS gem path at startup           | `rbs/loader.rs` (new)    | Test path discovery       |
+| 6.7  | Load core RBS files into index             | `rbs/loader.rs`          | Test core loading         |
+| 6.8  | Integrate with MethodResolver              | `method_resolver.rs`     | Test fallback to RBS      |
 
-// Integer
-"to_s" -> String
-"times" -> yields Integer
+**RBS Syntax Examples**:
 
-// Array
-"first" -> T | nil
-"last" -> T | nil
-"length" -> Integer
-"map" -> Array<U>
-"select" -> Array<T>
-"push" -> Array<T>
+```rbs
+# From core/string.rbs
+class String
+  def length: () -> Integer
+  def upcase: () -> String
+  def split: (?Regexp | String pattern, ?Integer limit) -> Array[String]
+  def []: (Integer index) -> String?
+        | (Range[Integer] range) -> String?
+end
 
-// Hash
-"keys" -> Array<K>
-"values" -> Array<V>
-"[]" -> V | nil
+# From core/array.rbs
+class Array[unchecked out Elem]
+  def first: () -> Elem?
+  def last: () -> Elem?
+  def length: () -> Integer
+  def map: [U] () { (Elem) -> U } -> Array[U]
+  def push: (*Elem) -> self
+end
 ```
+
+**Key files to parse**:
+
+- `core/string.rbs` - String methods
+- `core/integer.rbs` - Integer methods
+- `core/array.rbs` - Array methods
+- `core/hash.rbs` - Hash methods
+- `core/enumerable.rbs` - Enumerable mixin
+- `core/object.rbs` - Object base methods
 
 ### Milestone 7: Control Flow Type Narrowing
 
@@ -1976,18 +2011,19 @@ name = "hello"
 name.  # Completions show String methods: upcase, downcase, length, etc.
 ```
 
-### Milestone 9: RBS Integration (Future)
+### Milestone 9: Project RBS Support (Future)
 
-**Goal**: Load type information from .rbs files.
+**Goal**: Load type information from project-specific .rbs files.
 
-| Step | Task                                       | Files to Modify          | Test                |
-| ---- | ------------------------------------------ | ------------------------ | ------------------- |
-| 9.1  | Add RBS file detection                     | `indexer/`               | Test file detection |
-| 9.2  | Create RBS parser (or use existing crate)  | `rbs/parser.rs` (new)    | Test parsing        |
-| 9.3  | Convert RBS types to RubyType              | `rbs/converter.rs` (new) | Test conversion     |
-| 9.4  | Load RBS signatures into BuiltinSignatures | `builtins.rs`            | Test loading        |
-| 9.5  | Handle RBS generics                        | `rbs/`                   | Test generics       |
-| 9.6  | Add integration tests                      | `test/`                  | Comprehensive tests |
+Note: Milestone 6 covers RBS for standard library. This milestone extends RBS support to user-defined types.
+
+| Step | Task                                          | Files to Modify | Test                 |
+| ---- | --------------------------------------------- | --------------- | -------------------- |
+| 9.1  | Detect .rbs files in project (sig/ directory) | `indexer/`      | Test file detection  |
+| 9.2  | Parse project RBS files on startup            | `rbs/loader.rs` | Test project loading |
+| 9.3  | Watch for RBS file changes                    | `handlers/`     | Test file watching   |
+| 9.4  | Merge project types with stdlib types         | `rbs/loader.rs` | Test type merging    |
+| 9.5  | Add integration tests                         | `test/`         | Comprehensive tests  |
 
 ### Milestone 10: Type Diagnostics (Future)
 

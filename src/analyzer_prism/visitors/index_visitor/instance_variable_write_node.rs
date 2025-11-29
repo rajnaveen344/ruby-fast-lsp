@@ -36,9 +36,7 @@ impl IndexVisitor {
 
         // Infer type from value if available
         let inferred_type = if let Some(value) = value_node {
-            self.literal_analyzer
-                .analyze_literal(value)
-                .unwrap_or(RubyType::Unknown)
+            self.infer_type_from_value(value)
         } else {
             RubyType::Unknown
         };

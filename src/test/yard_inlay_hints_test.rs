@@ -311,3 +311,111 @@ async fn test_return_type_inference_without_yard() {
     println!("Has union hint: {}", has_union_hint);
     // Union hints should be present for methods like if_else_different_types
 }
+
+/// Test that method call resolution works for User.new -> User instance
+#[tokio::test]
+async fn test_method_call_type_resolution() {
+    let harness = TestHarness::new().await;
+
+    // Open the method call resolution fixture
+    harness.open_fixture_dir("method_call_resolution.rb").await;
+
+    let fixture_path = fixture_root().join("method_call_resolution.rb");
+    let _uri = path_to_uri(&fixture_path);
+
+    // Check that the index has the User class and its methods
+    let index = harness.server().index.lock();
+
+    // Verify User class is indexed
+    let user_entries: Vec<_> = index
+        .definitions
+        .iter()
+        .filter(|(fqn, _)| {
+            matches!(fqn, crate::types::fully_qualified_name::FullyQualifiedName::Constant(parts)
+            if parts.len() == 1 && parts[0].to_string() == "User")
+        })
+        .collect();
+
+    assert!(!user_entries.is_empty(), "User class should be indexed");
+
+    // Verify User#name method is indexed with return type
+    let name_methods: Vec<_> = index
+        .methods_by_name
+        .iter()
+        .filter(|(method, _)| method.to_string().contains("name"))
+        .collect();
+
+    println!(
+        "Found {} methods with 'name': {:?}",
+        name_methods.len(),
+        name_methods
+    );
+
+    // Verify User.find class method is indexed
+    let find_methods: Vec<_> = index
+        .methods_by_name
+        .iter()
+        .filter(|(method, _)| method.to_string().contains("find"))
+        .collect();
+
+    println!(
+        "Found {} methods with 'find': {:?}",
+        find_methods.len(),
+        find_methods
+    );
+}
+
+/// Test that variable type hints are correctly generated after indexing
+#[tokio::test]
+async fn test_variable_type_hints_after_indexing() {
+    use tower_lsp::lsp_types::{InlayHintParams, Range, TextDocumentIdentifier};
+
+    let harness = TestHarness::new().await;
+
+    // Open the method call resolution fixture
+    harness.open_fixture_dir("method_call_resolution.rb").await;
+
+    let fixture_path = fixture_root().join("method_call_resolution.rb");
+    let uri = path_to_uri(&fixture_path);
+
+    // Request inlay hints
+    let params = InlayHintParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range {
+            start: Position::new(0, 0),
+            end: Position::new(60, 0),
+        },
+        work_done_progress_params: Default::default(),
+    };
+
+    let hints = handle_inlay_hints(harness.server(), params).await;
+
+    // Print all hints for debugging
+    println!("Generated {} inlay hints", hints.len());
+    for hint in &hints {
+        println!("  Hint at {:?}: {:?}", hint.position, hint.label);
+    }
+
+    // Check for variable type hints
+    let hint_labels: Vec<String> = hints
+        .iter()
+        .filter_map(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Should have type hint for user variable (: User)
+    assert!(
+        hint_labels.iter().any(|h| h.contains("User")),
+        "Expected type hint containing 'User' for user variable, got: {:?}",
+        hint_labels
+    );
+
+    // Should have type hint for name variable (: String)
+    assert!(
+        hint_labels.iter().any(|h| h == ": String"),
+        "Expected ': String' type hint for name variable, got: {:?}",
+        hint_labels
+    );
+}

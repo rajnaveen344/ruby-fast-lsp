@@ -1,0 +1,558 @@
+//! Method Resolution for Type Inference
+//!
+//! Resolves method calls to their return types by:
+//! 1. Determining the receiver type
+//! 2. Looking up the method in the index
+//! 3. Returning the method's return type
+
+use parking_lot::Mutex;
+use ruby_prism::*;
+use std::sync::Arc;
+
+use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::MethodKind;
+use crate::indexer::index::RubyIndex;
+use crate::type_inference::literal_analyzer::LiteralAnalyzer;
+use crate::type_inference::ruby_type::RubyType;
+use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyConstant;
+
+/// Resolves method calls to their return types
+pub struct MethodResolver {
+    index: Arc<Mutex<RubyIndex>>,
+    literal_analyzer: LiteralAnalyzer,
+}
+
+impl MethodResolver {
+    pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
+        Self {
+            index,
+            literal_analyzer: LiteralAnalyzer::new(),
+        }
+    }
+
+    /// Resolve the return type of a method call
+    pub fn resolve_call_type(&self, call_node: &CallNode) -> Option<RubyType> {
+        let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();
+
+        // Get receiver type
+        let receiver_type = self.resolve_receiver_type(call_node.receiver())?;
+
+        // Look up method and get its return type
+        self.lookup_method_return_type(&receiver_type, &method_name)
+    }
+
+    /// Resolve the type of a receiver expression
+    fn resolve_receiver_type(&self, receiver: Option<Node>) -> Option<RubyType> {
+        let receiver = receiver?;
+
+        // Try literal analysis first
+        if let Some(literal_type) = self.literal_analyzer.analyze_literal(&receiver) {
+            return Some(literal_type);
+        }
+
+        // Handle constant read (e.g., User.new)
+        if let Some(const_read) = receiver.as_constant_read_node() {
+            let const_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+            // This is a class/module reference, not an instance
+            return Some(RubyType::ClassReference(FullyQualifiedName::Constant(
+                vec![RubyConstant::new(&const_name).ok()?],
+            )));
+        }
+
+        // Handle constant path (e.g., Foo::Bar.new)
+        if let Some(const_path) = receiver.as_constant_path_node() {
+            let fqn = self.resolve_constant_path(&const_path)?;
+            return Some(RubyType::ClassReference(fqn));
+        }
+
+        // Handle self
+        if receiver.as_self_node().is_some() {
+            // Self type depends on context - for now return Any
+            return Some(RubyType::Any);
+        }
+
+        // Handle local variable read
+        if let Some(local_var) = receiver.as_local_variable_read_node() {
+            let var_name = String::from_utf8_lossy(local_var.name().as_slice()).to_string();
+            return self.lookup_local_variable_type(&var_name);
+        }
+
+        // Handle instance variable read
+        if let Some(ivar) = receiver.as_instance_variable_read_node() {
+            let var_name = String::from_utf8_lossy(ivar.name().as_slice()).to_string();
+            return self.lookup_instance_variable_type(&var_name);
+        }
+
+        // Handle chained method calls (e.g., user.profile.name)
+        if let Some(call) = receiver.as_call_node() {
+            return self.resolve_call_type(&call);
+        }
+
+        // Handle parenthesized expressions
+        if let Some(parens) = receiver.as_parentheses_node() {
+            if let Some(body) = parens.body() {
+                return self.resolve_receiver_type(Some(body));
+            }
+        }
+
+        None
+    }
+
+    /// Resolve a constant path to an FQN
+    fn resolve_constant_path(&self, const_path: &ConstantPathNode) -> Option<FullyQualifiedName> {
+        let mut parts = Vec::new();
+
+        // Get the child constant name
+        if let Some(name_node) = const_path.name() {
+            let name = String::from_utf8_lossy(name_node.as_slice()).to_string();
+            parts.push(RubyConstant::new(&name).ok()?);
+        }
+
+        // Get parent parts
+        if let Some(parent) = const_path.parent() {
+            if let Some(parent_path) = parent.as_constant_path_node() {
+                if let Some(parent_fqn) = self.resolve_constant_path(&parent_path) {
+                    if let FullyQualifiedName::Constant(parent_parts) = parent_fqn {
+                        let mut full_parts = parent_parts;
+                        full_parts.extend(parts);
+                        return Some(FullyQualifiedName::Constant(full_parts));
+                    }
+                }
+            } else if let Some(const_read) = parent.as_constant_read_node() {
+                let parent_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+                let mut full_parts = vec![RubyConstant::new(&parent_name).ok()?];
+                full_parts.extend(parts);
+                return Some(FullyQualifiedName::Constant(full_parts));
+            }
+        } else {
+            // No parent means this is a top-level constant
+            return Some(FullyQualifiedName::Constant(parts));
+        }
+
+        None
+    }
+
+    /// Look up a method's return type given receiver type and method name
+    fn lookup_method_return_type(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        // Handle class reference calling .new
+        if method_name == "new" {
+            if let RubyType::ClassReference(fqn) = receiver_type {
+                // .new returns an instance of the class
+                return Some(RubyType::Class(fqn.clone()));
+            }
+        }
+
+        // Get the class/module FQN from the receiver type
+        let owner_fqn = match receiver_type {
+            RubyType::Class(fqn) => fqn.clone(),
+            RubyType::ClassReference(fqn) => fqn.clone(),
+            RubyType::Module(fqn) => fqn.clone(),
+            RubyType::ModuleReference(fqn) => fqn.clone(),
+            // For other types, we can't look up methods yet
+            _ => return None,
+        };
+
+        // Determine method kind based on receiver
+        let method_kind = match receiver_type {
+            RubyType::ClassReference(_) | RubyType::ModuleReference(_) => MethodKind::Class,
+            _ => MethodKind::Instance,
+        };
+
+        // Look up the method in the index
+        let index = self.index.lock();
+
+        // Try to find method by name
+        if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
+            if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                // Find method that belongs to the owner
+                for entry in entries {
+                    if let EntryKind::Method {
+                        owner, return_type, ..
+                    } = &entry.kind
+                    {
+                        if *owner == owner_fqn {
+                            return return_type.clone();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try instance method if class method not found (and vice versa)
+        let alt_kind = match method_kind {
+            MethodKind::Class => MethodKind::Instance,
+            MethodKind::Instance => MethodKind::Class,
+            MethodKind::Unknown => return None,
+        };
+
+        if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
+            if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                for entry in entries {
+                    if let EntryKind::Method {
+                        owner, return_type, ..
+                    } = &entry.kind
+                    {
+                        if *owner == owner_fqn {
+                            return return_type.clone();
+                        }
+                    }
+                }
+            }
+        }
+
+        // TODO: Search ancestor chain for inherited methods
+
+        None
+    }
+
+    /// Look up a local variable's type from the index
+    fn lookup_local_variable_type(&self, var_name: &str) -> Option<RubyType> {
+        log::debug!("Looking up local variable type for: {}", var_name);
+        let index = self.index.lock();
+
+        // Search through all definitions for local variables with matching name
+        for (fqn, entries) in &index.definitions {
+            if let FullyQualifiedName::LocalVariable(name, _) = fqn {
+                if name == var_name {
+                    log::debug!("Found local variable {} in index", var_name);
+                    for entry in entries {
+                        if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
+                            log::debug!("Variable {} has type: {:?}", var_name, r#type);
+                            if *r#type != RubyType::Unknown {
+                                return Some(r#type.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        log::debug!("Local variable {} not found in index", var_name);
+        None
+    }
+
+    /// Look up an instance variable's type from the index
+    fn lookup_instance_variable_type(&self, var_name: &str) -> Option<RubyType> {
+        let index = self.index.lock();
+
+        // Search through all definitions for instance variables with matching name
+        for (fqn, entries) in &index.definitions {
+            if let FullyQualifiedName::InstanceVariable(name) = fqn {
+                if name == var_name {
+                    for entry in entries {
+                        if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
+                            if *r#type != RubyType::Unknown {
+                                return Some(r#type.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::entry::entry_builder::EntryBuilder;
+    use crate::indexer::entry::{MethodKind, MethodOrigin, MethodVisibility};
+    use tower_lsp::lsp_types::{Location, Position, Range, Url};
+
+    fn create_test_index() -> Arc<Mutex<RubyIndex>> {
+        Arc::new(Mutex::new(RubyIndex::new()))
+    }
+
+    fn create_test_location() -> Location {
+        Location {
+            uri: Url::parse("file:///test.rb").unwrap(),
+            range: Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 10),
+            },
+        }
+    }
+
+    #[test]
+    fn test_method_resolver_creation() {
+        let index = create_test_index();
+        let _resolver = MethodResolver::new(index);
+        // Just verify it can be created
+        assert!(true);
+    }
+
+    #[test]
+    fn test_class_new_returns_instance() {
+        let index = create_test_index();
+        let resolver = MethodResolver::new(index);
+
+        // Test that calling .new on a class reference returns an instance
+        let class_ref =
+            RubyType::ClassReference(FullyQualifiedName::Constant(vec![RubyConstant::new(
+                "User",
+            )
+            .unwrap()]));
+
+        let result = resolver.lookup_method_return_type(&class_ref, "new");
+
+        assert!(result.is_some());
+        if let Some(RubyType::Class(fqn)) = result {
+            assert_eq!(
+                fqn,
+                FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()])
+            );
+        } else {
+            panic!("Expected Class type");
+        }
+    }
+
+    #[test]
+    fn test_lookup_method_with_return_type() {
+        let index = create_test_index();
+
+        // Add a User class with a name method that returns String
+        let user_fqn = FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()]);
+
+        let method_entry = EntryBuilder::new()
+            .fqn(FullyQualifiedName::method(
+                vec![RubyConstant::new("User").unwrap()],
+                RubyMethod::new("name", MethodKind::Instance).unwrap(),
+            ))
+            .location(create_test_location())
+            .kind(EntryKind::Method {
+                name: RubyMethod::new("name", MethodKind::Instance).unwrap(),
+                params: vec![],
+                owner: user_fqn.clone(),
+                visibility: MethodVisibility::Public,
+                origin: MethodOrigin::Direct,
+                origin_visibility: None,
+                yard_doc: None,
+                return_type_position: None,
+                return_type: Some(RubyType::string()),
+                param_types: vec![],
+            })
+            .build()
+            .unwrap();
+
+        {
+            let mut idx = index.lock();
+            idx.add_entry(method_entry);
+        }
+
+        let resolver = MethodResolver::new(index);
+
+        // Test looking up the name method on a User instance
+        let user_instance = RubyType::Class(user_fqn);
+        let result = resolver.lookup_method_return_type(&user_instance, "name");
+
+        assert!(result.is_some(), "Should find name method");
+        assert_eq!(result.unwrap(), RubyType::string());
+    }
+
+    #[test]
+    fn test_lookup_class_method() {
+        let index = create_test_index();
+
+        // Add a User class with a find class method that returns User
+        let user_fqn = FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()]);
+
+        let method_entry = EntryBuilder::new()
+            .fqn(FullyQualifiedName::method(
+                vec![RubyConstant::new("User").unwrap()],
+                RubyMethod::new("find", MethodKind::Class).unwrap(),
+            ))
+            .location(create_test_location())
+            .kind(EntryKind::Method {
+                name: RubyMethod::new("find", MethodKind::Class).unwrap(),
+                params: vec![],
+                owner: user_fqn.clone(),
+                visibility: MethodVisibility::Public,
+                origin: MethodOrigin::Direct,
+                origin_visibility: None,
+                yard_doc: None,
+                return_type_position: None,
+                return_type: Some(RubyType::Class(user_fqn.clone())),
+                param_types: vec![],
+            })
+            .build()
+            .unwrap();
+
+        {
+            let mut idx = index.lock();
+            idx.add_entry(method_entry);
+        }
+
+        let resolver = MethodResolver::new(index);
+
+        // Test looking up the find class method on User class reference
+        let user_class_ref = RubyType::ClassReference(user_fqn.clone());
+        let result = resolver.lookup_method_return_type(&user_class_ref, "find");
+
+        assert!(result.is_some(), "Should find find class method");
+        if let Some(RubyType::Class(fqn)) = result {
+            assert_eq!(fqn, user_fqn);
+        } else {
+            panic!("Expected Class type for find result");
+        }
+    }
+
+    #[test]
+    fn test_lookup_nonexistent_method() {
+        let index = create_test_index();
+        let resolver = MethodResolver::new(index);
+
+        let user_fqn = FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()]);
+        let user_instance = RubyType::Class(user_fqn);
+
+        let result = resolver.lookup_method_return_type(&user_instance, "nonexistent");
+        assert!(result.is_none(), "Should not find nonexistent method");
+    }
+
+    #[test]
+    fn test_lookup_method_without_return_type() {
+        let index = create_test_index();
+
+        // Add a method without a return type
+        let user_fqn = FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()]);
+
+        let method_entry = EntryBuilder::new()
+            .fqn(FullyQualifiedName::method(
+                vec![RubyConstant::new("User").unwrap()],
+                RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
+            ))
+            .location(create_test_location())
+            .kind(EntryKind::Method {
+                name: RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
+                params: vec![],
+                owner: user_fqn.clone(),
+                visibility: MethodVisibility::Public,
+                origin: MethodOrigin::Direct,
+                origin_visibility: None,
+                yard_doc: None,
+                return_type_position: None,
+                return_type: None, // No return type
+                param_types: vec![],
+            })
+            .build()
+            .unwrap();
+
+        {
+            let mut idx = index.lock();
+            idx.add_entry(method_entry);
+        }
+
+        let resolver = MethodResolver::new(index);
+
+        let user_instance = RubyType::Class(user_fqn);
+        let result = resolver.lookup_method_return_type(&user_instance, "unknown_return");
+
+        assert!(
+            result.is_none(),
+            "Should return None for method without return type"
+        );
+    }
+
+    #[test]
+    fn test_nested_class_new() {
+        let index = create_test_index();
+        let resolver = MethodResolver::new(index);
+
+        // Test that Foo::Bar.new returns Foo::Bar instance
+        let nested_fqn = FullyQualifiedName::Constant(vec![
+            RubyConstant::new("Foo").unwrap(),
+            RubyConstant::new("Bar").unwrap(),
+        ]);
+
+        let class_ref = RubyType::ClassReference(nested_fqn.clone());
+        let result = resolver.lookup_method_return_type(&class_ref, "new");
+
+        assert!(result.is_some());
+        if let Some(RubyType::Class(fqn)) = result {
+            assert_eq!(fqn, nested_fqn);
+        } else {
+            panic!("Expected Class type for nested class");
+        }
+    }
+
+    #[test]
+    fn test_lookup_local_variable_type() {
+        let index = create_test_index();
+
+        // Add a local variable with a known type
+        use crate::types::scope::LVScopeStack;
+
+        let scope_stack = LVScopeStack::default();
+        let var_fqn =
+            FullyQualifiedName::local_variable("user".to_string(), scope_stack.clone()).unwrap();
+
+        let var_entry = EntryBuilder::new()
+            .fqn(var_fqn)
+            .location(create_test_location())
+            .kind(EntryKind::LocalVariable {
+                name: "user".to_string(),
+                scope_stack,
+                r#type: RubyType::Class(FullyQualifiedName::Constant(vec![RubyConstant::new(
+                    "User",
+                )
+                .unwrap()])),
+            })
+            .build()
+            .unwrap();
+
+        {
+            let mut idx = index.lock();
+            idx.add_entry(var_entry);
+        }
+
+        let resolver = MethodResolver::new(index);
+
+        let result = resolver.lookup_local_variable_type("user");
+        assert!(result.is_some(), "Should find local variable 'user'");
+
+        if let Some(RubyType::Class(fqn)) = result {
+            assert_eq!(
+                fqn,
+                FullyQualifiedName::Constant(vec![RubyConstant::new("User").unwrap()])
+            );
+        } else {
+            panic!("Expected Class type for user variable");
+        }
+    }
+
+    #[test]
+    fn test_lookup_instance_variable_type() {
+        let index = create_test_index();
+
+        // Add an instance variable with a known type
+        let ivar_fqn = FullyQualifiedName::instance_variable("@name".to_string()).unwrap();
+
+        let ivar_entry = EntryBuilder::new()
+            .fqn(ivar_fqn)
+            .location(create_test_location())
+            .kind(EntryKind::InstanceVariable {
+                name: "@name".to_string(),
+                r#type: RubyType::string(),
+            })
+            .build()
+            .unwrap();
+
+        {
+            let mut idx = index.lock();
+            idx.add_entry(ivar_entry);
+        }
+
+        let resolver = MethodResolver::new(index);
+
+        let result = resolver.lookup_instance_variable_type("@name");
+        assert!(result.is_some(), "Should find instance variable '@name'");
+        assert_eq!(result.unwrap(), RubyType::string());
+    }
+}
