@@ -1823,17 +1823,31 @@ end
 #   return_type: Some(RubyType::string())
 ```
 
-### Milestone 4: Simple Return Type Inference
+### Milestone 4: Simple Return Type Inference ✅ COMPLETED
 
 **Goal**: Infer return types from simple method bodies (no YARD needed).
 
-| Step | Task                                                  | Files to Modify             | Test                      |
-| ---- | ----------------------------------------------------- | --------------------------- | ------------------------- |
-| 4.1  | Detect single-expression method bodies                | `index_visitor/def_node.rs` | Test detection            |
-| 4.2  | Infer return type from last expression (literal case) | `index_visitor/def_node.rs` | Test `def foo; "hi"; end` |
-| 4.3  | Handle explicit `return` statements                   | `index_visitor/def_node.rs` | Test `return "hi"`        |
-| 4.4  | Create union for multiple return paths                | `index_visitor/def_node.rs` | Test conditional returns  |
-| 4.5  | Add tests for return type inference                   | `test/`                     | Comprehensive tests       |
+| Step | Task                                                  | Files to Modify                          | Status |
+| ---- | ----------------------------------------------------- | ---------------------------------------- | ------ |
+| 4.1  | Create ReturnTypeInferrer module                      | `type_inference/return_type_inferrer.rs` | ✅     |
+| 4.2  | Infer return type from last expression (literal case) | `return_type_inferrer.rs`                | ✅     |
+| 4.3  | Handle explicit `return` statements                   | `return_type_inferrer.rs`                | ✅     |
+| 4.4  | Create union for multiple return paths                | `return_type_inferrer.rs`                | ✅     |
+| 4.5  | Handle conditionals (if/unless/case)                  | `return_type_inferrer.rs`                | ✅     |
+| 4.6  | Handle begin/rescue blocks                            | `return_type_inferrer.rs`                | ✅     |
+| 4.7  | Integrate with IndexVisitor                           | `index_visitor/def_node.rs`              | ✅     |
+| 4.8  | Update inlay hints to show inferred return types      | `capabilities/inlay_hints.rs`            | ✅     |
+| 4.9  | Add comprehensive tests                               | `return_type_inferrer.rs`, `test/`       | ✅     |
+
+**Features implemented**:
+
+- Analyzes method body to infer return type from literals
+- Collects all explicit `return` statements
+- Gets implicit return type from last expression
+- Creates union types for multiple return paths (early returns, conditionals)
+- Handles control flow: if/unless/elsif/else, case/when, begin/rescue
+- YARD return types take precedence over inferred types
+- Inferred types are displayed in inlay hints
 
 **Example outcome**:
 
@@ -1842,6 +1856,13 @@ def answer
   42
 end
 # Inferred return type: Integer (no YARD needed)
+
+def process(value)
+  return nil if value.nil?
+  return "error" if value < 0
+  42
+end
+# Inferred return type: NilClass | String | Integer
 ```
 
 ### Milestone 5: Method Call Type Resolution

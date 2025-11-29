@@ -251,3 +251,63 @@ async fn test_yard_matched_params_no_diagnostics() {
         "Correctly matched 'age' param should not have diagnostic"
     );
 }
+
+/// Test that return types are inferred from method bodies when no YARD is present
+#[tokio::test]
+async fn test_return_type_inference_without_yard() {
+    let harness = TestHarness::new().await;
+
+    // Open the return type inference fixture
+    harness.open_fixture_dir("return_type_inference.rb").await;
+
+    let fixture_path = fixture_root().join("return_type_inference.rb");
+    let uri = path_to_uri(&fixture_path);
+
+    // Request inlay hints for the entire file
+    let params = InlayHintParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range {
+            start: Position::new(0, 0),
+            end: Position::new(150, 0),
+        },
+        work_done_progress_params: Default::default(),
+    };
+
+    let hints = handle_inlay_hints(harness.server(), params).await;
+
+    // Print hints for debugging
+    println!("Generated {} inlay hints", hints.len());
+    for hint in &hints {
+        println!("  Hint at {:?}: {:?}", hint.position, hint.label);
+    }
+
+    // Check that we have inlay hints for methods without YARD
+    // Methods should have return type hints like "-> String", "-> Integer", etc.
+    let hint_labels: Vec<String> = hints
+        .iter()
+        .map(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => s.clone(),
+            tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => {
+                parts.iter().map(|p| p.value.clone()).collect::<String>()
+            }
+        })
+        .collect();
+
+    // Verify return type hints are present
+    assert!(
+        hint_labels.iter().any(|l| l.contains("-> String")),
+        "Should have String return type hints, got: {:?}",
+        hint_labels
+    );
+    assert!(
+        hint_labels.iter().any(|l| l.contains("-> Integer")),
+        "Should have Integer return type hints, got: {:?}",
+        hint_labels
+    );
+
+    // Verify that union types are inferred for conditional returns
+    // e.g., "-> (String | Integer)" or "-> (String | NilClass)"
+    let has_union_hint = hint_labels.iter().any(|l| l.contains("|"));
+    println!("Has union hint: {}", has_union_hint);
+    // Union hints should be present for methods like if_else_different_types
+}

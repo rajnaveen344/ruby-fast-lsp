@@ -6,6 +6,7 @@ use crate::indexer::entry::{
     Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
 use crate::type_inference::ruby_type::RubyType;
+use crate::type_inference::ReturnTypeInferrer;
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 use crate::yard::{YardParser, YardTypeConverter};
@@ -99,8 +100,8 @@ impl IndexVisitor {
         let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
 
         // Convert YARD types to RubyType for type inference
-        let (return_type, param_types) = if let Some(ref doc) = yard_doc {
-            // Convert return type
+        let (yard_return_type, param_types) = if let Some(ref doc) = yard_doc {
+            // Convert return type from YARD
             let return_type = if !doc.returns.is_empty() {
                 let all_return_types: Vec<String> =
                     doc.returns.iter().flat_map(|r| r.types.clone()).collect();
@@ -133,6 +134,12 @@ impl IndexVisitor {
         } else {
             (None, Vec::new())
         };
+
+        // If no YARD return type, try to infer from method body
+        let return_type = yard_return_type.or_else(|| {
+            let inferrer = ReturnTypeInferrer::new();
+            inferrer.infer_return_type(node.body())
+        });
 
         let entry = Entry {
             fqn: fqn.clone(),

@@ -51,52 +51,67 @@ pub async fn handle_inlay_hints(
                         all_hints.push(type_hint);
                     }
                 }
-                // Generate inlay hints for methods with YARD documentation
+                // Generate inlay hints for methods
                 EntryKind::Method {
-                    yard_doc: Some(doc),
+                    yard_doc,
                     params,
                     return_type_position,
+                    return_type,
                     ..
                 } => {
-                    // Generate individual type hints for each parameter
-                    for param in params {
-                        if let Some(type_str) = doc.get_param_type_str(&param.name) {
-                            let yard_param = doc.params.iter().find(|p| p.name == param.name);
-                            // Keyword params already have a colon, so just add space + type
-                            // Other params need ": type"
-                            let label = if param.has_colon() {
-                                format!(" {}", type_str)
-                            } else {
-                                format!(": {}", type_str)
-                            };
-                            let hint = InlayHint {
-                                position: param.end_position,
-                                label: InlayHintLabel::String(label),
-                                kind: Some(InlayHintKind::TYPE),
-                                text_edits: None,
-                                tooltip: yard_param
-                                    .and_then(|p| p.description.clone())
-                                    .map(InlayHintTooltip::String),
-                                padding_left: None,
-                                padding_right: None,
-                                data: None,
-                            };
-                            all_hints.push(hint);
+                    // Generate individual type hints for each parameter (from YARD only for now)
+                    if let Some(doc) = yard_doc {
+                        for param in params {
+                            if let Some(type_str) = doc.get_param_type_str(&param.name) {
+                                let yard_param = doc.params.iter().find(|p| p.name == param.name);
+                                // Keyword params already have a colon, so just add space + type
+                                // Other params need ": type"
+                                let label = if param.has_colon() {
+                                    format!(" {}", type_str)
+                                } else {
+                                    format!(": {}", type_str)
+                                };
+                                let hint = InlayHint {
+                                    position: param.end_position,
+                                    label: InlayHintLabel::String(label),
+                                    kind: Some(InlayHintKind::TYPE),
+                                    text_edits: None,
+                                    tooltip: yard_param
+                                        .and_then(|p| p.description.clone())
+                                        .map(InlayHintTooltip::String),
+                                    padding_left: None,
+                                    padding_right: None,
+                                    data: None,
+                                };
+                                all_hints.push(hint);
+                            }
                         }
                     }
 
                     // Generate return type hint at the end of the method signature
-                    if let (Some(return_type_str), Some(pos)) =
-                        (doc.format_return_type(), return_type_position)
-                    {
+                    // Priority: YARD documentation > inferred return type
+                    let return_type_str = yard_doc
+                        .as_ref()
+                        .and_then(|doc| doc.format_return_type())
+                        .or_else(|| {
+                            return_type.as_ref().and_then(|rt| {
+                                if *rt != RubyType::Unknown && *rt != RubyType::Any {
+                                    Some(rt.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        });
+
+                    if let (Some(type_str), Some(pos)) = (return_type_str, return_type_position) {
                         let hint = InlayHint {
                             position: *pos,
-                            label: InlayHintLabel::String(format!(" -> {}", return_type_str)),
+                            label: InlayHintLabel::String(format!(" -> {}", type_str)),
                             kind: Some(InlayHintKind::TYPE),
                             text_edits: None,
-                            tooltip: doc
-                                .get_return_description()
-                                .cloned()
+                            tooltip: yard_doc
+                                .as_ref()
+                                .and_then(|doc| doc.get_return_description().cloned())
                                 .map(InlayHintTooltip::String),
                             padding_left: None,
                             padding_right: None,
