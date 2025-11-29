@@ -92,6 +92,54 @@
 
 ### 🔄 In Progress
 
+#### Phase 3: Control Flow Type Narrowing (Milestone 7)
+
+- [x] **CFG Data Structures** - `src/type_inference/cfg/graph.rs`
+
+  - BasicBlock, BlockId, BlockLocation
+  - Statement and StatementKind
+  - CfgEdge and EdgeKind
+  - ControlFlowGraph with entry/exit tracking
+
+- [x] **CFG Builder** - `src/type_inference/cfg/builder.rs`
+
+  - Builds CFG from DefNode (method definitions)
+  - Handles if/unless/case/while/until/for statements
+  - Processes return statements and begin/rescue blocks
+  - Extracts method parameters with types
+
+- [x] **Type Guards** - `src/type_inference/cfg/guards.rs`
+
+  - IsA, IsNil, NotNil, RespondsTo guards
+  - CaseMatch for case/when patterns
+  - Boolean combinations (And, Or, Not)
+  - Guard negation for else branches
+
+- [x] **Dataflow Analysis** - `src/type_inference/cfg/dataflow.rs`
+
+  - TypeState for tracking variable types
+  - Forward dataflow analysis with fixed-point iteration
+  - Type state merging at join points
+  - Guard application for type narrowing
+
+- [x] **RubyType Extensions** - `src/type_inference/ruby_type.rs`
+
+  - `union_with()` for merging types
+  - `subtract()` for removing types
+  - `remove_nil()` for nil narrowing (existing)
+
+- [x] **TypeNarrowingEngine** - `src/type_inference/cfg/engine.rs`
+
+  - File lifecycle management (open/close/change)
+  - CFG caching per open file
+  - Lazy analysis on demand
+  - Position-based type queries
+
+- [x] **LSP Integration** - `src/server.rs`, `src/handlers/notification.rs`
+  - TypeNarrowingEngine added to RubyLanguageServer
+  - File open/close/change tracking
+  - Ready for inlay hints and completions integration
+
 ### 📋 Planned Features
 
 See **Detailed Implementation Roadmap** section below.
@@ -2007,19 +2055,59 @@ end
 - `core/enumerable.rbs` - Enumerable mixin
 - `core/object.rbs` - Object base methods
 
-### Milestone 7: Control Flow Type Narrowing
+### Milestone 7: Control Flow Type Narrowing ✅ COMPLETED
 
-**Goal**: Narrow types based on conditional guards.
+**Goal**: Narrow types based on conditional guards using Control Flow Graph (CFG) analysis.
 
-| Step | Task                                      | Files to Modify                         | Test                |
-| ---- | ----------------------------------------- | --------------------------------------- | ------------------- |
-| 7.1  | Detect `is_a?` / `kind_of?` method calls  | `type_inference/flow_analyzer.rs` (new) | Test detection      |
-| 7.2  | Extract type argument from is_a? call     | `flow_analyzer.rs`                      | Test extraction     |
-| 7.3  | Create narrowed TypeContext for if-branch | `flow_analyzer.rs`                      | Test narrowing      |
-| 7.4  | Handle `nil?` checks                      | `flow_analyzer.rs`                      | Test nil narrowing  |
-| 7.5  | Handle `respond_to?` checks               | `flow_analyzer.rs`                      | Test duck typing    |
-| 7.6  | Handle negated conditions (unless, if !x) | `flow_analyzer.rs`                      | Test negation       |
-| 7.7  | Add integration tests                     | `test/`                                 | Comprehensive tests |
+**Implementation Status**: Core CFG infrastructure is complete, integration pending.
+
+#### Completed Steps:
+
+| Step | Task                              | Files Modified                   | Status |
+| ---- | --------------------------------- | -------------------------------- | ------ |
+| 7.1  | Create CFG data structures        | `type_inference/cfg/graph.rs`    | ✅     |
+| 7.2  | Implement CFG builder from AST    | `type_inference/cfg/builder.rs`  | ✅     |
+| 7.3  | Add type guard detection          | `type_inference/cfg/guards.rs`   | ✅     |
+| 7.4  | Implement dataflow analysis       | `type_inference/cfg/dataflow.rs` | ✅     |
+| 7.5  | Add RubyType narrowing operations | `type_inference/ruby_type.rs`    | ✅     |
+
+#### Completed Steps (continued):
+
+| Step | Task                                | Files Modified                          | Status |
+| ---- | ----------------------------------- | --------------------------------------- | ------ |
+| 7.6  | Create TypeNarrowingEngine          | `type_inference/cfg/engine.rs`          | ✅     |
+| 7.7  | Integrate with LSP handlers         | `handlers/notification.rs`, `server.rs` | ✅     |
+| 7.8  | Add comprehensive integration tests | `test/type_narrowing_test.rs`           | ✅     |
+
+#### CFG Architecture:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌──────────────────┐
+│ Ruby AST    │────►│ CFG Builder │────►│ Control Flow     │
+│ (Prism)     │     │             │     │ Graph            │
+└─────────────┘     └─────────────┘     └────────┬─────────┘
+                                                  │
+                                                  ▼
+                                        ┌──────────────────┐
+                                        │ Dataflow         │
+                                        │ Analyzer         │
+                                        └────────┬─────────┘
+                                                  │
+                                                  ▼
+                                        ┌──────────────────┐
+                                        │ Type State       │
+                                        │ per Block        │
+                                        └──────────────────┘
+```
+
+#### Supported Type Guards:
+
+- `is_a?(Type)`, `kind_of?(Type)`, `instance_of?(Type)`
+- `nil?` checks
+- `respond_to?(:method)` checks
+- `case/when Type` pattern matching
+- Boolean combinations (`&&`, `||`)
+- Negation (`!`, `unless`)
 
 **Example outcome**:
 

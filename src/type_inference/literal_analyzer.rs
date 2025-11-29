@@ -116,7 +116,7 @@ impl LiteralAnalyzer {
     /// Analyze an array literal and infer element types
     fn analyze_array_literal(&self, array_node: &ArrayNode) -> RubyType {
         let mut element_types = Vec::new();
-        
+
         for element in array_node.elements().iter() {
             if let Some(element_type) = self.analyze_literal(&element) {
                 element_types.push(element_type);
@@ -125,25 +125,25 @@ impl LiteralAnalyzer {
                 element_types.push(RubyType::Any);
             }
         }
-        
+
         // If array is empty, return Array with Unknown element type
         if element_types.is_empty() {
             return RubyType::Array(vec![RubyType::Unknown]);
         }
-        
+
         // Remove duplicate types
         element_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
         element_types.dedup();
-        
+
         // Return Array with deduplicated element types
         RubyType::Array(element_types)
     }
-    
+
     /// Analyze a hash literal and infer key and value types
     fn analyze_hash_literal(&self, hash_node: &HashNode) -> RubyType {
         let mut key_types = Vec::new();
         let mut value_types = Vec::new();
-        
+
         for element in hash_node.elements().iter() {
             if let Some(assoc_node) = element.as_assoc_node() {
                 // Analyze key
@@ -152,7 +152,7 @@ impl LiteralAnalyzer {
                 } else {
                     key_types.push(RubyType::Any);
                 }
-                
+
                 // Analyze value
                 if let Some(value_type) = self.analyze_literal(&assoc_node.value()) {
                     value_types.push(value_type);
@@ -179,20 +179,20 @@ impl LiteralAnalyzer {
                 }
             }
         }
-        
+
         // If hash is empty, return Hash with Unknown key/value types
         if key_types.is_empty() && value_types.is_empty() {
             return RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]);
         }
-        
+
         // Remove duplicate key types
         key_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
         key_types.dedup();
-        
+
         // Remove duplicate value types
         value_types.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
         value_types.dedup();
-        
+
         // Return Hash with deduplicated key and value types
         RubyType::Hash(key_types, value_types)
     }
@@ -349,9 +349,9 @@ mod tests {
             let ruby_type = analyzer.analyze_literal(node).unwrap();
             assert_eq!(
                 ruby_type,
-                RubyType::Array(vec![
-                    RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
-                ])
+                RubyType::Array(vec![RubyType::Class(
+                    FullyQualifiedName::try_from("Integer").unwrap()
+                )])
             );
         });
     }
@@ -364,12 +364,12 @@ mod tests {
             assert_eq!(
                 ruby_type,
                 RubyType::Hash(
-                    vec![
-                        RubyType::Class(FullyQualifiedName::try_from("Symbol").unwrap())
-                    ],
-                    vec![
-                        RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
-                    ]
+                    vec![RubyType::Class(
+                        FullyQualifiedName::try_from("Symbol").unwrap()
+                    )],
+                    vec![RubyType::Class(
+                        FullyQualifiedName::try_from("Integer").unwrap()
+                    )]
                 )
             );
         });

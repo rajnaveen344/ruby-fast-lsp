@@ -17,10 +17,7 @@ fn def_node_instance_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("bar", MethodKind::Instance).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
     let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("bar method entry missing");
@@ -37,10 +34,7 @@ fn def_node_class_method_self() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("baz", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
     let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("baz method entry missing");
@@ -57,10 +51,7 @@ fn def_node_initialize_as_new() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("new", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
     let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("new method entry missing");
@@ -77,10 +68,7 @@ fn def_node_singleton_class_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("qux", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
     let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("qux method entry missing");
@@ -97,10 +85,7 @@ fn def_node_constant_receiver_class_method() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("bar", MethodKind::Class).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
     let defs = &visitor.index.lock().definitions;
     assert!(defs.get(&fqn).is_none());
 }
@@ -151,10 +136,7 @@ fn def_node_uppercase_method_name() {
     let visitor = visit_code(code);
 
     let method = RubyMethod::new("UppercaseMethod", MethodKind::Instance).unwrap();
-    let fqn = FullyQualifiedName::method(
-        vec![RubyConstant::try_from("Foo").unwrap()],
-        method,
-    );
+    let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
     let defs = &visitor.index.lock().definitions;
     let entries = defs.get(&fqn).expect("UppercaseMethod entry missing");

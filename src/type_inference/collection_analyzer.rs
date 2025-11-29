@@ -352,9 +352,9 @@ mod tests {
             for element_type in &array_info.element_types {
                 assert_eq!(
                     *element_type,
-                    RubyType::Array(vec![
-                        RubyType::Class(FullyQualifiedName::try_from("Integer").unwrap())
-                    ])
+                    RubyType::Array(vec![RubyType::Class(
+                        FullyQualifiedName::try_from("Integer").unwrap()
+                    )])
                 );
             }
         });

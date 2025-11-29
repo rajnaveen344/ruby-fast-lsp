@@ -12,8 +12,7 @@ fn module_node_with_body() {
     let code = r#"module Foo\n  def bar; end\nend\n"#;
     let visitor = visit_code(code);
 
-    let expected_fqn =
-        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
+    let expected_fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     let index_lock = visitor.index.lock();
     let defs = &index_lock.definitions;
@@ -85,8 +84,7 @@ fn module_node_without_body() {
     let code = "module Foo; end";
     let visitor = visit_code(code);
 
-    let expected_fqn =
-        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
+    let expected_fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     let index_lock = visitor.index.lock();
     let entries = index_lock

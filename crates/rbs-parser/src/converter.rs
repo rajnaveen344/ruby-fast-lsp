@@ -137,7 +137,10 @@ mod tests {
 
     #[test]
     fn test_rbs_type_to_string_simple() {
-        assert_eq!(rbs_type_to_string(&RbsType::Class("String".to_string())), "String");
+        assert_eq!(
+            rbs_type_to_string(&RbsType::Class("String".to_string())),
+            "String"
+        );
         assert_eq!(rbs_type_to_string(&RbsType::Nil), "nil");
         assert_eq!(rbs_type_to_string(&RbsType::Bool), "bool");
         assert_eq!(rbs_type_to_string(&RbsType::Void), "void");
@@ -187,7 +190,9 @@ mod tests {
     #[test]
     fn test_is_nilable() {
         assert!(is_nilable(&RbsType::Nil));
-        assert!(is_nilable(&RbsType::Optional(Box::new(RbsType::Class("String".to_string())))));
+        assert!(is_nilable(&RbsType::Optional(Box::new(RbsType::Class(
+            "String".to_string()
+        )))));
         assert!(is_nilable(&RbsType::Union(vec![
             RbsType::Class("String".to_string()),
             RbsType::Nil,
@@ -198,13 +203,12 @@ mod tests {
     #[test]
     fn test_unwrap_nilable() {
         let optional = RbsType::Optional(Box::new(RbsType::Class("String".to_string())));
-        assert_eq!(unwrap_nilable(&optional), RbsType::Class("String".to_string()));
+        assert_eq!(
+            unwrap_nilable(&optional),
+            RbsType::Class("String".to_string())
+        );
 
-        let union = RbsType::Union(vec![
-            RbsType::Class("String".to_string()),
-            RbsType::Nil,
-        ]);
+        let union = RbsType::Union(vec![RbsType::Class("String".to_string()), RbsType::Nil]);
         assert_eq!(unwrap_nilable(&union), RbsType::Class("String".to_string()));
     }
 }
-

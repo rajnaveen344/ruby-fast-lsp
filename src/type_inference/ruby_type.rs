@@ -210,6 +210,63 @@ impl RubyType {
             other => other,
         }
     }
+
+    /// Create a union of this type with another type
+    /// Used for merging types at join points in CFG
+    pub fn union_with(&self, other: &RubyType) -> RubyType {
+        // Handle special cases
+        if self == other {
+            return self.clone();
+        }
+
+        match (self, other) {
+            // Any absorbs everything
+            (RubyType::Any, _) | (_, RubyType::Any) => RubyType::Any,
+
+            // Unknown is identity for union
+            (RubyType::Unknown, other) => other.clone(),
+            (this, RubyType::Unknown) => this.clone(),
+
+            // Merge unions
+            (RubyType::Union(types1), RubyType::Union(types2)) => {
+                let mut all_types = types1.clone();
+                all_types.extend(types2.clone());
+                RubyType::union(all_types)
+            }
+
+            // Add to existing union
+            (RubyType::Union(types), other) | (other, RubyType::Union(types)) => {
+                let mut all_types = types.clone();
+                all_types.push(other.clone());
+                RubyType::union(all_types)
+            }
+
+            // Create new union
+            (t1, t2) => RubyType::union([t1.clone(), t2.clone()]),
+        }
+    }
+
+    /// Subtract a type from this type (for type narrowing)
+    /// Returns a new type with the specified type removed
+    pub fn subtract(&self, other: &RubyType) -> RubyType {
+        match self {
+            RubyType::Union(types) => {
+                let filtered: Vec<RubyType> =
+                    types.iter().filter(|t| *t != other).cloned().collect();
+                RubyType::union(filtered)
+            }
+            t if t == other => RubyType::Unknown,
+            t => t.clone(),
+        }
+    }
+
+    /// Create a class type from a name
+    pub fn class(name: &str) -> Self {
+        RubyType::Class(FullyQualifiedName::try_from(name).unwrap_or_else(|_| {
+            // Fallback for complex names
+            FullyQualifiedName::try_from("Object").unwrap()
+        }))
+    }
 }
 
 impl Display for RubyType {

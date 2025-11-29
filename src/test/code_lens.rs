@@ -240,9 +240,11 @@ end
 
     // Find the CodeLens for Inner module
     let inner_lens = lenses.iter().find(|l| {
-        l.command.as_ref().map(|c| c.title.contains("include")).unwrap_or(false)
+        l.command
+            .as_ref()
+            .map(|c| c.title.contains("include"))
+            .unwrap_or(false)
     });
 
     assert!(inner_lens.is_some());
 }
-

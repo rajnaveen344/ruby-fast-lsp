@@ -50,9 +50,12 @@ end
     assert!(lenses.len() >= 4);
 
     // Find CodeLens for module A (should show it's used in B and transitively in MyClass)
-    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| {
-        l.range.start.line == 1 // module A is on line 1
-    }).collect();
+    let module_a_lenses: Vec<_> = lenses
+        .iter()
+        .filter(|l| {
+            l.range.start.line == 1 // module A is on line 1
+        })
+        .collect();
 
     assert!(module_a_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
 
@@ -69,9 +72,12 @@ end
     assert!(module_a_titles.iter().any(|t| t == "1 class"));
 
     // Find CodeLens for module B
-    let module_b_lenses: Vec<_> = lenses.iter().filter(|l| {
-        l.range.start.line == 4 // module B is on line 4
-    }).collect();
+    let module_b_lenses: Vec<_> = lenses
+        .iter()
+        .filter(|l| {
+            l.range.start.line == 4 // module B is on line 4
+        })
+        .collect();
 
     assert!(module_b_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
 
@@ -138,9 +144,7 @@ end
     let lenses = result.unwrap();
 
     // Find CodeLens for module A
-    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| {
-        l.range.start.line == 1
-    }).collect();
+    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| l.range.start.line == 1).collect();
 
     assert!(module_a_lenses.len() >= 2); // Should have "include" and "classes" CodeLens
 
@@ -155,4 +159,3 @@ end
     assert!(module_a_titles.iter().any(|t| t == "2 include"));
     assert!(module_a_titles.iter().any(|t| t == "3 classes"));
 }
-

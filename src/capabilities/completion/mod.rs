@@ -825,8 +825,7 @@ end
             index_guard.add_entry(middle_module_entry);
 
             let inner_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule::InnerClass")
-                    .unwrap(),
+                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule::InnerClass").unwrap(),
                 kind: EntryKind::Class {
                     superclass: Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],

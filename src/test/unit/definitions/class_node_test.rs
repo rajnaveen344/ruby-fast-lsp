@@ -13,8 +13,7 @@ fn class_node_with_body() {
     let visitor = visit_code(code);
 
     // Build the expected fully-qualified name for `Foo`.
-    let expected_fqn =
-        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
+    let expected_fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     // The `RubyIndex` stores definitions keyed by FQN → Vec<Entry>.
     let index_lock = visitor.index.lock();
@@ -88,8 +87,7 @@ fn class_node_without_body() {
     let code = "class Foo; end";
     let visitor = visit_code(code);
 
-    let expected_fqn =
-        FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
+    let expected_fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
     let index_lock = visitor.index.lock();
 
     let entries = index_lock

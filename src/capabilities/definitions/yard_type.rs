@@ -26,7 +26,10 @@ pub fn find_yard_type_definitions(type_name: &str, index: &RubyIndex) -> Option<
         .iter()
         .any(|b| b.eq_ignore_ascii_case(type_name))
     {
-        info!("Type '{}' is a built-in without a navigable definition", type_name);
+        info!(
+            "Type '{}' is a built-in without a navigable definition",
+            type_name
+        );
         return None;
     }
 
@@ -63,7 +66,11 @@ pub fn find_yard_type_definitions(type_name: &str, index: &RubyIndex) -> Option<
             .collect();
 
         if !locations.is_empty() {
-            info!("Found {} definition(s) for type '{}'", locations.len(), type_name);
+            info!(
+                "Found {} definition(s) for type '{}'",
+                locations.len(),
+                type_name
+            );
             return Some(locations);
         }
     }
@@ -100,4 +107,3 @@ mod tests {
         assert!(find_yard_type_definitions("lowercase", &index).is_none());
     }
 }
-

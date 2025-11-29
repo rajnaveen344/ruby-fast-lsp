@@ -97,9 +97,8 @@ pub struct YardTypeAtPosition {
 }
 
 /// Regex to find type references within square brackets
-static TYPE_BRACKET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\[([^\]]+)\]").expect("Invalid type bracket regex")
-});
+static TYPE_BRACKET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([^\]]+)\]").expect("Invalid type bracket regex"));
 
 /// Parser for YARD documentation comments
 pub struct YardParser;
@@ -399,7 +398,8 @@ impl YardParser {
             };
 
             if let (Some(r), Some(tr)) = (line_range, types_range) {
-                doc.params.push(YardParam::with_ranges(name, types, desc, r, tr));
+                doc.params
+                    .push(YardParam::with_ranges(name, types, desc, r, tr));
             } else if let Some(r) = line_range {
                 doc.params.push(YardParam::with_range(name, types, desc, r));
             } else {

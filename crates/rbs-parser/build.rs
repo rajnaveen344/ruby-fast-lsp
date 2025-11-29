@@ -38,11 +38,7 @@ fn main() {
         "/// Embedded core RBS files (class name, content as bytes)"
     )
     .unwrap();
-    writeln!(
-        file,
-        "pub static CORE_RBS_FILES: &[(&str, &[u8])] = &["
-    )
-    .unwrap();
+    writeln!(file, "pub static CORE_RBS_FILES: &[(&str, &[u8])] = &[").unwrap();
     for (name, content) in &core_files {
         write!(file, "    (\"{}\", &[", name).unwrap();
         for (i, byte) in content.iter().enumerate() {
@@ -69,11 +65,7 @@ fn main() {
         "/// Embedded stdlib RBS files (relative path, content as bytes)"
     )
     .unwrap();
-    writeln!(
-        file,
-        "pub static STDLIB_RBS_FILES: &[(&str, &[u8])] = &["
-    )
-    .unwrap();
+    writeln!(file, "pub static STDLIB_RBS_FILES: &[(&str, &[u8])] = &[").unwrap();
     for (name, content) in &stdlib_files {
         write!(file, "    (\"{}\", &[", name).unwrap();
         for (i, byte) in content.iter().enumerate() {

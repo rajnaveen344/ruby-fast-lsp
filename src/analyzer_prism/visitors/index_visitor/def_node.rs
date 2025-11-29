@@ -135,10 +135,10 @@ impl IndexVisitor {
             (None, Vec::new())
         };
 
-        // If no YARD return type, try to infer from method body
+        // If no YARD return type, try to infer from method body using CFG analysis
         let return_type = yard_return_type.or_else(|| {
-            let inferrer = ReturnTypeInferrer::new();
-            inferrer.infer_return_type(node.body())
+            let inferrer = ReturnTypeInferrer::new(self.index.clone());
+            inferrer.infer_return_type(self.document.content.as_bytes(), node)
         });
 
         let entry = Entry {

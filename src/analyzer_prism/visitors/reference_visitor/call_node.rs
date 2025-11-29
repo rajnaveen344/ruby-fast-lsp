@@ -65,7 +65,8 @@ impl ReferenceVisitor {
         // Determine the target namespace, method kind, and receiver info based on receiver
         let (target_namespace, method_kind, receiver_info) = match node.receiver() {
             Some(receiver_node) => {
-                let result = self.handle_receiver_node_with_info(&receiver_node, &current_namespace);
+                let result =
+                    self.handle_receiver_node_with_info(&receiver_node, &current_namespace);
                 (result.0, result.1, result.2)
             }
             None => {
@@ -101,7 +102,12 @@ impl ReferenceVisitor {
             match &receiver_info {
                 ReceiverInfo::NoReceiver => {
                     // Method without receiver - check if it exists in the index
-                    if !self.method_exists_in_index(&index, &method_name, &target_namespace, method_kind) {
+                    if !self.method_exists_in_index(
+                        &index,
+                        &method_name,
+                        &target_namespace,
+                        method_kind,
+                    ) {
                         debug!("Adding unresolved method call: {}", method_name);
                         index.add_unresolved_entry(
                             self.document.uri.clone(),
@@ -111,7 +117,12 @@ impl ReferenceVisitor {
                 }
                 ReceiverInfo::ConstantReceiver(receiver_name) => {
                     // Method with constant receiver - check if it exists
-                    if !self.method_exists_in_index(&index, &method_name, &target_namespace, method_kind) {
+                    if !self.method_exists_in_index(
+                        &index,
+                        &method_name,
+                        &target_namespace,
+                        method_kind,
+                    ) {
                         debug!(
                             "Adding unresolved method call: {}.{}",
                             receiver_name, method_name
@@ -126,7 +137,9 @@ impl ReferenceVisitor {
                         );
                     }
                 }
-                ReceiverInfo::ExpressionReceiver | ReceiverInfo::SelfReceiver | ReceiverInfo::InvalidConstantPath => {
+                ReceiverInfo::ExpressionReceiver
+                | ReceiverInfo::SelfReceiver
+                | ReceiverInfo::InvalidConstantPath => {
                     // Skip tracking for expression receivers, self receivers, and invalid constant paths
                     // as we can't determine the type statically
                 }
@@ -234,7 +247,11 @@ impl ReferenceVisitor {
             // Check if the constant path is valid (all nodes are constant paths or constant reads)
             if self.is_valid_constant_path_receiver(receiver_node) {
                 let receiver_name = self.build_constant_path_name(receiver_node);
-                let (ns, kind) = self.handle_constant_path_receiver(&constant_path, receiver_node, current_namespace);
+                let (ns, kind) = self.handle_constant_path_receiver(
+                    &constant_path,
+                    receiver_node,
+                    current_namespace,
+                );
                 (ns, kind, ReceiverInfo::ConstantReceiver(receiver_name))
             } else {
                 // Invalid constant path - contains non-constant nodes

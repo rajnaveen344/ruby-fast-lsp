@@ -209,6 +209,9 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
         .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
+    // Track file for type narrowing analysis
+    lang_server.type_narrowing.on_file_open(&uri, &content);
+
     // Process file with single parse (definitions + references)
     let affected_uris = match process_file(
         lang_server,
@@ -283,6 +286,11 @@ pub async fn handle_did_change(
         .publish_diagnostics(uri.clone(), diagnostics)
         .await;
 
+    // Update type narrowing engine with new content
+    lang_server
+        .type_narrowing
+        .on_file_change(&uri, &final_content);
+
     // Schedule debounced reindex for type inference (500ms delay)
     lang_server.schedule_reindex_debounced(uri.clone(), final_content);
 
@@ -300,6 +308,9 @@ pub async fn handle_did_close(
     // Remove the document from in-memory cache but keep definitions/references in the index
     lang_server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
+
+    // Remove type narrowing CFG cache for this file
+    lang_server.type_narrowing.on_file_close(&uri);
 
     // Keep unresolved entry diagnostics visible (project-wide diagnostics like rust-analyzer)
     let diagnostics = get_unresolved_diagnostics(lang_server, &uri);

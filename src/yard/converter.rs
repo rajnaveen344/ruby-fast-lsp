@@ -67,7 +67,10 @@ impl YardTypeConverter {
     ///
     /// If `index` is provided, validates that referenced types exist and collects
     /// unresolved types for diagnostics.
-    pub fn convert_with_validation(type_str: &str, index: Option<&RubyIndex>) -> TypeConversionResult {
+    pub fn convert_with_validation(
+        type_str: &str,
+        index: Option<&RubyIndex>,
+    ) -> TypeConversionResult {
         let trimmed = type_str.trim();
         let mut unresolved = Vec::new();
 
@@ -328,10 +331,28 @@ impl YardTypeConverter {
     pub fn type_exists_in_index(type_name: &str, index: &RubyIndex) -> bool {
         // Handle built-in types that always exist
         let builtins = [
-            "String", "Integer", "Float", "Symbol", "TrueClass", "FalseClass",
-            "NilClass", "Array", "Hash", "Object", "BasicObject", "Kernel",
-            "Module", "Class", "Numeric", "Fixnum", "Bignum", "Boolean",
-            "nil", "true", "false", "void",
+            "String",
+            "Integer",
+            "Float",
+            "Symbol",
+            "TrueClass",
+            "FalseClass",
+            "NilClass",
+            "Array",
+            "Hash",
+            "Object",
+            "BasicObject",
+            "Kernel",
+            "Module",
+            "Class",
+            "Numeric",
+            "Fixnum",
+            "Bignum",
+            "Boolean",
+            "nil",
+            "true",
+            "false",
+            "void",
         ];
 
         if builtins.iter().any(|b| b.eq_ignore_ascii_case(type_name)) {
@@ -493,4 +514,3 @@ mod tests {
         assert!(result.unresolved_types.is_empty());
     }
 }
-
