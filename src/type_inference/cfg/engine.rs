@@ -569,4 +569,29 @@ name.upcase"#;
             _ => panic!("Expected Class type, got {:?}", ty),
         }
     }
+
+    #[test]
+    fn test_variable_to_variable_assignment() {
+        // Test: a = 'str'; b = a; - b should have String type
+        let engine = TypeNarrowingEngine::new();
+        let uri = Url::parse("file:///test.rb").unwrap();
+
+        let source = r#"a = 'str'
+b = a
+puts a.
+puts b."#;
+
+        engine.on_file_open(&uri, source);
+        engine.analyze_file(&uri);
+
+        // Get type of 'a' - should be String
+        let a_type = engine.get_narrowed_type(&uri, "a", 20);
+        assert!(a_type.is_some(), "Should have type for 'a'");
+        assert_eq!(a_type.unwrap(), RubyType::string());
+
+        // Get type of 'b' - should also be String (assigned from a)
+        let b_type = engine.get_narrowed_type(&uri, "b", 30);
+        assert!(b_type.is_some(), "Should have type for 'b'");
+        assert_eq!(b_type.unwrap(), RubyType::string());
+    }
 }

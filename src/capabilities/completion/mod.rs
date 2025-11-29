@@ -333,7 +333,16 @@ fn get_receiver_type_from_cfg(
     };
 
     let dot_pos = before_cursor.rfind('.')?;
-    let receiver_text = before_cursor[..dot_pos].trim();
+    let before_dot = &before_cursor[..dot_pos];
+
+    // Extract only the last token (word) before the dot
+    // This handles cases like "puts b." where we want just "b"
+    let receiver_text = before_dot
+        .rsplit(|c: char| !c.is_alphanumeric() && c != '_' && c != '@' && c != '$')
+        .next()
+        .map(|s| s.trim())
+        .unwrap_or("")
+        .trim();
 
     if receiver_text.is_empty() {
         return None;
@@ -2355,6 +2364,54 @@ name."#;
                 assert!(
                     length_completion.is_some(),
                     "Should have 'length' method completion for String"
+                );
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_variable_to_variable_assignment_completion() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test_var_assign.rb").unwrap();
+        let content = r#"a = 'str'
+b = a
+puts b."#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position right after "b."
+        let position = Position {
+            line: 2,
+            character: 7,
+        }; // Right after "puts b."
+
+        // Debug: check what type is inferred for b
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // b should have String type (inherited from a)
+                // So we should get String methods
+                let upcase_completion = completions.iter().find(|c| c.label == "upcase");
+                assert!(
+                    upcase_completion.is_some(),
+                    "Should have 'upcase' method completion for b (String via a)"
+                );
+
+                let length_completion = completions.iter().find(|c| c.label == "length");
+                assert!(
+                    length_completion.is_some(),
+                    "Should have 'length' method completion for b (String via a)"
                 );
             }
             _ => panic!("Expected array response"),

@@ -76,7 +76,32 @@ impl Statement {
         target: String,
         value_type: Option<RubyType>,
     ) -> Self {
-        Self::new(start, end, StatementKind::Assignment { target, value_type })
+        Self::new(
+            start,
+            end,
+            StatementKind::Assignment {
+                target,
+                value_type,
+                source_variable: None,
+            },
+        )
+    }
+
+    pub fn assignment_from_variable(
+        start: usize,
+        end: usize,
+        target: String,
+        source_variable: String,
+    ) -> Self {
+        Self::new(
+            start,
+            end,
+            StatementKind::Assignment {
+                target,
+                value_type: None,
+                source_variable: Some(source_variable),
+            },
+        )
     }
 
     pub fn expression(start: usize, end: usize) -> Self {
@@ -94,7 +119,10 @@ pub enum StatementKind {
     /// Variable assignment: x = value
     Assignment {
         target: String,
+        /// Direct type if known (e.g., from literal)
         value_type: Option<RubyType>,
+        /// Source variable if assigned from another variable (e.g., b = a)
+        source_variable: Option<String>,
     },
     /// Method call (for tracking side effects)
     MethodCall {

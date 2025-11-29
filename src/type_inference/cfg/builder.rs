@@ -746,9 +746,23 @@ impl<'a> CfgBuilder<'a> {
     /// Process local variable write
     fn process_local_variable_write(&mut self, assign: &LocalVariableWriteNode) {
         let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        // Check if the value is a local variable read (variable-to-variable assignment)
+        if let Some(var_read) = assign.value().as_local_variable_read_node() {
+            let source_var = String::from_utf8_lossy(var_read.name().as_slice()).to_string();
+            self.add_statement(Statement::assignment_from_variable(
+                loc.start_offset(),
+                loc.end_offset(),
+                name,
+                source_var,
+            ));
+            return;
+        }
+
+        // Otherwise, try to analyze as a literal
         let value_type = self.literal_analyzer.analyze_literal(&assign.value());
 
-        let loc = assign.location();
         self.add_statement(Statement::assignment(
             loc.start_offset(),
             loc.end_offset(),

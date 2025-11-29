@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::{
     InlayHint, InlayHintKind, InlayHintLabel, InlayHintOptions, InlayHintParams,
-    InlayHintServerCapabilities, InlayHintTooltip, WorkDoneProgressOptions,
+    InlayHintServerCapabilities, InlayHintTooltip, Position, WorkDoneProgressOptions,
 };
 
 use crate::indexer::entry::entry_kind::EntryKind;
@@ -14,6 +14,19 @@ pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
     })
 }
 
+/// Convert LSP Position to byte offset
+fn position_to_offset(content: &str, position: Position) -> usize {
+    let mut offset = 0;
+    for (line_num, line) in content.lines().enumerate() {
+        if line_num == position.line as usize {
+            offset += position.character as usize;
+            break;
+        }
+        offset += line.len() + 1;
+    }
+    offset
+}
+
 pub async fn handle_inlay_hints(
     server: &RubyLanguageServer,
     params: InlayHintParams,
@@ -21,9 +34,16 @@ pub async fn handle_inlay_hints(
     let uri = params.text_document.uri;
     let document_guard = server.docs.lock();
     let document = document_guard.get(&uri).unwrap().read();
+    let content = document.content.clone();
+    drop(document);
+    drop(document_guard);
 
     // Get structural hints from the document
+    let document_guard = server.docs.lock();
+    let document = document_guard.get(&uri).unwrap().read();
     let mut all_hints = document.get_inlay_hints();
+    drop(document);
+    drop(document_guard);
 
     // Generate type hints from indexed entries
     let index = server.index.lock();
@@ -31,8 +51,34 @@ pub async fn handle_inlay_hints(
     if let Some(entries) = index.file_entries.get(&uri) {
         for entry in entries {
             match &entry.kind {
-                EntryKind::LocalVariable { r#type, .. }
-                | EntryKind::InstanceVariable { r#type, .. }
+                EntryKind::LocalVariable { r#type, name, .. } => {
+                    // First try the indexed type, then fall back to CFG
+                    let final_type = if *r#type != RubyType::Unknown {
+                        Some(r#type.clone())
+                    } else {
+                        // Use CFG-based type inference
+                        let offset = position_to_offset(&content, entry.location.range.start);
+                        server.type_narrowing.get_narrowed_type(&uri, name, offset)
+                    };
+
+                    if let Some(ty) = final_type {
+                        if ty != RubyType::Unknown {
+                            let end_position = entry.location.range.end;
+                            let type_hint = InlayHint {
+                                position: end_position,
+                                label: InlayHintLabel::String(format!(": {}", ty)),
+                                kind: Some(InlayHintKind::TYPE),
+                                text_edits: None,
+                                tooltip: None,
+                                padding_left: None,
+                                padding_right: None,
+                                data: None,
+                            };
+                            all_hints.push(type_hint);
+                        }
+                    }
+                }
+                EntryKind::InstanceVariable { r#type, .. }
                 | EntryKind::ClassVariable { r#type, .. }
                 | EntryKind::GlobalVariable { r#type, .. } => {
                     if *r#type != RubyType::Unknown {
@@ -126,4 +172,80 @@ pub async fn handle_inlay_hints(
     }
 
     all_hints
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::RubyLanguageServer;
+    use tower_lsp::lsp_types::{
+        DidOpenTextDocumentParams, InitializeParams, Range, TextDocumentIdentifier,
+        TextDocumentItem, Url,
+    };
+    use tower_lsp::LanguageServer;
+
+    async fn create_test_server() -> RubyLanguageServer {
+        let server = RubyLanguageServer::default();
+        let _ = server.initialize(InitializeParams::default()).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn test_inlay_hints_for_variable_to_variable_assignment() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test_inlay.rb").unwrap();
+        let content = r#"a = 'str'
+b = a"#;
+
+        // Open the document
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Request inlay hints
+        let inlay_params = InlayHintParams {
+            work_done_progress_params: Default::default(),
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 2,
+                    character: 0,
+                },
+            },
+        };
+
+        let hints = handle_inlay_hints(&server, inlay_params).await;
+
+        // Should have hints for both 'a' and 'b'
+        let a_hint = hints.iter().find(|h| {
+            if let InlayHintLabel::String(s) = &h.label {
+                s.contains("String") && h.position.line == 0
+            } else {
+                false
+            }
+        });
+        assert!(a_hint.is_some(), "Should have type hint for 'a'");
+
+        let b_hint = hints.iter().find(|h| {
+            if let InlayHintLabel::String(s) = &h.label {
+                s.contains("String") && h.position.line == 1
+            } else {
+                false
+            }
+        });
+        assert!(
+            b_hint.is_some(),
+            "Should have type hint for 'b' (inherited from 'a' via CFG)"
+        );
+    }
 }

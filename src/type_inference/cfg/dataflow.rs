@@ -375,9 +375,20 @@ impl<'a> DataflowAnalyzer<'a> {
         if let Some(block) = self.cfg.get_block(block_id) {
             for stmt in &block.statements {
                 match &stmt.kind {
-                    StatementKind::Assignment { target, value_type } => {
+                    StatementKind::Assignment {
+                        target,
+                        value_type,
+                        source_variable,
+                    } => {
+                        // First priority: direct type from literal
                         if let Some(ty) = value_type {
                             state.set_type(target.clone(), ty.clone());
+                        }
+                        // Second priority: type from source variable (b = a)
+                        else if let Some(src_var) = source_variable {
+                            if let Some(src_type) = state.get_type(src_var) {
+                                state.set_type(target.clone(), src_type.clone());
+                            }
                         }
                     }
                     StatementKind::MethodCall { .. } => {
