@@ -75,7 +75,7 @@ impl CompletionRanker {
         // Higher score for constants in the same or nearby namespaces
 
         // For now, give a small boost to top-level constants
-        if fqn.namespace_parts().len() == 0 {
+        if fqn.namespace_parts().is_empty() {
             0.2
         } else {
             0.0
@@ -106,7 +106,7 @@ impl CompletionRanker {
         let mut last_match_pos = 0;
         let mut consecutive_matches = 0;
 
-        for (_, ch) in partial_lower.chars().enumerate() {
+        for ch in partial_lower.chars() {
             if let Some(pos) = name_lower[last_match_pos..].find(ch) {
                 let actual_pos = last_match_pos + pos;
 
@@ -124,7 +124,7 @@ impl CompletionRanker {
                     || name
                         .chars()
                         .nth(actual_pos - 1)
-                        .map_or(false, |c| !c.is_alphanumeric())
+                        .is_some_and(|c| !c.is_alphanumeric())
                 {
                     score += 0.5;
                 }
@@ -180,7 +180,7 @@ impl CompletionRanker {
                     .partial_name
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_uppercase())
+                    .is_some_and(|c| c.is_uppercase())
                 {
                     score += 1.0;
                 }
@@ -193,7 +193,7 @@ impl CompletionRanker {
                     .partial_name
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_uppercase())
+                    .is_some_and(|c| c.is_uppercase())
                 {
                     score += 0.8;
                 }

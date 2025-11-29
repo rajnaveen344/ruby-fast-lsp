@@ -5,6 +5,12 @@ use ruby_prism::*;
 /// Analyzes Ruby literals and determines their types
 pub struct LiteralAnalyzer;
 
+impl Default for LiteralAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LiteralAnalyzer {
     pub fn new() -> Self {
         Self

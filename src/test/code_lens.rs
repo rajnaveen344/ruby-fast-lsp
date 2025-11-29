@@ -236,7 +236,7 @@ end
     let lenses = result.unwrap();
 
     // Should have CodeLens for Inner module
-    assert!(lenses.len() >= 1);
+    assert!(!lenses.is_empty());
 
     // Find the CodeLens for Inner module
     let inner_lens = lenses.iter().find(|l| {

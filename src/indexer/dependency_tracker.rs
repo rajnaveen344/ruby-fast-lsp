@@ -723,7 +723,7 @@ mod tests {
 
         // Should handle circular dependencies without infinite loop
         let transitive_deps = tracker.get_transitive_dependencies(&uri_a);
-        assert!(transitive_deps.len() >= 1);
+        assert!(!transitive_deps.is_empty());
         assert!(transitive_deps.contains(&uri_b));
     }
 

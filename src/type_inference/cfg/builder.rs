@@ -75,6 +75,39 @@ impl<'a> CfgBuilder<'a> {
         self.cfg
     }
 
+    /// Build CFG from top-level statements (outside any method)
+    pub fn build_from_statements(mut self, statements: &StatementsNode) -> ControlFlowGraph {
+        let entry = self.cfg.create_block();
+        self.cfg.entry = entry;
+        self.current_block = Some(entry);
+
+        // Set entry block location from statements
+        let loc = statements.location();
+        let (start_line, start_col) = self.offset_to_line_col(loc.start_offset());
+        let (end_line, end_col) = self.offset_to_line_col(loc.end_offset());
+        if let Some(block) = self.cfg.get_block_mut(entry) {
+            block.location = BlockLocation::new(
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                loc.start_offset(),
+                loc.end_offset(),
+            );
+        }
+
+        // Process each statement
+        for stmt in statements.body().iter() {
+            self.process_node(&stmt);
+        }
+
+        if let Some(current) = self.current_block {
+            self.cfg.mark_exit(current);
+        }
+
+        self.cfg
+    }
+
     /// Get node location as BlockLocation
     fn node_location(&self, node: &DefNode) -> BlockLocation {
         let loc = node.location();
@@ -398,8 +431,7 @@ impl<'a> CfgBuilder<'a> {
         // Get the case predicate variable
         let case_var = case_node
             .predicate()
-            .map(|p| self.extract_variable_name(&p))
-            .flatten();
+            .and_then(|p| self.extract_variable_name(&p));
 
         // Process each when clause
         let mut previous_block = condition_block;
@@ -850,7 +882,7 @@ impl<'a> CfgBuilder<'a> {
         let first_arg = args.arguments().iter().next()?;
 
         if let Some(symbol) = first_arg.as_symbol_node() {
-            return Some(String::from_utf8_lossy(symbol.unescaped().as_ref()).to_string());
+            return Some(String::from_utf8_lossy(symbol.unescaped()).to_string());
         }
 
         None
@@ -1015,7 +1047,7 @@ end
         let cfg = parse_and_build_cfg(source);
 
         // Should have multiple exit blocks
-        assert!(cfg.exits.len() >= 1);
+        assert!(!cfg.exits.is_empty());
     }
 
     #[test]

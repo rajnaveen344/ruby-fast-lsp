@@ -35,7 +35,7 @@ impl IdentifierVisitor {
                 );
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
-                let namespace = RubyConstant::new(&name.to_string()).unwrap();
+                let namespace = RubyConstant::new(name.as_ref()).unwrap();
                 self.set_result(
                     Some(Identifier::RubyConstant {
                         namespace: self.scope_tracker.get_ns_stack(),
@@ -71,7 +71,7 @@ impl IdentifierVisitor {
             ));
         } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
-            let namespace = RubyConstant::new(&name.to_string()).unwrap();
+            let namespace = RubyConstant::new(name.as_ref()).unwrap();
             self.scope_tracker.push_ns_scope(namespace);
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(

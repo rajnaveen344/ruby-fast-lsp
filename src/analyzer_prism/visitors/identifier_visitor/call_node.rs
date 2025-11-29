@@ -40,7 +40,7 @@ impl IdentifierVisitor {
                 // Determine receiver kind and receiver information
                 let (receiver_kind, receiver, method_kind) =
                     if let Some(receiver_node) = node.receiver() {
-                        if let Some(_) = receiver_node.as_self_node() {
+                        if receiver_node.as_self_node().is_some() {
                             (ReceiverKind::SelfReceiver, None, MethodKind::Instance)
                         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
                             let name = String::from_utf8_lossy(constant_read.name().as_slice())

@@ -24,6 +24,12 @@ pub struct HashTypeInfo {
     pub common_value_type: Option<RubyType>,
 }
 
+impl Default for CollectionAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectionAnalyzer {
     pub fn new() -> Self {
         Self {

@@ -23,7 +23,7 @@ pub fn find_local_variable_definitions(
             "Looking for local variable definition with scope: {:?}",
             fqn
         );
-        if let Some(entries) = index.definitions.get(&fqn.into()) {
+        if let Some(entries) = index.definitions.get(&fqn) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
             if !found_locations.is_empty() {
                 return Some(found_locations);
@@ -51,7 +51,7 @@ pub fn find_instance_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::instance_variable(name.to_string()).unwrap();
     debug!("Looking for instance variable definition: {:?}", fqn);
-    if let Some(entries) = index.definitions.get(&fqn.into()) {
+    if let Some(entries) = index.definitions.get(&fqn) {
         let locations = entries.iter().map(|e| e.location.clone()).collect();
         Some(locations)
     } else {
@@ -67,7 +67,7 @@ pub fn find_class_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::class_variable(name.to_string()).unwrap();
     debug!("Looking for class variable definition: {:?}", fqn);
-    if let Some(entries) = index.definitions.get(&fqn.into()) {
+    if let Some(entries) = index.definitions.get(&fqn) {
         let locations = entries.iter().map(|e| e.location.clone()).collect();
         Some(locations)
     } else {
@@ -83,7 +83,7 @@ pub fn find_global_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::global_variable(name.to_string()).unwrap();
     debug!("Looking for global variable definition: {:?}", fqn);
-    if let Some(entries) = index.definitions.get(&fqn.into()) {
+    if let Some(entries) = index.definitions.get(&fqn) {
         let locations = entries.iter().map(|e| e.location.clone()).collect();
         Some(locations)
     } else {
@@ -108,7 +108,7 @@ pub fn find_local_variable_definitions_at_position(
             "Looking for local variable definition with scope: {:?}",
             fqn
         );
-        if let Some(entries) = index.definitions.get(&fqn.into()) {
+        if let Some(entries) = index.definitions.get(&fqn) {
             // Filter entries that are before the cursor position
             let valid_entries: Vec<_> = entries
                 .iter()

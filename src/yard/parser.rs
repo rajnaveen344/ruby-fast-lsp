@@ -138,11 +138,7 @@ impl YardParser {
                 let types_start = types_match.start();
 
                 // Parse individual types (handling commas for union types)
-                let relative_pos = if char_pos > types_start {
-                    char_pos - types_start
-                } else {
-                    0
-                };
+                let relative_pos = char_pos.saturating_sub(types_start);
 
                 // Split by comma but track positions
                 let mut current_pos = 0;
@@ -225,7 +221,7 @@ impl YardParser {
         let trimmed = type_str.trim();
 
         // Find the first < or {
-        if let Some(pos) = trimmed.find(|c| c == '<' || c == '{') {
+        if let Some(pos) = trimmed.find(['<', '{']) {
             trimmed[..pos].trim().to_string()
         } else {
             trimmed.to_string()

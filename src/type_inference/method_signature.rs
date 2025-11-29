@@ -337,14 +337,11 @@ impl MethodSignatureContext {
         match class_name {
             Some(class) => {
                 if signature.class_method {
-                    self.class_methods
-                        .entry(class)
-                        .or_insert_with(Vec::new)
-                        .push(signature);
+                    self.class_methods.entry(class).or_default().push(signature);
                 } else {
                     self.instance_methods
                         .entry(class)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(signature);
                 }
             }
@@ -395,13 +392,13 @@ impl MethodSignatureContext {
             .instance_methods
             .get(class_name)
             .map(|methods| methods.iter().collect())
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         let class_methods = self
             .class_methods
             .get(class_name)
             .map(|methods| methods.iter().collect())
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         (instance_methods, class_methods)
     }

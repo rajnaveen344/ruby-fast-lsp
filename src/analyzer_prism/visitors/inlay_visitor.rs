@@ -66,7 +66,7 @@ impl<'a> Visit<'a> for InlayVisitor<'a> {
                     let position = self.document.offset_to_position(start_offset);
                     let hint = InlayHint {
                         position,
-                        label: InlayHintLabel::String(format!("return")),
+                        label: InlayHintLabel::String("return".to_string()),
                         kind: Some(InlayHintKind::PARAMETER),
                         text_edits: None,
                         tooltip: None,
@@ -84,7 +84,7 @@ impl<'a> Visit<'a> for InlayVisitor<'a> {
                         let position = self.document.offset_to_position(start_offset);
                         let hint = InlayHint {
                             position,
-                            label: InlayHintLabel::String(format!("return")),
+                            label: InlayHintLabel::String("return".to_string()),
                             kind: Some(InlayHintKind::PARAMETER),
                             text_edits: None,
                             tooltip: None,

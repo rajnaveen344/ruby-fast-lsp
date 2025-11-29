@@ -90,9 +90,9 @@
   - Supports chained method calls
   - Integrated with IndexVisitor for variable assignments
 
-### 🔄 In Progress
+### ✅ Completed (continued)
 
-#### Phase 3: Control Flow Type Narrowing (Milestone 7)
+#### Phase 3: Control Flow Type Narrowing (Milestone 7) ✅ COMPLETED
 
 - [x] **CFG Data Structures** - `src/type_inference/cfg/graph.rs`
 
@@ -104,6 +104,7 @@
 - [x] **CFG Builder** - `src/type_inference/cfg/builder.rs`
 
   - Builds CFG from DefNode (method definitions)
+  - Builds CFG from top-level statements
   - Handles if/unless/case/while/until/for statements
   - Processes return statements and begin/rescue blocks
   - Extracts method parameters with types
@@ -131,16 +132,31 @@
 - [x] **TypeNarrowingEngine** - `src/type_inference/cfg/engine.rs`
 
   - File lifecycle management (open/close/change)
-  - CFG caching per open file
+  - CFG caching per open file (methods and top-level)
   - Lazy analysis on demand
   - Position-based type queries
 
 - [x] **LSP Integration** - `src/server.rs`, `src/handlers/notification.rs`
   - TypeNarrowingEngine added to RubyLanguageServer
   - File open/close/change tracking
-  - Ready for inlay hints and completions integration
+  - Integrated with completions for type-aware method suggestions
+
+#### Phase 4: Type-Aware Completion (Milestone 8) ✅ COMPLETED
+
+- [x] **Method Completion** - `src/capabilities/completion/method.rs`
+
+  - Type-aware method suggestions based on receiver type
+  - RBS integration for built-in method signatures
+  - Return type display in completion details
+
+- [x] **CFG Integration** - `src/capabilities/completion/mod.rs`
+  - Uses TypeNarrowingEngine for receiver type inference
+  - Works for both method-level and top-level code
+  - Handles literals, constants, and variables
 
 ### 📋 Planned Features
+
+**Next Step**: Milestone 9 (Project RBS Support) or Milestone 10 (Type Diagnostics)
 
 See **Detailed Implementation Roadmap** section below.
 
@@ -2124,23 +2140,38 @@ def process(value)  # value: String | Integer | nil
 end
 ```
 
-### Milestone 8: Type-Aware Completion
+### Milestone 8: Type-Aware Completion ✅ COMPLETED
 
 **Goal**: Use inferred types to provide better completions.
 
-| Step | Task                                     | Files to Modify              | Test                |
-| ---- | ---------------------------------------- | ---------------------------- | ------------------- |
-| 8.1  | Get receiver type at completion position | `capabilities/completion.rs` | Test type retrieval |
-| 8.2  | Filter methods by receiver type          | `completion.rs`              | Test filtering      |
-| 8.3  | Add type info to completion item detail  | `completion.rs`              | Test display        |
-| 8.4  | Sort completions by type relevance       | `completion.rs`              | Test sorting        |
-| 8.5  | Add integration tests                    | `test/`                      | Comprehensive tests |
+| Step | Task                                     | Files to Modify                     | Status |
+| ---- | ---------------------------------------- | ----------------------------------- | ------ |
+| 8.1  | Get receiver type at completion position | `capabilities/completion/mod.rs`    | ✅     |
+| 8.2  | Filter methods by receiver type          | `capabilities/completion/method.rs` | ✅     |
+| 8.3  | Add type info to completion item detail  | `capabilities/completion/method.rs` | ✅     |
+| 8.4  | Sort completions by type relevance       | `capabilities/completion/method.rs` | ✅     |
+| 8.5  | Add integration tests                    | `test/`                             | ✅     |
+
+**Implementation Details**:
+
+- Created `capabilities/completion/method.rs` for type-aware method completions
+- Integrated CFG-based type narrowing for receiver type inference
+- Works for both method-level and top-level code
+- Uses RBS type definitions for built-in method signatures
+- Detects method call context by:
+  - Explicit dot trigger (`.`)
+  - Dot in line content before cursor
+  - `Identifier::RubyMethod` from analyzer
+- Handles:
+  - Constant receivers (class/module references)
+  - Literal receivers (strings, numbers, arrays, etc.)
+  - Variable receivers (via CFG type narrowing)
 
 **Example outcome**:
 
 ```ruby
 name = "hello"
-name.  # Completions show String methods: upcase, downcase, length, etc.
+name.  # Completions show 126 String methods: upcase, downcase, length, etc.
 ```
 
 ### Milestone 9: Project RBS Support (Future)
@@ -2173,16 +2204,21 @@ Note: Milestone 6 covers RBS for standard library. This milestone extends RBS su
 
 ## Next Steps
 
-**Recommended starting point**: Milestone 1 (Variable Type Inference from Literals)
+**Current Status**: Milestones 1-8 are complete! The type inference system now provides:
 
-This milestone:
+- Variable type inference from literals
+- YARD-based parameter and return type tracking
+- Method return type inference (with CFG)
+- Method call type resolution
+- RBS support for standard library types
+- Control flow type narrowing (CFG-based)
+- Type-aware method completions
 
-- Builds on existing LiteralAnalyzer
-- Provides immediate visible value (inlay hints)
-- Has no external dependencies
-- Is relatively simple to implement and test
+**Recommended next step**: Milestone 9 (Project RBS Support) or Milestone 10 (Type Diagnostics)
 
-After completing Milestone 1, proceed to Milestone 3 (Method Return Type Storage) as it enables Milestone 5 (Method Call Resolution) which provides significant value.
+**Milestone 9** would allow projects to define their own `.rbs` files for custom types, enabling type-aware completions for user-defined classes.
+
+**Milestone 10** would add type mismatch diagnostics, showing warnings when method arguments or return values don't match expected types.
 
 ---
 

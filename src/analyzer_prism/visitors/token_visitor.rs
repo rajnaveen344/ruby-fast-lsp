@@ -51,8 +51,8 @@ impl<'a> TokenVisitor<'a> {
         } else {
             // For multi-line tokens, we need to count characters
             // This is a simplification - in a real implementation you'd need to handle this case better
-            let start = location.start_offset() as usize;
-            let end = location.end_offset() as usize;
+            let start = location.start_offset();
+            let end = location.end_offset();
 
             self.document.content[start..end]
                 .chars()
@@ -62,8 +62,7 @@ impl<'a> TokenVisitor<'a> {
 
         debug!(
             "Adding token for {} at {}:{}-{}:{}",
-            &self.document.content
-                [location.start_offset() as usize..location.end_offset() as usize],
+            &self.document.content[location.start_offset()..location.end_offset()],
             start_pos.line,
             start_pos.character,
             end_pos.line,
@@ -384,47 +383,54 @@ impl Visit<'_> for TokenVisitor<'_> {
 
     fn visit_if_node(&mut self, node: &ruby_prism::IfNode<'_>) {
         // Determine if this is a modifier-style if (e.g., puts "hello" if condition)
-        let is_modifier_style = node.statements().as_ref().map_or(false, |stmts| {
+        let is_modifier_style = node.statements().as_ref().is_some_and(|stmts| {
             stmts.location().start_offset() < node.predicate().location().start_offset()
         });
 
         // Visit nodes in the appropriate order based on style
         if is_modifier_style {
             // Modifier style: statements → predicate → subsequent
-            node.statements()
-                .map(|stmts| self.visit_statements_node(&stmts));
+            if let Some(stmts) = node.statements() {
+                self.visit_statements_node(&stmts)
+            }
             self.visit(&node.predicate());
         } else {
             // Regular style: predicate → statements → subsequent
             self.visit(&node.predicate());
-            node.statements()
-                .map(|stmts| self.visit_statements_node(&stmts));
+            if let Some(stmts) = node.statements() {
+                self.visit_statements_node(&stmts)
+            }
         }
 
         // Visit subsequent nodes (else/elsif) if present
-        node.subsequent().map(|subsequent| self.visit(&subsequent));
+        if let Some(subsequent) = node.subsequent() {
+            self.visit(&subsequent)
+        }
     }
 
     fn visit_unless_node(&mut self, node: &ruby_prism::UnlessNode<'_>) {
-        let is_modifier_style = node.statements().as_ref().map_or(false, |stmts| {
+        let is_modifier_style = node.statements().as_ref().is_some_and(|stmts| {
             stmts.location().start_offset() < node.predicate().location().start_offset()
         });
 
         if is_modifier_style {
             // Modifier style: statements → predicate → subsequent
-            node.statements()
-                .map(|stmts| self.visit_statements_node(&stmts));
+            if let Some(stmts) = node.statements() {
+                self.visit_statements_node(&stmts)
+            }
             self.visit(&node.predicate());
         } else {
             // Regular style: predicate → statements → subsequent
             self.visit(&node.predicate());
-            node.statements()
-                .map(|stmts| self.visit_statements_node(&stmts));
+            if let Some(stmts) = node.statements() {
+                self.visit_statements_node(&stmts)
+            }
         }
 
         // Visit subsequent nodes (else/elsif) if present
-        node.else_clause()
-            .map(|else_clause| self.visit_else_node(&else_clause));
+        if let Some(else_clause) = node.else_clause() {
+            self.visit_else_node(&else_clause)
+        }
     }
 
     fn visit_constant_path_node(&mut self, node: &ruby_prism::ConstantPathNode<'_>) {

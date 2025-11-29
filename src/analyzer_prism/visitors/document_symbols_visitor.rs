@@ -323,6 +323,42 @@ impl<'a> DocumentSymbolsVisitor<'a> {
     }
 }
 
+impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
+    fn visit_class_node(&mut self, node: &ClassNode<'a>) {
+        self.process_class_node_entry(node);
+        visit_class_node(self, node);
+        self.process_class_node_exit(node);
+    }
+
+    fn visit_module_node(&mut self, node: &ModuleNode<'a>) {
+        self.process_module_node_entry(node);
+        visit_module_node(self, node);
+        self.process_module_node_exit(node);
+    }
+
+    fn visit_def_node(&mut self, node: &DefNode<'a>) {
+        self.process_def_node_entry(node);
+        visit_def_node(self, node);
+        self.process_def_node_exit(node);
+    }
+
+    fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'a>) {
+        self.process_constant_write_node_entry(node);
+        visit_constant_write_node(self, node);
+    }
+
+    fn visit_call_node(&mut self, node: &CallNode<'a>) {
+        self.process_call_node_entry(node);
+        visit_call_node(self, node);
+    }
+
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'a>) {
+        self.process_singleton_class_node_entry(node);
+        visit_singleton_class_node(self, node);
+        self.process_singleton_class_node_exit(node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -957,7 +993,7 @@ end
 "#;
         let symbols = extract_symbols_from_content(content);
 
-        assert!(symbols.len() >= 1);
+        assert!(!symbols.is_empty());
         let class_symbol = symbols.iter().find(|s| s.name == "MyClass").unwrap();
         assert_eq!(class_symbol.kind, SymbolKind::CLASS);
 
@@ -1210,41 +1246,5 @@ TOP_LEVEL_CONSTANT = 42
         assert!(has_class);
         assert!(has_method);
         assert!(has_constant);
-    }
-}
-
-impl<'a> Visit<'a> for DocumentSymbolsVisitor<'a> {
-    fn visit_class_node(&mut self, node: &ClassNode<'a>) {
-        self.process_class_node_entry(node);
-        visit_class_node(self, node);
-        self.process_class_node_exit(node);
-    }
-
-    fn visit_module_node(&mut self, node: &ModuleNode<'a>) {
-        self.process_module_node_entry(node);
-        visit_module_node(self, node);
-        self.process_module_node_exit(node);
-    }
-
-    fn visit_def_node(&mut self, node: &DefNode<'a>) {
-        self.process_def_node_entry(node);
-        visit_def_node(self, node);
-        self.process_def_node_exit(node);
-    }
-
-    fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'a>) {
-        self.process_constant_write_node_entry(node);
-        visit_constant_write_node(self, node);
-    }
-
-    fn visit_call_node(&mut self, node: &CallNode<'a>) {
-        self.process_call_node_entry(node);
-        visit_call_node(self, node);
-    }
-
-    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'a>) {
-        self.process_singleton_class_node_entry(node);
-        visit_singleton_class_node(self, node);
-        self.process_singleton_class_node_exit(node);
     }
 }

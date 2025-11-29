@@ -120,7 +120,7 @@ impl<'a> ModuleCodeLensVisitor<'a> {
         for usage in &usages {
             usages_by_type
                 .entry(usage.mixin_type)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(usage.location.clone());
         }
 
@@ -128,8 +128,8 @@ impl<'a> ModuleCodeLensVisitor<'a> {
         let start_offset = node.location().start_offset();
         let end_offset = _constant_path.location().end_offset();
 
-        let start_position = offset_to_position(&self.lang_server, &self.uri, start_offset);
-        let end_position = offset_to_position(&self.lang_server, &self.uri, end_offset);
+        let start_position = offset_to_position(self.lang_server, &self.uri, start_offset);
+        let end_position = offset_to_position(self.lang_server, &self.uri, end_offset);
 
         let range = Range {
             start: start_position,
@@ -223,7 +223,7 @@ impl<'a> ModuleCodeLensVisitor<'a> {
     }
 }
 
-impl<'a> Visit<'_> for ModuleCodeLensVisitor<'a> {
+impl Visit<'_> for ModuleCodeLensVisitor<'_> {
     fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
         // Generate CodeLens for this module
         self.generate_code_lens_for_module(node);

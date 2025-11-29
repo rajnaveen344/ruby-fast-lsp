@@ -1384,10 +1384,9 @@ end
             let position = Position::new(line, col);
             let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
 
-            let identifier = identifier_opt.expect(&format!(
-                "Expected to find variable identifier for {}",
-                expected_name
-            ));
+            let identifier = identifier_opt.unwrap_or_else(|| {
+                panic!("Expected to find variable identifier for {}", expected_name)
+            });
             assert_variable_identifier(&identifier, expected_name);
             assert_namespace_context(&namespace, &[]);
 
@@ -1472,10 +1471,9 @@ end
             let position = Position::new(line, col);
             let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
 
-            let identifier = identifier_opt.expect(&format!(
-                "Expected to find variable identifier for {}",
-                expected_name
-            ));
+            let identifier = identifier_opt.unwrap_or_else(|| {
+                panic!("Expected to find variable identifier for {}", expected_name)
+            });
             assert_variable_identifier(&identifier, expected_name);
             assert_namespace_context(&namespace, &[]);
 

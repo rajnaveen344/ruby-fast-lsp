@@ -24,7 +24,6 @@ impl IdentifierVisitor {
                 self.scope_tracker.get_ns_stack(),
                 self.scope_tracker.get_lv_stack(),
             );
-            return;
         }
     }
 

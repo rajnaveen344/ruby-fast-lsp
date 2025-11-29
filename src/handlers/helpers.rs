@@ -653,7 +653,7 @@ fn collect_ruby_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 
         if path.is_dir() {
             collect_ruby_files(&path, files)?;
-        } else if path.extension().map_or(false, |ext| ext == "rb") {
+        } else if path.extension().is_some_and(|ext| ext == "rb") {
             files.push(path);
         }
     }

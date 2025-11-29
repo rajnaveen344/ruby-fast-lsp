@@ -344,7 +344,7 @@ impl ReferenceVisitor {
         let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
         let index_guard = self.index.lock();
         if let Some(resolved_fqn) =
-            utils::resolve_constant_fqn(&*index_guard, receiver_node, &current_fqn)
+            utils::resolve_constant_fqn(&index_guard, receiver_node, &current_fqn)
         {
             if let FullyQualifiedName::Constant(parts) = resolved_fqn {
                 return (parts, MethodKind::Class);

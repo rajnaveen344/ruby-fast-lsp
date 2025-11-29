@@ -145,7 +145,7 @@ impl IndexVisitor {
             fqn: fqn.clone(),
             location,
             kind: EntryKind::Method {
-                name: method.clone().into(),
+                name: method.clone(),
                 params,
                 owner: owner_fqn,
                 visibility: MethodVisibility::Public,

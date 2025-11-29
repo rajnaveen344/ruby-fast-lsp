@@ -29,9 +29,7 @@ pub async fn find_references_at_position(
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
     let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
-    if let None = identifier_opt {
-        return None;
-    }
+    identifier_opt.as_ref()?;
 
     let identifier = identifier_opt.unwrap();
 
@@ -159,7 +157,7 @@ fn find_method_references(
                 // For constant receivers, we need to resolve the receiver namespace
                 // For Platform::PlatformServices from GoshPosh::Platform::SpecHelpers,
                 // this should resolve to GoshPosh::Platform::PlatformServices
-                let receiver_fqn = if receiver_ns.len() > 0 && ancestors.len() > 0 {
+                let receiver_fqn = if !receiver_ns.is_empty() && !ancestors.is_empty() {
                     // Try to resolve relative to the current namespace
                     // Look for the first part of receiver_ns in ancestors
                     let first_receiver_part = &receiver_ns[0];

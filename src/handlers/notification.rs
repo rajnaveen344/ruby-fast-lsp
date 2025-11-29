@@ -33,7 +33,7 @@ pub async fn handle_initialize(
                 "Parent process ID received: {}. Starting process monitor.",
                 process_id
             );
-            lang_server.set_parent_process_id(Some(process_id as u32));
+            lang_server.set_parent_process_id(Some(process_id));
         } else {
             info!(
                 "Invalid parent process ID received ({}), skipping process monitoring",

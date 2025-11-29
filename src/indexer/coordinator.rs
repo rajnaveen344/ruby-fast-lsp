@@ -190,7 +190,7 @@ impl IndexingCoordinator {
     /// Step 1: Detect which Ruby version we're working with
     fn detect_ruby_version(&mut self) -> Option<RubyVersion> {
         let version = self.version_detector.detect_version();
-        self.detected_ruby_version = version.clone();
+        self.detected_ruby_version = version;
         version
     }
 
@@ -260,10 +260,8 @@ impl IndexingCoordinator {
     ) -> Result<()> {
         let required_stdlib = self.get_required_stdlib_modules();
 
-        let mut stdlib_indexer = IndexerStdlib::new(
-            self.core_indexer.as_ref().unwrap().clone(),
-            ruby_version.clone(),
-        );
+        let mut stdlib_indexer =
+            IndexerStdlib::new(self.core_indexer.as_ref().unwrap().clone(), *ruby_version);
 
         stdlib_indexer.set_required_modules(required_stdlib);
         stdlib_indexer.index_stdlib(server).await?;

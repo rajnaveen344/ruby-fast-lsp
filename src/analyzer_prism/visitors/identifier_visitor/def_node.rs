@@ -21,19 +21,19 @@ impl IdentifierVisitor {
         let mut method_kind = MethodKind::Instance;
 
         if let Some(receiver) = node.receiver() {
-            if let Some(_) = receiver.as_self_node() {
+            if receiver.as_self_node().is_some() {
                 method_kind = MethodKind::Class;
-            } else if let Some(_) = receiver.as_constant_path_node() {
+            } else if receiver.as_constant_path_node().is_some() {
                 method_kind = MethodKind::Class;
-            } else if let Some(_) = receiver.as_constant_read_node() {
+            } else if receiver.as_constant_read_node().is_some() {
                 method_kind = MethodKind::Class;
             }
         }
 
-        let name = String::from_utf8_lossy(&node.name().as_slice()).to_string();
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str(), method_kind);
 
-        if let Err(_) = method {
+        if method.is_err() {
             warn!("Invalid method name: {}", name);
             return;
         }

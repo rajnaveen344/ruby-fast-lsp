@@ -120,7 +120,7 @@ impl RubySnippets {
                         .label
                         .to_lowercase()
                         .starts_with(&prefix.to_lowercase())
-                        || snippet.filter_text.as_ref().map_or(false, |filter| {
+                        || snippet.filter_text.as_ref().is_some_and(|filter| {
                             filter.to_lowercase().contains(&prefix.to_lowercase())
                         })
                 };
@@ -932,7 +932,7 @@ mod tests {
         let snippet = RubySnippets::if_snippet();
 
         // All snippets should have these basic properties
-        assert!(snippet.label.len() > 0);
+        assert!(!snippet.label.is_empty());
         assert_eq!(snippet.kind, Some(CompletionItemKind::SNIPPET));
         assert_eq!(snippet.insert_text_format, Some(InsertTextFormat::SNIPPET));
         assert!(snippet.insert_text.is_some());

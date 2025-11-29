@@ -228,7 +228,7 @@ pub async fn snapshot_definitions(
             serde_json::to_value(&loc).unwrap()
         }
         Some(tower_lsp::lsp_types::GotoDefinitionResponse::Scalar(l)) => {
-            serde_json::to_value(&vec![l]).unwrap()
+            serde_json::to_value(vec![l]).unwrap()
         }
         Some(tower_lsp::lsp_types::GotoDefinitionResponse::Link(ls)) => {
             serde_json::to_value(&ls).unwrap()

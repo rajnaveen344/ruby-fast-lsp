@@ -82,9 +82,8 @@ pub fn should_add_end_ast(content: &str) -> bool {
     visitor.visit(&result.node());
 
     // Add 'end' for standalone conditionals, but NOT for conditional assignments
-    let should_add = visitor.has_standalone_conditional && !visitor.has_conditional_assignment;
 
-    should_add
+    visitor.has_standalone_conditional && !visitor.has_conditional_assignment
 }
 
 pub fn get_document_on_type_formatting_options() -> DocumentOnTypeFormattingOptions {

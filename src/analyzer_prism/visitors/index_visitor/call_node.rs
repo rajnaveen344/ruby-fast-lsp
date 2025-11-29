@@ -100,8 +100,8 @@ impl IndexVisitor {
         if let Some(string_node) = node.as_string_node() {
             // Get the unescaped content of the string
             let unescaped = string_node.unescaped();
-            Some(String::from_utf8_lossy(&unescaped).to_string())
-        } else if let Some(_) = node.as_interpolated_string_node() {
+            Some(String::from_utf8_lossy(unescaped).to_string())
+        } else if node.as_interpolated_string_node().is_some() {
             // For now, we don't handle interpolated strings in require statements
             // as they are dynamic and can't be resolved statically
             None

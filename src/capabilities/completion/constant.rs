@@ -11,7 +11,6 @@ pub fn find_constant_completions(
     partial_name: String,
 ) -> Vec<CompletionItem> {
     let engine = ConstantCompletionEngine::new();
-    let completions = engine.complete_constants(index, analyzer, position, partial_name);
 
-    completions
+    engine.complete_constants(index, analyzer, position, partial_name)
 }

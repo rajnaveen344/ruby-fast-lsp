@@ -179,6 +179,86 @@ pub fn has_rbs_class(class_name: &str) -> bool {
     loader.get_class(class_name).is_some()
 }
 
+/// Method info for completion
+#[derive(Debug, Clone)]
+pub struct RbsMethodInfo {
+    pub name: String,
+    pub return_type: Option<RubyType>,
+    pub is_singleton: bool,
+    pub params: Vec<String>,
+}
+
+/// Get all methods for a class from RBS definitions
+pub fn get_rbs_class_methods(class_name: &str, include_singleton: bool) -> Vec<RbsMethodInfo> {
+    let loader = RBS_LOADER.read();
+    let mut methods = Vec::new();
+
+    if let Some(class) = loader.get_class(class_name) {
+        for method in &class.methods {
+            let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
+
+            // Skip singleton methods if not requested
+            if is_singleton && !include_singleton {
+                continue;
+            }
+
+            // Get parameter names from first overload
+            let params: Vec<String> = method
+                .overloads
+                .first()
+                .map(|o| {
+                    o.params
+                        .iter()
+                        .map(|p| p.name.clone().unwrap_or_default())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let return_type = method.return_type().map(rbs_type_to_ruby_type);
+
+            methods.push(RbsMethodInfo {
+                name: method.name.clone(),
+                return_type,
+                is_singleton,
+                params,
+            });
+        }
+    }
+
+    // Also check modules (for mixed-in methods)
+    if let Some(module) = loader.get_module(class_name) {
+        for method in &module.methods {
+            let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
+
+            if is_singleton && !include_singleton {
+                continue;
+            }
+
+            let params: Vec<String> = method
+                .overloads
+                .first()
+                .map(|o| {
+                    o.params
+                        .iter()
+                        .map(|p| p.name.clone().unwrap_or_default())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let return_type = method.return_type().map(rbs_type_to_ruby_type);
+
+            methods.push(RbsMethodInfo {
+                name: method.name.clone(),
+                return_type,
+                is_singleton,
+                params,
+            });
+        }
+    }
+
+    methods
+}
+
 /// Get the number of loaded RBS declarations
 pub fn rbs_declaration_count() -> usize {
     let loader = RBS_LOADER.read();

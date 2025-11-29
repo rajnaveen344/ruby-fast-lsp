@@ -246,7 +246,11 @@ impl<'a> DataflowAnalyzer<'a> {
     pub fn analyze(&mut self, initial_state: TypeState) {
         // Initialize entry block with initial state
         self.block_entry_states
-            .insert(self.cfg.entry, initial_state);
+            .insert(self.cfg.entry, initial_state.clone());
+
+        // Compute initial exit state for entry block
+        let entry_exit = self.compute_exit_state(self.cfg.entry, initial_state);
+        self.block_exit_states.insert(self.cfg.entry, entry_exit);
 
         // Iterate until fixed point
         let mut changed = true;

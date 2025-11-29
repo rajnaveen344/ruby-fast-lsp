@@ -114,7 +114,7 @@ impl IdentifierVisitor {
 
         (
             self.identifier.clone(),
-            self.identifier_type.clone(),
+            self.identifier_type,
             ns_stack,
             lv_stack,
         )
@@ -283,25 +283,22 @@ mod tests {
 
         // Special case for root constants
         if code.starts_with("::") {
-            match identifier {
-                Identifier::RubyConstant { namespace: _, iden } => {
-                    // For root constants, we expect the identifier path to match expected_parts
+            if let Identifier::RubyConstant { namespace: _, iden } = identifier {
+                // For root constants, we expect the identifier path to match expected_parts
+                assert_eq!(
+                    iden.len(),
+                    expected_parts.len(),
+                    "Identifier parts count mismatch for root constant path"
+                );
+                for (i, expected_part) in expected_parts.iter().enumerate() {
                     assert_eq!(
-                        iden.len(),
-                        expected_parts.len(),
-                        "Identifier parts count mismatch for root constant path"
+                        iden[i].to_string(),
+                        *expected_part,
+                        "Identifier part at index {} mismatch",
+                        i
                     );
-                    for (i, expected_part) in expected_parts.iter().enumerate() {
-                        assert_eq!(
-                            iden[i].to_string(),
-                            *expected_part,
-                            "Identifier part at index {} mismatch",
-                            i
-                        );
-                    }
-                    return;
                 }
-                _ => {}
+                return;
             }
         }
 

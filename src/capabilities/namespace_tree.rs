@@ -255,7 +255,7 @@ fn resolve_mixin_cached(
     cache: &mut HashMap<String, String>,
 ) -> String {
     let mixin_str = format_mixin_ref(mixin_ref);
-    let key = format!("{}-{}", mixin_str, current_fqn.to_string());
+    let key = format!("{}-{}", mixin_str, current_fqn);
     if let Some(cached) = cache.get(&key) {
         return cached.clone();
     }
@@ -317,7 +317,7 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<Na
             let parent_fqn = fqn[..last_sep].to_string();
             children_map
                 .entry(parent_fqn)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(fqn.clone());
         }
 

@@ -141,7 +141,7 @@ impl SymbolSearchEngine {
         let matcher = SymbolMatcher::new();
 
         // Search through definitions
-        for (_fqn, entries) in &index.definitions {
+        for entries in index.definitions.values() {
             for entry in entries {
                 if let Some(symbol) = convert_entry_to_symbol_information(entry) {
                     if let Some(relevance) =
@@ -350,11 +350,8 @@ fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformatio
     use crate::indexer::entry::entry_kind::EntryKind;
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
-    match &entry.kind {
-        EntryKind::LocalVariable { .. } => {
-            return None; // Exclude local variables
-        }
-        _ => {}
+    if let EntryKind::LocalVariable { .. } = &entry.kind {
+        return None; // Exclude local variables
     }
 
     let name = extract_display_name(&entry.fqn);

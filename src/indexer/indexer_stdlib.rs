@@ -165,7 +165,7 @@ impl IndexerStdlib {
     fn discover_stdlib_paths(&mut self) {
         self.stdlib_paths.clear();
 
-        if let Some(version) = self.ruby_version.clone() {
+        if let Some(version) = self.ruby_version {
             self.discover_version_specific_paths(&version);
         }
 

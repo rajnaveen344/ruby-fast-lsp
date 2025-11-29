@@ -20,7 +20,7 @@ impl RubyConstant {
         }
 
         // Subsequent characters must be word-like (letters, numbers, _)
-        if !chars.all(|c| unicode_ident::is_xid_continue(c)) {
+        if !chars.all(unicode_ident::is_xid_continue) {
             return Err("Namespace contains invalid characters");
         }
 

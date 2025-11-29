@@ -123,7 +123,6 @@ fn def_node_invalid_method_name() {
     // Ensure none of the FQNs contain 123invalid
     assert!(defs
         .keys()
-        .into_iter()
         .all(|fqn| !fqn.to_string().contains("123invalid")));
 }
 

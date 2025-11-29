@@ -15,12 +15,16 @@ use super::builder::CfgBuilder;
 use super::dataflow::{DataflowAnalyzer, DataflowResults, TypeState};
 use super::graph::ControlFlowGraph;
 
+/// Special key for top-level code CFG (not inside any method)
+const TOP_LEVEL_CFG_KEY: usize = usize::MAX;
+
 /// State for a single open file's CFG analysis
 #[derive(Debug)]
 pub struct FileCfgState {
     /// Source content
     pub content: String,
     /// CFGs for each method in the file (keyed by method start offset)
+    /// Also includes top-level code under TOP_LEVEL_CFG_KEY
     pub method_cfgs: HashMap<usize, MethodCfgState>,
     /// Last analysis timestamp
     pub last_analyzed: Instant,
@@ -68,7 +72,13 @@ impl MethodCfgState {
         // Find the block containing this offset
         for (block_id, block) in &self.cfg.blocks {
             if offset >= block.location.start_offset && offset <= block.location.end_offset {
-                // Check if there's a type for this variable in this block
+                // Check exit state first (includes assignments made in this block)
+                // then fall back to entry state
+                if let Some(state) = self.dataflow.get_exit_state(*block_id) {
+                    if let Some(ty) = state.get_type(var_name) {
+                        return Some(ty.clone());
+                    }
+                }
                 if let Some(state) = self.dataflow.get_entry_state(*block_id) {
                     if let Some(ty) = state.get_type(var_name) {
                         return Some(ty.clone());
@@ -129,7 +139,7 @@ impl TypeNarrowingEngine {
         }
     }
 
-    /// Analyze a file and build CFGs for all methods
+    /// Analyze a file and build CFGs for all methods and top-level code
     pub fn analyze_file(&self, uri: &Url) {
         let mut states = self.file_states.lock();
         let Some(state) = states.get_mut(uri) else {
@@ -150,10 +160,17 @@ impl TypeNarrowingEngine {
             return;
         };
 
-        // Find all method definitions and build CFGs
         let mut method_cfgs = HashMap::new();
 
-        for stmt in program.statements().body().iter() {
+        // Build CFG for top-level code (statements not inside methods)
+        let statements_node = program.statements();
+        let top_level_cfg = self.build_top_level_cfg(&statements_node, content.as_bytes());
+        if let Some(cfg_state) = top_level_cfg {
+            method_cfgs.insert(TOP_LEVEL_CFG_KEY, cfg_state);
+        }
+
+        // Find all method definitions and build CFGs
+        for stmt in statements_node.body().iter() {
             self.collect_method_cfgs(&stmt, content.as_bytes(), &mut method_cfgs);
         }
 
@@ -164,6 +181,46 @@ impl TypeNarrowingEngine {
             state.last_analyzed = Instant::now();
             state.dirty = false;
         }
+    }
+
+    /// Build a CFG for top-level code (outside any method)
+    fn build_top_level_cfg(
+        &self,
+        statements: &ruby_prism::StatementsNode,
+        source: &[u8],
+    ) -> Option<MethodCfgState> {
+        // Check if there's any top-level code (not just class/module/method definitions)
+        let has_top_level_code = statements.body().iter().any(|stmt| {
+            stmt.as_def_node().is_none()
+                && stmt.as_class_node().is_none()
+                && stmt.as_module_node().is_none()
+                && stmt.as_singleton_class_node().is_none()
+        });
+
+        if !has_top_level_code {
+            return None;
+        }
+
+        // Build CFG from the statements body as a "block"
+        let builder = CfgBuilder::new(source);
+        let cfg = builder.build_from_statements(statements);
+
+        // Run dataflow analysis (no parameters for top-level)
+        let initial_state = TypeState::new();
+        let mut analyzer = DataflowAnalyzer::new(&cfg);
+        analyzer.analyze(initial_state);
+        let dataflow = analyzer.into_results();
+
+        let start_offset = statements.location().start_offset();
+        let end_offset = statements.location().end_offset();
+
+        Some(MethodCfgState {
+            cfg,
+            dataflow,
+            start_offset,
+            end_offset,
+            method_name: "<top-level>".to_string(),
+        })
     }
 
     /// Recursively collect method CFGs from AST
@@ -238,10 +295,21 @@ impl TypeNarrowingEngine {
         let states = self.file_states.lock();
         let state = states.get(uri)?;
 
-        // Find the method containing this offset
-        for method_state in state.method_cfgs.values() {
+        // First, try to find a method containing this offset (more specific than top-level)
+        for (key, method_state) in &state.method_cfgs {
+            // Skip top-level CFG in first pass - we want to check methods first
+            if *key == TOP_LEVEL_CFG_KEY {
+                continue;
+            }
             if method_state.contains_offset(offset) {
                 return method_state.get_type_at_position(var_name, offset);
+            }
+        }
+
+        // If not in any method, check top-level CFG
+        if let Some(top_level) = state.method_cfgs.get(&TOP_LEVEL_CFG_KEY) {
+            if top_level.contains_offset(offset) {
+                return top_level.get_type_at_position(var_name, offset);
             }
         }
 
@@ -400,5 +468,105 @@ end
 
         // Line 2, col 2 -> offset 10
         assert_eq!(engine.line_col_to_offset(content, 2, 2), Some(10));
+    }
+
+    #[test]
+    fn test_top_level_code_type_inference() {
+        let engine = TypeNarrowingEngine::new();
+        let uri = Url::parse("file:///test.rb").unwrap();
+
+        let source = r#"a = [1, 2, 3]
+a.each"#;
+
+        engine.on_file_open(&uri, source);
+        engine.analyze_file(&uri);
+
+        // Check that top-level CFG was created
+        {
+            let states = engine.file_states.lock();
+            let state = states.get(&uri).unwrap();
+            assert!(
+                state.method_cfgs.contains_key(&TOP_LEVEL_CFG_KEY),
+                "Should have top-level CFG"
+            );
+        }
+
+        // Get type of 'a' at line 2 (the a.each line)
+        // Line 2 starts at offset 14 (after "a = [1, 2, 3]\n")
+        let offset = 14; // Start of line 2
+        let narrowed_type = engine.get_narrowed_type(&uri, "a", offset);
+        assert!(
+            narrowed_type.is_some(),
+            "Should have narrowed type for 'a' at top level"
+        );
+
+        // Verify it's an Array type
+        let ty = narrowed_type.unwrap();
+        match ty {
+            RubyType::Array(_) => {}
+            _ => panic!("Expected Array type, got {:?}", ty),
+        }
+    }
+
+    #[test]
+    fn test_top_level_string_variable() {
+        let engine = TypeNarrowingEngine::new();
+        let uri = Url::parse("file:///test.rb").unwrap();
+
+        let source = r#"name = "hello"
+puts name."#;
+
+        engine.on_file_open(&uri, source);
+        engine.analyze_file(&uri);
+
+        // Get type of 'name' at line 2 (the puts name. line)
+        let offset = 20; // somewhere on line 2
+        let narrowed_type = engine.get_narrowed_type(&uri, "name", offset);
+
+        assert!(
+            narrowed_type.is_some(),
+            "Should have narrowed type for 'name' at top level"
+        );
+
+        // Verify it's a String type
+        let ty = narrowed_type.unwrap();
+        assert_eq!(ty, RubyType::string(), "Expected String type, got {:?}", ty);
+    }
+
+    #[test]
+    fn test_top_level_string_with_method_call() {
+        // Test the exact scenario: name = "hello" followed by name.
+        let engine = TypeNarrowingEngine::new();
+        let uri = Url::parse("file:///test.rb").unwrap();
+
+        let source = r#"name = "hello"
+name.upcase"#;
+
+        engine.on_file_open(&uri, source);
+        engine.analyze_file(&uri);
+
+        // Get type of 'name' at the method call position
+        let offset = 20; // somewhere on line 2 after "name."
+        let narrowed_type = engine.get_narrowed_type(&uri, "name", offset);
+
+        assert!(
+            narrowed_type.is_some(),
+            "Should have narrowed type for 'name'"
+        );
+
+        let ty = narrowed_type.unwrap();
+
+        // Check it's String
+        match &ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                assert!(
+                    name.contains("String"),
+                    "Expected String class, got: {}",
+                    name
+                );
+            }
+            _ => panic!("Expected Class type, got {:?}", ty),
+        }
     }
 }

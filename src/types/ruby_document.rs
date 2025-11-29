@@ -151,16 +151,12 @@ impl RubyDocument {
 
     /// Get all hints (both inlay and type hints) combined
     pub fn get_all_hints(&self) -> Vec<InlayHint> {
-        let all_hints = self.inlay_hints.clone();
-        all_hints
+        self.inlay_hints.clone()
     }
 
     pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
         debug!("Adding local variable entry with scope id: {:?}", scope_id);
-        self.lvars
-            .entry(scope_id)
-            .or_insert_with(Vec::new)
-            .push(entry);
+        self.lvars.entry(scope_id).or_default().push(entry);
     }
 
     pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {

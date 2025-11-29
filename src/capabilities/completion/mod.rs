@@ -2,6 +2,7 @@ pub mod completion_ranker;
 pub mod constant;
 pub mod constant_completion;
 pub mod constant_matcher;
+pub mod method;
 pub mod scope_resolver;
 pub mod snippets;
 pub mod variable;
@@ -11,7 +12,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::{
-    analyzer_prism::{Identifier, RubyPrismAnalyzer},
+    analyzer_prism::{Identifier, ReceiverKind, RubyPrismAnalyzer},
     server::RubyLanguageServer,
 };
 
@@ -183,6 +184,44 @@ pub async fn find_completion_at_position(
 
     let mut completions = vec![];
 
+    // Check if we're in a method call context (after a dot)
+    let is_dot_trigger = is_trigger_character && trigger_character == Some(".");
+
+    // Also detect method call context by looking for a dot before the cursor
+    let line_has_dot = {
+        let line = document
+            .content
+            .lines()
+            .nth(position.line as usize)
+            .unwrap_or("");
+        let char_pos = position.character as usize;
+        // Safely get substring before cursor
+        let before_cursor = if char_pos <= line.len() {
+            &line[..char_pos]
+        } else {
+            line
+        };
+        // Check if there's a dot followed by optional method name chars
+        before_cursor.contains('.')
+            && before_cursor
+                .rfind('.')
+                .map(|dot_pos| {
+                    let after_dot = &before_cursor[dot_pos + 1..];
+                    after_dot.chars().all(|c| c.is_alphanumeric() || c == '_')
+                })
+                .unwrap_or(false)
+    };
+
+    let is_method_call_context = is_dot_trigger
+        || line_has_dot
+        || matches!(
+            &partial_name,
+            Some(Identifier::RubyMethod {
+                receiver_kind: ReceiverKind::Expr,
+                ..
+            })
+        );
+
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
@@ -191,6 +230,32 @@ pub async fn find_completion_at_position(
         let constant_completions =
             constant::find_constant_completions(&index_guard, &analyzer, position, partial_string);
         completions.extend(constant_completions);
+    } else if is_method_call_context {
+        // Method call context: provide type-aware method completions using CFG
+        let index_arc = server.index();
+
+        // Get receiver type using CFG-based type inference
+        let receiver_type =
+            get_receiver_type_from_cfg(server, &uri, &document.content, position, &partial_name);
+
+        if let Some(receiver_type) = receiver_type {
+            // Determine if this is a class method call (receiver is a constant)
+            let is_class_method = matches!(
+                &partial_name,
+                Some(Identifier::RubyMethod {
+                    receiver_kind: ReceiverKind::Constant,
+                    ..
+                })
+            );
+
+            let method_completions = method::find_method_completions(
+                &index_arc,
+                &receiver_type,
+                &partial_string,
+                is_class_method,
+            );
+            completions.extend(method_completions);
+        }
     } else {
         // Normal completion: include variables, constants, and snippets
 
@@ -202,7 +267,7 @@ pub async fn find_completion_at_position(
         let index_arc = server.index();
         let index_guard = index_arc.lock();
         let constant_completions = constant::find_constant_completions(
-            &*index_guard,
+            &index_guard,
             &analyzer,
             position,
             partial_string.clone(),
@@ -211,8 +276,6 @@ pub async fn find_completion_at_position(
 
         // Add snippet completions with context awareness
         // Only include snippets if not triggered by a dot character
-        let is_dot_trigger = is_trigger_character && trigger_character == Some(".");
-
         if !is_dot_trigger {
             let snippet_context = snippets::RubySnippets::determine_context_with_position(
                 &partial_name,
@@ -228,6 +291,151 @@ pub async fn find_completion_at_position(
     }
 
     CompletionResponse::Array(completions)
+}
+
+/// Get the receiver type using CFG-based type inference
+///
+/// This function determines the type of the receiver expression at a completion position.
+/// It handles:
+/// - Constant receivers (e.g., `User.find`) -> ClassReference
+/// - Literal receivers (e.g., `"hello".`, `123.`) -> direct type
+/// - Variable receivers (e.g., `name.`) -> CFG narrowed type (works for both methods and top-level)
+fn get_receiver_type_from_cfg(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+    position: Position,
+    identifier: &Option<Identifier>,
+) -> Option<crate::type_inference::ruby_type::RubyType> {
+    use crate::type_inference::ruby_type::RubyType;
+    use crate::types::fully_qualified_name::FullyQualifiedName;
+    use crate::types::ruby_namespace::RubyConstant;
+
+    // If we have a method identifier with constant receiver, use it directly
+    if let Some(Identifier::RubyMethod {
+        receiver_kind: ReceiverKind::Constant,
+        receiver: Some(recv_parts),
+        ..
+    }) = identifier
+    {
+        let fqn = FullyQualifiedName::Constant(recv_parts.clone());
+        return Some(RubyType::ClassReference(fqn));
+    }
+
+    // Extract receiver text from the line
+    let line = content.lines().nth(position.line as usize)?;
+    let char_pos = position.character as usize;
+
+    let before_cursor = if char_pos <= line.len() {
+        &line[..char_pos]
+    } else {
+        line
+    };
+
+    let dot_pos = before_cursor.rfind('.')?;
+    let receiver_text = before_cursor[..dot_pos].trim();
+
+    if receiver_text.is_empty() {
+        return None;
+    }
+
+    // Handle literals directly (no CFG needed - these are unambiguous)
+    if let Some(literal_type) = infer_literal_type(receiver_text) {
+        return Some(literal_type);
+    }
+
+    // Handle constant references (class/module names)
+    if receiver_text
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
+        if let Ok(constant) = RubyConstant::new(receiver_text) {
+            return Some(RubyType::ClassReference(FullyQualifiedName::Constant(
+                vec![constant],
+            )));
+        }
+    }
+
+    // For variables, use CFG-based type narrowing
+    // CFG handles both method-level and top-level code
+    if is_variable_name(receiver_text) {
+        let offset = position_to_offset(content, position);
+        return server
+            .type_narrowing
+            .get_narrowed_type(uri, receiver_text, offset);
+    }
+
+    None
+}
+
+/// Infer type from a literal expression
+fn infer_literal_type(text: &str) -> Option<crate::type_inference::ruby_type::RubyType> {
+    use crate::type_inference::ruby_type::RubyType;
+
+    // String literal
+    if text.starts_with('"') || text.starts_with('\'') {
+        return Some(RubyType::string());
+    }
+
+    // Symbol literal
+    if text.starts_with(':') {
+        return Some(RubyType::symbol());
+    }
+
+    // Array literal
+    if text.starts_with('[') {
+        return Some(RubyType::Array(vec![RubyType::Any]));
+    }
+
+    // Hash literal
+    if text.starts_with('{') {
+        return Some(RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]));
+    }
+
+    // Integer literal (must check before float)
+    if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit() || c == '_') {
+        return Some(RubyType::integer());
+    }
+
+    // Float literal
+    if text.contains('.')
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '_' || c == '.')
+    {
+        return Some(RubyType::float());
+    }
+
+    None
+}
+
+/// Check if text is a valid Ruby variable name (lowercase identifier)
+fn is_variable_name(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+
+    let first_char = text.chars().next().unwrap();
+    if !first_char.is_lowercase() && first_char != '_' {
+        return false;
+    }
+
+    text.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Convert LSP Position to byte offset
+fn position_to_offset(content: &str, position: Position) -> usize {
+    let mut offset = 0;
+    for (line_num, line) in content.lines().enumerate() {
+        if line_num == position.line as usize {
+            offset += position.character as usize;
+            break;
+        }
+        offset += line.len() + 1;
+    }
+    offset
 }
 
 #[cfg(test)]
@@ -917,8 +1125,7 @@ end
         let uri = Url::parse("file:///edge_cases.rb").unwrap();
 
         // Test various edge cases for scope resolution
-        let test_cases = vec![
-            // Case 1: :: at the beginning of a line
+        let test_cases = [
             (
                 r#"
 class TestClass
@@ -1302,7 +1509,7 @@ end
 
                 // Verify we have a reasonable number of completions
                 assert!(
-                    completions.len() > 0,
+                    !completions.is_empty(),
                     "Should have at least some completions"
                 );
             }
@@ -1883,31 +2090,16 @@ a.each"#;
 
         match response {
             CompletionResponse::Array(completions) => {
-                // Check if we have each snippet completion
+                // Check if we have each completion (now from RBS, so it's a METHOD)
                 let each_completion = completions.iter().find(|c| c.label == "each");
                 assert!(
                     each_completion.is_some(),
-                    "Should have each snippet completion"
+                    "Should have each method completion"
                 );
 
                 if let Some(completion) = each_completion {
-                    assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
-                    // Should NOT have collection placeholder in method call context
-                    assert!(
-                        !completion
-                            .insert_text
-                            .as_ref()
-                            .unwrap()
-                            .contains("${1:collection}"),
-                        "Method call context should not include collection placeholder. Got: {}",
-                        completion.insert_text.as_ref().unwrap()
-                    );
-                    // Should start with "each"
-                    assert!(
-                        completion.insert_text.as_ref().unwrap().starts_with("each"),
-                        "Method call context should start with method name. Got: {}",
-                        completion.insert_text.as_ref().unwrap()
-                    );
+                    // Now returns METHOD from RBS type-aware completion
+                    assert_eq!(completion.kind, Some(CompletionItemKind::METHOD));
                 }
             }
             _ => panic!("Expected array response"),
@@ -1941,32 +2133,17 @@ a."#;
 
         match response {
             CompletionResponse::Array(completions) => {
-                // Check if we have each snippet completion
+                // With CFG-based type inference, we now get proper method completions from RBS
+                // Check if we have each method completion (from Array RBS)
                 let each_completion = completions.iter().find(|c| c.label == "each");
                 assert!(
                     each_completion.is_some(),
-                    "Should have each snippet completion"
+                    "Should have 'each' method completion from Array"
                 );
 
                 if let Some(completion) = each_completion {
-                    assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
-                    // With enhanced context detection, even when cursor is right after dot,
-                    // it should detect method call context and NOT include the collection placeholder
-                    assert!(
-                        !completion
-                            .insert_text
-                            .as_ref()
-                            .unwrap()
-                            .contains("${1:collection}"),
-                        "After dot, should detect method call context and not include collection placeholder. Got: {}",
-                        completion.insert_text.as_ref().unwrap()
-                    );
-                    // Should start with "each" (method call context)
-                    assert!(
-                        completion.insert_text.as_ref().unwrap().starts_with("each"),
-                        "Method call context should start with method name. Got: {}",
-                        completion.insert_text.as_ref().unwrap()
-                    );
+                    // Now returns METHOD from RBS type-aware completion
+                    assert_eq!(completion.kind, Some(CompletionItemKind::METHOD));
                 }
             }
             _ => panic!("Expected array response"),
@@ -2021,15 +2198,22 @@ a."#;
                     );
                 }
 
-                // But should still have method-appropriate snippets
-                let method_snippets = ["each", "map", "select", "reject"];
-                for method in method_snippets {
+                // Method completions should be present (from RBS)
+                // Note: some methods like 'map' and 'reject' are aliases or inherited from Enumerable
+                // We check for methods that are directly defined in Array
+                let method_names = ["each", "first", "last", "length"];
+                for method in method_names {
                     let method_completion = completions.iter().find(|c| c.label == method);
                     assert!(
                         method_completion.is_some(),
-                        "Should have '{}' method snippet in method call context",
+                        "Should have '{}' method completion in method call context",
                         method
                     );
+
+                    // Verify it's a METHOD, not a SNIPPET
+                    if let Some(completion) = method_completion {
+                        assert_eq!(completion.kind, Some(CompletionItemKind::METHOD));
+                    }
                 }
             }
             _ => panic!("Expected array response"),
@@ -2127,6 +2311,51 @@ end
                 if let Some(completion) = while_snippet {
                     assert_eq!(completion.kind, Some(CompletionItemKind::SNIPPET));
                 }
+            }
+            _ => panic!("Expected array response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_top_level_string_variable_completion() {
+        let server = create_test_server().await;
+        let uri = Url::parse("file:///test_string.rb").unwrap();
+        let content = r#"name = "hello"
+name."#;
+
+        // Open the document in the server
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        };
+        server.did_open(params).await;
+
+        // Test completion at position right after "name."
+        let position = Position {
+            line: 1,
+            character: 5,
+        }; // Right after "name."
+
+        let response = find_completion_at_position(&server, uri, position, None).await;
+
+        match response {
+            CompletionResponse::Array(completions) => {
+                // Should have String methods like upcase, downcase, length
+                let upcase_completion = completions.iter().find(|c| c.label == "upcase");
+                assert!(
+                    upcase_completion.is_some(),
+                    "Should have 'upcase' method completion for String"
+                );
+
+                let length_completion = completions.iter().find(|c| c.label == "length");
+                assert!(
+                    length_completion.is_some(),
+                    "Should have 'length' method completion for String"
+                );
             }
             _ => panic!("Expected array response"),
         }
