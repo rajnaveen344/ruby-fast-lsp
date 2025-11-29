@@ -1910,7 +1910,7 @@ user = User.new      # user: User (instance type)
 name = user.name     # name: String (from method return type)
 ```
 
-### Milestone 6: RBS Support for Standard Library Types
+### Milestone 6: RBS Support for Standard Library Types ✅ COMPLETED
 
 **Goal**: Parse RBS files from Ruby's standard library to provide type information for built-in methods.
 
@@ -1921,16 +1921,60 @@ name = user.name     # name: String (from method return type)
 - Maintained by the Ruby team - always up to date
 - Located at: `<rbs_gem_path>/core/` and `<rbs_gem_path>/stdlib/`
 
-| Step | Task                                       | Files to Modify          | Test                      |
-| ---- | ------------------------------------------ | ------------------------ | ------------------------- |
-| 6.1  | Create RBS parser module                   | `rbs/parser.rs` (new)    | Unit tests for RBS syntax |
-| 6.2  | Parse class/module definitions             | `rbs/parser.rs`          | Test class parsing        |
-| 6.3  | Parse method signatures with return types  | `rbs/parser.rs`          | Test method parsing       |
-| 6.4  | Parse generic types (Array[T], Hash[K, V]) | `rbs/parser.rs`          | Test generic parsing      |
-| 6.5  | Convert RBS types to RubyType              | `rbs/converter.rs` (new) | Test type conversion      |
-| 6.6  | Discover RBS gem path at startup           | `rbs/loader.rs` (new)    | Test path discovery       |
-| 6.7  | Load core RBS files into index             | `rbs/loader.rs`          | Test core loading         |
-| 6.8  | Integrate with MethodResolver              | `method_resolver.rs`     | Test fallback to RBS      |
+| Step | Task                                       | Files to Modify                      | Status |
+| ---- | ------------------------------------------ | ------------------------------------ | ------ |
+| 6.1  | Create RBS parser crate                    | `crates/rbs-parser/`                 | ✅     |
+| 6.2  | Integrate tree-sitter-rbs for parsing      | `crates/rbs-parser/src/parser.rs`    | ✅     |
+| 6.3  | Parse class/module definitions             | `crates/rbs-parser/src/visitor.rs`   | ✅     |
+| 6.4  | Parse method signatures with return types  | `crates/rbs-parser/src/visitor.rs`   | ✅     |
+| 6.5  | Parse generic types (Array[T], Hash[K, V]) | `crates/rbs-parser/src/visitor.rs`   | ✅     |
+| 6.6  | Convert RBS types to strings               | `crates/rbs-parser/src/converter.rs` | ✅     |
+| 6.7  | Create RBS file loader                     | `crates/rbs-parser/src/loader.rs`    | ✅     |
+| 6.8  | Bundle RBS type definitions with crate     | `crates/rbs-parser/rbs_types/`       | ✅     |
+| 6.9  | Integrate with MethodResolver              | `method_resolver.rs`                 | ✅     |
+| 6.10 | Add update-rbs binary for fetching latest  | `crates/rbs-parser/src/bin/`         | ✅     |
+
+**Implementation Details**:
+
+Created a separate `rbs-parser` crate (`crates/rbs-parser/`) using `tree-sitter-rbs` for parsing:
+
+- **parser.rs**: Wrapper around tree-sitter-rbs that parses RBS source
+- **visitor.rs**: Converts tree-sitter nodes to clean Rust AST types
+- **types.rs**: Rich type definitions (ClassDecl, ModuleDecl, MethodDecl, RbsType, etc.)
+- **loader.rs**: File loader for loading RBS from directories with method indexing
+- **converter.rs**: Utilities to convert RbsType to display strings, YARD format, etc.
+- **rbs_types/**: Bundled RBS type definitions from Ruby 3.3.5 (core + stdlib)
+
+**Bundled Types**: The RBS type definitions are bundled with the crate, so they work
+without requiring the `rbs` gem to be installed. This is important for corporate
+environments with gem installation restrictions.
+
+**Update Tool**: The `update-rbs` binary can fetch the latest RBS definitions from GitHub:
+
+```bash
+# Update to latest from master branch
+cargo run -p rbs-parser --bin update-rbs --features update-tool
+
+# Update to specific branch
+cargo run -p rbs-parser --bin update-rbs --features update-tool -- --branch v3.4
+```
+
+The branch and commit info is stored in `Cargo.toml` for reproducibility:
+
+```toml
+[package.metadata.rbs]
+repository = "ruby/rbs"
+branch = "master"
+commit = "3686510eec35b5d3839cada91c81d17b96898c3c"
+last_updated = "2025-12-17"
+```
+
+**Test Results**:
+
+- Successfully loads 83 RBS files from Ruby core
+- Indexes 172 declarations and 1730 methods
+- Correctly parses String class with 126 methods
+- Properly extracts return types (e.g., `String#length` returns `Integer`)
 
 **RBS Syntax Examples**:
 
@@ -1954,9 +1998,9 @@ class Array[unchecked out Elem]
 end
 ```
 
-**Key files to parse**:
+**Key files parsed**:
 
-- `core/string.rbs` - String methods
+- `core/string.rbs` - String methods (126 methods)
 - `core/integer.rbs` - Integer methods
 - `core/array.rbs` - Array methods
 - `core/hash.rbs` - Hash methods

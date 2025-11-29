@@ -419,3 +419,138 @@ async fn test_variable_type_hints_after_indexing() {
         hint_labels
     );
 }
+
+/// Test that RBS types are used for built-in methods like String#length
+#[tokio::test]
+async fn test_rbs_builtin_type_resolution() {
+    use crate::type_inference::rbs_index::{
+        get_rbs_method_return_type_as_ruby_type, rbs_declaration_count, rbs_method_count,
+    };
+    use crate::type_inference::RubyType;
+
+    // Verify RBS types are loaded
+    let decl_count = rbs_declaration_count();
+    let method_count = rbs_method_count();
+    println!(
+        "RBS: {} declarations, {} methods loaded",
+        decl_count, method_count
+    );
+    assert!(decl_count > 0, "RBS declarations should be loaded");
+    assert!(method_count > 0, "RBS methods should be loaded");
+
+    // Test String#length returns Integer
+    let length_type = get_rbs_method_return_type_as_ruby_type("String", "length", false);
+    assert!(
+        length_type.is_some(),
+        "String#length should have a return type"
+    );
+    if let Some(RubyType::Class(fqn)) = length_type {
+        assert!(
+            fqn.to_string().contains("Integer"),
+            "String#length should return Integer, got: {}",
+            fqn
+        );
+    } else {
+        panic!(
+            "Expected Class type for String#length, got: {:?}",
+            length_type
+        );
+    }
+
+    // Test Integer#to_s returns String
+    let to_s_type = get_rbs_method_return_type_as_ruby_type("Integer", "to_s", false);
+    assert!(
+        to_s_type.is_some(),
+        "Integer#to_s should have a return type"
+    );
+    if let Some(RubyType::Class(fqn)) = to_s_type {
+        assert!(
+            fqn.to_string().contains("String"),
+            "Integer#to_s should return String, got: {}",
+            fqn
+        );
+    } else {
+        panic!("Expected Class type for Integer#to_s, got: {:?}", to_s_type);
+    }
+
+    // Test Array#length returns Integer (size is an alias)
+    let length_type = get_rbs_method_return_type_as_ruby_type("Array", "length", false);
+    assert!(
+        length_type.is_some(),
+        "Array#length should have a return type"
+    );
+    if let Some(RubyType::Class(fqn)) = length_type {
+        assert!(
+            fqn.to_string().contains("Integer"),
+            "Array#length should return Integer, got: {}",
+            fqn
+        );
+    } else {
+        panic!(
+            "Expected Class type for Array#length, got: {:?}",
+            length_type
+        );
+    }
+
+    // Test Hash#keys returns Array
+    let keys_type = get_rbs_method_return_type_as_ruby_type("Hash", "keys", false);
+    assert!(keys_type.is_some(), "Hash#keys should have a return type");
+    println!("Hash#keys return type: {:?}", keys_type);
+}
+
+/// Test that inlay hints show RBS-derived types for built-in method calls
+#[tokio::test]
+async fn test_rbs_inlay_hints_for_builtin_methods() {
+    let harness = TestHarness::new().await;
+
+    // Open the RBS builtin types fixture
+    harness.open_fixture_dir("rbs_builtin_types.rb").await;
+
+    let fixture_path = fixture_root().join("rbs_builtin_types.rb");
+    let uri = path_to_uri(&fixture_path);
+
+    // Request inlay hints for the entire file
+    let params = InlayHintParams {
+        text_document: TextDocumentIdentifier { uri },
+        range: Range {
+            start: Position::new(0, 0),
+            end: Position::new(50, 0),
+        },
+        work_done_progress_params: Default::default(),
+    };
+
+    let hints = handle_inlay_hints(harness.server(), params).await;
+
+    // Print all hints for debugging
+    println!(
+        "Generated {} inlay hints for RBS built-in types:",
+        hints.len()
+    );
+    for hint in &hints {
+        println!("  Line {}: {:?}", hint.position.line, hint.label);
+    }
+
+    // Collect hint labels
+    let hint_labels: Vec<String> = hints
+        .iter()
+        .filter_map(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Should have type hints for built-in method results
+    // name.length should show Integer
+    assert!(
+        hint_labels.iter().any(|h| h.contains("Integer")),
+        "Expected type hint containing 'Integer' for length variable, got: {:?}",
+        hint_labels
+    );
+
+    // name.upcase should show String (or self type)
+    assert!(
+        hint_labels.iter().any(|h| h.contains("String")),
+        "Expected type hint containing 'String' for upper variable, got: {:?}",
+        hint_labels
+    );
+}

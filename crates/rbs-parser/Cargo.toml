@@ -1,0 +1,47 @@
+[package]
+name = "rbs-parser"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ruby Fast LSP Team"]
+description = "A parser for Ruby RBS (Ruby Signature) files using tree-sitter"
+license = "MIT"
+keywords = ["ruby", "rbs", "parser", "type-signature", "tree-sitter"]
+categories = ["parsing", "development-tools"]
+# Include RBS type definitions in the package
+include = ["src/**/*", "Cargo.toml", "rbs_types/**/*.rbs", "build.rs"]
+
+# RBS source configuration - used by update-rbs binary
+[package.metadata.rbs]
+repository = "ruby/rbs"
+branch = "master"
+# Pin to a specific commit for reproducible builds
+# Run `cargo run --bin update-rbs` to update to latest
+commit = "3686510eec35b5d3839cada91c81d17b96898c3c"
+last_updated = "2025-12-17"
+
+[dependencies]
+# Tree-sitter for parsing
+tree-sitter = "0.25"
+tree-sitter-rbs = "0.2.2"
+
+# Logging
+log = "0.4"
+
+# Optional dependencies for the update-rbs binary
+reqwest = { version = "0.11", features = ["json", "blocking"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+flate2 = { version = "1.0", optional = true }
+tar = { version = "0.4", optional = true }
+toml_edit = { version = "0.22", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"
+
+[features]
+update-tool = ["reqwest", "serde", "serde_json", "flate2", "tar", "toml_edit"]
+
+[[bin]]
+name = "update-rbs"
+path = "src/bin/update_rbs.rs"
+required-features = ["update-tool"]

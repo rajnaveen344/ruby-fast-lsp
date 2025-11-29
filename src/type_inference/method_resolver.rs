@@ -3,7 +3,8 @@
 //! Resolves method calls to their return types by:
 //! 1. Determining the receiver type
 //! 2. Looking up the method in the index
-//! 3. Returning the method's return type
+//! 3. Falling back to RBS type definitions for built-in classes
+//! 4. Returning the method's return type
 
 use parking_lot::Mutex;
 use ruby_prism::*;
@@ -13,6 +14,7 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
+use crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
@@ -148,67 +150,128 @@ impl MethodResolver {
             }
         }
 
+        // Get the class name for RBS lookup
+        let class_name = self.get_class_name_for_rbs(receiver_type);
+
+        // Determine if this is a singleton (class) method call
+        let is_singleton = matches!(
+            receiver_type,
+            RubyType::ClassReference(_) | RubyType::ModuleReference(_)
+        );
+
         // Get the class/module FQN from the receiver type
         let owner_fqn = match receiver_type {
-            RubyType::Class(fqn) => fqn.clone(),
-            RubyType::ClassReference(fqn) => fqn.clone(),
-            RubyType::Module(fqn) => fqn.clone(),
-            RubyType::ModuleReference(fqn) => fqn.clone(),
-            // For other types, we can't look up methods yet
-            _ => return None,
+            RubyType::Class(fqn) => Some(fqn.clone()),
+            RubyType::ClassReference(fqn) => Some(fqn.clone()),
+            RubyType::Module(fqn) => Some(fqn.clone()),
+            RubyType::ModuleReference(fqn) => Some(fqn.clone()),
+            // For built-in types without FQN, we'll use RBS
+            _ => None,
         };
 
-        // Determine method kind based on receiver
-        let method_kind = match receiver_type {
-            RubyType::ClassReference(_) | RubyType::ModuleReference(_) => MethodKind::Class,
-            _ => MethodKind::Instance,
-        };
+        // Try to look up in Ruby index first (for user-defined methods)
+        if let Some(owner_fqn) = owner_fqn {
+            // Determine method kind based on receiver
+            let method_kind = if is_singleton {
+                MethodKind::Class
+            } else {
+                MethodKind::Instance
+            };
 
-        // Look up the method in the index
-        let index = self.index.lock();
+            // Look up the method in the index
+            let index = self.index.lock();
 
-        // Try to find method by name
-        if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
-            if let Some(entries) = index.methods_by_name.get(&ruby_method) {
-                // Find method that belongs to the owner
-                for entry in entries {
-                    if let EntryKind::Method {
-                        owner, return_type, ..
-                    } = &entry.kind
-                    {
-                        if *owner == owner_fqn {
-                            return return_type.clone();
+            // Try to find method by name
+            if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
+                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                    // Find method that belongs to the owner
+                    for entry in entries {
+                        if let EntryKind::Method {
+                            owner, return_type, ..
+                        } = &entry.kind
+                        {
+                            if *owner == owner_fqn {
+                                if let Some(rt) = return_type {
+                                    return Some(rt.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try instance method if class method not found (and vice versa)
+            let alt_kind = match method_kind {
+                MethodKind::Class => MethodKind::Instance,
+                MethodKind::Instance => MethodKind::Class,
+                MethodKind::Unknown => {
+                    return self.lookup_rbs_method(class_name.as_deref(), method_name, is_singleton)
+                }
+            };
+
+            if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
+                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                    for entry in entries {
+                        if let EntryKind::Method {
+                            owner, return_type, ..
+                        } = &entry.kind
+                        {
+                            if *owner == owner_fqn {
+                                if let Some(rt) = return_type {
+                                    return Some(rt.clone());
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Try instance method if class method not found (and vice versa)
-        let alt_kind = match method_kind {
-            MethodKind::Class => MethodKind::Instance,
-            MethodKind::Instance => MethodKind::Class,
-            MethodKind::Unknown => return None,
-        };
+        // Fall back to RBS type definitions for built-in methods
+        self.lookup_rbs_method(class_name.as_deref(), method_name, is_singleton)
+    }
 
-        if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
-            if let Some(entries) = index.methods_by_name.get(&ruby_method) {
-                for entry in entries {
-                    if let EntryKind::Method {
-                        owner, return_type, ..
-                    } = &entry.kind
-                    {
-                        if *owner == owner_fqn {
-                            return return_type.clone();
-                        }
-                    }
+    /// Get the class name for RBS lookup from a RubyType
+    fn get_class_name_for_rbs(&self, ruby_type: &RubyType) -> Option<String> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+                // Extract the class name from FQN
+                if let FullyQualifiedName::Constant(parts) = fqn {
+                    parts.last().map(|c| c.to_string())
+                } else {
+                    None
                 }
             }
+            RubyType::Module(fqn) | RubyType::ModuleReference(fqn) => {
+                if let FullyQualifiedName::Constant(parts) = fqn {
+                    parts.last().map(|c| c.to_string())
+                } else {
+                    None
+                }
+            }
+            // Built-in types map to their class names
+            RubyType::Array(_) => Some("Array".to_string()),
+            RubyType::Hash(_, _) => Some("Hash".to_string()),
+            RubyType::Union(_) => None, // Can't lookup methods on union types directly
+            RubyType::Unknown | RubyType::Any => None,
         }
+    }
 
-        // TODO: Search ancestor chain for inherited methods
-
-        None
+    /// Look up a method's return type from RBS definitions
+    fn lookup_rbs_method(
+        &self,
+        class_name: Option<&str>,
+        method_name: &str,
+        is_singleton: bool,
+    ) -> Option<RubyType> {
+        let class_name = class_name?;
+        log::debug!(
+            "Looking up RBS method: {}{}{}",
+            class_name,
+            if is_singleton { "." } else { "#" },
+            method_name
+        );
+        get_rbs_method_return_type_as_ruby_type(class_name, method_name, is_singleton)
     }
 
     /// Look up a local variable's type from the index

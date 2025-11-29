@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ast-visualizer"]
+members = [".", "crates/ast-visualizer", "crates/rbs-parser"]
 resolver = "2"
 
 [package]
@@ -22,12 +22,14 @@ anyhow = "1.0.75"
 
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"
+rbs-parser = { path = "crates/rbs-parser" }
 
 # File system operations
 walkdir = "2.4.0"
 
 # Utils
 parking_lot = "0.12.4"
+once_cell = "1.19"
 unicode-ident = "1.0.18"
 lazy_static = "1.4.0"
 trie-rs = "0.4.2"
