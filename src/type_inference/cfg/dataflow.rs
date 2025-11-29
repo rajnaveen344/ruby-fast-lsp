@@ -196,6 +196,15 @@ impl TypeState {
     }
 }
 
+/// A snapshot of type state at a specific offset
+#[derive(Debug, Clone)]
+pub struct TypeSnapshot {
+    /// Byte offset in source where this snapshot applies (end of statement)
+    pub end_offset: usize,
+    /// Variable types at this point
+    pub variables: HashMap<String, RubyType>,
+}
+
 /// Results of dataflow analysis
 #[derive(Debug)]
 pub struct DataflowResults {
@@ -203,6 +212,9 @@ pub struct DataflowResults {
     pub block_entry_states: HashMap<BlockId, TypeState>,
     /// Type state at exit of each block
     pub block_exit_states: HashMap<BlockId, TypeState>,
+    /// Per-statement type snapshots for each block (sorted by offset)
+    /// This enables O(log n) lookup for type at specific position
+    pub statement_snapshots: HashMap<BlockId, Vec<TypeSnapshot>>,
 }
 
 impl DataflowResults {
@@ -222,6 +234,41 @@ impl DataflowResults {
     pub fn get_exit_state(&self, block_id: BlockId) -> Option<&TypeState> {
         self.block_exit_states.get(&block_id)
     }
+
+    /// Get the type of a variable at a specific offset using binary search - O(log n)
+    ///
+    /// Returns the type of the variable AFTER the statement that contains or precedes the offset.
+    /// For example, if offset is at the start of `e = nil`, returns the type of `e` after that assignment.
+    pub fn get_type_at_offset(
+        &self,
+        block_id: BlockId,
+        var_name: &str,
+        offset: usize,
+    ) -> Option<RubyType> {
+        let snapshots = self.statement_snapshots.get(&block_id)?;
+
+        if snapshots.is_empty() {
+            // No statements in block, use entry state
+            return self
+                .block_entry_states
+                .get(&block_id)
+                .and_then(|s| s.get_type(var_name).cloned());
+        }
+
+        // Binary search to find the first snapshot whose end_offset > offset
+        // This gives us the snapshot for the statement that contains or follows the offset
+        let idx = snapshots.partition_point(|s| s.end_offset <= offset);
+
+        if idx < snapshots.len() {
+            // Found a snapshot at/after offset - use it (includes the current statement's effect)
+            snapshots[idx].variables.get(var_name).cloned()
+        } else {
+            // Offset is after all statements, use the last snapshot
+            snapshots
+                .last()
+                .and_then(|s| s.variables.get(var_name).cloned())
+        }
+    }
 }
 
 /// Dataflow analyzer that propagates types through the CFG
@@ -231,6 +278,8 @@ pub struct DataflowAnalyzer<'a> {
     block_entry_states: HashMap<BlockId, TypeState>,
     /// Type state at exit of each block
     block_exit_states: HashMap<BlockId, TypeState>,
+    /// Per-statement type snapshots for O(log n) position lookup
+    statement_snapshots: HashMap<BlockId, Vec<TypeSnapshot>>,
 }
 
 impl<'a> DataflowAnalyzer<'a> {
@@ -239,6 +288,7 @@ impl<'a> DataflowAnalyzer<'a> {
             cfg,
             block_entry_states: HashMap::new(),
             block_exit_states: HashMap::new(),
+            statement_snapshots: HashMap::new(),
         }
     }
 
@@ -284,6 +334,7 @@ impl<'a> DataflowAnalyzer<'a> {
         DataflowResults {
             block_entry_states: self.block_entry_states,
             block_exit_states: self.block_exit_states,
+            statement_snapshots: self.statement_snapshots,
         }
     }
 
@@ -371,7 +422,10 @@ impl<'a> DataflowAnalyzer<'a> {
     }
 
     /// Compute exit state by processing statements in the block
-    fn compute_exit_state(&self, block_id: BlockId, mut state: TypeState) -> TypeState {
+    /// Also records per-statement type snapshots for O(log n) position lookup
+    fn compute_exit_state(&mut self, block_id: BlockId, mut state: TypeState) -> TypeState {
+        let mut snapshots = Vec::new();
+
         if let Some(block) = self.cfg.get_block(block_id) {
             for stmt in &block.statements {
                 match &stmt.kind {
@@ -391,6 +445,56 @@ impl<'a> DataflowAnalyzer<'a> {
                             }
                         }
                     }
+                    StatementKind::OrAssignment {
+                        target,
+                        left_var,
+                        left_type,
+                        right_var,
+                        right_type,
+                    } => {
+                        // c = a || b
+                        // - If a is DEFINITELY truthy -> result is a's type
+                        // - If a is DEFINITELY falsy (nil/false) -> result is b's type
+                        // - If a COULD BE falsy -> result is Union(a's non-falsy type, b's type)
+                        let left_resolved = left_type
+                            .clone()
+                            .or_else(|| left_var.as_ref().and_then(|v| state.get_type(v).cloned()));
+                        let right_resolved = right_type.clone().or_else(|| {
+                            right_var.as_ref().and_then(|v| state.get_type(v).cloned())
+                        });
+
+                        let result_type =
+                            Self::compute_or_result_type(left_resolved, right_resolved);
+
+                        if let Some(ty) = result_type {
+                            state.set_type(target.clone(), ty);
+                        }
+                    }
+                    StatementKind::AndAssignment {
+                        target,
+                        left_var,
+                        left_type,
+                        right_var,
+                        right_type,
+                    } => {
+                        // d = a && b
+                        // - If a is DEFINITELY truthy -> result is b's type
+                        // - If a is DEFINITELY falsy -> result is a's type (nil or false)
+                        // - If a COULD BE falsy -> result is Union(b's type, a's falsy types)
+                        let left_resolved = left_type
+                            .clone()
+                            .or_else(|| left_var.as_ref().and_then(|v| state.get_type(v).cloned()));
+                        let right_resolved = right_type.clone().or_else(|| {
+                            right_var.as_ref().and_then(|v| state.get_type(v).cloned())
+                        });
+
+                        let result_type =
+                            Self::compute_and_result_type(left_resolved, right_resolved);
+
+                        if let Some(ty) = result_type {
+                            state.set_type(target.clone(), ty);
+                        }
+                    }
                     StatementKind::MethodCall { .. } => {
                         // Could track side effects here
                     }
@@ -401,9 +505,191 @@ impl<'a> DataflowAnalyzer<'a> {
                         // Generic expressions don't change types
                     }
                 }
+
+                // Record snapshot after this statement
+                snapshots.push(TypeSnapshot {
+                    end_offset: stmt.end_offset,
+                    variables: state.variables.clone(),
+                });
             }
         }
+
+        // Store snapshots for this block
+        self.statement_snapshots.insert(block_id, snapshots);
+
         state
+    }
+
+    /// Compute result type for `a || b` expression
+    /// Ruby semantics: returns a if a is truthy, otherwise returns b
+    fn compute_or_result_type(left: Option<RubyType>, right: Option<RubyType>) -> Option<RubyType> {
+        match (left, right) {
+            (Some(l), Some(r)) => {
+                if Self::is_definitely_truthy(&l) {
+                    // a is always truthy, so a || b always returns a
+                    Some(l)
+                } else if Self::is_definitely_falsy(&l) {
+                    // a is always falsy, so a || b always returns b
+                    Some(r)
+                } else {
+                    // a could be truthy or falsy
+                    // Result is: (a's non-falsy parts) | b
+                    let non_falsy_left = Self::remove_falsy_types(&l);
+                    match non_falsy_left {
+                        Some(nf) => Some(RubyType::union(vec![nf, r])),
+                        None => Some(r), // left was only falsy types
+                    }
+                }
+            }
+            (Some(l), None) => {
+                // Don't know right type
+                if Self::is_definitely_truthy(&l) {
+                    Some(l)
+                } else {
+                    // Could return left or unknown right
+                    Some(l)
+                }
+            }
+            (None, Some(r)) => Some(r),
+            (None, None) => None,
+        }
+    }
+
+    /// Compute result type for `a && b` expression
+    /// Ruby semantics: returns a if a is falsy, otherwise returns b
+    fn compute_and_result_type(
+        left: Option<RubyType>,
+        right: Option<RubyType>,
+    ) -> Option<RubyType> {
+        match (left, right) {
+            (Some(l), Some(r)) => {
+                if Self::is_definitely_truthy(&l) {
+                    // a is always truthy, so a && b always returns b
+                    Some(r)
+                } else if Self::is_definitely_falsy(&l) {
+                    // a is always falsy, so a && b always returns a
+                    Some(l)
+                } else {
+                    // a could be truthy or falsy
+                    // Result is: b | (a's falsy parts)
+                    let falsy_left = Self::extract_falsy_types(&l);
+                    match falsy_left {
+                        Some(f) => Some(RubyType::union(vec![r, f])),
+                        None => Some(r), // left has no falsy types
+                    }
+                }
+            }
+            (Some(l), None) => {
+                // Don't know right type
+                if Self::is_definitely_falsy(&l) {
+                    Some(l)
+                } else {
+                    // Could return right (unknown) or left's falsy parts
+                    None
+                }
+            }
+            (None, Some(r)) => {
+                // Don't know left, conservatively include falsy types
+                Some(RubyType::union(vec![
+                    r,
+                    RubyType::nil_class(),
+                    RubyType::false_class(),
+                ]))
+            }
+            (None, None) => None,
+        }
+    }
+
+    /// Check if a type is DEFINITELY truthy (never nil or false)
+    fn is_definitely_truthy(ty: &RubyType) -> bool {
+        !Self::could_be_falsy(ty)
+    }
+
+    /// Check if a type is DEFINITELY falsy (only nil or false)
+    fn is_definitely_falsy(ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                name == "NilClass" || name == "FalseClass"
+            }
+            RubyType::Union(types) => types.iter().all(Self::is_definitely_falsy),
+            _ => false,
+        }
+    }
+
+    /// Check if a type COULD be falsy (includes nil or false)
+    fn could_be_falsy(ty: &RubyType) -> bool {
+        Self::type_includes_nil(ty) || Self::type_includes_false(ty)
+    }
+
+    /// Check if a type includes NilClass
+    fn type_includes_nil(ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) => fqn.to_string() == "NilClass",
+            RubyType::Union(types) => types.iter().any(Self::type_includes_nil),
+            _ => false,
+        }
+    }
+
+    /// Check if a type includes FalseClass
+    fn type_includes_false(ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) => fqn.to_string() == "FalseClass",
+            RubyType::Union(types) => types.iter().any(Self::type_includes_false),
+            _ => false,
+        }
+    }
+
+    /// Remove falsy types (NilClass, FalseClass) from a type
+    fn remove_falsy_types(ty: &RubyType) -> Option<RubyType> {
+        match ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                if name == "NilClass" || name == "FalseClass" {
+                    None
+                } else {
+                    Some(ty.clone())
+                }
+            }
+            RubyType::Union(types) => {
+                let non_falsy: Vec<RubyType> =
+                    types.iter().filter_map(Self::remove_falsy_types).collect();
+                if non_falsy.is_empty() {
+                    None
+                } else if non_falsy.len() == 1 {
+                    Some(non_falsy.into_iter().next().unwrap())
+                } else {
+                    Some(RubyType::Union(non_falsy))
+                }
+            }
+            _ => Some(ty.clone()),
+        }
+    }
+
+    /// Extract only the falsy types (NilClass, FalseClass) from a type
+    fn extract_falsy_types(ty: &RubyType) -> Option<RubyType> {
+        match ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                if name == "NilClass" || name == "FalseClass" {
+                    Some(ty.clone())
+                } else {
+                    None
+                }
+            }
+            RubyType::Union(types) => {
+                let falsy: Vec<RubyType> =
+                    types.iter().filter_map(Self::extract_falsy_types).collect();
+                if falsy.is_empty() {
+                    None
+                } else if falsy.len() == 1 {
+                    Some(falsy.into_iter().next().unwrap())
+                } else {
+                    Some(RubyType::Union(falsy))
+                }
+            }
+            _ => None,
+        }
     }
 }
 

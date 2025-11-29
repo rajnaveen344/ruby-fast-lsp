@@ -109,12 +109,17 @@ fn get_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
         RubyType::Array(_) => vec!["Array".to_string()],
         RubyType::Hash(_, _) => vec!["Hash".to_string()],
         RubyType::Union(types) => {
-            // Get methods common to all types in the union
-            // For now, just use the first type
-            types
-                .first()
-                .map(get_class_names_for_type)
-                .unwrap_or_default()
+            // Get class names from ALL types in the union
+            // This allows showing methods from all possible types
+            let mut all_names = Vec::new();
+            for ty in types {
+                for name in get_class_names_for_type(ty) {
+                    if !all_names.contains(&name) {
+                        all_names.push(name);
+                    }
+                }
+            }
+            all_names
         }
         _ => vec![],
     }
@@ -309,5 +314,40 @@ mod tests {
             "Length detail should mention Integer return type, got: {}",
             detail
         );
+    }
+
+    #[test]
+    fn test_union_type_completion_includes_all_types() {
+        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        // Create a union type: String | Integer
+        let union_type = RubyType::union(vec![RubyType::string(), RubyType::integer()]);
+
+        let completions = find_method_completions(&index, &union_type, "", false);
+
+        let method_names: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+
+        // Should have String methods
+        assert!(
+            method_names.contains(&"upcase"),
+            "Should have String#upcase method"
+        );
+        assert!(
+            method_names.contains(&"downcase"),
+            "Should have String#downcase method"
+        );
+
+        // Should also have Integer methods
+        assert!(
+            method_names.contains(&"abs"),
+            "Should have Integer#abs method"
+        );
+        assert!(
+            method_names.contains(&"times"),
+            "Should have Integer#times method"
+        );
+
+        // Common methods should only appear once
+        let length_count = method_names.iter().filter(|&&m| m == "to_s").count();
+        assert_eq!(length_count, 1, "to_s should only appear once");
     }
 }

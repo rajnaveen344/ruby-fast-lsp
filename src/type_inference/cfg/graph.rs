@@ -124,6 +124,30 @@ pub enum StatementKind {
         /// Source variable if assigned from another variable (e.g., b = a)
         source_variable: Option<String>,
     },
+    /// Or assignment: x = a || b (union of both types)
+    OrAssignment {
+        target: String,
+        /// Left operand variable name (if it's a variable)
+        left_var: Option<String>,
+        /// Left operand type (if it's a literal)
+        left_type: Option<RubyType>,
+        /// Right operand variable name (if it's a variable)
+        right_var: Option<String>,
+        /// Right operand type (if it's a literal)
+        right_type: Option<RubyType>,
+    },
+    /// And assignment: x = a && b (right type or falsy)
+    AndAssignment {
+        target: String,
+        /// Left operand variable name (if it's a variable)
+        left_var: Option<String>,
+        /// Left operand type (if it's a literal)
+        left_type: Option<RubyType>,
+        /// Right operand variable name (if it's a variable)
+        right_var: Option<String>,
+        /// Right operand type (if it's a literal)
+        right_type: Option<RubyType>,
+    },
     /// Method call (for tracking side effects)
     MethodCall {
         receiver: Option<String>,

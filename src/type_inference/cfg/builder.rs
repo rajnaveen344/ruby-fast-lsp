@@ -8,7 +8,7 @@ use ruby_prism::*;
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 use crate::type_inference::ruby_type::RubyType;
 
-use super::graph::{BlockId, BlockLocation, CfgEdge, ControlFlowGraph, Statement};
+use super::graph::{BlockId, BlockLocation, CfgEdge, ControlFlowGraph, Statement, StatementKind};
 use super::guards::TypeGuard;
 
 /// Builds a Control Flow Graph from Ruby AST
@@ -257,8 +257,30 @@ impl<'a> CfgBuilder<'a> {
             self.process_begin(&begin_node);
         } else if let Some(assign) = node.as_local_variable_write_node() {
             self.process_local_variable_write(&assign);
+        } else if let Some(assign) = node.as_local_variable_or_write_node() {
+            self.process_local_variable_or_write(&assign);
+        } else if let Some(assign) = node.as_local_variable_and_write_node() {
+            self.process_local_variable_and_write(&assign);
+        } else if let Some(assign) = node.as_local_variable_operator_write_node() {
+            self.process_local_variable_operator_write(&assign);
         } else if let Some(assign) = node.as_instance_variable_write_node() {
             self.process_instance_variable_write(&assign);
+        } else if let Some(assign) = node.as_instance_variable_or_write_node() {
+            self.process_instance_variable_or_write(&assign);
+        } else if let Some(assign) = node.as_instance_variable_and_write_node() {
+            self.process_instance_variable_and_write(&assign);
+        } else if let Some(assign) = node.as_class_variable_write_node() {
+            self.process_class_variable_write(&assign);
+        } else if let Some(assign) = node.as_class_variable_or_write_node() {
+            self.process_class_variable_or_write(&assign);
+        } else if let Some(assign) = node.as_class_variable_and_write_node() {
+            self.process_class_variable_and_write(&assign);
+        } else if let Some(assign) = node.as_global_variable_write_node() {
+            self.process_global_variable_write(&assign);
+        } else if let Some(assign) = node.as_global_variable_or_write_node() {
+            self.process_global_variable_or_write(&assign);
+        } else if let Some(assign) = node.as_global_variable_and_write_node() {
+            self.process_global_variable_and_write(&assign);
         } else if let Some(stmts) = node.as_statements_node() {
             for stmt in stmts.body().iter() {
                 self.process_node(&stmt);
@@ -760,6 +782,42 @@ impl<'a> CfgBuilder<'a> {
             return;
         }
 
+        // Check for || (or) expression: c = a || b -> Union of both types
+        if let Some(or_node) = assign.value().as_or_node() {
+            let (left_var, left_type) = self.extract_operand_info(&or_node.left());
+            let (right_var, right_type) = self.extract_operand_info(&or_node.right());
+            self.add_statement(Statement::new(
+                loc.start_offset(),
+                loc.end_offset(),
+                StatementKind::OrAssignment {
+                    target: name,
+                    left_var,
+                    left_type,
+                    right_var,
+                    right_type,
+                },
+            ));
+            return;
+        }
+
+        // Check for && (and) expression: d = a && b -> right side type or falsy
+        if let Some(and_node) = assign.value().as_and_node() {
+            let (left_var, left_type) = self.extract_operand_info(&and_node.left());
+            let (right_var, right_type) = self.extract_operand_info(&and_node.right());
+            self.add_statement(Statement::new(
+                loc.start_offset(),
+                loc.end_offset(),
+                StatementKind::AndAssignment {
+                    target: name,
+                    left_var,
+                    left_type,
+                    right_var,
+                    right_type,
+                },
+            ));
+            return;
+        }
+
         // Otherwise, try to analyze as a literal
         let value_type = self.literal_analyzer.analyze_literal(&assign.value());
 
@@ -768,6 +826,196 @@ impl<'a> CfgBuilder<'a> {
             loc.end_offset(),
             name,
             value_type,
+        ));
+    }
+
+    /// Extract operand info from an expression (for || and && handling)
+    /// Returns (variable_name, literal_type) - one or both may be Some
+    /// Handles nested || and && expressions recursively
+    fn extract_operand_info(&self, node: &Node) -> (Option<String>, Option<RubyType>) {
+        // Check for local variable read
+        if let Some(var_read) = node.as_local_variable_read_node() {
+            let var_name = String::from_utf8_lossy(var_read.name().as_slice()).to_string();
+            return (Some(var_name), None);
+        }
+
+        // Check for instance variable read
+        if let Some(var_read) = node.as_instance_variable_read_node() {
+            let var_name = String::from_utf8_lossy(var_read.name().as_slice()).to_string();
+            return (Some(var_name), None);
+        }
+
+        // Check for class variable read
+        if let Some(var_read) = node.as_class_variable_read_node() {
+            let var_name = String::from_utf8_lossy(var_read.name().as_slice()).to_string();
+            return (Some(var_name), None);
+        }
+
+        // Check for global variable read
+        if let Some(var_read) = node.as_global_variable_read_node() {
+            let var_name = String::from_utf8_lossy(var_read.name().as_slice()).to_string();
+            return (Some(var_name), None);
+        }
+
+        // Handle nested || expression: a || b || c
+        // We compute the type recursively
+        if let Some(or_node) = node.as_or_node() {
+            let nested_type = self.compute_or_expression_type(&or_node.left(), &or_node.right());
+            return (None, nested_type);
+        }
+
+        // Handle nested && expression: a && b && c
+        if let Some(and_node) = node.as_and_node() {
+            let nested_type = self.compute_and_expression_type(&and_node.left(), &and_node.right());
+            return (None, nested_type);
+        }
+
+        // Otherwise, try to get literal type
+        let literal_type = self.literal_analyzer.analyze_literal(node);
+        (None, literal_type)
+    }
+
+    /// Compute the type of an || expression during CFG building
+    /// This handles nested expressions like a || b || c
+    fn compute_or_expression_type(&self, left: &Node, right: &Node) -> Option<RubyType> {
+        let (_, left_type) = self.extract_operand_info(left);
+        let (_, right_type) = self.extract_operand_info(right);
+
+        // If we have both types at build time (literals), compute the result
+        // Otherwise, return None and let dataflow handle it
+        match (left_type, right_type) {
+            (Some(l), Some(r)) => {
+                // If left is definitely truthy, return left
+                if Self::is_definitely_truthy_static(&l) {
+                    Some(l)
+                } else if Self::is_definitely_falsy_static(&l) {
+                    Some(r)
+                } else {
+                    // Union of non-falsy left and right
+                    Some(RubyType::union(vec![l, r]))
+                }
+            }
+            (Some(l), None) => {
+                if Self::is_definitely_truthy_static(&l) {
+                    Some(l)
+                } else {
+                    None // Need dataflow to resolve
+                }
+            }
+            (None, Some(_)) | (None, None) => None,
+        }
+    }
+
+    /// Compute the type of an && expression during CFG building
+    fn compute_and_expression_type(&self, left: &Node, right: &Node) -> Option<RubyType> {
+        let (_, left_type) = self.extract_operand_info(left);
+        let (_, right_type) = self.extract_operand_info(right);
+
+        match (left_type, right_type) {
+            (Some(l), Some(r)) => {
+                if Self::is_definitely_truthy_static(&l) {
+                    Some(r)
+                } else if Self::is_definitely_falsy_static(&l) {
+                    Some(l)
+                } else {
+                    // Union of right and left's falsy types
+                    Some(RubyType::union(vec![r, RubyType::nil_class()]))
+                }
+            }
+            (Some(l), None) => {
+                if Self::is_definitely_falsy_static(&l) {
+                    Some(l)
+                } else {
+                    None
+                }
+            }
+            (None, Some(_)) | (None, None) => None,
+        }
+    }
+
+    /// Check if a type is definitely truthy (for static analysis during CFG build)
+    fn is_definitely_truthy_static(ty: &RubyType) -> bool {
+        !Self::could_be_falsy_static(ty)
+    }
+
+    /// Check if a type is definitely falsy (only nil or false)
+    fn is_definitely_falsy_static(ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                name == "NilClass" || name == "FalseClass"
+            }
+            RubyType::Union(types) => types.iter().all(Self::is_definitely_falsy_static),
+            _ => false,
+        }
+    }
+
+    /// Check if a type could be falsy
+    fn could_be_falsy_static(ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) => {
+                let name = fqn.to_string();
+                name == "NilClass" || name == "FalseClass"
+            }
+            RubyType::Union(types) => types.iter().any(Self::could_be_falsy_static),
+            _ => false,
+        }
+    }
+
+    /// Process local variable ||= assignment: x ||= value
+    /// Semantics: x = x || value
+    fn process_local_variable_or_write(&mut self, assign: &LocalVariableOrWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::OrAssignment {
+                target: name.clone(),
+                left_var: Some(name), // x ||= y means x = x || y
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process local variable &&= assignment: x &&= value
+    /// Semantics: x = x && value
+    fn process_local_variable_and_write(&mut self, assign: &LocalVariableAndWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::AndAssignment {
+                target: name.clone(),
+                left_var: Some(name), // x &&= y means x = x && y
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process local variable operator write: x += value, x -= value, etc.
+    fn process_local_variable_operator_write(&mut self, assign: &LocalVariableOperatorWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        // For operator writes like +=, -=, etc., the result type depends on the operator
+        // For now, we'll keep the same type as the variable (conservative)
+        self.add_statement(Statement::assignment_from_variable(
+            loc.start_offset(),
+            loc.end_offset(),
+            name.clone(),
+            name,
         ));
     }
 
@@ -782,6 +1030,154 @@ impl<'a> CfgBuilder<'a> {
             loc.end_offset(),
             name,
             value_type,
+        ));
+    }
+
+    /// Process instance variable ||= assignment
+    fn process_instance_variable_or_write(&mut self, assign: &InstanceVariableOrWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::OrAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process instance variable &&= assignment
+    fn process_instance_variable_and_write(&mut self, assign: &InstanceVariableAndWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::AndAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process class variable write
+    fn process_class_variable_write(&mut self, assign: &ClassVariableWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let value_type = self.literal_analyzer.analyze_literal(&assign.value());
+
+        let loc = assign.location();
+        self.add_statement(Statement::assignment(
+            loc.start_offset(),
+            loc.end_offset(),
+            name,
+            value_type,
+        ));
+    }
+
+    /// Process class variable ||= assignment
+    fn process_class_variable_or_write(&mut self, assign: &ClassVariableOrWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::OrAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process class variable &&= assignment
+    fn process_class_variable_and_write(&mut self, assign: &ClassVariableAndWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::AndAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process global variable write
+    fn process_global_variable_write(&mut self, assign: &GlobalVariableWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let value_type = self.literal_analyzer.analyze_literal(&assign.value());
+
+        let loc = assign.location();
+        self.add_statement(Statement::assignment(
+            loc.start_offset(),
+            loc.end_offset(),
+            name,
+            value_type,
+        ));
+    }
+
+    /// Process global variable ||= assignment
+    fn process_global_variable_or_write(&mut self, assign: &GlobalVariableOrWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::OrAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
+        ));
+    }
+
+    /// Process global variable &&= assignment
+    fn process_global_variable_and_write(&mut self, assign: &GlobalVariableAndWriteNode) {
+        let name = String::from_utf8_lossy(assign.name().as_slice()).to_string();
+        let loc = assign.location();
+
+        let (right_var, right_type) = self.extract_operand_info(&assign.value());
+
+        self.add_statement(Statement::new(
+            loc.start_offset(),
+            loc.end_offset(),
+            StatementKind::AndAssignment {
+                target: name.clone(),
+                left_var: Some(name),
+                left_type: None,
+                right_var,
+                right_type,
+            },
         ));
     }
 

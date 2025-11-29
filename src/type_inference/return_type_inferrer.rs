@@ -77,7 +77,9 @@ impl ReturnTypeInferrer {
                                 }
                             }
                         }
-                        StatementKind::Assignment { .. } => {
+                        StatementKind::Assignment { .. }
+                        | StatementKind::OrAssignment { .. }
+                        | StatementKind::AndAssignment { .. } => {
                             // Assignments are not return values
                         }
                     }

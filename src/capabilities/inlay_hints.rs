@@ -1,7 +1,16 @@
 use tower_lsp::lsp_types::{
     InlayHint, InlayHintKind, InlayHintLabel, InlayHintOptions, InlayHintParams,
-    InlayHintServerCapabilities, InlayHintTooltip, Position, WorkDoneProgressOptions,
+    InlayHintServerCapabilities, InlayHintTooltip, Position, Range, WorkDoneProgressOptions,
 };
+
+/// Check if a position is within a range
+#[inline]
+fn is_position_in_range(pos: &Position, range: &Range) -> bool {
+    (pos.line > range.start.line
+        || (pos.line == range.start.line && pos.character >= range.start.character))
+        && (pos.line < range.end.line
+            || (pos.line == range.end.line && pos.character <= range.end.character))
+}
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::server::RubyLanguageServer;
@@ -32,34 +41,53 @@ pub async fn handle_inlay_hints(
     params: InlayHintParams,
 ) -> Vec<InlayHint> {
     let uri = params.text_document.uri;
+    let requested_range = params.range;
+
     let document_guard = server.docs.lock();
     let document = document_guard.get(&uri).unwrap().read();
     let content = document.content.clone();
     drop(document);
     drop(document_guard);
 
-    // Get structural hints from the document
+    // Get structural hints from the document (filtered to range)
     let document_guard = server.docs.lock();
     let document = document_guard.get(&uri).unwrap().read();
-    let mut all_hints = document.get_inlay_hints();
+    let mut all_hints: Vec<InlayHint> = document
+        .get_inlay_hints()
+        .into_iter()
+        .filter(|h| is_position_in_range(&h.position, &requested_range))
+        .collect();
     drop(document);
     drop(document_guard);
 
-    // Generate type hints from indexed entries
+    // Generate type hints from indexed entries - ONLY for entries in the requested range
     let index = server.index.lock();
 
     if let Some(entries) = index.file_entries.get(&uri) {
         for entry in entries {
+            // Skip entries outside the requested range
+            if !is_position_in_range(&entry.location.range.start, &requested_range)
+                && !is_position_in_range(&entry.location.range.end, &requested_range)
+            {
+                continue;
+            }
+
             match &entry.kind {
                 EntryKind::LocalVariable { r#type, name, .. } => {
-                    // First try the indexed type, then fall back to CFG
-                    let final_type = if *r#type != RubyType::Unknown {
-                        Some(r#type.clone())
-                    } else {
-                        // Use CFG-based type inference
-                        let offset = position_to_offset(&content, entry.location.range.start);
-                        server.type_narrowing.get_narrowed_type(&uri, name, offset)
-                    };
+                    // Prefer CFG-based type inference (more accurate for ||, &&, etc.)
+                    // Fall back to indexed type for method call results
+                    let offset = position_to_offset(&content, entry.location.range.start);
+                    let final_type = server
+                        .type_narrowing
+                        .get_narrowed_type(&uri, name, offset)
+                        .or_else(|| {
+                            // Fallback to indexed type (for method call results)
+                            if *r#type != RubyType::Unknown {
+                                Some(r#type.clone())
+                            } else {
+                                None
+                            }
+                        });
 
                     if let Some(ty) = final_type {
                         if ty != RubyType::Unknown {
