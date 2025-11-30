@@ -6,6 +6,7 @@ pub mod definitions;
 pub mod inlay_hints_integration;
 pub mod integration_test;
 pub mod references;
+pub mod simulation;
 pub mod type_narrowing_test;
 pub mod unit;
 pub mod yard_inlay_hints_test;

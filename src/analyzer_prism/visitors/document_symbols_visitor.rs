@@ -186,7 +186,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         }
 
         // Push local variable scope
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        // Use the class node's start offset + 1 as the scope_id to avoid collision
+        // with the top-level scope (which has scope_id = 0)
+        let scope_id = node.location().start_offset() + 1;
         let lv_scope = crate::types::scope::LVScope::new(
             scope_id,
             body_loc,
@@ -230,7 +232,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         }
 
         // Push local variable scope
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        // Use the module node's start offset + 1 as the scope_id to avoid collision
+        // with the top-level scope (which has scope_id = 0)
+        let scope_id = node.location().start_offset() + 1;
         let lv_scope = crate::types::scope::LVScope::new(
             scope_id,
             body_loc,
@@ -454,10 +458,10 @@ mod tests {
         let content = r#"
 class MyClass
   MY_CONSTANT = 42
-  
+
   def instance_method
   end
-  
+
   def self.class_method
   end
 end
@@ -503,19 +507,19 @@ end
 class MyClass
   def public_method
   end
-  
+
   private
-  
+
   def private_method
   end
-  
+
   protected
-  
+
   def protected_method
   end
-  
+
   public
-  
+
   def back_to_public
   end
 end
@@ -551,7 +555,7 @@ module OuterModule
     def inner_method
     end
   end
-  
+
   module InnerModule
     INNER_CONSTANT = "test"
   end
@@ -583,7 +587,7 @@ module OuterModule
     def inner_method
     end
   end
-  
+
   module InnerModule
     INNER_CONSTANT = "test"
   end
@@ -981,6 +985,46 @@ end
     }
 
     #[test]
+    fn test_multiple_top_level_classes() {
+        let content = "class Aaa\nend\n\nclass Aab\nend";
+        let document = create_test_document(content);
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let node = parse_result.node();
+
+        let mut visitor = DocumentSymbolsVisitor::new(&document);
+        visitor.visit(&node);
+
+        // Test flat symbols
+        let flat_symbols = visitor.symbols();
+        assert_eq!(flat_symbols.len(), 2, "Should have 2 flat symbols");
+        assert!(
+            flat_symbols.iter().any(|s| s.name == "Aaa"),
+            "Should find Aaa"
+        );
+        assert!(
+            flat_symbols.iter().any(|s| s.name == "Aab"),
+            "Should find Aab"
+        );
+
+        // Test hierarchy
+        let hierarchical = visitor.build_hierarchy();
+        assert_eq!(
+            hierarchical.len(),
+            2,
+            "Should have 2 root symbols in hierarchy. Got: {:?}",
+            hierarchical.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+        assert!(
+            hierarchical.iter().any(|s| s.name == "Aaa"),
+            "Hierarchy should contain Aaa"
+        );
+        assert!(
+            hierarchical.iter().any(|s| s.name == "Aab"),
+            "Hierarchy should contain Aab"
+        );
+    }
+
+    #[test]
     fn test_comments_and_whitespace() {
         let content = r#"
 # This is a comment
@@ -1207,20 +1251,20 @@ end
 module Namespace
   class Base
     CONSTANT = "value"
-    
+
     def initialize
     end
-    
+
     private
-    
+
     def private_helper
     end
   end
-  
+
   class Derived < Base
     def self.factory_method
     end
-    
+
     def override_method
     end
   end

@@ -59,6 +59,9 @@ pretty_assertions = "1.4.0"
 insta = { version = "1.43.1", features = ["json", "redactions"] }
 tempfile = "3.8.0"
 async-trait = "0.1.73"
+# Property-based testing for deterministic simulation
+proptest = "1.5"
+proptest-state-machine = "0.3"
 
 [build-dependencies]
 cc = "1.0.83"
