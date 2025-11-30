@@ -2,7 +2,7 @@ use log::warn;
 use ruby_prism::DefNode;
 
 use crate::{
-    analyzer_prism::{Identifier, ReceiverKind},
+    analyzer_prism::{Identifier, MethodReceiver},
     indexer::entry::MethodKind,
     types::{
         ruby_method::RubyMethod,
@@ -59,18 +59,17 @@ impl IdentifierVisitor {
         // Is position on method name
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
-            // Determine receiver kind for method definition
-            let receiver_kind = if node.receiver().is_some() {
-                ReceiverKind::SelfReceiver // Method definitions with receivers are typically self methods
+            // Determine receiver for method definition
+            let receiver = if node.receiver().is_some() {
+                MethodReceiver::SelfReceiver // Method definitions with receivers are typically self methods
             } else {
-                ReceiverKind::None // Instance methods have no receiver in definition
+                MethodReceiver::None // Instance methods have no receiver in definition
             };
 
             self.set_result(
                 Some(Identifier::RubyMethod {
                     namespace: self.scope_tracker.get_ns_stack(),
-                    receiver_kind,
-                    receiver: None, // Method definitions don't have receiver information
+                    receiver,
                     iden: method,
                 }),
                 Some(IdentifierType::MethodDef),

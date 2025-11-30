@@ -13,20 +13,70 @@ pub mod scope_tracker;
 pub mod utils;
 pub mod visitors;
 
-/// Enum to categorize method receiver types
+/// Represents the receiver of a method call, combining type and data
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReceiverKind {
-    /// No receiver, e.g., "method_a"
+pub enum MethodReceiver {
+    /// No receiver, e.g., `method_a`
     None,
-
-    /// Self receiver, e.g., "self.method_a"
+    /// Self receiver, e.g., `self.method_a`
     SelfReceiver,
+    /// Constant receiver with path, e.g., `Foo::Bar` in `Foo::Bar.method`
+    Constant(Vec<RubyConstant>),
+    /// Local variable receiver, e.g., `a` in `a.method`
+    LocalVariable(String),
+    /// Instance variable receiver, e.g., `@name` in `@name.method`
+    InstanceVariable(String),
+    /// Class variable receiver, e.g., `@@count` in `@@count.method`
+    ClassVariable(String),
+    /// Global variable receiver, e.g., `$stdout` in `$stdout.method`
+    GlobalVariable(String),
+    /// Method call receiver, e.g., `user.name` in `user.name.upcase`
+    /// Contains the receiver of the inner call and the method name
+    MethodCall {
+        /// The receiver of the inner method call (boxed to avoid infinite size)
+        inner_receiver: Box<MethodReceiver>,
+        /// The method name being called
+        method_name: String,
+    },
+    /// Complex expression receiver that can't be statically analyzed, e.g., `(a + b).method`
+    Expression,
+}
 
-    /// Constant receiver, e.g., "Class.method_a" or "Module::Class.method_a"
-    Constant,
+impl MethodReceiver {
+    /// Returns true if this is a constant receiver (class method call)
+    pub fn is_constant(&self) -> bool {
+        matches!(self, MethodReceiver::Constant(_))
+    }
 
-    /// Expression receiver, e.g., "a.method_a" or "(a + b).method_a"
-    Expr,
+    /// Returns the variable name if this is a variable receiver
+    pub fn variable_name(&self) -> Option<&str> {
+        match self {
+            MethodReceiver::LocalVariable(name)
+            | MethodReceiver::InstanceVariable(name)
+            | MethodReceiver::ClassVariable(name)
+            | MethodReceiver::GlobalVariable(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Returns the constant path if this is a constant receiver
+    pub fn constant_path(&self) -> Option<&[RubyConstant]> {
+        match self {
+            MethodReceiver::Constant(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Returns the method call info if this is a method call receiver
+    pub fn method_call_info(&self) -> Option<(&MethodReceiver, &str)> {
+        match self {
+            MethodReceiver::MethodCall {
+                inner_receiver,
+                method_name,
+            } => Some((inner_receiver, method_name)),
+            _ => None,
+        }
+    }
 }
 
 /// Enum to represent different types of identifiers at a specific position
@@ -42,13 +92,11 @@ pub enum Identifier {
 
     /// Ruby method with comprehensive context
     /// - namespace: Current namespace stack (where the cursor is located)
-    /// - receiver_kind: Type of method receiver
-    /// - receiver: Receiver information for constant receivers
+    /// - receiver: The method receiver (None, self, constant, variable, or expression)
     /// - iden: The method being called
     RubyMethod {
         namespace: Vec<RubyConstant>,
-        receiver_kind: ReceiverKind,
-        receiver: Option<Vec<RubyConstant>>,
+        receiver: MethodReceiver,
         iden: RubyMethod,
     },
 
@@ -102,12 +150,7 @@ impl fmt::Display for Identifier {
                 let iden_str: Vec<String> = iden.iter().map(|c| c.to_string()).collect();
                 write!(f, "{}", iden_str.join("::"))
             }
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver_kind: _,
-                receiver: _,
-                iden,
-            } => {
+            Identifier::RubyMethod { iden, .. } => {
                 write!(f, "{}", iden)
             }
             Identifier::RubyLocalVariable { name, .. } => {
@@ -196,23 +239,33 @@ mod tests {
         }
     }
 
-    /// Assert that an identifier is a RubyMethod with the expected method name and receiver kind
+    /// Assert that an identifier is a RubyMethod with the expected method name and receiver
     pub fn assert_method_identifier(
         identifier: &Identifier,
         expected_method: &str,
-        expected_receiver_kind: ReceiverKind,
+        expected_receiver: MethodReceiver,
     ) {
         match identifier {
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver_kind,
-                receiver: _,
-                iden,
-            } => {
-                assert_eq!(
-                    *receiver_kind, expected_receiver_kind,
-                    "Expected receiver kind {:?}, got {:?}",
-                    expected_receiver_kind, receiver_kind
+            Identifier::RubyMethod { receiver, iden, .. } => {
+                // Compare receiver discriminants (ignoring inner data for variable types)
+                let receiver_matches = match (&expected_receiver, receiver) {
+                    (MethodReceiver::None, MethodReceiver::None) => true,
+                    (MethodReceiver::SelfReceiver, MethodReceiver::SelfReceiver) => true,
+                    (MethodReceiver::Constant(_), MethodReceiver::Constant(_)) => true,
+                    (MethodReceiver::LocalVariable(_), MethodReceiver::LocalVariable(_)) => true,
+                    (MethodReceiver::InstanceVariable(_), MethodReceiver::InstanceVariable(_)) => {
+                        true
+                    }
+                    (MethodReceiver::ClassVariable(_), MethodReceiver::ClassVariable(_)) => true,
+                    (MethodReceiver::GlobalVariable(_), MethodReceiver::GlobalVariable(_)) => true,
+                    (MethodReceiver::MethodCall { .. }, MethodReceiver::MethodCall { .. }) => true,
+                    (MethodReceiver::Expression, MethodReceiver::Expression) => true,
+                    _ => false,
+                };
+                assert!(
+                    receiver_matches,
+                    "Expected receiver {:?}, got {:?}",
+                    expected_receiver, receiver
                 );
                 assert_eq!(
                     iden.to_string(),
@@ -534,7 +587,7 @@ end
 
         if let Some(method_identifier) = method_identifier_opt {
             // Demonstrate method helper usage
-            assert_method_identifier(&method_identifier, "some_method", ReceiverKind::None);
+            assert_method_identifier(&method_identifier, "some_method", MethodReceiver::None);
             assert_namespace_context(&method_ancestors, &["TestClass"]);
         }
 
@@ -573,7 +626,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "simple_method", ReceiverKind::None);
+        assert_method_identifier(&identifier, "simple_method", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -591,7 +644,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "method_with_args", ReceiverKind::None);
+        assert_method_identifier(&identifier, "method_with_args", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -609,7 +662,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "method_with_block", ReceiverKind::None);
+        assert_method_identifier(&identifier, "method_with_block", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -627,7 +680,7 @@ global_method
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "global_method", ReceiverKind::None);
+        assert_method_identifier(&identifier, "global_method", MethodReceiver::None);
         assert_namespace_context(&ancestors, &[]);
     }
 
@@ -645,7 +698,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "helper_method", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "helper_method", MethodReceiver::SelfReceiver);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -663,7 +716,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "helper_method", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "helper_method", MethodReceiver::SelfReceiver);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -681,7 +734,15 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "second_method", ReceiverKind::Expr);
+        // Now correctly identifies as MethodCall with inner receiver being self.first_method
+        assert_method_identifier(
+            &identifier,
+            "second_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::SelfReceiver),
+                method_name: "first_method".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -701,7 +762,11 @@ MyClass.class_method
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(&ancestors, &[]);
     }
 
@@ -723,7 +788,11 @@ MyModule::MyClass.nested_method
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "nested_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "nested_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(&ancestors, &[]);
     }
 
@@ -743,7 +812,11 @@ MyModule.module_method
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "module_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "module_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(&ancestors, &[]);
     }
 
@@ -769,12 +842,12 @@ A::B::C::D.deep_method
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "deep_method", ReceiverKind::Constant);
+        assert_method_identifier(&identifier, "deep_method", MethodReceiver::Constant(vec![]));
         assert_namespace_context(&ancestors, &[]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_variable_receiver() {
+    fn test_receiver_kind_local_variable_receiver() {
         let content = r#"
 class TestClass
   def test_method
@@ -788,12 +861,16 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "instance_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "instance_method",
+            MethodReceiver::LocalVariable("obj".to_string()),
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_method_chain() {
+    fn test_receiver_kind_method_chain() {
         let content = r#"
 class TestClass
   def test_method
@@ -806,7 +883,15 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "second_method", ReceiverKind::Expr);
+        // Now correctly identifies as MethodCall with nested structure
+        assert_method_identifier(
+            &identifier,
+            "second_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::LocalVariable("obj".to_string())),
+                method_name: "first_method".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -824,12 +909,12 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "result_method", ReceiverKind::Expr);
+        assert_method_identifier(&identifier, "result_method", MethodReceiver::Expression);
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_array_access() {
+    fn test_receiver_kind_array_access() {
         let content = r#"
 class TestClass
   def test_method
@@ -842,12 +927,20 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "array_element_method", ReceiverKind::Expr);
+        // arr[0] is a method call ([] method) on arr
+        assert_method_identifier(
+            &identifier,
+            "array_element_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::LocalVariable("arr".to_string())),
+                method_name: "[]".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_hash_access() {
+    fn test_receiver_kind_hash_access() {
         let content = r#"
 class TestClass
   def test_method
@@ -860,12 +953,20 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "hash_value_method", ReceiverKind::Expr);
+        // hash[:key] is a method call ([] method) on hash
+        assert_method_identifier(
+            &identifier,
+            "hash_value_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::LocalVariable("hash".to_string())),
+                method_name: "[]".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_instance_variable() {
+    fn test_receiver_kind_instance_variable() {
         let content = r#"
 class TestClass
   def test_method
@@ -878,12 +979,16 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "instance_var_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "instance_var_method",
+            MethodReceiver::InstanceVariable("@instance_var".to_string()),
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_class_variable() {
+    fn test_receiver_kind_class_variable() {
         let content = r#"
 class TestClass
   def test_method
@@ -896,12 +1001,16 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "class_var_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "class_var_method",
+            MethodReceiver::ClassVariable("@@class_var".to_string()),
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
     #[test]
-    fn test_receiver_kind_expr_global_variable() {
+    fn test_receiver_kind_global_variable() {
         let content = r#"
 class TestClass
   def test_method
@@ -914,7 +1023,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
-        assert_method_identifier(&identifier, "global_var_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "global_var_method",
+            MethodReceiver::GlobalVariable("$global_var".to_string()),
+        );
         assert_namespace_context(&ancestors, &["TestClass"]);
     }
 
@@ -1994,7 +2107,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "helper_method", ReceiverKind::None);
+        assert_method_identifier(&identifier, "helper_method", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 2: Self receiver method call within OuterClass
@@ -2002,7 +2115,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "instance_helper", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "instance_helper", MethodReceiver::SelfReceiver);
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 3: Constant receiver method call within OuterClass
@@ -2010,15 +2123,26 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
-        // Test 4: Expression receiver method call within OuterClass
+        // Test 4: Method call receiver (obj is parsed as method call since it's not defined)
         let position = Position::new(14, 12); // Position at "expression_method"
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "expression_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "expression_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::None),
+                method_name: "obj".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass"]);
 
         // Test 5: No receiver method call within InnerModule
@@ -2026,7 +2150,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "nested_helper", ReceiverKind::None);
+        assert_method_identifier(&identifier, "nested_helper", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 6: Self receiver method call within InnerModule
@@ -2034,7 +2158,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "module_helper", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "module_helper", MethodReceiver::SelfReceiver);
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
         // Test 7: Complex constant receiver method call within InnerModule
@@ -2042,15 +2166,26 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
 
-        // Test 8: Expression receiver method call within InnerModule
+        // Test 8: Method call receiver (var is parsed as method call since it's not defined)
         let position = Position::new(37, 12); // Position at "nested_expression_method"
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "nested_expression_method", ReceiverKind::Expr);
+        assert_method_identifier(
+            &identifier,
+            "nested_expression_method",
+            MethodReceiver::MethodCall {
+                inner_receiver: Box::new(MethodReceiver::None),
+                method_name: "var".to_string(),
+            },
+        );
         assert_namespace_context(&ancestors, &["OuterModule", "OuterClass", "InnerModule"]);
     }
 
@@ -2111,7 +2246,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level1_instance_method", ReceiverKind::None);
+        assert_method_identifier(&identifier, "level1_instance_method", MethodReceiver::None);
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class"],
@@ -2125,7 +2260,7 @@ end
         assert_method_identifier(
             &identifier,
             "level2_instance_method",
-            ReceiverKind::SelfReceiver,
+            MethodReceiver::SelfReceiver,
         );
         assert_namespace_context(
             &ancestors,
@@ -2137,7 +2272,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "level1_class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class"],
@@ -2148,7 +2287,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level2_class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "level2_class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class"],
@@ -2159,7 +2302,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "level1_class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class"],
@@ -2170,7 +2317,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "nested_call", ReceiverKind::None);
+        assert_method_identifier(&identifier, "nested_call", MethodReceiver::None);
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
@@ -2181,7 +2328,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level3_helper", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "level3_helper", MethodReceiver::SelfReceiver);
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
@@ -2192,7 +2339,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level1_class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "level1_class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
@@ -2203,7 +2354,11 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "level2_class_method", ReceiverKind::Constant);
+        assert_method_identifier(
+            &identifier,
+            "level2_class_method",
+            MethodReceiver::Constant(vec![]),
+        );
         assert_namespace_context(
             &ancestors,
             &["Level1", "Level1Class", "Level2", "Level2Class", "Level3"],
@@ -2238,7 +2393,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "helper_method", ReceiverKind::None);
+        assert_method_identifier(&identifier, "helper_method", MethodReceiver::None);
         assert_namespace_context(&ancestors, &["TestModule", "TestClass"]);
 
         // Test 2: Self receiver method call
@@ -2246,7 +2401,7 @@ end
         let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
-        assert_method_identifier(&identifier, "other_method", ReceiverKind::SelfReceiver);
+        assert_method_identifier(&identifier, "other_method", MethodReceiver::SelfReceiver);
         assert_namespace_context(&ancestors, &["TestModule", "TestClass"]);
     }
 }

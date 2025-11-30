@@ -1,4 +1,4 @@
-use crate::analyzer_prism::{Identifier, ReceiverKind};
+use crate::analyzer_prism::{Identifier, MethodReceiver};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 
 /// Context for snippet completion to determine appropriate snippets
@@ -170,7 +170,13 @@ impl RubySnippets {
     pub fn determine_context(identifier: &Option<Identifier>) -> SnippetContext {
         match identifier {
             Some(Identifier::RubyMethod {
-                receiver_kind: ReceiverKind::Expr,
+                receiver:
+                    MethodReceiver::LocalVariable(_)
+                    | MethodReceiver::InstanceVariable(_)
+                    | MethodReceiver::ClassVariable(_)
+                    | MethodReceiver::GlobalVariable(_)
+                    | MethodReceiver::MethodCall { .. }
+                    | MethodReceiver::Expression,
                 ..
             }) => SnippetContext::MethodCall,
             _ => SnippetContext::General,
@@ -185,7 +191,13 @@ impl RubySnippets {
     ) -> SnippetContext {
         match identifier {
             Some(Identifier::RubyMethod {
-                receiver_kind: ReceiverKind::Expr,
+                receiver:
+                    MethodReceiver::LocalVariable(_)
+                    | MethodReceiver::InstanceVariable(_)
+                    | MethodReceiver::ClassVariable(_)
+                    | MethodReceiver::GlobalVariable(_)
+                    | MethodReceiver::MethodCall { .. }
+                    | MethodReceiver::Expression,
                 ..
             }) => SnippetContext::MethodCall,
             None => {
@@ -219,9 +231,9 @@ impl RubySnippets {
         matches!(
             label,
             // Control flow keywords
-            "if" | "if else" | "unless" | "unless else" | "case when" | 
+            "if" | "if else" | "unless" | "unless else" | "case when" |
             "while" | "until" | "for" | "loop" |
-            // Definition keywords  
+            // Definition keywords
             "def" | "def with args" | "class" | "class with superclass" | "module" |
             // Exception handling keywords
             "begin rescue" | "begin rescue ensure" | "rescue" |

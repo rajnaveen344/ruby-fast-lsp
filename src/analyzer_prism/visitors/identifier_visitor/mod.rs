@@ -245,7 +245,7 @@ impl Visit<'_> for IdentifierVisitor {
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer_prism::ReceiverKind;
+    use crate::analyzer_prism::MethodReceiver;
 
     use super::*;
     use tower_lsp::lsp_types::{Position, Url};
@@ -449,20 +449,20 @@ mod tests {
         match identifier {
             Identifier::RubyMethod {
                 namespace: parts,
-                receiver_kind,
                 receiver,
                 iden: method,
             } => {
                 // The namespace should be empty at top-level (no artificial prefix)
                 assert_eq!(parts.len(), 0);
-                // The receiver kind should be Constant since we have Foo::Bar.baz
-                assert_eq!(receiver_kind, ReceiverKind::Constant);
-                // The receiver should contain [Foo, Bar]
-                assert!(receiver.is_some());
-                let receiver_parts = receiver.as_ref().unwrap();
-                assert_eq!(receiver_parts.len(), 2);
-                assert_eq!(receiver_parts[0].to_string(), "Foo");
-                assert_eq!(receiver_parts[1].to_string(), "Bar");
+                // The receiver should be Constant with [Foo, Bar]
+                match receiver {
+                    MethodReceiver::Constant(receiver_parts) => {
+                        assert_eq!(receiver_parts.len(), 2);
+                        assert_eq!(receiver_parts[0].to_string(), "Foo");
+                        assert_eq!(receiver_parts[1].to_string(), "Bar");
+                    }
+                    _ => panic!("Expected Constant receiver"),
+                }
                 assert_eq!(method.to_string(), "baz");
             }
             _ => panic!("Expected Method identifier, got {:?}", identifier),
@@ -593,12 +593,7 @@ mod tests {
         let identifier = visitor.identifier.expect("Expected to find an identifier");
 
         match identifier {
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver_kind: _,
-                receiver: _,
-                iden: method,
-            } => {
+            Identifier::RubyMethod { iden: method, .. } => {
                 assert_eq!(method.to_string(), "a");
             }
             _ => panic!("Expected InstanceMethod FQN, got {:?}", identifier),

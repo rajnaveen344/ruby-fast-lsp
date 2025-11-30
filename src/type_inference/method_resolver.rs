@@ -34,6 +34,93 @@ impl MethodResolver {
         }
     }
 
+    /// Static method to resolve return type given an index, receiver type, and method name.
+    /// Useful when you don't have a MethodResolver instance.
+    pub fn resolve_method_return_type(
+        index: &RubyIndex,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        // Handle class reference calling .new
+        if method_name == "new" {
+            if let RubyType::ClassReference(fqn) = receiver_type {
+                // .new returns an instance of the class
+                return Some(RubyType::Class(fqn.clone()));
+            }
+        }
+
+        // Get the class name for RBS lookup
+        let class_name = Self::get_class_name_for_rbs_static(receiver_type);
+
+        // Determine if this is a singleton (class) method call
+        let is_singleton = matches!(
+            receiver_type,
+            RubyType::ClassReference(_) | RubyType::ModuleReference(_)
+        );
+
+        // Get the class/module FQN from the receiver type
+        let owner_fqn = match receiver_type {
+            RubyType::Class(fqn) => Some(fqn.clone()),
+            RubyType::ClassReference(fqn) => Some(fqn.clone()),
+            RubyType::Module(fqn) => Some(fqn.clone()),
+            RubyType::ModuleReference(fqn) => Some(fqn.clone()),
+            _ => None,
+        };
+
+        // Try to look up in Ruby index first (for user-defined methods)
+        if let Some(owner_fqn) = owner_fqn {
+            let method_kind = if is_singleton {
+                MethodKind::Class
+            } else {
+                MethodKind::Instance
+            };
+
+            if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
+                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                    for entry in entries {
+                        if let EntryKind::Method {
+                            owner, return_type, ..
+                        } = &entry.kind
+                        {
+                            if *owner == owner_fqn {
+                                if let Some(rt) = return_type {
+                                    return Some(rt.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to RBS type definitions for built-in methods
+        get_rbs_method_return_type_as_ruby_type(class_name.as_deref()?, method_name, is_singleton)
+    }
+
+    /// Static helper to get class name for RBS lookup
+    fn get_class_name_for_rbs_static(ruby_type: &RubyType) -> Option<String> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+                if let FullyQualifiedName::Constant(parts) = fqn {
+                    parts.last().map(|c| c.to_string())
+                } else {
+                    None
+                }
+            }
+            RubyType::Module(fqn) | RubyType::ModuleReference(fqn) => {
+                if let FullyQualifiedName::Constant(parts) = fqn {
+                    parts.last().map(|c| c.to_string())
+                } else {
+                    None
+                }
+            }
+            RubyType::Array(_) => Some("Array".to_string()),
+            RubyType::Hash(_, _) => Some("Hash".to_string()),
+            RubyType::Union(_) => None,
+            RubyType::Unknown | RubyType::Any => None,
+        }
+    }
+
     /// Resolve the return type of a method call
     pub fn resolve_call_type(&self, call_node: &CallNode) -> Option<RubyType> {
         let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();

@@ -2,7 +2,7 @@ use log::info;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
-use crate::analyzer_prism::{Identifier, ReceiverKind};
+use crate::analyzer_prism::{Identifier, MethodReceiver};
 use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
@@ -45,10 +45,9 @@ pub async fn find_references_at_position(
         }
         Identifier::RubyMethod {
             namespace,
-            receiver_kind,
             receiver,
             iden,
-        } => find_method_references(namespace, receiver_kind, receiver, iden, &index, &ancestors),
+        } => find_method_references(namespace, receiver, iden, &index, &ancestors),
         Identifier::RubyLocalVariable { name, scope, .. } => {
             let fqn = FullyQualifiedName::local_variable(name.clone(), scope.clone()).unwrap();
             find_local_variable_references(&fqn, &index, uri, position)
@@ -143,60 +142,47 @@ fn find_non_local_variable_references(
 /// Find references to a method, including mixin-aware references
 fn find_method_references(
     _namespace: &[crate::types::ruby_namespace::RubyConstant],
-    receiver_kind: &ReceiverKind,
-    receiver: &Option<Vec<crate::types::ruby_namespace::RubyConstant>>,
+    receiver: &MethodReceiver,
     method: &crate::types::ruby_method::RubyMethod,
     index: &crate::indexer::index::RubyIndex,
     ancestors: &[crate::types::ruby_namespace::RubyConstant],
 ) -> Option<Vec<Location>> {
     let mut all_references = Vec::new();
 
-    match receiver_kind {
-        ReceiverKind::Constant => {
-            if let Some(receiver_ns) = receiver {
-                // For constant receivers, we need to resolve the receiver namespace
-                // For Platform::PlatformServices from GoshPosh::Platform::SpecHelpers,
-                // this should resolve to GoshPosh::Platform::PlatformServices
-                let receiver_fqn = if !receiver_ns.is_empty() && !ancestors.is_empty() {
-                    // Try to resolve relative to the current namespace
-                    // Look for the first part of receiver_ns in ancestors
-                    let first_receiver_part = &receiver_ns[0];
+    match receiver {
+        MethodReceiver::Constant(receiver_ns) => {
+            // For constant receivers, we need to resolve the receiver namespace
+            // For Platform::PlatformServices from GoshPosh::Platform::SpecHelpers,
+            // this should resolve to GoshPosh::Platform::PlatformServices
+            let receiver_fqn = if !receiver_ns.is_empty() && !ancestors.is_empty() {
+                // Try to resolve relative to the current namespace
+                // Look for the first part of receiver_ns in ancestors
+                let first_receiver_part = &receiver_ns[0];
 
-                    // Find where this constant appears in ancestors
-                    if let Some(pos) = ancestors.iter().position(|c| c == first_receiver_part) {
-                        // Build FQN up to that position + the receiver namespace
-                        let mut resolved_ns = ancestors[..=pos].to_vec();
-                        resolved_ns.extend(receiver_ns[1..].iter().cloned());
-                        FullyQualifiedName::Constant(resolved_ns)
-                    } else {
-                        // Not found in ancestors, treat as absolute from root
-                        let mut full_ns = vec![ancestors[0].clone()];
-                        full_ns.extend(receiver_ns.clone());
-                        FullyQualifiedName::Constant(full_ns)
-                    }
+                // Find where this constant appears in ancestors
+                if let Some(pos) = ancestors.iter().position(|c| c == first_receiver_part) {
+                    // Build FQN up to that position + the receiver namespace
+                    let mut resolved_ns = ancestors[..=pos].to_vec();
+                    resolved_ns.extend(receiver_ns[1..].iter().cloned());
+                    FullyQualifiedName::Constant(resolved_ns)
                 } else {
-                    // Simple case: prepend ancestors
-                    let mut full_ns = ancestors.to_vec();
+                    // Not found in ancestors, treat as absolute from root
+                    let mut full_ns = vec![ancestors[0].clone()];
                     full_ns.extend(receiver_ns.clone());
                     FullyQualifiedName::Constant(full_ns)
-                };
-
-                if let Some(refs) =
-                    find_method_references_with_receiver(&receiver_fqn, method, index)
-                {
-                    all_references.extend(refs);
                 }
             } else {
-                // No specific receiver, search in current context
-                let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
-                if let Some(refs) =
-                    find_method_references_without_receiver(&receiver_fqn, method, index)
-                {
-                    all_references.extend(refs);
-                }
+                // Simple case: prepend ancestors
+                let mut full_ns = ancestors.to_vec();
+                full_ns.extend(receiver_ns.clone());
+                FullyQualifiedName::Constant(full_ns)
+            };
+
+            if let Some(refs) = find_method_references_with_receiver(&receiver_fqn, method, index) {
+                all_references.extend(refs);
             }
         }
-        ReceiverKind::None | ReceiverKind::SelfReceiver => {
+        MethodReceiver::None | MethodReceiver::SelfReceiver => {
             // No receiver, search in current context and mixins
             let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
             if let Some(refs) =
@@ -205,8 +191,13 @@ fn find_method_references(
                 all_references.extend(refs);
             }
         }
-        ReceiverKind::Expr => {
-            // Expression receiver, search by method name across all contexts
+        MethodReceiver::LocalVariable(_)
+        | MethodReceiver::InstanceVariable(_)
+        | MethodReceiver::ClassVariable(_)
+        | MethodReceiver::GlobalVariable(_)
+        | MethodReceiver::MethodCall { .. }
+        | MethodReceiver::Expression => {
+            // Variable, method call, or expression receiver - search by method name across all contexts
             if let Some(refs) = find_method_references_by_name(method, index) {
                 all_references.extend(refs);
             }

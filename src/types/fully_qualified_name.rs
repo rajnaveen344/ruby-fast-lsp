@@ -238,10 +238,7 @@ impl From<Identifier> for FullyQualifiedName {
         match value {
             Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::Constant(iden),
             Identifier::RubyMethod {
-                namespace,
-                receiver_kind: _,
-                receiver: _,
-                iden,
+                namespace, iden, ..
             } => FullyQualifiedName::Method(namespace, iden),
             Identifier::RubyLocalVariable { name, scope, .. } => {
                 FullyQualifiedName::LocalVariable(name, scope)

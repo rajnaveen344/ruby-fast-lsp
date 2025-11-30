@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::{
-    analyzer_prism::{Identifier, ReceiverKind, RubyPrismAnalyzer},
+    analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer},
     server::RubyLanguageServer,
 };
 
@@ -106,12 +106,7 @@ pub async fn find_completion_at_position(
                 iden.last().map(|c| c.to_string()).unwrap_or_default()
             }
         }
-        Some(Identifier::RubyMethod {
-            namespace: _,
-            receiver_kind: _,
-            receiver: _,
-            iden,
-        }) => {
+        Some(Identifier::RubyMethod { iden, .. }) => {
             // For method completion, extract the method name being typed
             iden.to_string()
         }
@@ -217,7 +212,12 @@ pub async fn find_completion_at_position(
         || matches!(
             &partial_name,
             Some(Identifier::RubyMethod {
-                receiver_kind: ReceiverKind::Expr,
+                receiver: MethodReceiver::LocalVariable(_)
+                    | MethodReceiver::InstanceVariable(_)
+                    | MethodReceiver::ClassVariable(_)
+                    | MethodReceiver::GlobalVariable(_)
+                    | MethodReceiver::MethodCall { .. }
+                    | MethodReceiver::Expression,
                 ..
             })
         );
@@ -243,7 +243,7 @@ pub async fn find_completion_at_position(
             let is_class_method = matches!(
                 &partial_name,
                 Some(Identifier::RubyMethod {
-                    receiver_kind: ReceiverKind::Constant,
+                    receiver: MethodReceiver::Constant(_),
                     ..
                 })
             );
@@ -313,8 +313,7 @@ fn get_receiver_type_from_cfg(
 
     // If we have a method identifier with constant receiver, use it directly
     if let Some(Identifier::RubyMethod {
-        receiver_kind: ReceiverKind::Constant,
-        receiver: Some(recv_parts),
+        receiver: MethodReceiver::Constant(recv_parts),
         ..
     }) = identifier
     {
@@ -434,18 +433,7 @@ fn is_variable_name(text: &str) -> bool {
     text.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// Convert LSP Position to byte offset
-fn position_to_offset(content: &str, position: Position) -> usize {
-    let mut offset = 0;
-    for (line_num, line) in content.lines().enumerate() {
-        if line_num == position.line as usize {
-            offset += position.character as usize;
-            break;
-        }
-        offset += line.len() + 1;
-    }
-    offset
-}
+use super::utils::position_to_offset;
 
 #[cfg(test)]
 mod tests {

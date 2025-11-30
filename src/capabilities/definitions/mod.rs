@@ -24,7 +24,7 @@ pub async fn find_definition_at_position(
         return yard_type::find_yard_type_definitions(&yard_type.type_name, &index);
     }
 
-    let analyzer = RubyPrismAnalyzer::new(uri, content.to_string());
+    let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
     let (identifier, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
     let identifier = match identifier {
@@ -49,17 +49,22 @@ pub async fn find_definition_at_position(
         }
         Identifier::RubyMethod {
             namespace,
-            receiver_kind,
             receiver,
             iden,
-        } => method::find_method_definitions(
-            namespace,
-            receiver_kind,
-            receiver,
-            iden,
-            &index,
-            &ancestors,
-        ),
+        } => {
+            drop(index); // Release lock before calling type-aware function
+            method::find_method_definitions(
+                namespace,
+                receiver,
+                iden,
+                &server.index.lock(),
+                &ancestors,
+                &server.type_narrowing,
+                &uri,
+                position,
+                content,
+            )
+        }
         Identifier::RubyLocalVariable { name, scope, .. } => {
             variable::find_local_variable_definitions_at_position(name, scope, &index, position)
         }

@@ -23,18 +23,7 @@ pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
     })
 }
 
-/// Convert LSP Position to byte offset
-fn position_to_offset(content: &str, position: Position) -> usize {
-    let mut offset = 0;
-    for (line_num, line) in content.lines().enumerate() {
-        if line_num == position.line as usize {
-            offset += position.character as usize;
-            break;
-        }
-        offset += line.len() + 1;
-    }
-    offset
-}
+use super::utils::position_to_offset;
 
 pub async fn handle_inlay_hints(
     server: &RubyLanguageServer,

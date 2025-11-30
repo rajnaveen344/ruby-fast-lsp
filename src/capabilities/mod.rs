@@ -9,4 +9,5 @@ pub mod inlay_hints;
 pub mod namespace_tree;
 pub mod references;
 pub mod semantic_tokens;
+pub mod utils;
 pub mod workspace_symbols;

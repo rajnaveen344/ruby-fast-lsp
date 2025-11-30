@@ -17,40 +17,224 @@
 //! 3. For each including class, search its complete hierarchy
 //!
 //! ## Key Functions:
-//! - `find_method_definitions`: Main entry point for method definition search
+//! - `find_method_definitions`: Main entry point for method definition search (type-aware)
 //! - `search_method_in_class_hierarchy`: Handles class context search
 //! - `search_method_in_including_classes`: Handles module context search
 //! - `get_ancestor_chain`: Gets the complete ancestor chain from ancestor_chain.rs
 
 use log::debug;
 use std::collections::HashSet;
-use tower_lsp::lsp_types::Location;
+use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
-use crate::analyzer_prism::ReceiverKind;
+use crate::analyzer_prism::MethodReceiver;
+use crate::capabilities::utils::position_to_offset;
 use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
+use crate::type_inference::ruby_type::RubyType;
+use crate::type_inference::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 
-/// Find definitions for a Ruby method
+/// Find definitions for a Ruby method with type-aware filtering.
+///
+/// Uses the type narrowing engine to filter results based on receiver type when available.
+/// This provides precise go-to-definition for method calls like `a.length` where `a` is a
+/// typed local variable.
 pub fn find_method_definitions(
     _ns: &[RubyConstant],
-    receiver_kind: &ReceiverKind,
-    receiver: &Option<Vec<RubyConstant>>,
+    receiver: &MethodReceiver,
     method: &RubyMethod,
     index: &RubyIndex,
     ancestors: &[RubyConstant],
+    type_narrowing: &TypeNarrowingEngine,
+    uri: &Url,
+    position: Position,
+    content: &str,
 ) -> Option<Vec<Location>> {
-    match receiver_kind {
-        ReceiverKind::Constant => handle_constant_receiver(receiver, method, index, ancestors),
-        ReceiverKind::None | ReceiverKind::SelfReceiver => {
+    match receiver {
+        MethodReceiver::Constant(path) => {
+            handle_constant_receiver(&Some(path.clone()), method, index, ancestors)
+        }
+        MethodReceiver::None | MethodReceiver::SelfReceiver => {
             find_method_without_receiver(method, index, ancestors)
         }
-        ReceiverKind::Expr => search_by_name(method, index),
+        MethodReceiver::LocalVariable(name)
+        | MethodReceiver::InstanceVariable(name)
+        | MethodReceiver::ClassVariable(name)
+        | MethodReceiver::GlobalVariable(name) => {
+            // Try to get the receiver's type using type narrowing
+            let offset = position_to_offset(content, position);
+            if let Some(receiver_type) = type_narrowing.get_narrowed_type(uri, name, offset) {
+                debug!("Found receiver type for '{}': {:?}", name, receiver_type);
+                return search_by_name_filtered(method, index, &receiver_type);
+            }
+            // Fallback to unfiltered search
+            search_by_name(method, index)
+        }
+        MethodReceiver::MethodCall {
+            inner_receiver,
+            method_name,
+        } => {
+            // Method call receiver - try to resolve the inner receiver's type first,
+            // then look up the method's return type
+            let receiver_type = resolve_method_call_type(
+                inner_receiver,
+                method_name,
+                index,
+                type_narrowing,
+                uri,
+                position,
+                content,
+            );
+            if let Some(ty) = receiver_type {
+                debug!(
+                    "Found method call receiver type for '{}.{}': {:?}",
+                    inner_receiver_to_string(inner_receiver),
+                    method_name,
+                    ty
+                );
+                return search_by_name_filtered(method, index, &ty);
+            }
+            // Fallback to unfiltered search
+            search_by_name(method, index)
+        }
+        MethodReceiver::Expression => {
+            // Complex expression - can't determine type, search by name
+            search_by_name(method, index)
+        }
+    }
+}
+
+/// Resolve the type of a method call receiver by looking up the method's return type
+fn resolve_method_call_type(
+    inner_receiver: &MethodReceiver,
+    method_name: &str,
+    index: &RubyIndex,
+    type_narrowing: &TypeNarrowingEngine,
+    uri: &Url,
+    position: Position,
+    content: &str,
+) -> Option<RubyType> {
+    use crate::type_inference::method_resolver::MethodResolver;
+
+    // First, resolve the inner receiver's type
+    let inner_type = match inner_receiver {
+        MethodReceiver::None | MethodReceiver::SelfReceiver => {
+            // TODO: For self, we'd need to know the current class context
+            return None;
+        }
+        MethodReceiver::Constant(path) => {
+            // Class method call - the type is the class itself
+            RubyType::ClassReference(FullyQualifiedName::Constant(path.clone()))
+        }
+        MethodReceiver::LocalVariable(name)
+        | MethodReceiver::InstanceVariable(name)
+        | MethodReceiver::ClassVariable(name)
+        | MethodReceiver::GlobalVariable(name) => {
+            let offset = position_to_offset(content, position);
+            type_narrowing.get_narrowed_type(uri, name, offset)?
+        }
+        MethodReceiver::MethodCall {
+            inner_receiver: nested_receiver,
+            method_name: nested_method,
+        } => {
+            // Recursively resolve nested method calls
+            resolve_method_call_type(
+                nested_receiver,
+                nested_method,
+                index,
+                type_narrowing,
+                uri,
+                position,
+                content,
+            )?
+        }
+        MethodReceiver::Expression => {
+            return None;
+        }
+    };
+
+    // Now look up the method's return type on the inner type
+    MethodResolver::resolve_method_return_type(index, &inner_type, method_name)
+}
+
+/// Helper to convert inner receiver to string for debug logging
+fn inner_receiver_to_string(receiver: &MethodReceiver) -> String {
+    match receiver {
+        MethodReceiver::None => "".to_string(),
+        MethodReceiver::SelfReceiver => "self".to_string(),
+        MethodReceiver::Constant(path) => path
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        MethodReceiver::LocalVariable(name)
+        | MethodReceiver::InstanceVariable(name)
+        | MethodReceiver::ClassVariable(name)
+        | MethodReceiver::GlobalVariable(name) => name.clone(),
+        MethodReceiver::MethodCall {
+            inner_receiver,
+            method_name,
+        } => format!(
+            "{}.{}",
+            inner_receiver_to_string(inner_receiver),
+            method_name
+        ),
+        MethodReceiver::Expression => "<expr>".to_string(),
+    }
+}
+
+/// Search for methods by name, filtered by receiver type
+fn search_by_name_filtered(
+    method: &RubyMethod,
+    index: &RubyIndex,
+    receiver_type: &RubyType,
+) -> Option<Vec<Location>> {
+    let type_names = get_type_names(receiver_type);
+
+    if type_names.is_empty() {
+        // Unknown type, fall back to unfiltered search
+        return search_by_name(method, index);
+    }
+
+    let mut filtered_locations = Vec::new();
+
+    if let Some(entries) = index.methods_by_name.get(method) {
+        for entry in entries.iter() {
+            // Check if this method belongs to one of the receiver's types
+            let method_class = entry.fqn.namespace_parts();
+            if !method_class.is_empty() {
+                let class_name = method_class
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::");
+
+                if type_names.iter().any(|t| *t == class_name) {
+                    filtered_locations.push(entry.location.clone());
+                }
+            }
+        }
+    }
+
+    if filtered_locations.is_empty() {
+        // No matches for the specific type, fall back to unfiltered
+        search_by_name(method, index)
+    } else {
+        Some(filtered_locations)
+    }
+}
+
+/// Extract type names from a RubyType (handles unions)
+fn get_type_names(ty: &RubyType) -> Vec<String> {
+    match ty {
+        RubyType::Class(fqn) => vec![fqn.to_string()],
+        RubyType::Union(types) => types.iter().flat_map(get_type_names).collect(),
+        _ => vec![],
     }
 }
 
@@ -103,10 +287,9 @@ fn find_method_without_receiver(
     ancestors: &[RubyConstant],
 ) -> Option<Vec<Location>> {
     let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
-    let mut visited = HashSet::new(); // Global visited set for this entire search
+    let mut visited = HashSet::new();
 
     // Search current module and its mixins/inheritance chain
-    // For methods without receivers, only search for the method kind that matches the method
     let method_kind = method.get_kind();
 
     if let Some(locations) = search_in_ancestor_chain_with_visited(
@@ -119,8 +302,7 @@ fn find_method_without_receiver(
         return Some(locations);
     }
 
-    // If we're in a module and didn't find the method, search in all classes/modules that include this module
-    // This handles the case where a method in ModuleA calls a method from ModuleB, and both are included in a class
+    // If we're in a module and didn't find the method, search in sibling modules
     if let Some(including_classes) = search_in_sibling_modules_with_visited(
         &receiver_fqn,
         method,
@@ -138,10 +320,8 @@ fn find_method_without_receiver(
 // UTILITY FUNCTIONS
 // ============================================================================
 
-/// Check if a method name represents a constant (starts with uppercase)
+/// Check if a method should be searched via direct references (class/unknown methods)
 fn is_constant_receiver(method: &RubyMethod) -> bool {
-    // For constant receivers, we search direct references
-    // For non-constant receivers, we fall back to name search
     method.get_kind() == MethodKind::Class || method.get_kind() == MethodKind::Unknown
 }
 
@@ -152,7 +332,7 @@ fn search_direct_references(
     index: &RubyIndex,
 ) -> Option<Vec<Location>> {
     let mut found_locations = Vec::new();
-    let mut visited = HashSet::new(); // Global visited set for this search
+    let mut visited = HashSet::new();
 
     let kinds_to_check = if method.get_kind() == MethodKind::Unknown {
         vec![MethodKind::Instance, MethodKind::Class]
@@ -184,15 +364,11 @@ fn get_included_modules(
     index: &RubyIndex,
     class_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    debug!("Starting get_included_modules for {:?}", class_fqn);
-
     let mut included_modules = Vec::new();
     let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-    // Get the ancestor chain to check superclasses too
     let ancestor_chain = get_ancestor_chain(index, class_fqn, false);
 
-    // Check each class/module in the ancestor chain for included modules
     for ancestor_fqn in &ancestor_chain {
         if let Some(entries) = index.definitions.get(ancestor_fqn) {
             for entry in entries.iter() {
@@ -213,13 +389,11 @@ fn get_included_modules(
 /// Process mixins for a specific entry (class/module)
 fn process_entry_mixins(
     index: &RubyIndex,
-    entry_kind: &crate::indexer::entry::entry_kind::EntryKind,
+    entry_kind: &EntryKind,
     ancestor_fqn: &FullyQualifiedName,
     included_modules: &mut Vec<FullyQualifiedName>,
     seen_modules: &mut HashSet<FullyQualifiedName>,
 ) {
-    use crate::indexer::entry::entry_kind::EntryKind;
-
     match entry_kind {
         EntryKind::Class {
             includes,
@@ -290,17 +464,14 @@ fn process_mixins(
 
 /// Search for methods by name across the entire index
 fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location>> {
-    if let Some(entries) = index.methods_by_name.get(method) {
+    index.methods_by_name.get(method).and_then(|entries| {
         let locations: Vec<Location> = entries.iter().map(|entry| entry.location.clone()).collect();
-
         if locations.is_empty() {
             None
         } else {
             Some(locations)
         }
-    } else {
-        None
-    }
+    })
 }
 
 // ============================================================================
@@ -318,8 +489,7 @@ fn is_class_context(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
             }
         }
     }
-    // Default to class if we can't determine
-    true
+    true // Default to class if we can't determine
 }
 
 // ============================================================================
@@ -334,7 +504,6 @@ fn search_in_ancestor_chain_with_visited(
     kind: MethodKind,
     visited: &mut HashSet<FullyQualifiedName>,
 ) -> Option<Vec<Location>> {
-    // Prevent infinite recursion
     if visited.contains(receiver_fqn) {
         return None;
     }
@@ -342,9 +511,9 @@ fn search_in_ancestor_chain_with_visited(
     visited.insert(receiver_fqn.clone());
 
     let found_locations = if is_class_context(index, receiver_fqn) {
-        search_method_in_class_hierarchy(receiver_fqn, method, index, kind, visited)
+        search_method_in_class_hierarchy(receiver_fqn, method, index, kind)
     } else {
-        search_method_in_including_classes(receiver_fqn, method, index, kind, visited)
+        search_method_in_including_classes(receiver_fqn, method, index)
     };
 
     if found_locations.is_empty() {
@@ -361,49 +530,29 @@ fn search_in_ancestor_chain_with_visited(
 /// 2. Included modules - search modules included by the class (in reverse order)
 /// 3. Parent class - search the superclass and repeat the process recursively
 /// 4. Parent's modules - search modules included by parent classes
-///
-/// For class methods, this also processes 'extend' mixins which add class methods.
 fn search_method_in_class_hierarchy(
     receiver_fqn: &FullyQualifiedName,
     method: &RubyMethod,
     index: &RubyIndex,
     kind: MethodKind,
-    _visited: &mut HashSet<FullyQualifiedName>,
 ) -> Vec<Location> {
-    debug!(
-        "Searching method '{}' in class hierarchy starting from {:?}",
-        method.get_name(),
-        receiver_fqn
-    );
     let mut found_locations = Vec::new();
     let is_class_method = kind == MethodKind::Class;
 
-    // Build complete set of all modules/classes to search (single-pass collection)
     let mut modules_to_search = HashSet::new();
-
-    // Step 1: Add the current class to search
     modules_to_search.insert(receiver_fqn.clone());
 
-    // Step 2: Get the complete ancestor chain (includes parent classes and their modules)
     let ancestor_chain = get_ancestor_chain(index, receiver_fqn, is_class_method);
-    debug!(
-        "Found {} ancestors in chain for {:?}",
-        ancestor_chain.len(),
-        receiver_fqn
-    );
 
-    // Step 3: Add all ancestors to the search set
     for ancestor_fqn in &ancestor_chain {
         modules_to_search.insert(ancestor_fqn.clone());
 
-        // Add all modules included by this ancestor
         let included_modules = get_included_modules(index, ancestor_fqn);
         for module_fqn in included_modules {
             collect_all_searchable_modules(index, &module_fqn, &mut modules_to_search);
         }
     }
 
-    // 3. Search each module exactly once
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.definitions.get(&method_fqn) {
@@ -435,50 +584,27 @@ fn deduplicate_locations(locations: Vec<Location>) -> Vec<Location> {
 /// 1. Search the module itself for the method definition
 /// 2. Find all classes that include/prepend/extend this module
 /// 3. For each including class, search its complete hierarchy
-///
-/// This handles cases where a method is called on a module but the actual
-/// implementation might be in a class that includes the module.
 fn search_method_in_including_classes(
     receiver_fqn: &FullyQualifiedName,
     method: &RubyMethod,
     index: &RubyIndex,
-    _kind: MethodKind,
-    _visited: &mut HashSet<FullyQualifiedName>,
 ) -> Vec<Location> {
-    debug!(
-        "Searching method '{}' in module context for {:?}",
-        method.get_name(),
-        receiver_fqn
-    );
     let mut found_locations = Vec::new();
-
-    // Build complete set of all modules/classes to search (single-pass collection)
     let mut modules_to_search = HashSet::new();
 
-    // Step 1: Add the module itself to search
     modules_to_search.insert(receiver_fqn.clone());
 
-    // Step 2: Find all classes that include this module and add their dependencies
     let including_classes = index.get_including_classes(receiver_fqn);
-    debug!(
-        "Found {} classes that include module {:?}",
-        including_classes.len(),
-        receiver_fqn
-    );
 
-    // Step 3: For each including class, add it and its complete hierarchy
     for class_fqn in including_classes {
-        // Add the class itself and its ancestor chain
         collect_all_searchable_modules(index, &class_fqn, &mut modules_to_search);
 
-        // Add all modules included by this class
         let included_modules = get_included_modules(index, &class_fqn);
         for module_fqn in included_modules {
             collect_all_searchable_modules(index, &module_fqn, &mut modules_to_search);
         }
     }
 
-    // 3. Search each module exactly once
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.definitions.get(&method_fqn) {
@@ -489,29 +615,25 @@ fn search_method_in_including_classes(
     deduplicate_locations(found_locations)
 }
 
-/// Recursively collect all modules that should be searched for a given module/class,
-/// including its ancestor chain and included modules, without exponential traversal
+/// Recursively collect all modules that should be searched for a given module/class
 fn collect_all_searchable_modules(
     index: &RubyIndex,
     fqn: &FullyQualifiedName,
     modules_to_search: &mut HashSet<FullyQualifiedName>,
 ) {
-    // Avoid infinite recursion
     if modules_to_search.contains(fqn) {
         return;
     }
 
     modules_to_search.insert(fqn.clone());
 
-    // Add ancestor chain (for classes)
-    let ancestor_chain = get_ancestor_chain(index, fqn, false); // Use instance method chain
+    let ancestor_chain = get_ancestor_chain(index, fqn, false);
     for ancestor_fqn in &ancestor_chain {
         if !modules_to_search.contains(ancestor_fqn) {
             modules_to_search.insert(ancestor_fqn.clone());
         }
     }
 
-    // Add included modules recursively
     let included_modules = get_included_modules(index, fqn);
     for module_fqn in included_modules {
         collect_all_searchable_modules(index, &module_fqn, modules_to_search);
@@ -521,8 +643,6 @@ fn collect_all_searchable_modules(
 // ============================================================================
 // SIBLING MODULE SEARCH
 // ============================================================================
-
-/// Search for methods in sibling modules (included/extended/prepended)
 
 /// Search for methods in sibling modules with visited tracking
 fn search_in_sibling_modules_with_visited(
@@ -534,10 +654,8 @@ fn search_in_sibling_modules_with_visited(
 ) -> Option<Vec<Location>> {
     let mut found_locations = Vec::new();
 
-    // Get the modules that this class/module includes, extends, or prepends
     let included_modules = get_included_modules(index, class_fqn);
 
-    // Search in each included module and its ancestor chain
     for module_fqn in included_modules {
         if let Some(locations) =
             search_in_ancestor_chain_with_visited(&module_fqn, method, index, kind, visited)
