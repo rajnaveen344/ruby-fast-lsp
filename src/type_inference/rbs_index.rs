@@ -355,4 +355,18 @@ mod tests {
         let return_type = get_rbs_method_return_type("String", "nonexistent_method_xyz", false);
         assert!(return_type.is_none(), "Should not find nonexistent method");
     }
+
+    #[test]
+    fn test_string_chars_return_type() {
+        let return_type = get_rbs_method_return_type("String", "chars", false);
+        println!("String#chars return type: {:?}", return_type);
+        assert!(
+            return_type.is_some(),
+            "String#chars should have a return type"
+        );
+
+        // Also test the RubyType conversion
+        let ruby_type = get_rbs_method_return_type_as_ruby_type("String", "chars", false);
+        println!("String#chars as RubyType: {:?}", ruby_type);
+    }
 }

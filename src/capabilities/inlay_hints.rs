@@ -63,20 +63,17 @@ pub async fn handle_inlay_hints(
 
             match &entry.kind {
                 EntryKind::LocalVariable { r#type, name, .. } => {
-                    // Prefer CFG-based type inference (more accurate for ||, &&, etc.)
-                    // Fall back to indexed type for method call results
-                    let offset = position_to_offset(&content, entry.location.range.start);
-                    let final_type = server
-                        .type_narrowing
-                        .get_narrowed_type(&uri, name, offset)
-                        .or_else(|| {
-                            // Fallback to indexed type (for method call results)
-                            if *r#type != RubyType::Unknown {
-                                Some(r#type.clone())
-                            } else {
-                                None
-                            }
-                        });
+                    // For variable assignments, prefer the indexed type from the RHS expression
+                    // since CFG gives the type BEFORE the assignment, not after.
+                    // Only use CFG for reads when the indexed type is Unknown.
+                    let final_type = if *r#type != RubyType::Unknown {
+                        // Use the indexed type (from analyzing the RHS)
+                        Some(r#type.clone())
+                    } else {
+                        // Fallback to CFG-based type narrowing (for reads, etc.)
+                        let offset = position_to_offset(&content, entry.location.range.start);
+                        server.type_narrowing.get_narrowed_type(&uri, name, offset)
+                    };
 
                     if let Some(ty) = final_type {
                         if ty != RubyType::Unknown {
