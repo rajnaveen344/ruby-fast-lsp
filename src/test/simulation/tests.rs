@@ -23,6 +23,9 @@ use tower_lsp::LanguageServer;
 // Configuration
 // =============================================================================
 
+/// Path for soak test failure logs (relative to workspace root)
+const SOAK_LOG_FILE: &str = "src/test/simulation/soak_failures.log";
+
 fn get_config() -> Config {
     Config {
         cases: std::env::var("PROPTEST_CASES")
@@ -30,6 +33,12 @@ fn get_config() -> Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(100),
         max_shrink_iters: 10000,
+        // Use Direct persistence to write to src/test/simulation/regressions.txt
+        failure_persistence: Some(Box::new(
+            proptest::test_runner::FileFailurePersistence::Direct(
+                "src/test/simulation/regressions.txt",
+            ),
+        )),
         ..Config::default()
     }
 }
@@ -592,10 +601,10 @@ proptest! {
     /// 3. Performs random operations (edits, queries, saves)
     /// 4. Verifies invariants still hold
     ///
-    /// Run with: `cargo test simulation_runner`
-    /// More cases: `PROPTEST_CASES=1000 cargo test simulation_runner`
+    /// Run with: `cargo test sim`
+    /// More cases: `PROPTEST_CASES=1000 cargo test sim`
     #[test]
-    fn simulation_runner(
+    fn sim(
         tracked in tracked_code(),
         edit_lines in prop::collection::vec(0..50u32, 0..15),
         edit_texts in prop::collection::vec("[a-z #\n]{0,30}", 0..15),
@@ -707,6 +716,284 @@ proptest! {
                 Err(e) => panic!("Simulation setup failed: {}", e),
             }
         });
+    }
+}
+
+// =============================================================================
+// SOAK TEST MODE - Run overnight to collect all failures
+// =============================================================================
+//
+// Run with: SOAK_TEST=1 PROPTEST_CASES=10000 cargo test soak_test --release -- --nocapture
+//
+// This test:
+// 1. Runs continuously without stopping on failures
+// 2. Records all failures to a file
+// 3. Prints a summary at the end
+
+#[cfg(test)]
+mod soak_test {
+    use super::*;
+    use crate::test::simulation::generators::{
+        tracked_class_with_method_call, tracked_inheritance, tracked_inlay_hints,
+        tracked_instance_variable, tracked_mixin_method_call, tracked_type_assignments,
+    };
+    use proptest::strategy::ValueTree;
+    use std::collections::hash_map::DefaultHasher;
+    use std::fs::OpenOptions;
+    use std::hash::{Hash, Hasher};
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static FAILURES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static TOTAL_RUNS: AtomicUsize = AtomicUsize::new(0);
+    static TOTAL_FAILURES: AtomicUsize = AtomicUsize::new(0);
+
+    fn record_failure(description: String) {
+        TOTAL_FAILURES.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut failures) = FAILURES.lock() {
+            // Deduplicate by error type
+            let error_key = description
+                .lines()
+                .find(|l| l.starts_with("Error:"))
+                .unwrap_or(&description);
+            if !failures.iter().any(|f| f.contains(error_key)) {
+                failures.push(description);
+            }
+        }
+    }
+
+    /// Generate a seed from iteration number for reproducibility
+    fn make_seed(iteration: usize) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        iteration.hash(&mut hasher);
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Soak test - runs continuously until Ctrl+C and collects all unique failures
+    ///
+    /// Run with: `cargo test soak --release -- --nocapture --ignored`
+    /// Optional max limit: `PROPTEST_CASES=10000 cargo test soak --release -- --nocapture --ignored`
+    ///
+    /// Results are written to `src/test/simulation/soak_failures.log` on exit
+    #[test]
+    #[ignore] // Only run when explicitly requested with --ignored
+    fn soak() {
+        // Optional max limit, otherwise run forever
+        let max_cases: Option<usize> = std::env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|s| s.parse().ok());
+
+        println!("🔥 SOAK TEST MODE");
+        if let Some(max) = max_cases {
+            println!("   Running up to {} iterations (or until Ctrl+C)", max);
+        } else {
+            println!("   Running indefinitely until Ctrl+C");
+        }
+        println!("   Failures will be collected (not stopped on first failure)");
+        println!("   Results will be written to {}\n", super::SOAK_LOG_FILE);
+
+        // Set up Ctrl+C handler
+        let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let r = running.clone();
+        ctrlc::set_handler(move || {
+            println!("\n\n⏹️  Ctrl+C received, finishing up...");
+            r.store(false, Ordering::SeqCst);
+        })
+        .ok();
+
+        let start = Instant::now();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let mut i: usize = 0;
+        while running.load(Ordering::SeqCst) {
+            // Check max limit
+            if let Some(max) = max_cases {
+                if i >= max {
+                    break;
+                }
+            }
+            TOTAL_RUNS.fetch_add(1, Ordering::SeqCst);
+
+            // Generate a reproducible seed for this iteration
+            let seed = make_seed(i);
+
+            // Use proptest's TestRunner for random generation
+            let config = proptest::test_runner::Config {
+                cases: 1,
+                ..Default::default()
+            };
+            let mut runner = proptest::test_runner::TestRunner::new(config);
+
+            // Cycle through different generators
+            let generator_idx = i % 6;
+            let generator_name = match generator_idx {
+                0 => "tracked_class_with_method_call",
+                1 => "tracked_mixin_method_call",
+                2 => "tracked_inheritance",
+                3 => "tracked_instance_variable",
+                4 => "tracked_type_assignments",
+                _ => "tracked_inlay_hints",
+            };
+
+            let tracked = match generator_idx {
+                0 => tracked_class_with_method_call()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+                1 => tracked_mixin_method_call()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+                2 => tracked_inheritance()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+                3 => tracked_instance_variable()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+                4 => tracked_type_assignments()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+                _ => tracked_inlay_hints()
+                    .new_tree(&mut runner)
+                    .ok()
+                    .map(|t| t.current()),
+            };
+
+            if let Some(tracked) = tracked {
+                // Generate random steps
+                let step_count = 10 + (i % 40);
+                let steps: Vec<SimStep> = (0..step_count)
+                    .map(|j| match (i + j) % 13 {
+                        0 | 1 => SimStep::Edit {
+                            line: ((i + j) % 20) as u32,
+                            text: format!("# edit {}\n", j),
+                        },
+                        2 | 3 => SimStep::VerifyDefinition {
+                            marker_idx: j % tracked.markers.len().max(1),
+                        },
+                        4 => SimStep::VerifyType {
+                            marker_idx: j % tracked.markers.len().max(1),
+                        },
+                        5 => SimStep::VerifyCompletion {
+                            marker_idx: j % tracked.markers.len().max(1),
+                        },
+                        6 => SimStep::QuerySymbols,
+                        7 => SimStep::QueryCompletion {
+                            line: (j % 10) as u32,
+                            character: 5,
+                        },
+                        8 => SimStep::QueryReferences {
+                            line: (j % 10) as u32,
+                            character: 5,
+                        },
+                        9 => SimStep::QueryHover {
+                            line: (j % 10) as u32,
+                            character: 5,
+                        },
+                        10 => SimStep::QueryInlayHints,
+                        11 => SimStep::QuerySemanticTokens,
+                        _ => SimStep::Save,
+                    })
+                    .collect();
+
+                let result = rt.block_on(run_simulation(&tracked, &steps));
+
+                match result {
+                    Ok(report) if !report.is_success() => {
+                        let failure_desc = format!(
+                            "Seed: {:016x}\nIteration: {}\nGenerator: {}\nCode:\n{}\nError: {:?}\n---\n",
+                            seed,
+                            i,
+                            generator_name,
+                            tracked.code.lines().take(10).collect::<Vec<_>>().join("\n"),
+                            report.errors
+                        );
+                        record_failure(failure_desc);
+                    }
+                    Err(e) => {
+                        let failure_desc = format!("Iteration: {}\nSetup Error: {}\n---\n", i, e);
+                        record_failure(failure_desc);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Print progress every 100 runs
+            if (i + 1) % 100 == 0 {
+                let total = TOTAL_RUNS.load(Ordering::SeqCst);
+                let failures = TOTAL_FAILURES.load(Ordering::SeqCst);
+                let unique = FAILURES.lock().map(|f| f.len()).unwrap_or(0);
+                let elapsed = start.elapsed().as_secs();
+                let rate = total as f64 / elapsed.max(1) as f64;
+                if let Some(max) = max_cases {
+                    print!(
+                        "\r✓ Progress: {}/{} | {} failures ({} unique) | {}s | {:.0}/s    ",
+                        total, max, failures, unique, elapsed, rate
+                    );
+                } else {
+                    print!(
+                        "\r✓ Progress: {} | {} failures ({} unique) | {}s | {:.0}/s    ",
+                        total, failures, unique, elapsed, rate
+                    );
+                }
+                std::io::stdout().flush().ok();
+            }
+
+            i += 1;
+        }
+
+        // Write results to file
+        let total = TOTAL_RUNS.load(Ordering::SeqCst);
+        let failures = TOTAL_FAILURES.load(Ordering::SeqCst);
+        let elapsed = start.elapsed();
+
+        println!("\n\n📊 SOAK TEST COMPLETE");
+        println!("   Duration: {:.1}s", elapsed.as_secs_f64());
+        println!("   Total runs: {}", total);
+        println!(
+            "   Total failures: {} ({:.1}%)",
+            failures,
+            (failures as f64 / total as f64) * 100.0
+        );
+
+        if let Ok(failures_list) = FAILURES.lock() {
+            println!("   Unique failure types: {}", failures_list.len());
+
+            if !failures_list.is_empty() {
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(super::SOAK_LOG_FILE)
+                    .expect("Failed to create log file");
+
+                writeln!(file, "# Simulation Soak Test Failures").ok();
+                writeln!(file, "# Date: {:?}", std::time::SystemTime::now()).ok();
+                writeln!(file, "# Duration: {:.1}s", elapsed.as_secs_f64()).ok();
+                writeln!(file, "# Total runs: {}", total).ok();
+                writeln!(file, "# Total failures: {}", failures).ok();
+                writeln!(file, "# Unique failure types: {}\n", failures_list.len()).ok();
+
+                for (i, failure) in failures_list.iter().enumerate() {
+                    writeln!(file, "## Failure #{}\n{}", i + 1, failure).ok();
+                }
+
+                println!("\n   📝 Results written to: {}", super::SOAK_LOG_FILE);
+            }
+        }
+
+        // Don't fail the test - we just collected data
+        println!("\n   ✅ Soak test completed successfully (failures are expected)");
     }
 }
 

@@ -84,6 +84,39 @@ Ruby Fast LSP is designed for speed:
 - Large workspaces may take time to index initially
 - Some edge cases in Ruby syntax may not be fully supported yet
 
+## Development
+
+### Building from Source
+
+```bash
+cargo build --release
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run simulation tests (property-based fuzzing)
+cargo test sim --release
+
+# Run soak test (overnight fuzzing, Ctrl+C to stop)
+cargo test soak --release -- --nocapture --ignored
+```
+
+See [docs/testing.md](docs/testing.md) for detailed testing documentation.
+
+### Project Structure
+
+- `src/` - Main LSP server implementation
+- `src/capabilities/` - LSP feature handlers (completion, definitions, etc.)
+- `src/indexer/` - Project indexing and symbol management
+- `src/type_inference/` - Type inference engine
+- `src/test/simulation/` - Property-based simulation tests
+- `crates/rbs-parser/` - RBS type signature parser
+- `vsix/` - VS Code extension packaging
+
 ## Contributing
 
 Please report any issues or feature requests on our [GitHub repository](https://github.com/rajnaveen344/ruby-fast-lsp).
