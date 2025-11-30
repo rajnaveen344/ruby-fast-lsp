@@ -123,16 +123,14 @@ fn apply_edit_to_string(content: &str, range: &Range, new_text: &str) -> String 
 /// Convert an LSP Position to a byte offset in the content
 fn position_to_offset(content: &str, position: &Position) -> usize {
     let mut offset = 0;
-    let mut current_line = 0;
 
-    for line in content.lines() {
+    for (current_line, line) in content.lines().enumerate() {
         if current_line == position.line as usize {
             // Found the line, add character offset
             let char_offset = (position.character as usize).min(line.len());
             return offset + char_offset;
         }
         offset += line.len() + 1; // +1 for newline
-        current_line += 1;
     }
 
     // If position is beyond content, return end

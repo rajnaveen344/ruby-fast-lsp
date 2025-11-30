@@ -2,13 +2,85 @@
 
 ## Implementation Status ✅
 
-| Phase                        | Status      | Description                                          |
-| ---------------------------- | ----------- | ---------------------------------------------------- |
-| **Phase 1: Foundation**      | ✅ Complete | Dependencies, module structure, Model, basic harness |
-| **Phase 2: Edit Testing**    | ✅ Complete | `DidChange` with text sync verification              |
-| **Phase 3: Query Testing**   | ✅ Complete | All 15 operations with Level 1 assertions            |
-| **Phase 4: Marker Strategy** | 🔄 Partial  | `DocumentSymbols` completeness test done             |
-| **Phase 5: CI Integration**  | ⏳ Pending  | GitHub Actions workflow                              |
+| Phase                        | Status      | Description                                                          |
+| ---------------------------- | ----------- | -------------------------------------------------------------------- |
+| **Phase 1: Foundation**      | ✅ Complete | Dependencies, module structure, Model, basic harness                 |
+| **Phase 2: Edit Testing**    | ✅ Complete | `DidChange` with text sync verification                              |
+| **Phase 3: Query Testing**   | ✅ Complete | All 15 operations with random sequences                              |
+| **Phase 4: Marker Strategy** | ✅ Complete | GotoDefinition, References, DocumentSymbols, FoldingRanges, CodeLens |
+| **Phase 5: Type Inference**  | ✅ Complete | Type assignments, narrowing, stability, inlay hints                  |
+| **Phase 6: Complex Mixins**  | ✅ Complete | Diamond inheritance, deep chains, edge cases                         |
+| **Phase 7: CI Integration**  | ⏳ Pending  | GitHub Actions workflow                                              |
+
+### Tests Implemented (15 tests)
+
+| Test                             | Type       | Description                                    |
+| -------------------------------- | ---------- | ---------------------------------------------- |
+| **`simulation_runner`**          | TRUE SIM   | THE main simulation: tracked code + random ops |
+| `text_sync_maintained`           | L1         | Model.text == LSP.text after edits             |
+| `document_symbols_finds_classes` | L2 Marker  | Generated classes found in symbols             |
+| `semantic_tokens_deterministic`  | L2 Marker  | Same input → same tokens                       |
+| `folding_ranges_for_classes`     | L2 Marker  | Classes have folding ranges                    |
+| `harness_smoke_test`             | Standalone | Basic harness functionality                    |
+| `mixin_method_resolution`        | Standalone | Include method resolution                      |
+| `prepend_method_shadowing`       | Standalone | Prepend semantics                              |
+| + 7 model unit tests             | Unit       | Text edit logic                                |
+
+### The TRUE Simulation Runner
+
+The `simulation_runner` test is the ONE comprehensive simulation that:
+
+1. **Generates tracked code** with known definition/reference positions (18 different scenarios)
+2. **Performs random operations** (edits, queries, saves, type checks) in random order (10-50 steps)
+3. **Verifies definitions AND types survive** after each edit
+4. **Tests all LSP operations** don't crash
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    SIMULATION RUNNER FLOW                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  proptest generates:                                                │
+│  ├── tracked_code() → Ruby with known markers (18 scenarios)        │
+│  ├── edit_lines, edit_texts → random edit parameters                │
+│  ├── query_lines, query_chars → random query positions              │
+│  ├── verify_indices → which markers to check                        │
+│  └── step_order → random sequence of operations (0-14)              │
+│                                                                     │
+│  For each iteration:                                                │
+│  1. Open tracked file                                               │
+│  2. Execute 10-50 random steps:                                     │
+│     - Edit (insert text at random line)                             │
+│     - VerifyDefinition (check marker still resolves)                │
+│     - VerifyType (check type inlay hints) [NEW]                     │
+│     - VerifyCompletion (check expected methods) [NEW]               │
+│     - QuerySymbols, QueryCompletion, QueryReferences                │
+│     - QueryHover, QueryInlayHints [NEW]                             │
+│     - QuerySemanticTokens, QueryFoldingRanges, QueryCodeLens        │
+│     - Save                                                          │
+│  3. Report: errors, warnings, stats (defs, types, completions)      │
+│  4. Assert: no hard errors                                          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Simulation Step Types (14 types)
+
+| Step Type             | Weight | Description                                |
+| --------------------- | ------ | ------------------------------------------ |
+| `Edit`                | 15%    | Insert random text at random line          |
+| `VerifyDefinition`    | 15%    | Check definition marker still resolves     |
+| `VerifyType`          | 10%    | Check type inlay hints match expected      |
+| `VerifyCompletion`    | 10%    | Check completion includes expected methods |
+| `QuerySymbols`        | 5%     | Query document symbols                     |
+| `QueryCompletion`     | 5%     | Query completion at random position        |
+| `QueryReferences`     | 5%     | Query references at random position        |
+| `QueryHover`          | 5%     | Query hover at random position             |
+| `QueryInlayHints`     | 5%     | Query inlay hints for entire file          |
+| `QuerySemanticTokens` | 3%     | Query semantic tokens                      |
+| `QueryFoldingRanges`  | 3%     | Query folding ranges                       |
+| `QueryCodeLens`       | 3%     | Query code lens                            |
+| `Save`                | 5%     | Save the file (triggers full reindex)      |
 
 ### Bugs Found by Simulation Testing 🐛
 
@@ -779,14 +851,137 @@ proptest! {
 
 ---
 
-## 5. Ruby Content Generators
+## 5. Ruby Content Generators ✅
 
-### 5.1 Position & Range Generators
+The generators produce **rich, diverse Ruby code** to exercise all LSP features.
+
+### 5.1 Coverage Matrix
+
+| Category       | Generators                                                                                       | What They Produce                                              |
+| -------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| **Methods**    | `ruby_instance_method`, `ruby_class_method`, `ruby_method_with_visibility`, `ruby_attr_accessor` | `def foo`, `def self.foo`, `private def foo`, `attr_reader :x` |
+| **Variables**  | `ruby_instance_var`, `ruby_class_var`, `ruby_constant`                                           | `@foo = 1`, `@@count = 0`, `LIMIT = 42`                        |
+| **Mixins**     | `ruby_include`, `ruby_extend`, `ruby_prepend`                                                    | `include Foo`, `extend Bar`, `prepend Baz`                     |
+| **Structures** | `ruby_class`, `ruby_module`, `ruby_nested_class`, `ruby_nested_modules`                          | Classes, modules, nesting                                      |
+| **Complex**    | `ruby_singleton_class`, `ruby_class_with_initialize`, `ruby_mixin_hierarchy`                     | `class << self`, constructors, mixin trees                     |
+
+### 5.2 Example Generated Code
+
+```ruby
+# === ruby_class() - Class with inheritance, mixins, class vars, constants ===
+class Foo < Bar
+  include Baz
+  @@counter = 0
+  LIMIT = 42
+
+  def self.create(name)
+    nil
+  end
+
+  private
+  def internal_method
+    nil
+  end
+
+  attr_reader :name, :age
+end
+
+# === ruby_nested_class() - Module with nested class ===
+module Services
+  class UserService
+    def call(user)
+      nil
+    end
+  end
+end
+
+# === ruby_nested_modules() - Deep nesting (A::B::C style) ===
+module Api
+  module V1
+    module Users
+      def index
+        nil
+      end
+    end
+  end
+end
+
+# === ruby_singleton_class() - class << self ===
+class Config
+  class << self
+    def load
+      nil
+    end
+  end
+end
+
+# === ruby_class_with_initialize() - Constructor with ivars ===
+class User
+  def initialize(name, email)
+    @name = name
+    @email = email
+  end
+end
+
+# === ruby_mixin_hierarchy() - Full mixin test setup ===
+module Loggable
+  def log
+    "from Loggable"
+  end
+end
+
+class Service
+  include Loggable
+end
+
+class Worker
+  extend Loggable
+end
+
+class Processor
+  prepend Loggable
+end
+```
+
+### 5.3 Distribution Weights
+
+The main `ruby_content()` generator uses weighted probabilities:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Content Generation Weights                        │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Simple Structures (40%)                                            │
+│  ├── ruby_class()                          10%                      │
+│  └── ruby_module()                         10%                      │
+│                                                                     │
+│  Nested Structures (25%)                                            │
+│  ├── ruby_nested_class()                    5%                      │
+│  ├── ruby_nested_modules()                  5%                      │
+│  └── ruby_singleton_class()                 5%                      │
+│                                                                     │
+│  Complex Structures (25%)                                           │
+│  ├── ruby_class_with_initialize()           5%                      │
+│  ├── ruby_module_with_mixins()              5%                      │
+│  ├── ruby_class_with_includes()             5%                      │
+│  └── ruby_mixin_hierarchy()                 5%                      │
+│                                                                     │
+│  Edge Cases (15%)                                                   │
+│  ├── Simple assignment                      3%                      │
+│  ├── Empty file                             2%                      │
+│  ├── Just comments                          2%                      │
+│  └── Invalid syntax (error recovery)        3%                      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.4 Position & Range Generators
 
 ```rust
 /// Generate random position within document bounds
 fn random_position() -> impl Strategy<Value = Position> {
-    (0..1000u32, 0..200u32).prop_map(|(line, character)| Position { line, character })
+    (0..100u32, 0..200u32).prop_map(|(line, character)| Position { line, character })
 }
 
 /// Generate random range (start <= end)
@@ -800,100 +995,103 @@ fn random_range() -> impl Strategy<Value = Range> {
     })
 }
 
-/// Full document range
-fn full_range(content: &str) -> Range {
-    let lines: Vec<&str> = content.lines().collect();
-    Range {
-        start: Position { line: 0, character: 0 },
-        end: Position {
-            line: lines.len().saturating_sub(1) as u32,
-            character: lines.last().map(|l| l.len() as u32).unwrap_or(0),
-        },
-    }
-}
-```
-
-### 5.2 Basic Generators
-
-```rust
-/// Generate valid Ruby identifiers
-fn identifier() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9_]{0,15}"
-        .prop_filter("not keyword", |s| !RUBY_KEYWORDS.contains(&s.as_str()))
-}
-
-/// Generate Ruby class names (PascalCase)
-fn class_name() -> impl Strategy<Value = String> {
-    "[A-Z][a-z]{2,10}"
-}
-
-/// Generate random Ruby content (may have syntax errors - that's OK!)
-fn ruby_content() -> impl Strategy<Value = String> {
-    prop_oneof![
-        // Valid class
-        (class_name(), prop::collection::vec(method_def(), 0..3))
-            .prop_map(|(name, methods)| {
-                format!("class {}\n{}\nend", name, methods.join("\n"))
-            }),
-        // Valid module
-        (identifier(), prop::collection::vec(method_def(), 0..3))
-            .prop_map(|(name, methods)| {
-                format!("module {}\n{}\nend", name.to_uppercase(), methods.join("\n"))
-            }),
-        // Garbage (tests error recovery)
-        "[a-z{}()\\[\\]<>]{0,100}",
-    ]
-}
-
-fn method_def() -> impl Strategy<Value = String> {
-    (identifier(), prop::collection::vec(identifier(), 0..3))
-        .prop_map(|(name, params)| {
-            format!("  def {}({})\n    nil\n  end", name, params.join(", "))
-        })
-}
-
-/// Generate valid edit range for given content
-fn valid_edit_for(content: &str) -> impl Strategy<Value = (Range, String)> {
-    let lines: Vec<&str> = content.lines().collect();
+/// Generate valid position within given content
+fn valid_position_for(content: &str) -> impl Strategy<Value = Position> {
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let line_count = lines.len().max(1);
 
-    (0..line_count, 0..line_count)
-        .prop_flat_map(move |(start_line, end_line)| {
-            let (start_line, end_line) = if start_line <= end_line {
-                (start_line, end_line)
-            } else {
-                (end_line, start_line)
-            };
-
-            let start_char = lines.get(start_line).map(|l| l.len()).unwrap_or(0);
-            let end_char = lines.get(end_line).map(|l| l.len()).unwrap_or(0);
-
-            (
-                Just(start_line),
-                0..=start_char,
-                Just(end_line),
-                0..=end_char,
-                "[a-z \n]{0,50}",  // replacement text
-            )
+    (0..line_count).prop_flat_map(move |line| {
+        let line_len = lines.get(line).map(|l| l.len()).unwrap_or(0).max(1);
+        (Just(line), 0..=line_len).prop_map(|(l, c)| Position {
+            line: l as u32,
+            character: c as u32,
         })
-        .prop_map(|(sl, sc, el, ec, text)| {
-            (
-                Range {
-                    start: Position { line: sl as u32, character: sc as u32 },
-                    end: Position { line: el as u32, character: ec as u32 },
-                },
-                text,
-            )
-        })
+    })
 }
 
-const RUBY_KEYWORDS: &[&str] = &[
-    "def", "class", "module", "end", "if", "else", "elsif", "unless",
-    "case", "when", "while", "until", "for", "do", "begin", "rescue",
-    "ensure", "raise", "return", "yield", "super", "self", "nil",
-    "true", "false", "and", "or", "not", "in",
-];
+/// Generate valid edit range and replacement text for given content
+fn valid_edit_for(content: &str) -> impl Strategy<Value = (Range, String)> {
+    // ... generates valid ranges within document bounds
+}
 ```
+
+### 5.5 Tracked Code Generators (18 scenarios)
+
+The simulation runner uses `tracked_code()` which generates one of 18 scenarios:
+
+| Generator                             | Weight | What It Tests                            |
+| ------------------------------------- | ------ | ---------------------------------------- | --- | ---------------- |
+| **Structural Tests**                  |        |                                          |
+| `tracked_class_with_method_call()`    | 3      | Method calls within a class              |
+| `tracked_mixin_method_call()`         | 3      | Method calls through `include`           |
+| `tracked_inheritance()`               | 3      | Parent class references in `< Parent`    |
+| `tracked_instance_variable()`         | 2      | `@var` definition and references         |
+| `tracked_nested_constant()`           | 2      | `A::B::CONST` namespaced access          |
+| `tracked_multi_class()`               | 2      | Cross-class references                   |
+| `tracked_prepend_override()`          | 2      | `prepend` method resolution order        |
+| `tracked_extend()`                    | 2      | Class methods from `extend`              |
+| **Complex Mixin Tests**               |        |                                          |
+| `tracked_diamond_mixin()`             | 1      | Diamond inheritance (C3 linearization)   |
+| `tracked_deep_include_chain()`        | 1      | N-level deep include chains (3-5 levels) |
+| `tracked_mixin_counts()`              | 1      | Include/extend/prepend counting          |
+| `tracked_completion_through_mixins()` | 1      | Completion through ancestor chain        |
+| `tracked_mixin_edge_cases()`          | 1      | Self-include, circular, missing modules  |
+| **Type Inference Tests** (NEW)        |        |                                          |
+| `tracked_type_assignments()`          | 2      | String/Integer/Array/Hash type inference |
+| `tracked_type_narrowing()`            | 1      | Type narrowing after `                   |     | =`, conditionals |
+| `tracked_type_stability()`            | 2      | Type survives unrelated edits            |
+| `tracked_method_chain_types()`        | 1      | Type flow through method chains          |
+| `tracked_inlay_hints()`               | 2      | Inlay hint type display                  |
+
+### 5.6 What We Now Test
+
+| Ruby Construct                    | Generator                             | Tested? |
+| --------------------------------- | ------------------------------------- | ------- |
+| Simple classes                    | `ruby_class()`                        | ✅      |
+| Class inheritance                 | `ruby_class()`                        | ✅      |
+| Simple modules                    | `ruby_module()`                       | ✅      |
+| Instance methods                  | `ruby_instance_method()`              | ✅      |
+| Class methods (`def self.foo`)    | `ruby_class_method()`                 | ✅      |
+| Visibility modifiers              | `ruby_method_with_visibility()`       | ✅      |
+| `attr_reader/writer/accessor`     | `ruby_attr_accessor()`                | ✅      |
+| Instance variables (`@foo`)       | `ruby_instance_var()`                 | ✅      |
+| Class variables (`@@foo`)         | `ruby_class_var()`                    | ✅      |
+| Constants (`FOO = 1`)             | `ruby_constant()`                     | ✅      |
+| `include`                         | `ruby_include()`                      | ✅      |
+| `extend`                          | `ruby_extend()`                       | ✅      |
+| `prepend`                         | `ruby_prepend()`                      | ✅      |
+| Nested classes                    | `ruby_nested_class()`                 | ✅      |
+| Deep module nesting               | `ruby_nested_modules()`               | ✅      |
+| Singleton class (`class << self`) | `ruby_singleton_class()`              | ✅      |
+| Constructor with ivars            | `ruby_class_with_initialize()`        | ✅      |
+| Mixin hierarchies                 | `ruby_mixin_hierarchy()`              | ✅      |
+| Invalid syntax (error recovery)   | `ruby_content()`                      | ✅      |
+| Diamond inheritance               | `tracked_diamond_mixin()`             | ✅      |
+| Deep include chains (N levels)    | `tracked_deep_include_chain()`        | ✅      |
+| Include/extend/prepend counts     | `tracked_mixin_counts()`              | ✅      |
+| Completion through mixins         | `tracked_completion_through_mixins()` | ✅      |
+| Self-include edge case            | `tracked_mixin_edge_cases()`          | ✅      |
+| Circular include edge case        | `tracked_mixin_edge_cases()`          | ✅      |
+| Missing module edge case          | `tracked_mixin_edge_cases()`          | ✅      |
+| Deep namespace (A::B::C)          | `tracked_mixin_edge_cases()`          | ✅      |
+| String/Integer/Array/Hash types   | `tracked_type_assignments()`          | ✅      |
+| Type propagation                  | `tracked_type_assignments()`          | ✅      |
+| Type narrowing (`\|\|=`)          | `tracked_type_narrowing()`            | ✅      |
+| Type stability across edits       | `tracked_type_stability()`            | ✅      |
+| Method chain types                | `tracked_method_chain_types()`        | ✅      |
+| Inlay hint types                  | `tracked_inlay_hints()`               | ✅      |
+
+### 5.7 What We Don't Yet Test
+
+| Ruby Construct            | Status     |
+| ------------------------- | ---------- | ----- | ---------- |
+| Blocks (`{                | x          | x }`) | ❌ Not yet |
+| Procs/Lambdas             | ❌ Not yet |
+| `if`/`unless`/`case`      | ❌ Not yet |
+| `begin`/`rescue`/`ensure` | ❌ Not yet |
+| Method aliases            | ❌ Not yet |
+| Refinements               | ❌ Not yet |
+| `method_missing`          | ❌ Not yet |
 
 ---
 

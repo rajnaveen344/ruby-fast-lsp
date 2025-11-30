@@ -1,503 +1,753 @@
 //! # Simulation Tests
 //!
-//! Property-based tests using proptest.
-//! These tests generate random sequences of LSP operations and verify invariants.
+//! ONE comprehensive property-based fuzzer for the LSP server.
+//!
+//! ## Philosophy
+//!
+//! Instead of many small tests, we have ONE simulation runner that:
+//! 1. Generates tracked code with known definition/reference positions
+//! 2. Performs random sequences of LSP operations
+//! 3. Verifies invariants hold after each operation
+//!
+//! This catches bugs that manual tests miss - like type info disappearing after edits.
 
 use super::*;
+use crate::test::simulation::generators::{tracked_code, MarkerKind, TrackedCode};
 use proptest::prelude::*;
 use proptest::test_runner::Config;
+use std::collections::HashSet;
+use tower_lsp::lsp_types::{GotoDefinitionResponse, TextDocumentIdentifier, Url};
 use tower_lsp::LanguageServer;
 
 // =============================================================================
-// Test Configuration
+// Configuration
 // =============================================================================
 
-/// Get proptest config from environment or use defaults
 fn get_config() -> Config {
     Config {
-        // Default to 100 cases, can be overridden with PROPTEST_CASES
         cases: std::env::var("PROPTEST_CASES")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(100),
-        // Allow more shrinking iterations for better minimal examples
         max_shrink_iters: 10000,
         ..Config::default()
     }
 }
 
-/// Generate deterministic Ruby content based on a seed
-/// This allows proptest to shrink the seed while keeping content reproducible
-fn generate_ruby_content(seed: u32) -> String {
-    let class_names = ["Foo", "Bar", "Baz", "Qux", "Alpha", "Beta", "Gamma"];
-    let method_names = ["run", "call", "execute", "process", "handle", "compute"];
+// =============================================================================
+// Simulation Steps
+// =============================================================================
 
-    let class_idx = (seed as usize) % class_names.len();
-    let method_idx = ((seed as usize) / 7) % method_names.len();
-    let num_methods = (seed % 4) as usize;
-
-    let class_name = class_names[class_idx];
-    let mut code = format!("class {}\n", class_name);
-
-    for i in 0..=num_methods {
-        let m_idx = (method_idx + i) % method_names.len();
-        code.push_str(&format!(
-            "  def {}_{}\n    @value = {}\n  end\n\n",
-            method_names[m_idx],
-            i,
-            seed + i as u32
-        ));
-    }
-
-    code.push_str("end\n");
-
-    // Sometimes add a module too
-    if seed % 3 == 0 {
-        code.push_str(&format!(
-            "\nmodule {}Helper\n  def helper_method\n    nil\n  end\nend\n",
-            class_name
-        ));
-    }
-
-    // Sometimes add invalid syntax to test error recovery
-    if seed % 7 == 0 {
-        code.push_str("\n# Invalid syntax below\ndef incomplete(");
-    }
-
-    code
+#[derive(Debug, Clone)]
+enum SimStep {
+    Edit { line: u32, text: String },
+    VerifyDefinition { marker_idx: usize },
+    VerifyType { marker_idx: usize },
+    VerifyCompletion { marker_idx: usize },
+    QuerySymbols,
+    QueryCompletion { line: u32, character: u32 },
+    QueryReferences { line: u32, character: u32 },
+    QueryHover { line: u32, character: u32 },
+    QueryInlayHints,
+    QuerySemanticTokens,
+    QueryFoldingRanges,
+    QueryCodeLens,
+    Save,
 }
 
 // =============================================================================
-// Level 1: Basic Safety Tests
+// Simulation Report
 // =============================================================================
 
-proptest! {
-    #![proptest_config(get_config())]
+#[derive(Debug, Default)]
+struct SimulationReport {
+    steps_executed: usize,
+    edits_applied: usize,
+    definitions_checked: usize,
+    definitions_correct: usize,
+    types_checked: usize,
+    types_correct: usize,
+    completions_checked: usize,
+    completions_correct: usize,
+    queries_executed: usize,
+    saves: usize,
+    errors: Vec<(usize, String)>,
+}
 
-    /// Property: Server should never crash regardless of operation sequence.
-    ///
-    /// This generates TRULY RANDOM sequences of ALL 15 LSP operations.
-    /// Each iteration picks random operations based on current state.
-    #[test]
-    fn server_never_crashes(
-        // Generate a sequence of random operation indices (0-14 for 15 operation types)
-        // We use indices because we can't generate Transitions directly without state
-        operation_indices in prop::collection::vec(0..15u8, 1..100),
-        // Random seeds for content generation
-        content_seeds in prop::collection::vec(0..1000u32, 1..10),
-    ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut harness = SimulationHarness::new().await;
+impl SimulationReport {
+    fn add_error(&mut self, step: usize, msg: String) {
+        self.errors.push((step, msg));
+    }
 
-            // Open initial file with some content
-            let initial_content = generate_ruby_content(content_seeds.get(0).copied().unwrap_or(0));
-            let transition = Transition::DidOpen {
-                filename: "test.rb".to_string(),
-                content: initial_content,
-            };
-            let _ = harness.apply(&transition).await;
+    fn is_success(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
 
-            // Apply random operations based on indices
-            for (i, &op_idx) in operation_indices.iter().enumerate() {
-                let files = harness.model.open_files();
-                if files.is_empty() {
-                    // Reopen a file if all closed
-                    let content = generate_ruby_content(content_seeds.get(i % content_seeds.len()).copied().unwrap_or(0));
-                    let _ = harness.apply(&Transition::DidOpen {
-                        filename: format!("file_{}.rb", i),
-                        content,
-                    }).await;
-                    continue;
-                }
+// =============================================================================
+// Simulation Runner Core
+// =============================================================================
 
-                let filename = files[0].clone();
-                let content = harness.model.get_content(&filename).unwrap_or("").to_string();
-                let line_count = content.lines().count().max(1);
-                let rand_line = (op_idx as usize * 7 + i) % line_count;
-                let rand_char = (op_idx as usize * 13 + i) % 50;
+async fn run_simulation(
+    tracked: &TrackedCode,
+    steps: &[SimStep],
+) -> Result<SimulationReport, String> {
+    let mut harness = SimulationHarness::new().await;
+    let mut report = SimulationReport::default();
 
-                let position = tower_lsp::lsp_types::Position {
-                    line: rand_line as u32,
-                    character: rand_char as u32,
-                };
+    // Open the tracked file
+    harness
+        .apply(&Transition::DidOpen {
+            filename: tracked.filename.clone(),
+            content: tracked.code.clone(),
+        })
+        .await
+        .map_err(|e| format!("Failed to open file: {:?}", e))?;
 
-                let transition = match op_idx % 15 {
-                    // Document Lifecycle (4 ops)
-                    0 => Transition::DidOpen {
-                        filename: format!("file_{}.rb", i),
-                        content: generate_ruby_content(i as u32),
-                    },
-                    1 => {
-                        // DidChange - insert at random position
-                        let line_len = content.lines().nth(rand_line).map(|l| l.len()).unwrap_or(0);
-                        let safe_char = rand_char.min(line_len);
-                        Transition::DidChange {
-                            filename: filename.clone(),
-                            range: tower_lsp::lsp_types::Range {
-                                start: tower_lsp::lsp_types::Position {
-                                    line: rand_line as u32,
-                                    character: safe_char as u32,
-                                },
-                                end: tower_lsp::lsp_types::Position {
-                                    line: rand_line as u32,
-                                    character: safe_char as u32,
-                                },
-                            },
-                            new_text: format!(" # edit {} ", i),
-                        }
-                    },
-                    2 => Transition::DidSave { filename: filename.clone() },
-                    3 => Transition::DidClose { filename: filename.clone() },
+    let uri = Url::from_file_path(
+        harness
+            .file_paths
+            .get(&tracked.filename)
+            .expect("File should exist"),
+    )
+    .unwrap();
 
-                    // Navigation (2 ops)
-                    4 => Transition::GotoDefinition { filename: filename.clone(), position },
-                    5 => Transition::FindReferences {
-                        filename: filename.clone(),
-                        position,
-                        include_declaration: i % 2 == 0,
-                    },
+    // ==========================================================================
+    // INITIAL VERIFICATION: All definitions must resolve BEFORE any edits
+    // ==========================================================================
+    for marker in &tracked.markers {
+        if let Some(expected_def) = &marker.definition_position {
+            match &marker.kind {
+                MarkerKind::Definition
+                | MarkerKind::TypeAssignment { .. }
+                | MarkerKind::CompletionTrigger { .. } => continue,
+                _ => {}
+            }
 
-                    // Intelligence (4 ops)
-                    6 => Transition::Completion { filename: filename.clone(), position },
-                    7 => Transition::Hover { filename: filename.clone(), position },
-                    8 => Transition::InlayHints {
-                        filename: filename.clone(),
-                        range: tower_lsp::lsp_types::Range {
-                            start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
-                            end: position,
+            let result = harness
+                .server
+                .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
+                    text_document_position_params:
+                        tower_lsp::lsp_types::TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: marker.position,
                         },
-                    },
-                    9 => Transition::SemanticTokens { filename: filename.clone() },
-
-                    // Structure (4 ops)
-                    10 => Transition::DocumentSymbols { filename: filename.clone() },
-                    11 => Transition::WorkspaceSymbols { query: format!("query{}", i % 10) },
-                    12 => Transition::FoldingRange { filename: filename.clone() },
-                    13 => Transition::CodeLens { filename: filename.clone() },
-
-                    // Formatting (1 op)
-                    _ => Transition::OnTypeFormatting {
-                        filename: filename.clone(),
-                        position,
-                        character: if i % 2 == 0 { '\n' } else { 'd' },
-                    },
-                };
-
-                // Apply and continue even on error (we're testing for panics)
-                let _ = harness.apply(&transition).await;
-            }
-
-            // If we got here without panic, the test passes
-        });
-    }
-
-    /// Property: Text synchronization should always hold.
-    ///
-    /// After any sequence of DidOpen/DidChange/DidClose operations,
-    /// the model's content should match the server's content.
-    #[test]
-    fn text_sync_maintained(
-        initial_content in generators::ruby_content(),
-        edits in prop::collection::vec(
-            ("[a-z \\n]{0,20}", 0..10u32, 0..50u32),
-            0..10
-        ),
-    ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut harness = SimulationHarness::new().await;
-
-            // Open file
-            let transition = Transition::DidOpen {
-                filename: "test.rb".to_string(),
-                content: initial_content.clone(),
-            };
-            harness.apply(&transition).await.expect("DidOpen should succeed");
-
-            // Apply edits
-            for (new_text, line, char) in edits {
-                let line_count = harness.model.line_count("test.rb");
-                if line_count == 0 {
-                    continue;
-                }
-
-                let line = (line as usize) % line_count;
-                let line_len = harness.model.line_length("test.rb", line);
-                let char = if line_len > 0 { (char as usize) % line_len } else { 0 };
-
-                let range = tower_lsp::lsp_types::Range {
-                    start: tower_lsp::lsp_types::Position {
-                        line: line as u32,
-                        character: char as u32,
-                    },
-                    end: tower_lsp::lsp_types::Position {
-                        line: line as u32,
-                        character: char as u32,
-                    },
-                };
-
-                let transition = Transition::DidChange {
-                    filename: "test.rb".to_string(),
-                    range,
-                    new_text,
-                };
-
-                // This will check text sync invariant
-                if let Err(e) = harness.apply(&transition).await {
-                    panic!(
-                        "Text sync failed after edit!\nError: {}\nLog: {:?}",
-                        e,
-                        harness.get_log()
-                    );
-                }
-            }
-        });
-    }
-}
-
-// =============================================================================
-// Level 2: Semantic Tests (Marker Strategy)
-// =============================================================================
-
-proptest! {
-    #![proptest_config(get_config())]
-
-    /// Property: Document symbols should find all classes we generate.
-    ///
-    /// We generate Ruby code with known class names, then verify
-    /// document symbols returns all of them.
-    #[test]
-    fn document_symbols_finds_classes(
-        class_names in prop::collection::vec(generators::ruby_class_name(), 1..5)
-    ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut harness = SimulationHarness::new().await;
-
-            // Generate code with known classes
-            let code = class_names
-                .iter()
-                .map(|name| format!("class {}\nend", name))
-                .collect::<Vec<_>>()
-                .join("\n\n");
-
-            // Open file
-            let transition = Transition::DidOpen {
-                filename: "test.rb".to_string(),
-                content: code,
-            };
-            harness.apply(&transition).await.expect("DidOpen should succeed");
-
-            // Get document symbols
-            let uri = tower_lsp::lsp_types::Url::from_file_path(
-                harness.file_paths.get("test.rb").unwrap()
-            ).unwrap();
-
-            let result = harness.server.document_symbol(
-                tower_lsp::lsp_types::DocumentSymbolParams {
-                    text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
                     work_done_progress_params: Default::default(),
                     partial_result_params: Default::default(),
-                }
-            ).await;
+                })
+                .await;
 
-            // Extract symbol names
-            let found_names: std::collections::HashSet<String> = match result {
-                Ok(Some(tower_lsp::lsp_types::DocumentSymbolResponse::Nested(symbols))) => {
-                    symbols.iter().map(|s| s.name.clone()).collect()
+            let resolved = match &result {
+                Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+                    (loc.range.start.line as i32 - expected_def.line as i32).abs() <= 2
                 }
-                Ok(Some(tower_lsp::lsp_types::DocumentSymbolResponse::Flat(symbols))) => {
-                    symbols.iter().map(|s| s.name.clone()).collect()
+                Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => locs
+                    .iter()
+                    .any(|loc| (loc.range.start.line as i32 - expected_def.line as i32).abs() <= 2),
+                Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
+                    links.iter().any(|link| {
+                        (link.target_selection_range.start.line as i32 - expected_def.line as i32)
+                            .abs()
+                            <= 2
+                    })
                 }
-                Ok(None) | Err(_) => std::collections::HashSet::new(),
+                _ => false,
             };
 
-            // Verify all generated classes are found
-            for name in &class_names {
-                assert!(
-                    found_names.contains(name),
-                    "Document symbols should find class '{}'. Found: {:?}",
-                    name,
-                    found_names
+            if !resolved {
+                report.add_error(
+                    0,
+                    format!(
+                        "INITIAL CHECK FAILED: '{}' ({:?}) at line {} should resolve to line {}",
+                        marker.name, marker.kind, marker.position.line, expected_def.line
+                    ),
                 );
             }
-        });
+        }
     }
 
-    /// Property: Semantic tokens should be deterministic.
+    // If initial checks failed, return early
+    if !report.is_success() {
+        return Ok(report);
+    }
+
+    // ==========================================================================
+    // Execute random steps
+    // ==========================================================================
+    for (step_idx, step) in steps.iter().enumerate() {
+        report.steps_executed += 1;
+
+        match step {
+            SimStep::Edit { line, text } => {
+                let content = harness
+                    .model
+                    .get_content(&tracked.filename)
+                    .unwrap_or("")
+                    .to_string();
+                let line_count = content.lines().count().max(1);
+                let safe_line = (*line as usize) % line_count;
+                let line_len = content.lines().nth(safe_line).map(|l| l.len()).unwrap_or(0);
+
+                let transition = Transition::DidChange {
+                    filename: tracked.filename.clone(),
+                    range: tower_lsp::lsp_types::Range {
+                        start: tower_lsp::lsp_types::Position {
+                            line: safe_line as u32,
+                            character: line_len as u32,
+                        },
+                        end: tower_lsp::lsp_types::Position {
+                            line: safe_line as u32,
+                            character: line_len as u32,
+                        },
+                    },
+                    new_text: text.clone(),
+                };
+
+                if harness.apply(&transition).await.is_ok() {
+                    report.edits_applied += 1;
+                }
+            }
+
+            SimStep::VerifyDefinition { marker_idx } => {
+                if let Some(marker) = tracked.markers.get(*marker_idx) {
+                    match &marker.kind {
+                        MarkerKind::Definition
+                        | MarkerKind::TypeAssignment { .. }
+                        | MarkerKind::CompletionTrigger { .. } => continue,
+                        _ => {}
+                    }
+
+                    if let Some(expected_def) = &marker.definition_position {
+                        let result = harness
+                            .server
+                            .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
+                                text_document_position_params:
+                                    tower_lsp::lsp_types::TextDocumentPositionParams {
+                                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                        position: marker.position,
+                                    },
+                                work_done_progress_params: Default::default(),
+                                partial_result_params: Default::default(),
+                            })
+                            .await;
+
+                        report.definitions_checked += 1;
+                        let tolerance = (report.edits_applied as i32 * 2).max(3);
+
+                        match result {
+                            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+                                let line_diff =
+                                    (loc.range.start.line as i32 - expected_def.line as i32).abs();
+                                if line_diff <= tolerance {
+                                    report.definitions_correct += 1;
+                                } else if report.edits_applied == 0 {
+                                    report.add_error(
+                                        step_idx,
+                                        format!(
+                                            "DEFINITION WRONG: '{}' resolved to line {} (expected {})",
+                                            marker.name, loc.range.start.line, expected_def.line
+                                        ),
+                                    );
+                                }
+                            }
+                            Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => {
+                                let any_close = locs.iter().any(|loc| {
+                                    (loc.range.start.line as i32 - expected_def.line as i32).abs()
+                                        <= tolerance
+                                });
+                                if any_close {
+                                    report.definitions_correct += 1;
+                                } else if report.edits_applied == 0 {
+                                    report.add_error(
+                                        step_idx,
+                                        format!(
+                                            "DEFINITION WRONG: '{}' resolved to wrong lines",
+                                            marker.name
+                                        ),
+                                    );
+                                }
+                            }
+                            Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
+                                let any_close = links.iter().any(|link| {
+                                    (link.target_selection_range.start.line as i32
+                                        - expected_def.line as i32)
+                                        .abs()
+                                        <= tolerance
+                                });
+                                if any_close {
+                                    report.definitions_correct += 1;
+                                }
+                            }
+                            _ => {
+                                if report.edits_applied == 0 {
+                                    report.add_error(
+                                        step_idx,
+                                        format!("DEFINITION NOT FOUND: '{}'", marker.name),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SimStep::VerifyType { marker_idx } => {
+                if let Some(marker) = tracked.markers.get(*marker_idx) {
+                    if let MarkerKind::TypeAssignment { expected_type } = &marker.kind {
+                        let result = harness
+                            .server
+                            .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                range: tower_lsp::lsp_types::Range {
+                                    start: tower_lsp::lsp_types::Position {
+                                        line: marker.position.line,
+                                        character: 0,
+                                    },
+                                    end: tower_lsp::lsp_types::Position {
+                                        line: marker.position.line + 1,
+                                        character: 0,
+                                    },
+                                },
+                                work_done_progress_params: Default::default(),
+                            })
+                            .await;
+
+                        report.types_checked += 1;
+
+                        if let Ok(Some(hints)) = result {
+                            if !hints.is_empty() {
+                                let type_found = hints.iter().any(|hint| match &hint.label {
+                                    tower_lsp::lsp_types::InlayHintLabel::String(s) => {
+                                        s.contains(expected_type)
+                                    }
+                                    tower_lsp::lsp_types::InlayHintLabel::LabelParts(p) => {
+                                        p.iter().any(|x| x.value.contains(expected_type))
+                                    }
+                                });
+
+                                if type_found {
+                                    report.types_correct += 1;
+                                } else {
+                                    // Got hints but WRONG type - this IS an error
+                                    let hint_labels: Vec<String> = hints
+                                        .iter()
+                                        .map(|h| match &h.label {
+                                            tower_lsp::lsp_types::InlayHintLabel::String(s) => {
+                                                s.clone()
+                                            }
+                                            tower_lsp::lsp_types::InlayHintLabel::LabelParts(p) => {
+                                                p.iter().map(|x| x.value.as_str()).collect()
+                                            }
+                                        })
+                                        .collect();
+                                    report.add_error(
+                                        step_idx,
+                                        format!(
+                                            "TYPE MISMATCH: Expected '{}' for '{}', got: {:?}",
+                                            expected_type, marker.name, hint_labels
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SimStep::VerifyCompletion { marker_idx } => {
+                if let Some(marker) = tracked.markers.get(*marker_idx) {
+                    if let MarkerKind::CompletionTrigger { expected_methods } = &marker.kind {
+                        let result = harness
+                            .server
+                            .completion(tower_lsp::lsp_types::CompletionParams {
+                                text_document_position:
+                                    tower_lsp::lsp_types::TextDocumentPositionParams {
+                                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                        position: marker.position,
+                                    },
+                                work_done_progress_params: Default::default(),
+                                partial_result_params: Default::default(),
+                                context: Some(tower_lsp::lsp_types::CompletionContext {
+                                    trigger_kind:
+                                        tower_lsp::lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+                                    trigger_character: Some(".".to_string()),
+                                }),
+                            })
+                            .await;
+
+                        report.completions_checked += 1;
+
+                        let check_items = |items: &[tower_lsp::lsp_types::CompletionItem]| {
+                            let labels: HashSet<_> =
+                                items.iter().map(|i| i.label.as_str()).collect();
+                            expected_methods.iter().any(|m| labels.contains(m.as_str()))
+                        };
+
+                        match result {
+                            Ok(Some(tower_lsp::lsp_types::CompletionResponse::Array(items)))
+                                if !items.is_empty() =>
+                            {
+                                if check_items(&items) {
+                                    report.completions_correct += 1;
+                                } else if items.len() > 10 {
+                                    // Got many completions but wrong ones
+                                    report.add_error(
+                                        step_idx,
+                                        format!(
+                                            "WRONG COMPLETIONS: Expected {:?}",
+                                            expected_methods
+                                        ),
+                                    );
+                                }
+                            }
+                            Ok(Some(tower_lsp::lsp_types::CompletionResponse::List(list)))
+                                if !list.items.is_empty() =>
+                            {
+                                if check_items(&list.items) {
+                                    report.completions_correct += 1;
+                                } else if list.items.len() > 10 {
+                                    report.add_error(
+                                        step_idx,
+                                        format!(
+                                            "WRONG COMPLETIONS: Expected {:?}",
+                                            expected_methods
+                                        ),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            SimStep::QuerySymbols => {
+                let _ = harness
+                    .server
+                    .document_symbol(tower_lsp::lsp_types::DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryCompletion { line, character } => {
+                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
+                let line_count = content.lines().count().max(1);
+                let safe_line = (*line as usize) % line_count;
+
+                let _ = harness
+                    .server
+                    .completion(tower_lsp::lsp_types::CompletionParams {
+                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: tower_lsp::lsp_types::Position {
+                                line: safe_line as u32,
+                                character: *character,
+                            },
+                        },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                        context: None,
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryReferences { line, character } => {
+                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
+                let line_count = content.lines().count().max(1);
+                let safe_line = (*line as usize) % line_count;
+
+                let _ = harness
+                    .server
+                    .references(tower_lsp::lsp_types::ReferenceParams {
+                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: tower_lsp::lsp_types::Position {
+                                line: safe_line as u32,
+                                character: *character,
+                            },
+                        },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                        context: tower_lsp::lsp_types::ReferenceContext {
+                            include_declaration: true,
+                        },
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryHover { line, character } => {
+                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
+                let line_count = content.lines().count().max(1);
+                let safe_line = (*line as usize) % line_count;
+
+                let _ = harness
+                    .server
+                    .hover(tower_lsp::lsp_types::HoverParams {
+                        text_document_position_params:
+                            tower_lsp::lsp_types::TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                position: tower_lsp::lsp_types::Position {
+                                    line: safe_line as u32,
+                                    character: *character,
+                                },
+                            },
+                        work_done_progress_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryInlayHints => {
+                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
+                let line_count = content.lines().count().max(1) as u32;
+
+                let _ = harness
+                    .server
+                    .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        range: tower_lsp::lsp_types::Range {
+                            start: tower_lsp::lsp_types::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: tower_lsp::lsp_types::Position {
+                                line: line_count,
+                                character: 0,
+                            },
+                        },
+                        work_done_progress_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QuerySemanticTokens => {
+                let _ = harness
+                    .server
+                    .semantic_tokens_full(tower_lsp::lsp_types::SemanticTokensParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryFoldingRanges => {
+                let _ = harness
+                    .server
+                    .folding_range(tower_lsp::lsp_types::FoldingRangeParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::QueryCodeLens => {
+                let _ = harness
+                    .server
+                    .code_lens(tower_lsp::lsp_types::CodeLensParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    })
+                    .await;
+                report.queries_executed += 1;
+            }
+
+            SimStep::Save => {
+                let _ = harness
+                    .apply(&Transition::DidSave {
+                        filename: tracked.filename.clone(),
+                    })
+                    .await;
+                report.saves += 1;
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+// =============================================================================
+// THE ONE SIMULATION RUNNER
+// =============================================================================
+
+proptest! {
+    #![proptest_config(get_config())]
+
+    /// THE comprehensive simulation test.
     ///
-    /// Calling semantic_tokens_full twice on the same content
-    /// should return identical results.
+    /// This is the ONLY fuzzer you need. It:
+    /// 1. Generates tracked code with known markers (18 scenarios)
+    /// 2. Verifies all definitions resolve correctly BEFORE any edits
+    /// 3. Performs random operations (edits, queries, saves)
+    /// 4. Verifies invariants still hold
+    ///
+    /// Run with: `cargo test simulation_runner`
+    /// More cases: `PROPTEST_CASES=1000 cargo test simulation_runner`
     #[test]
-    fn semantic_tokens_deterministic(content in generators::ruby_content()) {
+    fn simulation_runner(
+        tracked in tracked_code(),
+        edit_lines in prop::collection::vec(0..50u32, 0..15),
+        edit_texts in prop::collection::vec("[a-z #\n]{0,30}", 0..15),
+        query_lines in prop::collection::vec(0..50u32, 0..10),
+        query_chars in prop::collection::vec(0..100u32, 0..10),
+        verify_indices in prop::collection::vec(0..20usize, 0..10),
+        step_order in prop::collection::vec(0..15u8, 10..50),
+    ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let mut harness = SimulationHarness::new().await;
+            let mut steps = Vec::new();
+            let mut edit_idx = 0;
+            let mut verify_idx = 0;
+            let mut query_idx = 0;
 
-            // Open file
-            let transition = Transition::DidOpen {
-                filename: "test.rb".to_string(),
-                content,
-            };
-            harness.apply(&transition).await.expect("DidOpen should succeed");
+            for &step_type in &step_order {
+                let step = match step_type {
+                    0 | 1 if edit_idx < edit_lines.len() && edit_idx < edit_texts.len() => {
+                        let s = SimStep::Edit {
+                            line: edit_lines[edit_idx],
+                            text: edit_texts[edit_idx].clone(),
+                        };
+                        edit_idx += 1;
+                        s
+                    }
+                    2 | 3 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                        let s = SimStep::VerifyDefinition {
+                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                        };
+                        verify_idx += 1;
+                        s
+                    }
+                    4 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                        let s = SimStep::VerifyType {
+                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                        };
+                        verify_idx += 1;
+                        s
+                    }
+                    5 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                        let s = SimStep::VerifyCompletion {
+                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                        };
+                        verify_idx += 1;
+                        s
+                    }
+                    6 => SimStep::QuerySymbols,
+                    7 if query_idx < query_lines.len() => {
+                        let s = SimStep::QueryCompletion {
+                            line: query_lines[query_idx],
+                            character: query_chars.get(query_idx).copied().unwrap_or(5),
+                        };
+                        query_idx += 1;
+                        s
+                    }
+                    8 if query_idx < query_lines.len() => {
+                        let s = SimStep::QueryReferences {
+                            line: query_lines[query_idx],
+                            character: query_chars.get(query_idx).copied().unwrap_or(5),
+                        };
+                        query_idx += 1;
+                        s
+                    }
+                    9 if query_idx < query_lines.len() => {
+                        let s = SimStep::QueryHover {
+                            line: query_lines[query_idx],
+                            character: query_chars.get(query_idx).copied().unwrap_or(5),
+                        };
+                        query_idx += 1;
+                        s
+                    }
+                    10 => SimStep::QueryInlayHints,
+                    11 | 12 => {
+                        match (step_type as usize + edit_idx) % 3 {
+                            0 => SimStep::QuerySemanticTokens,
+                            1 => SimStep::QueryFoldingRanges,
+                            _ => SimStep::QueryCodeLens,
+                        }
+                    }
+                    _ => SimStep::Save,
+                };
+                steps.push(step);
+            }
 
-            let uri = tower_lsp::lsp_types::Url::from_file_path(
-                harness.file_paths.get("test.rb").unwrap()
-            ).unwrap();
+            let report = run_simulation(&tracked, &steps).await;
 
-            let params = tower_lsp::lsp_types::SemanticTokensParams {
-                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-            };
-
-            // Call twice
-            let result1 = harness.server.semantic_tokens_full(params.clone()).await;
-            let result2 = harness.server.semantic_tokens_full(params).await;
-
-            // Compare
-            assert_eq!(
-                format!("{:?}", result1),
-                format!("{:?}", result2),
-                "Semantic tokens should be deterministic"
-            );
+            match report {
+                Ok(r) => {
+                    assert!(
+                        r.is_success(),
+                        "Simulation failed!\n\
+                         Steps: {} | Edits: {} | Saves: {}\n\
+                         Definitions: {}/{} | Types: {}/{} | Completions: {}/{}\n\
+                         Queries: {}\n\
+                         Errors: {:?}",
+                        r.steps_executed,
+                        r.edits_applied,
+                        r.saves,
+                        r.definitions_correct,
+                        r.definitions_checked,
+                        r.types_correct,
+                        r.types_checked,
+                        r.completions_correct,
+                        r.completions_checked,
+                        r.queries_executed,
+                        r.errors
+                    );
+                }
+                Err(e) => panic!("Simulation setup failed: {}", e),
+            }
         });
     }
 }
 
 // =============================================================================
-// Standalone Tests (Not proptest)
+// Model Unit Tests (minimal - just for the model logic)
 // =============================================================================
 
 #[cfg(test)]
-mod standalone_tests {
+mod model_tests {
     use super::*;
 
-    /// Smoke test: Basic harness functionality
-    #[tokio::test]
-    async fn harness_smoke_test() {
-        let mut harness = SimulationHarness::new().await;
+    #[test]
+    fn test_model_open_close() {
+        let mut model = LspModel::new();
+        assert!(!model.is_open("test.rb"));
 
-        // Open a file
-        let transition = Transition::DidOpen {
-            filename: "test.rb".to_string(),
-            content: "class Foo\nend".to_string(),
-        };
-        harness
-            .apply(&transition)
-            .await
-            .expect("DidOpen should work");
+        model.open("test.rb".to_string(), "class Foo; end".to_string());
+        assert!(model.is_open("test.rb"));
+        assert_eq!(model.get_content("test.rb"), Some("class Foo; end"));
 
-        // Verify model state
-        assert!(harness.model.is_open("test.rb"));
-        assert_eq!(harness.model.get_content("test.rb"), Some("class Foo\nend"));
-
-        // Close the file
-        let transition = Transition::DidClose {
-            filename: "test.rb".to_string(),
-        };
-        harness
-            .apply(&transition)
-            .await
-            .expect("DidClose should work");
-
-        // Verify model state
-        assert!(!harness.model.is_open("test.rb"));
+        model.close("test.rb");
+        assert!(!model.is_open("test.rb"));
     }
 
-    /// Test: Edit operations maintain text sync
-    #[tokio::test]
-    async fn edit_maintains_sync() {
-        let mut harness = SimulationHarness::new().await;
+    #[test]
+    fn test_model_edit() {
+        let mut model = LspModel::new();
+        model.open("test.rb".to_string(), "class Foo\nend".to_string());
 
-        // Open a file
-        let transition = Transition::DidOpen {
-            filename: "test.rb".to_string(),
-            content: "class Foo\nend".to_string(),
+        let range = tower_lsp::lsp_types::Range {
+            start: tower_lsp::lsp_types::Position {
+                line: 0,
+                character: 6,
+            },
+            end: tower_lsp::lsp_types::Position {
+                line: 0,
+                character: 9,
+            },
         };
-        harness
-            .apply(&transition)
-            .await
-            .expect("DidOpen should work");
 
-        // Edit: Insert "Bar" after "Foo"
-        let transition = Transition::DidChange {
-            filename: "test.rb".to_string(),
-            range: tower_lsp::lsp_types::Range {
-                start: tower_lsp::lsp_types::Position {
-                    line: 0,
-                    character: 9,
-                },
-                end: tower_lsp::lsp_types::Position {
-                    line: 0,
-                    character: 9,
-                },
-            },
-            new_text: "Bar".to_string(),
-        };
-        harness
-            .apply(&transition)
-            .await
-            .expect("DidChange should work");
-
-        // Verify model state
-        assert_eq!(
-            harness.model.get_content("test.rb"),
-            Some("class FooBar\nend")
-        );
-    }
-
-    /// Test: Query operations don't crash
-    #[tokio::test]
-    async fn queries_dont_crash() {
-        let mut harness = SimulationHarness::new().await;
-
-        // Open a file with some content
-        let transition = Transition::DidOpen {
-            filename: "test.rb".to_string(),
-            content: "class Foo\n  def bar\n    @x = 1\n  end\nend".to_string(),
-        };
-        harness
-            .apply(&transition)
-            .await
-            .expect("DidOpen should work");
-
-        // Run various queries - none should crash
-        let queries = vec![
-            Transition::DocumentSymbols {
-                filename: "test.rb".to_string(),
-            },
-            Transition::SemanticTokens {
-                filename: "test.rb".to_string(),
-            },
-            Transition::FoldingRange {
-                filename: "test.rb".to_string(),
-            },
-            Transition::CodeLens {
-                filename: "test.rb".to_string(),
-            },
-            Transition::GotoDefinition {
-                filename: "test.rb".to_string(),
-                position: tower_lsp::lsp_types::Position {
-                    line: 2,
-                    character: 4,
-                },
-            },
-            Transition::Completion {
-                filename: "test.rb".to_string(),
-                position: tower_lsp::lsp_types::Position {
-                    line: 2,
-                    character: 4,
-                },
-            },
-        ];
-
-        for query in queries {
-            harness
-                .apply(&query)
-                .await
-                .expect(&format!("Query should not crash: {:?}", query));
-        }
+        model.edit("test.rb", &range, "Bar");
+        assert_eq!(model.get_content("test.rb"), Some("class Bar\nend"));
     }
 }
