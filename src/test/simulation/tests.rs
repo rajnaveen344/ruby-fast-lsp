@@ -4,14 +4,16 @@
 //!
 //! ## Philosophy
 //!
-//! Generate complex Ruby code structures with known marker positions, then verify
+//! Generate complex Ruby code structures using the Graph Growth strategy, then verify
 //! that all LSP features (goto definition, references, completion, symbols, etc.)
-//! work correctly on those structures. **Includes deterministic edit tracking.**
+//! work correctly on those structures. **Uses dynamic position resolution via SourceLocator.**
 //!
-//! Edits are tracked by adjusting marker positions after each edit operation.
+//! Instead of tracking exact positions that become stale after edits, we store unique
+//! names and resolve positions dynamically using `SourceLocator`. This makes the simulation
+//! robust to edits.
 
 use super::*;
-use crate::test::simulation::generators::{tracked_code, MarkerKind, SafeEdit, TrackedCode};
+use crate::test::simulation::generators::{tracked_code, SafeEdit, SourceLocator, TrackedCodeV2};
 use proptest::prelude::*;
 use proptest::test_runner::Config;
 use std::collections::HashSet;
@@ -126,7 +128,7 @@ impl SimulationReport {
 // =============================================================================
 
 /// Generate a safe edit based on the edit_type index
-fn generate_safe_edit(edit_type: u8, tracked: &TrackedCode) -> SafeEdit {
+fn generate_safe_edit(edit_type: u8, tracked: &TrackedCodeV2) -> SafeEdit {
     let safe_line = tracked.find_safe_edit_line().unwrap_or(0);
     match edit_type % 4 {
         0 => SafeEdit::InsertBlankLine { line: safe_line },
@@ -144,7 +146,7 @@ fn generate_safe_edit(edit_type: u8, tracked: &TrackedCode) -> SafeEdit {
 }
 
 async fn run_simulation(
-    tracked: &TrackedCode,
+    tracked: &TrackedCodeV2,
     steps: &[SimStep],
 ) -> Result<SimulationReport, String> {
     let mut harness = SimulationHarness::new().await;
@@ -171,54 +173,62 @@ async fn run_simulation(
     .unwrap();
 
     // ==========================================================================
-    // INITIAL VERIFICATION: All definitions must resolve correctly
+    // INITIAL VERIFICATION: Reference anchors resolve correctly
     // ==========================================================================
-    for marker in &tracked.markers {
-        if let Some(expected_def) = &marker.definition_position {
-            match &marker.kind {
-                MarkerKind::Definition | MarkerKind::CompletionTrigger { .. } => continue,
-                _ => {}
-            }
+    // Use SourceLocator to find positions dynamically
+    let locator = SourceLocator::new(&tracked.code);
 
-            let result = harness
-                .server
-                .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
-                    text_document_position_params:
-                        tower_lsp::lsp_types::TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri: uri.clone() },
-                            position: marker.position,
-                        },
-                    work_done_progress_params: Default::default(),
-                    partial_result_params: Default::default(),
+    for (anchor_id, target_name) in &tracked.state.ref_ledger.anchors {
+        // Find where the reference is used (via anchor line)
+        let Some(anchor_line) = locator.find_anchor_line(anchor_id) else {
+            continue; // Anchor not found, skip
+        };
+
+        // Find the reference position on that line
+        let Some(usage_pos) = locator.find_token_on_line(target_name, anchor_line) else {
+            continue;
+        };
+
+        // Find where the target is defined
+        let Some(def_pos) = locator.find_token(target_name) else {
+            continue;
+        };
+
+        let result = harness
+            .server
+            .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
+                text_document_position_params: tower_lsp::lsp_types::TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: usage_pos,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+
+        let resolved = match &result {
+            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+                (loc.range.start.line as i32 - def_pos.line as i32).abs() <= 2
+            }
+            Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => locs
+                .iter()
+                .any(|loc| (loc.range.start.line as i32 - def_pos.line as i32).abs() <= 2),
+            Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
+                links.iter().any(|link| {
+                    (link.target_selection_range.start.line as i32 - def_pos.line as i32).abs() <= 2
                 })
-                .await;
-
-            let resolved = match &result {
-                Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
-                    (loc.range.start.line as i32 - expected_def.line as i32).abs() <= 2
-                }
-                Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => locs
-                    .iter()
-                    .any(|loc| (loc.range.start.line as i32 - expected_def.line as i32).abs() <= 2),
-                Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
-                    links.iter().any(|link| {
-                        (link.target_selection_range.start.line as i32 - expected_def.line as i32)
-                            .abs()
-                            <= 2
-                    })
-                }
-                _ => false,
-            };
-
-            if !resolved {
-                report.add_error(
-                    0,
-                    format!(
-                        "INITIAL CHECK FAILED: '{}' ({:?}) at line {} should resolve to line {}",
-                        marker.name, marker.kind, marker.position.line, expected_def.line
-                    ),
-                );
             }
+            _ => false,
+        };
+
+        if !resolved {
+            report.add_error(
+                0,
+                format!(
+                    "INITIAL CHECK FAILED: '{}' at line {} should resolve to line {}",
+                    target_name, usage_pos.line, def_pos.line
+                ),
+            );
         }
     }
 
@@ -228,18 +238,41 @@ async fn run_simulation(
     }
 
     // ==========================================================================
-    // Execute steps - including edits with position tracking
+    // Execute steps - using dynamic position resolution via SourceLocator
     // ==========================================================================
+    // Clone verification targets from ledgers upfront (to avoid borrow issues with edits)
+    let ref_anchors: Vec<_> = tracked
+        .state
+        .ref_ledger
+        .anchors
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let type_entries: Vec<_> = tracked
+        .state
+        .type_ledger
+        .var_types
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let completion_entries: Vec<_> = tracked
+        .state
+        .completion_ledger
+        .expected_completions
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
     for (step_idx, step) in steps.iter().enumerate() {
         report.steps_executed += 1;
 
         match step {
             SimStep::Edit { edit_type } => {
-                // Generate a safe edit that won't destroy markers
+                // Generate a safe edit
                 let safe_edit = generate_safe_edit(*edit_type, &tracked);
-                let (range, new_text) = safe_edit.to_edit(&tracked);
+                let (range, new_text) = safe_edit.to_edit(&tracked.code);
 
-                // Apply edit to our tracked code (adjusts all marker positions)
+                // Apply edit to our tracked code
                 let edit_ok = tracked.apply_edit(&range, &new_text);
                 if !edit_ok {
                     report
@@ -295,239 +328,258 @@ async fn run_simulation(
             }
 
             SimStep::VerifyDefinition { marker_idx } => {
-                if let Some(marker) = tracked.markers.get(*marker_idx) {
-                    match &marker.kind {
-                        MarkerKind::Definition | MarkerKind::CompletionTrigger { .. } => continue,
-                        _ => {}
-                    }
+                if ref_anchors.is_empty() {
+                    continue;
+                }
+                // Use SourceLocator to find current positions (they may have shifted due to edits)
+                let locator = SourceLocator::new(&tracked.code);
 
-                    if let Some(expected_def) = &marker.definition_position {
-                        let result = harness
-                            .server
-                            .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
-                                text_document_position_params:
-                                    tower_lsp::lsp_types::TextDocumentPositionParams {
-                                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                        position: marker.position,
-                                    },
-                                work_done_progress_params: Default::default(),
-                                partial_result_params: Default::default(),
-                            })
-                            .await;
+                let (anchor_id, target_name) = &ref_anchors[*marker_idx % ref_anchors.len()];
+                // Find the reference on the anchor line
+                let Some(anchor_line) = locator.find_anchor_line(anchor_id) else {
+                    continue;
+                };
+                let Some(usage_pos) = locator.find_token_on_line(target_name, anchor_line) else {
+                    continue;
+                };
+                let Some(def_pos) = locator.find_token(target_name) else {
+                    continue;
+                };
 
-                        report.definitions_checked += 1;
-                        // Tolerance needs to account for multiple edits (each can shift by 1-4 lines)
-                        // With up to 10 edits possible, positions can shift significantly
-                        const TOLERANCE: i32 = 15;
+                let result = harness
+                    .server
+                    .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
+                        text_document_position_params:
+                            tower_lsp::lsp_types::TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                position: usage_pos,
+                            },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                    })
+                    .await;
 
-                        match result {
-                            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
-                                let line_diff =
-                                    (loc.range.start.line as i32 - expected_def.line as i32).abs();
-                                if line_diff <= TOLERANCE {
-                                    report.definitions_correct += 1;
-                                } else {
-                                    report.add_error(
-                                        step_idx,
-                                        format!(
-                                            "DEFINITION WRONG: '{}' resolved to line {} (expected {})",
-                                            marker.name, loc.range.start.line, expected_def.line
-                                        ),
-                                    );
-                                }
-                            }
-                            Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => {
-                                let any_close = locs.iter().any(|loc| {
-                                    (loc.range.start.line as i32 - expected_def.line as i32).abs()
-                                        <= TOLERANCE
-                                });
-                                if any_close {
-                                    report.definitions_correct += 1;
-                                } else {
-                                    report.add_error(
-                                        step_idx,
-                                        format!(
-                                            "DEFINITION WRONG: '{}' resolved to wrong lines",
-                                            marker.name
-                                        ),
-                                    );
-                                }
-                            }
-                            Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
-                                let any_close = links.iter().any(|link| {
-                                    (link.target_selection_range.start.line as i32
-                                        - expected_def.line as i32)
-                                        .abs()
-                                        <= TOLERANCE
-                                });
-                                if any_close {
-                                    report.definitions_correct += 1;
-                                }
-                            }
-                            _ => {
-                                report.add_error(
-                                    step_idx,
-                                    format!("DEFINITION NOT FOUND: '{}'", marker.name),
-                                );
-                            }
+                report.definitions_checked += 1;
+                // Tolerance for position drift after edits
+                const TOLERANCE: i32 = 15;
+
+                match result {
+                    Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
+                        let line_diff = (loc.range.start.line as i32 - def_pos.line as i32).abs();
+                        if line_diff <= TOLERANCE {
+                            report.definitions_correct += 1;
+                        } else {
+                            report.add_error(
+                                step_idx,
+                                format!(
+                                    "DEFINITION WRONG: '{}' resolved to line {} (expected {})",
+                                    target_name, loc.range.start.line, def_pos.line
+                                ),
+                            );
                         }
+                    }
+                    Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => {
+                        let any_close = locs.iter().any(|loc| {
+                            (loc.range.start.line as i32 - def_pos.line as i32).abs() <= TOLERANCE
+                        });
+                        if any_close {
+                            report.definitions_correct += 1;
+                        } else {
+                            report.add_error(
+                                step_idx,
+                                format!(
+                                    "DEFINITION WRONG: '{}' resolved to wrong lines",
+                                    target_name
+                                ),
+                            );
+                        }
+                    }
+                    Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
+                        let any_close = links.iter().any(|link| {
+                            (link.target_selection_range.start.line as i32 - def_pos.line as i32)
+                                .abs()
+                                <= TOLERANCE
+                        });
+                        if any_close {
+                            report.definitions_correct += 1;
+                        }
+                    }
+                    _ => {
+                        report.add_error(
+                            step_idx,
+                            format!("DEFINITION NOT FOUND: '{}'", target_name),
+                        );
                     }
                 }
             }
 
             SimStep::VerifyCompletion { marker_idx } => {
-                if let Some(marker) = tracked.markers.get(*marker_idx) {
-                    if let MarkerKind::CompletionTrigger { expected_methods } = &marker.kind {
-                        let result = harness
-                            .server
-                            .completion(tower_lsp::lsp_types::CompletionParams {
-                                text_document_position:
-                                    tower_lsp::lsp_types::TextDocumentPositionParams {
-                                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                        position: marker.position,
-                                    },
-                                work_done_progress_params: Default::default(),
-                                partial_result_params: Default::default(),
-                                context: Some(tower_lsp::lsp_types::CompletionContext {
-                                    trigger_kind:
-                                        tower_lsp::lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
-                                    trigger_character: Some(".".to_string()),
-                                }),
-                            })
-                            .await;
+                if completion_entries.is_empty() {
+                    continue;
+                }
+                let locator = SourceLocator::new(&tracked.code);
 
-                        report.completions_checked += 1;
+                let (anchor_id, expected_methods) =
+                    &completion_entries[*marker_idx % completion_entries.len()];
+                // Find completion position from anchor
+                let Some(comp_pos) = locator.find_completion_position(anchor_id) else {
+                    continue;
+                };
 
-                        // Check if any of the expected methods are present (lenient check)
-                        let check_items_and_get_labels =
-                            |items: &[tower_lsp::lsp_types::CompletionItem]| {
-                                let labels: HashSet<_> =
-                                    items.iter().map(|i| i.label.as_str()).collect();
-                                let found =
-                                    expected_methods.iter().any(|m| labels.contains(m.as_str()));
-                                (
-                                    found,
-                                    items
-                                        .iter()
-                                        .take(10)
-                                        .map(|i| i.label.clone())
-                                        .collect::<Vec<_>>(),
-                                )
-                            };
+                let result = harness
+                    .server
+                    .completion(tower_lsp::lsp_types::CompletionParams {
+                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: comp_pos,
+                        },
+                        work_done_progress_params: Default::default(),
+                        partial_result_params: Default::default(),
+                        context: Some(tower_lsp::lsp_types::CompletionContext {
+                            trigger_kind:
+                                tower_lsp::lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+                            trigger_character: Some(".".to_string()),
+                        }),
+                    })
+                    .await;
 
-                        match &result {
-                            Ok(Some(tower_lsp::lsp_types::CompletionResponse::Array(items)))
-                                if !items.is_empty() =>
-                            {
-                                let (found, sample_labels) = check_items_and_get_labels(items);
-                                if found {
-                                    report.completions_correct += 1;
-                                } else {
-                                    report.add_warning(format!(
+                report.completions_checked += 1;
+
+                // Check if any of the expected methods are present (lenient check)
+                let check_items_and_get_labels =
+                    |items: &[tower_lsp::lsp_types::CompletionItem]| {
+                        let labels: HashSet<_> = items.iter().map(|i| i.label.as_str()).collect();
+                        let found = expected_methods.iter().any(|m| labels.contains(m.as_str()));
+                        (
+                            found,
+                            items
+                                .iter()
+                                .take(10)
+                                .map(|i| i.label.clone())
+                                .collect::<Vec<_>>(),
+                        )
+                    };
+
+                match &result {
+                    Ok(Some(tower_lsp::lsp_types::CompletionResponse::Array(items)))
+                        if !items.is_empty() =>
+                    {
+                        let (found, sample_labels) = check_items_and_get_labels(items);
+                        if found {
+                            report.completions_correct += 1;
+                        } else {
+                            report.add_error(
+                                    step_idx,
+                                    format!(
                                         "COMPLETION MISMATCH at line {}: expected {:?} but got {:?} (total: {})",
-                                        marker.position.line,
+                                        comp_pos.line,
                                         expected_methods,
                                         sample_labels,
                                         items.len()
-                                    ));
-                                }
-                            }
-                            Ok(Some(tower_lsp::lsp_types::CompletionResponse::List(list)))
-                                if !list.items.is_empty() =>
-                            {
-                                let (found, sample_labels) =
-                                    check_items_and_get_labels(&list.items);
-                                if found {
-                                    report.completions_correct += 1;
-                                } else {
-                                    report.add_warning(format!(
+                                    ),
+                                );
+                        }
+                    }
+                    Ok(Some(tower_lsp::lsp_types::CompletionResponse::List(list)))
+                        if !list.items.is_empty() =>
+                    {
+                        let (found, sample_labels) = check_items_and_get_labels(&list.items);
+                        if found {
+                            report.completions_correct += 1;
+                        } else {
+                            report.add_error(
+                                    step_idx,
+                                    format!(
                                         "COMPLETION MISMATCH at line {}: expected {:?} but got {:?} (total: {})",
-                                        marker.position.line,
+                                        comp_pos.line,
                                         expected_methods,
                                         sample_labels,
                                         list.items.len()
-                                    ));
-                                }
-                            }
-                            _ => {
-                                report.add_warning(format!(
-                                    "NO COMPLETIONS at line {}: expected {:?} but got nothing",
-                                    marker.position.line, expected_methods
-                                ));
-                            }
+                                    ),
+                                );
                         }
+                    }
+                    _ => {
+                        report.add_error(
+                            step_idx,
+                            format!(
+                                "NO COMPLETIONS at line {}: expected {:?} but got nothing",
+                                comp_pos.line, expected_methods
+                            ),
+                        );
                     }
                 }
             }
 
             SimStep::VerifyTypes { marker_idx } => {
-                if let Some(marker) = tracked.markers.get(*marker_idx) {
-                    if let MarkerKind::TypeInference { expected_type } = &marker.kind {
-                        // Get inlay hints for the file to find type annotations
-                        let _content = harness.model.get_content(&tracked.filename).unwrap_or("");
+                if type_entries.is_empty() {
+                    continue;
+                }
+                let locator = SourceLocator::new(&tracked.code);
 
-                        let result = harness
-                            .server
-                            .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                range: tower_lsp::lsp_types::Range {
-                                    start: tower_lsp::lsp_types::Position {
-                                        line: marker.position.line.saturating_sub(1),
-                                        character: 0,
-                                    },
-                                    end: tower_lsp::lsp_types::Position {
-                                        line: marker.position.line + 2,
-                                        character: 100,
-                                    },
-                                },
-                                work_done_progress_params: Default::default(),
-                            })
-                            .await;
+                let (var_name, expected_type) = &type_entries[*marker_idx % type_entries.len()];
+                // Find the variable position
+                let Some(var_pos) = locator.find_token(var_name) else {
+                    continue;
+                };
 
-                        report.types_checked += 1;
+                let result = harness
+                    .server
+                    .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        range: tower_lsp::lsp_types::Range {
+                            start: tower_lsp::lsp_types::Position {
+                                line: var_pos.line.saturating_sub(1),
+                                character: 0,
+                            },
+                            end: tower_lsp::lsp_types::Position {
+                                line: var_pos.line + 2,
+                                character: 100,
+                            },
+                        },
+                        work_done_progress_params: Default::default(),
+                    })
+                    .await;
 
-                        // Check if any hint contains the expected type
-                        let (has_expected_type, actual_hint) = match &result {
-                            Ok(Some(hints)) => {
-                                // Find hint near the marker position
-                                let near_hint = hints.iter().find(|hint| {
-                                    (hint.position.line as i32 - marker.position.line as i32).abs()
-                                        <= 2
-                                });
+                report.types_checked += 1;
 
-                                if let Some(hint) = near_hint {
-                                    let hint_text = match &hint.label {
-                                        tower_lsp::lsp_types::InlayHintLabel::String(s) => {
-                                            s.clone()
-                                        }
-                                        tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => {
-                                            parts
-                                                .iter()
-                                                .map(|p| p.value.as_str())
-                                                .collect::<Vec<_>>()
-                                                .join("")
-                                        }
-                                    };
-                                    (hint_text.contains(expected_type), Some(hint_text))
-                                } else {
-                                    (false, None)
-                                }
-                            }
-                            _ => (false, None),
-                        };
+                // Check if any hint contains the expected type
+                let (has_expected_type, actual_hint) = match &result {
+                    Ok(Some(hints)) => {
+                        // Find hint near the variable position
+                        let near_hint = hints.iter().find(|hint| {
+                            (hint.position.line as i32 - var_pos.line as i32).abs() <= 2
+                        });
 
-                        if has_expected_type {
-                            report.types_correct += 1;
+                        if let Some(hint) = near_hint {
+                            let hint_text = match &hint.label {
+                                tower_lsp::lsp_types::InlayHintLabel::String(s) => s.clone(),
+                                tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => parts
+                                    .iter()
+                                    .map(|p| p.value.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(""),
+                            };
+                            (hint_text.contains(expected_type.as_str()), Some(hint_text))
                         } else {
-                            // Report type mismatch as a WARNING (not error) for now
-                            // This helps identify type inference issues without blocking all tests
-                            let actual = actual_hint.unwrap_or_else(|| "no hint".to_string());
-                            report.add_warning(format!(
-                                "TYPE MISMATCH at line {}: '{}' expected type '{}' but got '{}'",
-                                marker.position.line, marker.name, expected_type, actual
-                            ));
+                            (false, None)
                         }
                     }
+                    _ => (false, None),
+                };
+
+                if has_expected_type {
+                    report.types_correct += 1;
+                } else {
+                    // Type mismatches are errors - these indicate real bugs
+                    let actual = actual_hint.unwrap_or_else(|| "no hint".to_string());
+                    report.add_error(
+                        step_idx,
+                        format!(
+                            "TYPE MISMATCH at line {}: '{}' expected type '{}' but got '{}'",
+                            var_pos.line, var_name, expected_type, actual
+                        ),
+                    );
                 }
             }
 
@@ -685,13 +737,13 @@ async fn run_simulation(
 proptest! {
     #![proptest_config(get_config())]
 
-    /// Comprehensive simulation test for LSP features with deterministic edit tracking.
+    /// Comprehensive simulation test for LSP features using Graph Growth strategy.
     ///
     /// This test:
-    /// 1. Generates tracked code with known markers (various scenarios)
-    /// 2. Verifies all definitions resolve correctly
-    /// 3. Applies safe edits while tracking marker positions
-    /// 4. Verifies definitions still resolve correctly AFTER edits
+    /// 1. Generates tracked code with unique identifiers (Graph Growth)
+    /// 2. Verifies all references resolve correctly
+    /// 3. Applies safe edits (positions are re-resolved dynamically)
+    /// 4. Verifies references still resolve correctly AFTER edits
     /// 5. Runs various LSP queries (completion, references, symbols, etc.)
     ///
     /// Run with: `cargo test sim`
@@ -712,9 +764,14 @@ proptest! {
             let mut query_idx = 0;
             let mut edit_idx = 0;
 
+            // Count verifiable items from ledgers
+            let has_refs = !tracked.state.ref_ledger.anchors.is_empty();
+            let has_completions = !tracked.state.completion_ledger.expected_completions.is_empty();
+            let has_types = !tracked.state.type_ledger.var_types.is_empty();
+
             for &step_type in &step_order {
                 let step = match step_type {
-                    // Edit (15% weight) - safe edits that don't destroy markers
+                    // Edit (15% weight) - safe edits
                     0 | 1 if edit_idx < edit_types.len() => {
                         let s = SimStep::Edit {
                             edit_type: edit_types[edit_idx],
@@ -722,26 +779,26 @@ proptest! {
                         edit_idx += 1;
                         s
                     }
-                    // Verify definitions (20% weight) - tests position tracking after edits
-                    2 | 3 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                    // Verify definitions (20% weight) - tests reference resolution after edits
+                    2 | 3 if verify_idx < verify_indices.len() && has_refs => {
                         let s = SimStep::VerifyDefinition {
-                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                            marker_idx: verify_indices[verify_idx],
                         };
                         verify_idx += 1;
                         s
                     }
                     // Verify completions (7% weight)
-                    4 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                    4 if verify_idx < verify_indices.len() && has_completions => {
                         let s = SimStep::VerifyCompletion {
-                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                            marker_idx: verify_indices[verify_idx],
                         };
                         verify_idx += 1;
                         s
                     }
                     // Verify types (5% weight) - test type inference survives edits
-                    5 if verify_idx < verify_indices.len() && !tracked.markers.is_empty() => {
+                    5 if verify_idx < verify_indices.len() && has_types => {
                         let s = SimStep::VerifyTypes {
-                            marker_idx: verify_indices[verify_idx] % tracked.markers.len(),
+                            marker_idx: verify_indices[verify_idx],
                         };
                         verify_idx += 1;
                         s
@@ -859,8 +916,8 @@ proptest! {
 mod soak_test {
     use super::*;
     use crate::test::simulation::generators::{
-        tracked_class_with_method_call, tracked_inheritance, tracked_instance_variable,
-        tracked_mixin_completion, tracked_mixin_method_call, tracked_self_completion,
+        graph_class_hierarchy, graph_class_references, graph_comprehensive_inheritance,
+        graph_comprehensive_mixin, graph_method_return_types, graph_mixin_relationships,
     };
     use proptest::strategy::ValueTree;
     use std::collections::hash_map::DefaultHasher;
@@ -956,39 +1013,39 @@ mod soak_test {
             };
             let mut runner = proptest::test_runner::TestRunner::new(config);
 
-            // Cycle through different generators
+            // Cycle through different Graph Growth generators
             let generator_idx = i % 6;
             let generator_name = match generator_idx {
-                0 => "tracked_class_with_method_call",
-                1 => "tracked_mixin_method_call",
-                2 => "tracked_inheritance",
-                3 => "tracked_instance_variable",
-                4 => "tracked_self_completion",
-                _ => "tracked_mixin_completion",
+                0 => "graph_class_hierarchy",
+                1 => "graph_mixin_relationships",
+                2 => "graph_class_references",
+                3 => "graph_comprehensive_mixin",
+                4 => "graph_method_return_types",
+                _ => "graph_comprehensive_inheritance",
             };
 
             let tracked = match generator_idx {
-                0 => tracked_class_with_method_call()
+                0 => graph_class_hierarchy()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
-                1 => tracked_mixin_method_call()
+                1 => graph_mixin_relationships()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
-                2 => tracked_inheritance()
+                2 => graph_class_references()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
-                3 => tracked_instance_variable()
+                3 => graph_comprehensive_mixin()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
-                4 => tracked_self_completion()
+                4 => graph_method_return_types()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
-                _ => tracked_mixin_completion()
+                _ => graph_comprehensive_inheritance()
                     .new_tree(&mut runner)
                     .ok()
                     .map(|t| t.current()),
@@ -997,6 +1054,15 @@ mod soak_test {
             if let Some(tracked) = tracked {
                 // Generate random steps including edits
                 let step_count = 15 + (i % 30);
+                let ref_count = tracked.state.ref_ledger.anchors.len().max(1);
+                let type_count = tracked.state.type_ledger.var_types.len().max(1);
+                let completion_count = tracked
+                    .state
+                    .completion_ledger
+                    .expected_completions
+                    .len()
+                    .max(1);
+
                 let steps: Vec<SimStep> = (0..step_count)
                     .map(|j| match (i + j) % 14 {
                         // Edits with position tracking
@@ -1005,15 +1071,15 @@ mod soak_test {
                         },
                         // Verify definitions after edits
                         2 | 3 => SimStep::VerifyDefinition {
-                            marker_idx: j % tracked.markers.len().max(1),
+                            marker_idx: j % ref_count,
                         },
                         // Verify completions
                         4 => SimStep::VerifyCompletion {
-                            marker_idx: j % tracked.markers.len().max(1),
+                            marker_idx: j % completion_count,
                         },
                         // Verify types (test type inference survives edits)
                         5 => SimStep::VerifyTypes {
-                            marker_idx: j % tracked.markers.len().max(1),
+                            marker_idx: j % type_count,
                         },
                         // Save (triggers re-indexing)
                         6 => SimStep::Save,
