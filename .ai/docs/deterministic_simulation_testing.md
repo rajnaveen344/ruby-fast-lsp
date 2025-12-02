@@ -2,29 +2,34 @@
 
 ## Implementation Status ✅
 
-| Phase                        | Status      | Description                                                          |
-| ---------------------------- | ----------- | -------------------------------------------------------------------- |
-| **Phase 1: Foundation**      | ✅ Complete | Dependencies, module structure, Model, basic harness                 |
-| **Phase 2: Edit Testing**    | ✅ Complete | `DidChange` with text sync verification                              |
-| **Phase 3: Query Testing**   | ✅ Complete | All 15 operations with random sequences                              |
-| **Phase 4: Marker Strategy** | ✅ Complete | GotoDefinition, References, DocumentSymbols, FoldingRanges, CodeLens |
-| **Phase 5: Type Inference**  | ✅ Complete | Type assignments, narrowing, stability, inlay hints                  |
-| **Phase 6: Complex Mixins**  | ✅ Complete | Diamond inheritance, deep chains, edge cases                         |
-| **Phase 7: CI Integration**  | ⏳ Pending  | GitHub Actions workflow                                              |
+| Phase                              | Status      | Description                                                          |
+| ---------------------------------- | ----------- | -------------------------------------------------------------------- |
+| **Phase 1: Foundation**            | ✅ Complete | Dependencies, module structure, Model, basic harness                 |
+| **Phase 2: Edit Testing**          | ✅ Complete | `DidChange` with text sync verification                              |
+| **Phase 3: Query Testing**         | ✅ Complete | All 15 operations with random sequences                              |
+| **Phase 4: Marker Strategy**       | ✅ Complete | GotoDefinition, References, DocumentSymbols, FoldingRanges, CodeLens |
+| **Phase 5: Type Inference**        | ✅ Complete | Type assignments, narrowing, stability, inlay hints                  |
+| **Phase 6: Complex Mixins**        | ✅ Complete | Diamond inheritance, deep chains, edge cases                         |
+| **Phase 7: Deterministic Editing** | ✅ Complete | Position tracking after edits, safe edit generators                  |
+| **Phase 8: CI Integration**        | ⏳ Pending  | GitHub Actions workflow                                              |
 
-### Tests Implemented (15 tests)
+### Tests Implemented (21 tests)
 
-| Test                             | Type       | Description                                    |
-| -------------------------------- | ---------- | ---------------------------------------------- |
-| **`simulation_runner`**          | TRUE SIM   | THE main simulation: tracked code + random ops |
-| `text_sync_maintained`           | L1         | Model.text == LSP.text after edits             |
-| `document_symbols_finds_classes` | L2 Marker  | Generated classes found in symbols             |
-| `semantic_tokens_deterministic`  | L2 Marker  | Same input → same tokens                       |
-| `folding_ranges_for_classes`     | L2 Marker  | Classes have folding ranges                    |
-| `harness_smoke_test`             | Standalone | Basic harness functionality                    |
-| `mixin_method_resolution`        | Standalone | Include method resolution                      |
-| `prepend_method_shadowing`       | Standalone | Prepend semantics                              |
-| + 7 model unit tests             | Unit       | Text edit logic                                |
+| Test                                    | Type     | Description                                         |
+| --------------------------------------- | -------- | --------------------------------------------------- |
+| **`sim`**                               | TRUE SIM | THE main simulation: tracked code + edits + queries |
+| `test_position_before_edit_unchanged`   | Unit     | Positions before edit stay unchanged                |
+| `test_position_after_edit_line_shifted` | Unit     | Positions after edit shift correctly                |
+| `test_position_inside_edit_destroyed`   | Unit     | Positions inside deleted range are destroyed        |
+| `test_position_on_same_line_after_edit` | Unit     | Same-line character adjustment works                |
+| `test_multiline_edit_collapse`          | Unit     | Multi-line edits adjust positions correctly         |
+| `test_tracked_code_apply_edit`          | Unit     | TrackedCode.apply_edit updates markers              |
+| `test_apply_edit_insert`                | Unit     | Model edit insertion works                          |
+| `test_apply_edit_replace`               | Unit     | Model edit replacement works                        |
+| `test_apply_edit_multiline`             | Unit     | Model multiline edit works                          |
+| `test_model_open_close`                 | Unit     | Model open/close lifecycle                          |
+| `test_model_edit`                       | Unit     | Model edit function                                 |
+| `soak`                                  | Soak     | Long-running test (ignored by default)              |
 
 ### The TRUE Simulation Runner
 
@@ -66,25 +71,61 @@ The `simulation_runner` test is the ONE comprehensive simulation that:
 
 ### Simulation Step Types (14 types)
 
-| Step Type             | Weight | Description                                |
-| --------------------- | ------ | ------------------------------------------ |
-| `Edit`                | 15%    | Insert random text at random line          |
-| `VerifyDefinition`    | 15%    | Check definition marker still resolves     |
-| `VerifyType`          | 10%    | Check type inlay hints match expected      |
-| `VerifyCompletion`    | 10%    | Check completion includes expected methods |
-| `QuerySymbols`        | 5%     | Query document symbols                     |
-| `QueryCompletion`     | 5%     | Query completion at random position        |
-| `QueryReferences`     | 5%     | Query references at random position        |
-| `QueryHover`          | 5%     | Query hover at random position             |
-| `QueryInlayHints`     | 5%     | Query inlay hints for entire file          |
-| `QuerySemanticTokens` | 3%     | Query semantic tokens                      |
-| `QueryFoldingRanges`  | 3%     | Query folding ranges                       |
-| `QueryCodeLens`       | 3%     | Query code lens                            |
-| `Save`                | 5%     | Save the file (triggers full reindex)      |
+| Step Type             | Weight | Description                                          |
+| --------------------- | ------ | ---------------------------------------------------- |
+| `Edit`                | 15%    | Safe edit with deterministic position tracking       |
+| `VerifyDefinition`    | 20%    | Check definition marker still resolves (after edits) |
+| `VerifyCompletion`    | 7%     | Check completion includes expected methods           |
+| `Save`                | 5%     | Save the file (triggers full reindex)                |
+| `QuerySymbols`        | 7%     | Query document symbols                               |
+| `QueryCompletion`     | 7%     | Query completion at random position                  |
+| `QueryReferences`     | 7%     | Query references at random position                  |
+| `QueryHover`          | 7%     | Query hover at random position                       |
+| `QueryInlayHints`     | 5%     | Query inlay hints for entire file                    |
+| `QuerySemanticTokens` | 5%     | Query semantic tokens                                |
+| `QueryFoldingRanges`  | 5%     | Query folding ranges                                 |
+| `QueryCodeLens`       | 5%     | Query code lens                                      |
+
+### Deterministic Edit Tracking
+
+The simulation now supports **deterministic edit tracking**. When an edit is applied:
+
+1. **Position Adjustment**: All marker positions are adjusted based on the edit range and new text
+2. **Safe Edits**: Only "safe" edits are used that don't destroy markers:
+   - Insert blank lines
+   - Insert comments
+   - Append to file
+3. **Verification After Edits**: Definitions are verified to still resolve correctly after edits
+
+```rust
+/// Safe edit types that won't destroy markers
+enum SafeEdit {
+    InsertBlankLine { line: u32 },
+    InsertComment { line: u32, text: String },
+    InsertMethod { before_end_line: u32, method_name: String },
+    AppendToFile { text: String },
+}
+```
+
+Position adjustment handles:
+
+- Positions before edit: unchanged
+- Positions after edit: shifted by line delta
+- Positions inside deleted range: marker destroyed (removed)
+- Same-line positions after edit: character adjusted
 
 ### Bugs Found by Simulation Testing 🐛
 
 1. **Document Symbols Bug** (Fixed): Multiple top-level classes only returned first class due to scope_id collision with top-level scope (scope_id=0).
+
+2. **Array Element Type Inference** (Open): `[1, 2, 3].first` returns `: Elem` instead of `Integer`. The type system uses a generic `Elem` placeholder instead of inferring the actual element type.
+
+3. **Method Chain Type Loss** (Open): Chained method calls lose type information:
+   - `"hello".upcase` → expected `String`, got "no hint"
+   - `[1,2,3].first.to_s` → expected `String`, got "no hint"
+   - `{ a: 1 }[:a].to_s` → expected `String`, got "no hint"
+
+4. **Hash Access Type Inference** (Open): `{ a: 1 }[:a]` doesn't propagate the value type for subsequent method calls.
 
 ---
 

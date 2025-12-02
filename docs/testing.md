@@ -35,16 +35,22 @@ We use **property-based testing** with [proptest](https://proptest-rs.github.io/
 
 ### Quick Simulation Run
 
-Run the simulation runner with default settings (100 cases):
+Run the main simulation test (100 cases by default):
 
 ```bash
-cargo test sim --release
+cargo test test::simulation::tests::sim --release
 ```
 
 Run with more cases:
 
 ```bash
-PROPTEST_CASES=1000 cargo test sim --release
+PROPTEST_CASES=1000 cargo test test::simulation::tests::sim --release
+```
+
+Run all simulation-related tests (including unit tests for position tracking):
+
+```bash
+cargo test test::simulation --release
 ```
 
 ### Soak Testing (Overnight Fuzzing)
@@ -52,13 +58,13 @@ PROPTEST_CASES=1000 cargo test sim --release
 For thorough testing, run the soak test which runs indefinitely until you press Ctrl+C:
 
 ```bash
-cargo test soak --release -- --nocapture --ignored
+cargo test test::simulation::tests::soak_test::soak --release -- --nocapture --ignored
 ```
 
 Or with a maximum iteration limit:
 
 ```bash
-PROPTEST_CASES=100000 cargo test soak --release -- --nocapture --ignored
+PROPTEST_CASES=100000 cargo test test::simulation::tests::soak_test::soak --release -- --nocapture --ignored
 ```
 
 **Output:**
@@ -76,18 +82,20 @@ Results are written to `src/test/simulation/soak_failures.log` with deduplicated
 
 ### What Simulation Tests Cover
 
-| Category        | What's Tested                            |
-| --------------- | ---------------------------------------- |
-| **Text Sync**   | Document open/edit/save/close operations |
-| **Definitions** | Go-to-definition resolves correctly      |
-| **Types**       | Type inference via inlay hints           |
-| **Completions** | Autocomplete suggestions                 |
-| **Symbols**     | Document and workspace symbols           |
-| **Stability**   | No crashes on random input               |
+| Category        | What's Tested                                        |
+| --------------- | ---------------------------------------------------- |
+| **Edits**       | Safe edits with deterministic position tracking      |
+| **Text Sync**   | Document open/edit/save/close operations             |
+| **Definitions** | Go-to-definition resolves correctly (even post-edit) |
+| **Completions** | Autocomplete suggestions                             |
+| **Symbols**     | Document and workspace symbols                       |
+| **Stability**   | No crashes on random input                           |
 
 ### Regression Seeds
 
-When proptest finds a failure, it saves the seed to `src/test/simulation/regressions.txt`. These seeds are automatically re-run on future test runs to prevent regressions. This file is checked into source control.
+When proptest finds a failure, it saves the seed to `src/test/simulation/regressions.txt`. These seeds are automatically re-run on future test runs to prevent regressions.
+
+**Important:** Seeds are only valid for the current test signature. If the test parameters change (e.g., adding/removing inputs), old seeds become invalid and the file should be cleared.
 
 ## Running Specific Tests
 
@@ -107,21 +115,54 @@ cargo test --release
 
 ## Debugging Test Failures
 
-### Reproduce a Simulation Failure
+### When Simulation Fails
 
-If simulation testing finds a bug, it prints a seed. Re-run with that seed:
+When proptest finds a failure, it:
 
-```bash
-PROPTEST_SEED=<seed_from_output> cargo test simulation_runner
+1. **Prints the minimal failing input** (after shrinking)
+2. **Saves the seed** to `src/test/simulation/regressions.txt`
+3. **Automatically replays** the seed on every subsequent test run
+
+Example failure output:
+
+```
+test test::simulation::tests::sim ... FAILED
+minimal failing input: tracked = TrackedCode { code: "class Foo...", ... }
 ```
 
-### View Simulation Failure Log
+The seed is automatically saved, so just run the test again to reproduce:
+
+```bash
+cargo test test::simulation::tests::sim --release -- --nocapture
+```
+
+### View the Regression File
+
+```bash
+cat src/test/simulation/regressions.txt
+```
+
+### Clear Stale Seeds
+
+If the test signature has changed and old seeds are causing issues:
+
+```bash
+# Clear all seeds (keeps the header comments)
+head -10 src/test/simulation/regressions.txt > tmp && mv tmp src/test/simulation/regressions.txt
+```
+
+### View Soak Test Failure Log
 
 After running soak tests:
 
 ```bash
-cat simulation_failures.log
+cat src/test/simulation/soak_failures.log
 ```
+
+The log contains:
+
+- Unique failure types (deduplicated)
+- Code snippets that triggered failures
 
 ## CI Integration
 
