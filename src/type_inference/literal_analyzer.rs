@@ -115,8 +115,65 @@ impl LiteralAnalyzer {
             return Some(RubyType::Any); // Type depends on context
         }
 
+        // Handle array indexing: array[index] where array is a literal
+        // This handles cases like ["a", "b", "c"][0]
+        if let Some(call_node) = node.as_call_node() {
+            return self.analyze_array_access(&call_node);
+        }
+
         // Other nodes are not literals
         None
+    }
+
+    /// Analyze array access expressions like `array[0]` or `["a", "b"][1]`
+    fn analyze_array_access(&self, call_node: &CallNode) -> Option<RubyType> {
+        // Check if this is a `[]` method call
+        let method_name = String::from_utf8_lossy(call_node.name().as_slice());
+        if method_name != "[]" {
+            return None;
+        }
+
+        // Get the receiver (the array)
+        let receiver = call_node.receiver()?;
+
+        // Analyze the receiver - must be an array literal or array-like expression
+        let receiver_type = self.analyze_literal(&receiver)?;
+
+        // If the receiver is an array, return one of its element types
+        match receiver_type {
+            RubyType::Array(element_types) => {
+                // If all elements have the same type, return that type
+                // Otherwise return a union of element types
+                if element_types.len() == 1 {
+                    Some(element_types.into_iter().next().unwrap())
+                } else if element_types.is_empty() {
+                    // Empty array - element could be nil
+                    Some(RubyType::nil_class())
+                } else {
+                    // Multiple element types - could be any of them, union with nil
+                    // (since the index might be out of bounds)
+                    Some(RubyType::union(element_types))
+                }
+            }
+            RubyType::Hash(_, value_types) => {
+                // Hash access - return value type(s)
+                if value_types.len() == 1 {
+                    // Hash access can return nil if key not found
+                    Some(
+                        value_types
+                            .into_iter()
+                            .next()
+                            .unwrap()
+                            .union_with(&RubyType::nil_class()),
+                    )
+                } else if value_types.is_empty() {
+                    Some(RubyType::nil_class())
+                } else {
+                    Some(RubyType::union(value_types).union_with(&RubyType::nil_class()))
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Analyze an array literal and infer element types

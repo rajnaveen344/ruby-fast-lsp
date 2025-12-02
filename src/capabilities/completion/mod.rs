@@ -370,9 +370,79 @@ fn get_receiver_type_from_cfg(
     // CFG handles both method-level and top-level code
     if is_variable_name(receiver_text) {
         let offset = position_to_offset(content, position);
-        return server
+        if let Some(ty) = server
             .type_narrowing
-            .get_narrowed_type(uri, receiver_text, offset);
+            .get_narrowed_type(uri, receiver_text, offset)
+        {
+            return Some(ty);
+        }
+
+        // Fallback: Look for constructor assignment pattern (var = ClassName.new)
+        // CFG doesn't track method call return types, so we need to handle .new specially
+        if let Some(ty) = infer_type_from_constructor_assignment(content, receiver_text) {
+            return Some(ty);
+        }
+    }
+
+    None
+}
+
+/// Look for a constructor assignment pattern like `var = ClassName.new` in the source
+/// and return the class instance type if found.
+fn infer_type_from_constructor_assignment(
+    content: &str,
+    var_name: &str,
+) -> Option<crate::type_inference::ruby_type::RubyType> {
+    use crate::type_inference::ruby_type::RubyType;
+    use crate::types::fully_qualified_name::FullyQualifiedName;
+    use crate::types::ruby_namespace::RubyConstant;
+
+    // Pattern: `var_name = SomeClass.new` or `var_name = Some::Namespaced::Class.new`
+    // We search for assignments to this variable
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Look for assignment pattern: `var = ...`
+        if let Some(rest) = trimmed.strip_prefix(var_name) {
+            // Make sure we matched the whole variable name (not just a prefix)
+            // The next character should be whitespace or '='
+            let next_char = rest.chars().next();
+            if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
+                continue;
+            }
+
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rhs = rest.trim();
+
+                // Check for `.new` pattern
+                if rhs.ends_with(".new") || rhs.contains(".new(") || rhs.contains(".new ") {
+                    // Extract the class name before .new
+                    let new_pos = rhs.find(".new")?;
+                    let class_part = rhs[..new_pos].trim();
+
+                    // Validate it's a constant (starts with uppercase)
+                    if class_part
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
+                        // Parse the constant path (e.g., "Some::Namespaced::Class")
+                        let parts: Vec<_> = class_part
+                            .split("::")
+                            .filter_map(|s| RubyConstant::new(s.trim()).ok())
+                            .collect();
+
+                        if !parts.is_empty() {
+                            let fqn = FullyQualifiedName::Constant(parts);
+                            // RubyType::Class represents an instance of the class
+                            return Some(RubyType::Class(fqn));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     None

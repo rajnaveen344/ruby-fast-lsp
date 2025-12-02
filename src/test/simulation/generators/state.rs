@@ -377,4 +377,3 @@ mod tests {
         assert_ne!(name1, name3);
     }
 }
-

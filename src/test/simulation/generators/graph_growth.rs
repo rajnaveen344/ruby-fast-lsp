@@ -142,7 +142,8 @@ pub fn graph_completion_test() -> impl Strategy<Value = TrackedCodeV2> {
         let class_name = state.make_class_name();
         state.emit(&format!("class {}", class_name));
 
-        // Generate methods
+        // Generate methods - note: we need to track them in state.methods
+        // BEFORE calling add_completion_trigger so the expected methods are populated
         let mut methods = Vec::new();
         for _ in 0..num_methods {
             let method = state.make_method_name();
@@ -150,14 +151,16 @@ pub fn graph_completion_test() -> impl Strategy<Value = TrackedCodeV2> {
             methods.push(method);
         }
 
+        // Register methods BEFORE adding completion trigger
+        state.classes.push(class_name.clone());
+        state.methods.insert(class_name.clone(), methods);
+
         // Add a method with completion trigger
         state.emit("  def test_completion");
         let _comp_anchor = state.add_completion_trigger(&class_name);
         state.emit("  end");
 
         state.close_class();
-        state.classes.push(class_name.clone());
-        state.methods.insert(class_name, methods);
 
         TrackedCodeV2::from_state(state, "completion.rb".to_string())
     })

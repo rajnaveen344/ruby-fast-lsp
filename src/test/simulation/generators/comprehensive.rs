@@ -254,4 +254,3 @@ pub fn graph_comprehensive_inheritance() -> impl Strategy<Value = TrackedCodeV2>
         TrackedCodeV2::from_state(state, "comprehensive_inheritance.rb".to_string())
     })
 }
-

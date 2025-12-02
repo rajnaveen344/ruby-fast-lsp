@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
+use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
@@ -47,8 +48,9 @@ pub fn find_method_completions(
             completions.push(create_method_completion_item(&method_info));
         }
 
-        // Get methods from Ruby index (user-defined types)
-        let index_methods = get_index_methods(index, class_name, partial_method, is_class_method);
+        // Get methods from Ruby index (user-defined types) including ancestor chain
+        let index_methods =
+            get_index_methods_with_ancestors(index, class_name, partial_method, is_class_method);
         for (method_name, return_type, params) in index_methods {
             if seen_methods.contains(&method_name) {
                 continue;
@@ -125,8 +127,8 @@ fn get_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
     }
 }
 
-/// Get methods from the Ruby index for a class
-fn get_index_methods(
+/// Get methods from the Ruby index for a class, including methods from ancestor chain
+fn get_index_methods_with_ancestors(
     index: &Arc<Mutex<RubyIndex>>,
     class_name: &str,
     partial_method: &str,
@@ -134,6 +136,38 @@ fn get_index_methods(
 ) -> Vec<(String, Option<RubyType>, Vec<String>)> {
     let index = index.lock();
     let mut methods = Vec::new();
+    let mut seen_methods = std::collections::HashSet::new();
+
+    // Try to find the FQN for the class
+    let class_fqn = FullyQualifiedName::try_from(class_name);
+
+    // Get the ancestor chain for the class
+    let ancestors = if let Ok(fqn) = &class_fqn {
+        get_ancestor_chain(&index, fqn, is_class_method)
+    } else {
+        vec![]
+    };
+
+    // Collect class names to search (the class itself + all ancestors)
+    let mut classes_to_search: Vec<String> = vec![class_name.to_string()];
+    for ancestor in &ancestors {
+        if let FullyQualifiedName::Constant(parts) = ancestor {
+            let ancestor_name = parts
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            if !classes_to_search.contains(&ancestor_name) {
+                classes_to_search.push(ancestor_name);
+            }
+            // Also add the simple name
+            if let Some(simple_name) = parts.last().map(|c| c.to_string()) {
+                if !classes_to_search.contains(&simple_name) {
+                    classes_to_search.push(simple_name);
+                }
+            }
+        }
+    }
 
     let method_kind = if is_class_method {
         MethodKind::Class
@@ -149,12 +183,17 @@ fn get_index_methods(
             continue;
         }
 
+        // Skip if already seen
+        if seen_methods.contains(&method_name.to_string()) {
+            continue;
+        }
+
         // Check method kind
         if ruby_method.get_kind() != method_kind {
             continue;
         }
 
-        // Check if method belongs to the class we're looking for
+        // Check if method belongs to any class in our search list
         for entry in entries {
             if let EntryKind::Method {
                 owner,
@@ -163,7 +202,7 @@ fn get_index_methods(
                 ..
             } = &entry.kind
             {
-                // Check if owner matches the class name
+                // Check if owner matches any class in our list
                 let owner_matches = match owner {
                     FullyQualifiedName::Constant(parts) => {
                         let owner_name = parts
@@ -171,13 +210,19 @@ fn get_index_methods(
                             .map(|c| c.to_string())
                             .collect::<Vec<_>>()
                             .join("::");
-                        owner_name == class_name
-                            || parts.last().map(|c| c.to_string()).as_deref() == Some(class_name)
+                        let simple_name = parts.last().map(|c| c.to_string());
+
+                        classes_to_search.contains(&owner_name)
+                            || simple_name
+                                .as_ref()
+                                .map(|s| classes_to_search.contains(s))
+                                .unwrap_or(false)
                     }
                     _ => false,
                 };
 
                 if owner_matches {
+                    seen_methods.insert(method_name.to_string());
                     let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
                     methods.push((method_name.to_string(), return_type.clone(), param_names));
                     break;
