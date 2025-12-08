@@ -1,5 +1,6 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
+use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::server::RubyLanguageServer;
@@ -23,20 +24,9 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 // ============================================================================
 
 /// Options for processing definitions
-#[derive(Default, Clone)]
+#[derive(Clone, Default)]
 pub struct DefinitionOptions {
     pub dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
-}
-
-impl DefinitionOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_dependency_tracker(mut self, tracker: Arc<Mutex<DependencyTracker>>) -> Self {
-        self.dependency_tracker = Some(tracker);
-        self
-    }
 }
 
 /// Options for processing references
@@ -98,24 +88,57 @@ pub struct ProcessDefinitionsResult {
     /// URIs of files that reference definitions that were removed
     /// These files need their diagnostics updated
     pub affected_uris: std::collections::HashSet<Url>,
+    /// Syntax diagnostics extracted from the parse result (avoids re-parsing)
+    pub syntax_diagnostics: Vec<Diagnostic>,
 }
 
 /// Process both definitions and references with a single parse (more efficient for large files)
 /// This is the preferred method for did_open and did_change handlers.
+///
+/// `skip_mixin_resolution`: Skip mixin resolution for faster processing (defer to save)
 pub fn process_file(
     server: &RubyLanguageServer,
     uri: Url,
     content: &str,
-    def_options: DefinitionOptions,
+    skip_mixin_resolution: bool,
     ref_options: ReferenceOptions,
 ) -> Result<ProcessDefinitionsResult, String> {
-    let total_start = Instant::now();
+    // Check if this version was already indexed - skip expensive re-indexing if unchanged
+    let already_indexed = {
+        let docs = server.docs.lock();
+        if let Some(doc_arc) = docs.get(&uri) {
+            let doc = doc_arc.read();
+            doc.indexed_version == Some(doc.version)
+        } else {
+            false
+        }
+    };
 
-    // Parse once, use for both visitors
-    let parse_start = Instant::now();
+    if already_indexed {
+        debug!(
+            "Skipping re-indexing {} (version already indexed)",
+            uri.path().split('/').last().unwrap_or("?")
+        );
+        // Still need to return syntax diagnostics for the editor
+        let parse_result = parse(content.as_bytes());
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        let syntax_diagnostics = generate_diagnostics(&parse_result, &document);
+        return Ok(ProcessDefinitionsResult {
+            affected_uris: std::collections::HashSet::new(),
+            syntax_diagnostics,
+        });
+    }
+
+    // Parse once, use for both visitors AND diagnostics
     let parse_result = parse(content.as_bytes());
-    debug!("[PERF] Single parse took {:?}", parse_start.elapsed());
 
+    // Create document for diagnostics generation
+    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+
+    // Generate syntax diagnostics from the parse result (no re-parsing needed)
+    let syntax_diagnostics = generate_diagnostics(&parse_result, &document);
+
+    // If there are parse errors, still return diagnostics but skip indexing
     if parse_result.errors().count() > 0 {
         debug!(
             "Parse errors in content for URI {:?}: {} errors",
@@ -124,30 +147,23 @@ pub fn process_file(
         );
         return Ok(ProcessDefinitionsResult {
             affected_uris: std::collections::HashSet::new(),
+            syntax_diagnostics,
         });
     }
 
     // === DEFINITIONS PHASE ===
-    let def_start = Instant::now();
 
     // Remove existing entries for this URI before adding new ones
-    let step = Instant::now();
     let removed_fqns = server.index().lock().remove_entries_for_uri(&uri);
     let removed_fqn_set: std::collections::HashSet<_> = removed_fqns.into_iter().collect();
-    debug!("[PERF]   - Remove entries took {:?}", step.elapsed());
 
-    let step = Instant::now();
     let mut index_visitor = IndexVisitor::new(server, uri.clone());
-    if let Some(tracker) = def_options.dependency_tracker {
-        index_visitor = index_visitor.with_dependency_tracker(tracker);
-    }
     index_visitor.visit(&parse_result.node());
-    debug!("[PERF]   - Index visitor took {:?}", step.elapsed());
 
-    // Resolve mixins only for entries in this file
-    let step = Instant::now();
-    server.index().lock().resolve_mixins_for_uri(&uri);
-    debug!("[PERF]   - Resolve mixins took {:?}", step.elapsed());
+    // Resolve mixins only for entries in this file (skip if requested for speed)
+    if !skip_mixin_resolution {
+        server.index().lock().resolve_mixins_for_uri(&uri);
+    }
 
     // Get the FQNs of entries that were just added
     let added_fqns: Vec<_> = {
@@ -169,7 +185,6 @@ pub fn process_file(
         .cloned()
         .collect();
 
-    let step = Instant::now();
     if !truly_removed.is_empty() {
         let removed_affected = server
             .index()
@@ -182,22 +197,15 @@ pub fn process_file(
         let resolved_affected = server.index().lock().clear_resolved_entries(&added_fqns);
         affected_uris.extend(resolved_affected);
     }
-    debug!(
-        "[PERF]   - Cross-file diagnostics took {:?}",
-        step.elapsed()
-    );
 
     // Update document with index visitor's changes
     if let Some(doc_arc) = server.docs.lock().get(&uri) {
         *doc_arc.write() = index_visitor.document;
     }
-    debug!("[PERF] Definitions phase took {:?}", def_start.elapsed());
 
     // === REFERENCES PHASE ===
-    let ref_start = Instant::now();
 
     // Remove existing references
-    let step = Instant::now();
     {
         let index_arc = server.index();
         let mut index = index_arc.lock();
@@ -206,9 +214,7 @@ pub fn process_file(
             index.remove_unresolved_entries_for_uri(&uri);
         }
     }
-    debug!("[PERF]   - Remove references took {:?}", step.elapsed());
 
-    let step = Instant::now();
     let mut ref_visitor = if ref_options.track_unresolved {
         ReferenceVisitor::with_unresolved_tracking(
             server,
@@ -221,16 +227,22 @@ pub fn process_file(
         ReferenceVisitor::with_options(server, uri.clone(), false)
     };
     ref_visitor.visit(&parse_result.node());
-    debug!("[PERF]   - Reference visitor took {:?}", step.elapsed());
 
     // Update document with reference visitor's changes
     if let Some(doc_arc) = server.docs.lock().get(&uri) {
         *doc_arc.write() = ref_visitor.document;
     }
-    debug!("[PERF] References phase took {:?}", ref_start.elapsed());
 
-    debug!("[PERF] Total process_file took {:?}", total_start.elapsed());
-    Ok(ProcessDefinitionsResult { affected_uris })
+    // Mark document as indexed at current version
+    if let Some(doc_arc) = server.docs.lock().get(&uri) {
+        let mut doc = doc_arc.write();
+        doc.indexed_version = Some(doc.version);
+    }
+
+    Ok(ProcessDefinitionsResult {
+        affected_uris,
+        syntax_diagnostics,
+    })
 }
 
 /// Process content for definitions (in-memory content)
@@ -242,6 +254,11 @@ pub fn process_definitions(
     options: DefinitionOptions,
 ) -> Result<ProcessDefinitionsResult, String> {
     let parse_result = parse(content.as_bytes());
+
+    // Create document for diagnostics generation
+    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+    let syntax_diagnostics = generate_diagnostics(&parse_result, &document);
+
     if parse_result.errors().count() > 0 {
         debug!(
             "Parse errors in content for URI {:?}: {} errors",
@@ -250,6 +267,7 @@ pub fn process_definitions(
         );
         return Ok(ProcessDefinitionsResult {
             affected_uris: std::collections::HashSet::new(),
+            syntax_diagnostics,
         });
     }
 
@@ -308,7 +326,10 @@ pub fn process_definitions(
         *doc_arc.write() = visitor.document;
     }
 
-    Ok(ProcessDefinitionsResult { affected_uris })
+    Ok(ProcessDefinitionsResult {
+        affected_uris,
+        syntax_diagnostics,
+    })
 }
 
 /// Process content for references (in-memory content)

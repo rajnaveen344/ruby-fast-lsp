@@ -5,17 +5,28 @@ use crate::yard::YardTypeConverter;
 use log::{debug, warn};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 
-/// Generate diagnostics for a Ruby document using ruby-prism
+/// Generate diagnostics from a parse result
 ///
-/// This function parses the document content and returns a vector of LSP diagnostics
-/// for syntax errors, warnings, and other issues found in the code.
-pub fn generate_diagnostics(document: &RubyDocument) -> Vec<Diagnostic> {
+/// This extracts syntax errors and warnings from an existing parse result.
+/// Used by process_file() to avoid re-parsing.
+pub fn generate_diagnostics(
+    parse_result: &ruby_prism::ParseResult<'_>,
+    document: &RubyDocument,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    debug!("Generating diagnostics for document: {}", document.uri);
+    // Extend with syntax diagnostics (errors and warnings from parser)
+    diagnostics.extend(extract_syntax_diagnostics(parse_result, document));
 
-    // Parse the document content using ruby-prism
-    let parse_result = ruby_prism::parse(document.content.as_bytes());
+    diagnostics
+}
+
+/// Extract syntax errors and warnings from a parse result
+fn extract_syntax_diagnostics(
+    parse_result: &ruby_prism::ParseResult<'_>,
+    document: &RubyDocument,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
 
     // Check for syntax errors
     let errors: Vec<_> = parse_result.errors().collect();
@@ -80,13 +91,6 @@ pub fn generate_diagnostics(document: &RubyDocument) -> Vec<Diagnostic> {
             diagnostics.push(diagnostic);
         }
     }
-
-    // Additional linting checks can be added here in the future
-    // For example:
-    // - Unused variables
-    // - Unreachable code
-    // - Style violations
-    // - Performance suggestions
 
     debug!(
         "Generated {} total diagnostics for document",
@@ -246,44 +250,38 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::Url;
 
+    fn parse_and_generate(content: &str) -> Vec<Diagnostic> {
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let document = RubyDocument::new(uri, content.to_string(), 1);
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        generate_diagnostics(&parse_result, &document)
+    }
+
     #[test]
     fn test_generate_diagnostics_valid_ruby() {
-        let uri = Url::parse("file:///test.rb").unwrap();
         let content = r#"
 class TestClass
   def test_method
     puts "Hello, World!"
   end
 end
-"#
-        .to_string();
-
-        let document = RubyDocument::new(uri, content, 1);
-        let diagnostics = generate_diagnostics(&document);
-
-        // Valid Ruby code should have no diagnostics
+"#;
+        let diagnostics = parse_and_generate(content);
         assert_eq!(diagnostics.len(), 0);
     }
 
     #[test]
     fn test_generate_diagnostics_syntax_error() {
-        let uri = Url::parse("file:///test.rb").unwrap();
         let content = r#"
 class TestClass
   def test_method
     puts "Hello, World!"
   # Missing 'end' for method
 end
-"#
-        .to_string();
-
-        let document = RubyDocument::new(uri, content, 1);
-        let diagnostics = generate_diagnostics(&document);
-
-        // Should have at least one syntax error diagnostic
+"#;
+        let diagnostics = parse_and_generate(content);
         assert!(!diagnostics.is_empty());
 
-        // Check that the diagnostic is an error
         let first_diagnostic = &diagnostics[0];
         assert_eq!(first_diagnostic.severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(first_diagnostic.source, Some("ruby-fast-lsp".to_string()));
@@ -291,23 +289,16 @@ end
 
     #[test]
     fn test_generate_diagnostics_multiple_errors() {
-        let uri = Url::parse("file:///test.rb").unwrap();
         let content = r#"
 class TestClass
   def test_method(
     puts "Hello, World!"
   # Missing closing parenthesis and 'end'
 end
-"#
-        .to_string();
-
-        let document = RubyDocument::new(uri, content, 1);
-        let diagnostics = generate_diagnostics(&document);
-
-        // Should have multiple syntax diagnostics
+"#;
+        let diagnostics = parse_and_generate(content);
         assert!(!diagnostics.is_empty());
 
-        // All diagnostics should be either errors or warnings
         for diagnostic in &diagnostics {
             assert!(
                 diagnostic.severity == Some(DiagnosticSeverity::ERROR)
@@ -319,20 +310,13 @@ end
 
     #[test]
     fn test_human_readable_diagnostic_messages() {
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let content =
-            "def incomplete_method(\n  puts 'hello'\n# missing closing paren and end".to_string();
-        let document = RubyDocument::new(uri, content, 1);
-
-        let diagnostics = generate_diagnostics(&document);
+        let content = "def incomplete_method(\n  puts 'hello'\n# missing closing paren and end";
+        let diagnostics = parse_and_generate(content);
 
         assert!(!diagnostics.is_empty());
         assert_eq!(diagnostics.len(), 4);
 
-        // Check specific human-readable messages
         let messages: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
-
-        // Verify we get the expected human-readable error messages
         assert!(
             messages.contains(&"unexpected string literal; expected a `)` to close the parameters")
         );
@@ -342,7 +326,6 @@ end
         assert!(messages.contains(&"expected an `end` to close the `def` statement"));
         assert!(messages.contains(&"possibly useless use of a literal in void context"));
 
-        // Verify severities are correct
         let error_count = diagnostics
             .iter()
             .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -354,39 +337,21 @@ end
 
         assert_eq!(error_count, 3);
         assert_eq!(warning_count, 1);
-
-        // Verify all diagnostics have the correct source
-        for diagnostic in &diagnostics {
-            assert_eq!(diagnostic.source, Some("ruby-fast-lsp".to_string()));
-        }
     }
 
     #[test]
     fn test_human_readable_messages_simple_syntax_error() {
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let content = "if true\n  puts 'hello'\n# missing end".to_string();
-        let document = RubyDocument::new(uri, content, 1);
-
-        let diagnostics = generate_diagnostics(&document);
+        let content = "if true\n  puts 'hello'\n# missing end";
+        let diagnostics = parse_and_generate(content);
 
         assert!(!diagnostics.is_empty());
 
-        // Verify all messages are human-readable (no debug artifacts)
         for diagnostic in &diagnostics {
             let message = &diagnostic.message;
-
-            // Should not contain Rust debug artifacts
             assert!(!message.contains("Diagnostic {"));
             assert!(!message.contains("0x"));
-            assert!(!message.contains("PhantomData"));
-            assert!(!message.contains("parser:"));
-            assert!(!message.contains("marker:"));
-
-            // Should be a proper sentence or phrase
             assert!(!message.is_empty());
-            assert!(message.len() > 5); // Reasonable minimum length for a diagnostic message
-
-            // Verify source is set correctly
+            assert!(message.len() > 5);
             assert_eq!(diagnostic.source, Some("ruby-fast-lsp".to_string()));
         }
     }

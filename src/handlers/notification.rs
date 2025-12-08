@@ -9,7 +9,7 @@ use crate::capabilities;
 use crate::config::RubyFastLspConfig;
 use crate::handlers::helpers::{
     detect_system_ruby_version, get_unresolved_diagnostics, init_workspace, process_file,
-    DefinitionOptions, ReferenceOptions,
+    ReferenceOptions,
 };
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
@@ -206,32 +206,31 @@ pub async fn handle_did_open(lang_server: &RubyLanguageServer, params: DidOpenTe
     lang_server
         .docs
         .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
+        .insert(uri.clone(), Arc::new(RwLock::new(document)));
     debug!("Doc cache size: {}", lang_server.docs.lock().len());
 
     // Track file for type narrowing analysis
     lang_server.type_narrowing.on_file_open(&uri, &content);
 
-    // Process file with single parse (definitions + references)
-    let affected_uris = match process_file(
+    // Process file with single parse (definitions + references + diagnostics)
+    // This avoids re-parsing the file for diagnostics
+    let (affected_uris, mut diagnostics) = match process_file(
         lang_server,
         uri.clone(),
         &content,
-        DefinitionOptions::default(),
+        false, // resolve mixins on open
         ReferenceOptions::default().with_unresolved_tracking(true),
     ) {
-        Ok(result) => result.affected_uris,
-        Err(_) => std::collections::HashSet::new(),
+        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
     };
 
     // Invalidate namespace tree cache with debouncing
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
-    // Generate and publish diagnostics (syntax errors + unresolved entries + YARD issues)
-    let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&document);
+    // Add unresolved entry diagnostics and YARD diagnostics (no re-parsing needed)
     diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
-    // Add YARD documentation diagnostics (e.g., @param for non-existent parameters)
     {
         let index = lang_server.index.lock();
         diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
@@ -266,37 +265,57 @@ pub async fn handle_did_change(
         None => return,
     };
 
-    // Update or create the document atomically (lightweight - always do this)
-    let doc = {
+    // Update or create the document atomically
+    {
         let mut docs = lang_server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
             let mut doc_guard = existing_doc.write();
             doc_guard.update(final_content.clone(), version);
-            doc_guard.clone()
         } else {
             let new_doc = RubyDocument::new(uri.clone(), final_content.clone(), version);
-            docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc.clone())));
-            new_doc
+            docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc)));
         }
-    };
-
-    // Lightweight: Only generate syntax diagnostics (fast - no index lookup)
-    let diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
-    lang_server
-        .publish_diagnostics(uri.clone(), diagnostics)
-        .await;
+    }
 
     // Update type narrowing engine with new content
     lang_server
         .type_narrowing
         .on_file_change(&uri, &final_content);
 
-    // Schedule debounced reindex for type inference (500ms delay)
-    lang_server.schedule_reindex_debounced(uri.clone(), final_content);
+    // INSTANT PROCESSING: Do full indexing on every change (no debouncing)
+    // This provides immediate feedback for completions/definitions
+    // Skip mixin resolution and unresolved tracking for speed - defer to save
+    let (affected_uris, mut diagnostics) = match process_file(
+        lang_server,
+        uri.clone(),
+        &final_content,
+        true, // skip mixin resolution on change
+        ReferenceOptions::default().with_unresolved_tracking(false),
+    ) {
+        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    };
+
+    // Add unresolved diagnostics (fast - just index lookup)
+    diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
+
+    lang_server
+        .publish_diagnostics(uri.clone(), diagnostics)
+        .await;
 
     // Invalidate namespace tree cache with debouncing
     lang_server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to index change");
+
+    // Publish diagnostics for affected files (cross-file propagation)
+    for affected_uri in affected_uris {
+        if affected_uri != uri {
+            let affected_diagnostics = get_unresolved_diagnostics(lang_server, &affected_uri);
+            lang_server
+                .publish_diagnostics(affected_uri, affected_diagnostics)
+                .await;
+        }
+    }
 }
 
 pub async fn handle_did_close(
@@ -312,13 +331,12 @@ pub async fn handle_did_close(
     // Remove type narrowing CFG cache for this file
     lang_server.type_narrowing.on_file_close(&uri);
 
-    // Keep unresolved entry diagnostics visible (project-wide diagnostics like rust-analyzer)
+    // Keep unresolved entry diagnostics visible (project-wide diagnostics)
     let diagnostics = get_unresolved_diagnostics(lang_server, &uri);
     lang_server.publish_diagnostics(uri, diagnostics).await;
 }
 
 pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
-    let start_time = std::time::Instant::now();
     let uri = params.text_document.uri;
     info!("Document saved: {}", uri.path());
 
@@ -327,37 +345,32 @@ pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTe
     }
 
     // Get the current document content
-    let (doc, content) = {
+    let content = {
         let docs = lang_server.docs.lock();
         match docs.get(&uri) {
-            Some(doc_arc) => {
-                let doc = doc_arc.read().clone();
-                let content = doc.content.clone();
-                (doc, content)
-            }
+            Some(doc_arc) => doc_arc.read().content.clone(),
             None => return,
         }
     };
 
-    // Do full indexing on save (heavy work deferred from did_change)
-    let affected_uris = match process_file(
+    // On save: do full indexing with unresolved tracking (for cross-file diagnostics)
+    // This is the only place we track unresolved references for accurate diagnostics
+    let (affected_uris, mut diagnostics) = match process_file(
         lang_server,
         uri.clone(),
         &content,
-        DefinitionOptions::default(),
+        false, // resolve mixins on save
         ReferenceOptions::default().with_unresolved_tracking(true),
     ) {
-        Ok(result) => result.affected_uris,
-        Err(_) => std::collections::HashSet::new(),
+        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
     };
 
     // Invalidate namespace tree cache
     lang_server.invalidate_namespace_tree_cache_debounced();
 
-    // Generate and publish full diagnostics (syntax + unresolved + YARD)
-    let mut diagnostics = capabilities::diagnostics::generate_diagnostics(&doc);
+    // Add unresolved diagnostics and YARD diagnostics (no re-parsing needed)
     diagnostics.extend(get_unresolved_diagnostics(lang_server, &uri));
-    // Add YARD documentation diagnostics
     {
         let index = lang_server.index.lock();
         diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
@@ -380,11 +393,6 @@ pub async fn handle_did_save(lang_server: &RubyLanguageServer, params: DidSaveTe
 
     // Request the client to refresh inlay hints after save
     lang_server.refresh_inlay_hints().await;
-
-    info!(
-        "[PERF] Document save handler completed in {:?}",
-        start_time.elapsed()
-    );
 }
 
 pub async fn handle_did_change_watched_files(

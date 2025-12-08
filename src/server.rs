@@ -237,55 +237,6 @@ impl RubyLanguageServer {
             }
         });
     }
-
-    /// Schedule a debounced reindex for the given URI (500ms delay)
-    /// This allows type inference to work while typing without blocking
-    pub fn schedule_reindex_debounced(&self, uri: Url, content: String) {
-        let server = self.clone();
-        tokio::spawn(async move {
-            // Set the timer to current time with the URI
-            {
-                let mut timer = server.reindex_timer.lock();
-                *timer = Some((Instant::now(), uri.clone()));
-            }
-
-            // Wait for the debounce period (500ms - longer than cache invalidation)
-            sleep(Duration::from_millis(500)).await;
-
-            // Check if we should still reindex (no newer timer was set for this URI)
-            let should_reindex = {
-                let timer = server.reindex_timer.lock();
-                if let Some((timer_instant, timer_uri)) = timer.as_ref() {
-                    timer_instant.elapsed() >= Duration::from_millis(500) && *timer_uri == uri
-                } else {
-                    false
-                }
-            };
-
-            if should_reindex {
-                use crate::handlers::helpers::{process_file, DefinitionOptions, ReferenceOptions};
-
-                debug!("Debounced reindex triggered for {}", uri.path());
-
-                // Do the reindex
-                let _ = process_file(
-                    &server,
-                    uri.clone(),
-                    &content,
-                    DefinitionOptions::default(),
-                    ReferenceOptions::default(),
-                );
-
-                // Clear the timer
-                *server.reindex_timer.lock() = None;
-
-                // Request the client to refresh inlay hints
-                server.refresh_inlay_hints().await;
-
-                debug!("Debounced reindex completed for {}", uri.path());
-            }
-        });
-    }
 }
 
 impl Default for RubyLanguageServer {

@@ -11,6 +11,8 @@ pub struct RubyDocument {
     pub uri: Url,
     pub content: String,
     pub version: i32,
+    /// The version at which this document was last indexed (None if never indexed)
+    pub indexed_version: Option<i32>,
     /// Byte offset at the start of each line (last element is total content length)
     /// Eg. def foo\n  puts 'Hello'\nend\n
     ///     ^ -> 0   ^ -> 8          ^ -> 23
@@ -31,6 +33,7 @@ impl RubyDocument {
             uri,
             content,
             version,
+            indexed_version: None,
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
             lvars: BTreeMap::new(),
