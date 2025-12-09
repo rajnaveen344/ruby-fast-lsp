@@ -31,5 +31,5 @@ pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;
 pub mod prefix_tree;
-pub mod utils;
+
 pub mod version;

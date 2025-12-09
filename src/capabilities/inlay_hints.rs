@@ -23,7 +23,7 @@ pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
     })
 }
 
-use super::utils::position_to_offset;
+use crate::utils::position_to_offset;
 
 pub async fn handle_inlay_hints(
     server: &RubyLanguageServer,

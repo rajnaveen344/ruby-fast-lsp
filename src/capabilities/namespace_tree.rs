@@ -2,7 +2,7 @@ use crate::indexer::ancestor_chain::resolve_mixin_ref;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{Entry, MixinRef};
 use crate::indexer::index::RubyIndex;
-use crate::indexer::utils;
+// use crate::indexer::utils; // Removed
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use log::debug;
@@ -92,7 +92,7 @@ pub async fn handle_namespace_tree(
     for (fqn, entries) in &index.definitions {
         let mut project_entries_for_fqn = Vec::new();
         for entry in entries {
-            if !utils::is_project_file(&entry.location.uri) {
+            if !crate::utils::is_project_file(&entry.location.uri) {
                 continue;
             }
             match &entry.kind {

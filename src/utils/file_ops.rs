@@ -1,10 +1,11 @@
-//! Indexer Utilities
+//! File System Utilities
 //!
-//! Common utility functions shared across indexer modules:
+//! Common utility functions for:
 //! - File collection and filtering
 //! - Ruby file detection
 //! - Path utilities for distinguishing project vs external files
 
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
@@ -36,6 +37,12 @@ pub fn should_index_file(path: &Path) -> bool {
 // ============================================================================
 // File Collection
 // ============================================================================
+
+/// Find all Ruby files in a directory (recursive)
+/// Wrapper around collect_ruby_files for compatibility
+pub fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    Ok(collect_ruby_files(dir))
+}
 
 /// Collect Ruby files recursively from a directory
 ///

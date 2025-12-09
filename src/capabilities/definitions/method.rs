@@ -28,7 +28,6 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;
-use crate::capabilities::utils::position_to_offset;
 use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
@@ -38,6 +37,7 @@ use crate::type_inference::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
+use crate::utils::position_to_offset;
 
 /// Find definitions for a Ruby method with type-aware filtering.
 ///

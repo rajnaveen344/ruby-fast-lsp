@@ -4,7 +4,7 @@ use crate::indexer::indexer_core::IndexerCore;
 use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
-use crate::indexer::utils;
+
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
@@ -224,7 +224,7 @@ impl IndexingCoordinator {
 
     /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::handlers::helpers::get_unresolved_diagnostics;
+        use crate::capabilities::indexing::processor::get_unresolved_diagnostics;
 
         // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
@@ -371,7 +371,7 @@ impl IndexingCoordinator {
     /// but skips common directories that usually don't contain Ruby source code
     /// (like node_modules, .git, tmp, etc.)
     pub fn find_all_ruby_files_in_directory(&self, dir: &Path, files: &mut Vec<PathBuf>) {
-        let collected_files = utils::collect_ruby_files(dir);
+        let collected_files = crate::utils::collect_ruby_files(dir);
         files.extend(collected_files);
     }
 
@@ -380,7 +380,7 @@ impl IndexingCoordinator {
     /// This looks at the file extension (.rb, .ruby, .rake) and also checks
     /// for common Ruby files that don't have extensions (like Rakefile, Gemfile)
     pub fn is_ruby_file(&self, path: &Path) -> bool {
-        utils::should_index_file(path)
+        crate::utils::should_index_file(path)
     }
 
     /// Find the Ruby core stubs for a specific Ruby version

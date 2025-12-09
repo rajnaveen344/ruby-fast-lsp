@@ -5,13 +5,12 @@ use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 use ruby_prism::{parse, Visit};
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
@@ -631,52 +630,4 @@ pub fn get_unresolved_diagnostics(server: &RubyLanguageServer, uri: &Url) -> Vec
             }
         })
         .collect()
-}
-
-// ============================================================================
-// Ruby Version Detection
-// ============================================================================
-
-/// Detect system Ruby version without workspace context
-pub fn detect_system_ruby_version() -> Option<(u8, u8)> {
-    let output = std::process::Command::new("ruby")
-        .args(["--version"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let version_output = String::from_utf8_lossy(&output.stdout);
-    // Parse output like "ruby 3.0.0p0 (2020-12-25 revision 95aff21468) [x86_64-darwin20]"
-    let version_part = version_output.split_whitespace().nth(1)?;
-    debug!("System ruby version output: {}", version_part);
-    let version = RubyVersion::from_full_version(version_part)?;
-    Some((version.major, version.minor))
-}
-
-// ============================================================================
-// File Discovery
-// ============================================================================
-
-/// Find all Ruby files in a directory (recursive)
-pub fn find_ruby_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut ruby_files = Vec::new();
-    collect_ruby_files(dir, &mut ruby_files)?;
-    Ok(ruby_files)
-}
-
-fn collect_ruby_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            collect_ruby_files(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "rb") {
-            files.push(path);
-        }
-    }
-    Ok(())
 }

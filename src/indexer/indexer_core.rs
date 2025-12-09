@@ -7,7 +7,7 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::indexer::index::RubyIndex;
-use crate::indexer::utils;
+// use crate::indexer::utils; // Removed
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -232,7 +232,7 @@ impl IndexerCore {
             .iter()
             .filter(|path| {
                 Url::from_file_path(path)
-                    .map(|uri| utils::is_project_file(&uri))
+                    .map(|uri| crate::utils::is_project_file(&uri))
                     .unwrap_or(false)
             })
             .cloned()
@@ -279,12 +279,12 @@ impl IndexerCore {
 
     /// Check if a file should be indexed based on its extension
     pub fn should_index_file(&self, path: &Path) -> bool {
-        utils::should_index_file(path)
+        crate::utils::should_index_file(path)
     }
 
     /// Collect Ruby files recursively from a directory
     pub fn collect_ruby_files(&self, dir: &Path) -> Vec<PathBuf> {
-        utils::collect_ruby_files(dir)
+        crate::utils::collect_ruby_files(dir)
     }
 }
 

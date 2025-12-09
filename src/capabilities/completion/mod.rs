@@ -506,7 +506,7 @@ fn is_variable_name(text: &str) -> bool {
     text.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
-use super::utils::position_to_offset;
+use crate::utils::position_to_offset;
 
 #[cfg(test)]
 mod tests {
@@ -554,7 +554,7 @@ end
 "#;
 
         // Explicitly call processing function to ensure local variables are indexed
-        use crate::handlers::helpers::{process_definitions, DefinitionOptions};
+        use crate::capabilities::indexing::processor::{process_definitions, DefinitionOptions};
         use crate::types::ruby_document::RubyDocument;
         use parking_lot::RwLock;
         use std::sync::Arc;
