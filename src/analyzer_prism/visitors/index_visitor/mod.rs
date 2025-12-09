@@ -67,10 +67,18 @@ impl IndexVisitor {
 
         // Try method call resolution
         if let Some(call_node) = value_node.as_call_node() {
-            let resolver = MethodResolver::new(self.index.clone());
+            let ns_stack = self.scope_tracker.get_ns_stack();
+            log::debug!(
+                "infer_type_from_value: method call detected, namespace stack: {:?}",
+                ns_stack
+            );
+            // Pass current namespace context so 'self' can be resolved properly
+            let resolver = MethodResolver::with_namespace(self.index.clone(), ns_stack);
             if let Some(return_type) = resolver.resolve_call_type(&call_node) {
+                log::debug!("infer_type_from_value: resolved type: {:?}", return_type);
                 return return_type;
             }
+            log::debug!("infer_type_from_value: could not resolve type");
         }
 
         // Default to unknown type

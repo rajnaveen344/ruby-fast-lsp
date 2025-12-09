@@ -546,10 +546,10 @@ async fn run_simulation(
                 // Check if any hint contains the expected type
                 let (has_expected_type, actual_hint) = match &result {
                     Ok(Some(hints)) => {
-                        // Find hint near the variable position
-                        let near_hint = hints.iter().find(|hint| {
-                            (hint.position.line as i32 - var_pos.line as i32).abs() <= 2
-                        });
+                        // Find hint exactly on the variable's line (not with tolerance)
+                        // This prevents picking up hints from adjacent typed variable lines
+                        let near_hint =
+                            hints.iter().find(|hint| hint.position.line == var_pos.line);
 
                         if let Some(hint) = near_hint {
                             let hint_text = match &hint.label {

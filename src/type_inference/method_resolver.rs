@@ -24,6 +24,8 @@ use crate::types::ruby_namespace::RubyConstant;
 pub struct MethodResolver {
     index: Arc<Mutex<RubyIndex>>,
     literal_analyzer: LiteralAnalyzer,
+    /// Current namespace context (for resolving 'self')
+    current_namespace: Vec<RubyConstant>,
 }
 
 impl MethodResolver {
@@ -31,6 +33,20 @@ impl MethodResolver {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
+            current_namespace: Vec::new(),
+        }
+    }
+
+    /// Create a MethodResolver with namespace context for resolving 'self'
+    pub fn with_namespace(index: Arc<Mutex<RubyIndex>>, namespace: Vec<RubyConstant>) -> Self {
+        log::debug!(
+            "MethodResolver::with_namespace called with: {:?}",
+            namespace
+        );
+        Self {
+            index,
+            literal_analyzer: LiteralAnalyzer::new(),
+            current_namespace: namespace,
         }
     }
 
@@ -127,9 +143,16 @@ impl MethodResolver {
 
         // Get receiver type
         let receiver_type = self.resolve_receiver_type(call_node.receiver())?;
+        log::debug!(
+            "resolve_call_type: method={}, receiver_type={:?}",
+            method_name,
+            receiver_type
+        );
 
         // Look up method and get its return type
-        self.lookup_method_return_type(&receiver_type, &method_name)
+        let result = self.lookup_method_return_type(&receiver_type, &method_name);
+        log::debug!("resolve_call_type: result={:?}", result);
+        result
     }
 
     /// Resolve the type of a receiver expression
@@ -156,9 +179,21 @@ impl MethodResolver {
             return Some(RubyType::ClassReference(fqn));
         }
 
-        // Handle self
-        if receiver.as_self_node().is_some() {
-            // Self type depends on context - for now return Any
+        // Handle self - resolve to current class if we have namespace context
+        let is_self = receiver.as_self_node().is_some();
+        if is_self {
+            log::debug!(
+                "Resolving self receiver with namespace context: {:?}",
+                self.current_namespace
+            );
+            if !self.current_namespace.is_empty() {
+                // Self is an instance of the current class/module
+                let fqn = FullyQualifiedName::Constant(self.current_namespace.clone());
+                log::debug!("Self resolved to: {:?}", fqn);
+                return Some(RubyType::Class(fqn));
+            }
+            // No namespace context, fall back to Any
+            log::debug!("Self has no namespace context, returning Any");
             return Some(RubyType::Any);
         }
 
@@ -268,16 +303,24 @@ impl MethodResolver {
             // Look up the method in the index
             let index = self.index.lock();
 
-            // Try to find method by name
+            // Get the ancestor chain for this class/module
+            let ancestors = crate::indexer::ancestor_chain::get_ancestor_chain(
+                &index,
+                &owner_fqn,
+                is_singleton,
+            );
+
+            // Search through the ancestor chain for the method
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
                 if let Some(entries) = index.methods_by_name.get(&ruby_method) {
-                    // Find method that belongs to the owner
+                    // Find method that belongs to any class in the ancestor chain
                     for entry in entries {
                         if let EntryKind::Method {
                             owner, return_type, ..
                         } = &entry.kind
                         {
-                            if *owner == owner_fqn {
+                            // Check if owner is in ancestor chain
+                            if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
                                     return Some(rt.clone());
                                 }
@@ -303,7 +346,8 @@ impl MethodResolver {
                             owner, return_type, ..
                         } = &entry.kind
                         {
-                            if *owner == owner_fqn {
+                            // Check if owner is in ancestor chain
+                            if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
                                     return Some(rt.clone());
                                 }

@@ -110,10 +110,9 @@ impl LiteralAnalyzer {
             ));
         }
 
-        // Self keyword
-        if node.as_self_node().is_some() {
-            return Some(RubyType::Any); // Type depends on context
-        }
+        // NOTE: Self is intentionally NOT handled here. It's not a literal -
+        // its type depends on the class/module context and is resolved in
+        // MethodResolver::resolve_receiver_type with proper namespace context.
 
         // Handle array indexing: array[index] where array is a literal
         // This handles cases like ["a", "b", "c"][0]

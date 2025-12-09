@@ -279,6 +279,12 @@ impl GeneratorState {
             .insert(var_name.to_string(), expected_type.to_string());
     }
 
+    /// Create a method call WITHOUT type expectations
+    /// Use this when method return type inference isn't reliable enough to test
+    pub fn untyped_method_call(&mut self, var_name: &str, receiver: &str, method_name: &str) {
+        self.emit(&format!("{} = {}.{}", var_name, receiver, method_name));
+    }
+
     /// Add instance variable with type tracking
     pub fn define_ivar(&mut self, ivar_name: &str, value: &str, expected_type: &str) {
         let type_anchor = self.make_type_anchor();
