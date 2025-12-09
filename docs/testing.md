@@ -38,13 +38,13 @@ We use **property-based testing** with [proptest](https://proptest-rs.github.io/
 Run the main simulation test (100 cases by default):
 
 ```bash
-cargo test test::simulation::tests::sim --release
+cargo test test::simulation::tests::sim --release -- --ignored
 ```
 
 Run with more cases:
 
 ```bash
-PROPTEST_CASES=1000 cargo test test::simulation::tests::sim --release
+PROPTEST_CASES=1000 cargo test test::simulation::tests::sim --release -- --ignored
 ```
 
 Run all simulation-related tests (including unit tests for position tracking):

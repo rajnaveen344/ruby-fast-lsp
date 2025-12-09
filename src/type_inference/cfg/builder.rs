@@ -172,7 +172,7 @@ impl<'a> CfgBuilder<'a> {
                     let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
                     self.cfg
                         .parameters
-                        .push((name_str, RubyType::Array(vec![RubyType::Any])));
+                        .push((name_str, RubyType::Array(vec![RubyType::Unknown])));
                 }
             }
         }
@@ -202,7 +202,7 @@ impl<'a> CfgBuilder<'a> {
                     let name_str = String::from_utf8_lossy(name.as_slice()).to_string();
                     self.cfg.parameters.push((
                         name_str,
-                        RubyType::Hash(vec![RubyType::symbol()], vec![RubyType::Any]),
+                        RubyType::Hash(vec![RubyType::symbol()], vec![RubyType::Unknown]),
                     ));
                 }
             }
@@ -1337,8 +1337,8 @@ impl<'a> CfgBuilder<'a> {
             "TrueClass" => RubyType::true_class(),
             "FalseClass" => RubyType::false_class(),
             "NilClass" => RubyType::nil_class(),
-            "Array" => RubyType::Array(vec![RubyType::Any]),
-            "Hash" => RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]),
+            "Array" => RubyType::Array(vec![RubyType::Unknown]),
+            "Hash" => RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]),
             _ => RubyType::class(name),
         }
     }

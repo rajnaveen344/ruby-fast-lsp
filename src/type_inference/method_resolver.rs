@@ -133,7 +133,7 @@ impl MethodResolver {
             RubyType::Array(_) => Some("Array".to_string()),
             RubyType::Hash(_, _) => Some("Hash".to_string()),
             RubyType::Union(_) => None,
-            RubyType::Unknown | RubyType::Any => None,
+            RubyType::Unknown => None,
         }
     }
 
@@ -192,9 +192,9 @@ impl MethodResolver {
                 log::debug!("Self resolved to: {:?}", fqn);
                 return Some(RubyType::Class(fqn));
             }
-            // No namespace context, fall back to Any
-            log::debug!("Self has no namespace context, returning Any");
-            return Some(RubyType::Any);
+            // No namespace context, fall back to Unknown
+            log::debug!("Self has no namespace context, returning Unknown");
+            return Some(RubyType::Unknown);
         }
 
         // Handle local variable read
@@ -384,7 +384,7 @@ impl MethodResolver {
             RubyType::Array(_) => Some("Array".to_string()),
             RubyType::Hash(_, _) => Some("Hash".to_string()),
             RubyType::Union(_) => None, // Can't lookup methods on union types directly
-            RubyType::Unknown | RubyType::Any => None,
+            RubyType::Unknown => None,
         }
     }
 

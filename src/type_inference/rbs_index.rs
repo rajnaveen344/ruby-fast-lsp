@@ -78,9 +78,9 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         RbsType::Void => RubyType::nil_class(),
         RbsType::Nil => RubyType::nil_class(),
         RbsType::Bool => RubyType::Union(vec![RubyType::true_class(), RubyType::false_class()]),
-        RbsType::Top | RbsType::Bot | RbsType::Untyped => RubyType::Any,
-        RbsType::SelfType => RubyType::Any, // TODO: Track self type in context
-        RbsType::Instance => RubyType::Any, // TODO: Track instance type in context
+        RbsType::Top | RbsType::Bot | RbsType::Untyped => RubyType::Unknown,
+        RbsType::SelfType => RubyType::Unknown, // TODO: Track self type in context
+        RbsType::Instance => RubyType::Unknown, // TODO: Track instance type in context
         RbsType::Class(name) => class_name_to_ruby_type(name),
         RbsType::ClassInstance { name, args } => {
             // Strip leading :: from name for matching
@@ -108,7 +108,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         }
         RbsType::ClassType => {
             // The `class` type - represents a class object
-            RubyType::Any
+            RubyType::Unknown
         }
         RbsType::Union(types) => {
             let ruby_types: Vec<RubyType> = types.iter().map(rbs_type_to_ruby_type).collect();
@@ -168,7 +168,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         }
         RbsType::TypeVar(_) => {
             // Type variables like T - can't resolve without context
-            RubyType::Any
+            RubyType::Unknown
         }
     }
 }

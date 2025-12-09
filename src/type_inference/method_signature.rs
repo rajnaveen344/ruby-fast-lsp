@@ -457,7 +457,7 @@ mod tests {
         assert!(keyword_param.keyword);
         assert!(!keyword_param.required);
 
-        let splat_param = Parameter::new_splat("args".to_string(), RubyType::Any);
+        let splat_param = Parameter::new_splat("args".to_string(), RubyType::Unknown);
         assert!(splat_param.splat);
 
         let block_param = Parameter::new_block("block".to_string());

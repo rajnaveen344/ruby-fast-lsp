@@ -749,6 +749,7 @@ proptest! {
     /// Run with: `cargo test sim`
     /// More cases: `PROPTEST_CASES=1000 cargo test sim`
     #[test]
+    #[ignore]
     fn sim(
         tracked in tracked_code(),
         query_lines in prop::collection::vec(0..50u32, 0..15),

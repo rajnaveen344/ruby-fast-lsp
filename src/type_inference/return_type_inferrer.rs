@@ -446,8 +446,8 @@ impl ReturnTypeInferrer {
             "TrueClass" => RubyType::true_class(),
             "FalseClass" => RubyType::false_class(),
             "NilClass" => RubyType::nil_class(),
-            "Array" => RubyType::Array(vec![RubyType::Any]),
-            "Hash" => RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]),
+            "Array" => RubyType::Array(vec![RubyType::Unknown]),
+            "Hash" => RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]),
             _ => RubyType::class(name),
         }
     }

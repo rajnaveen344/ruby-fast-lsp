@@ -22,9 +22,7 @@ pub enum RubyType {
     // Composite types
     Union(Vec<RubyType>),
 
-    // Special types
     Unknown,
-    Any,
 }
 
 impl RubyType {
@@ -79,13 +77,16 @@ impl RubyType {
                 RubyType::Union(inner_types) => {
                     type_vec.extend(inner_types);
                 }
-                // Skip Any type as it subsumes all others
-                RubyType::Any => return RubyType::Any,
                 // Add other types
                 other => {
                     type_vec.push(other);
                 }
             }
+        }
+
+        // Check if Unknown is present (Strict strictness: Unknown absorbs all types)
+        if type_vec.contains(&RubyType::Unknown) {
+            return RubyType::Unknown;
         }
 
         // Remove duplicates
@@ -102,12 +103,7 @@ impl RubyType {
     /// Check if this type is a subtype of another type
     pub fn is_subtype_of(&self, other: &RubyType) -> bool {
         match (self, other) {
-            // Any type is only subtype of itself
-            (RubyType::Any, RubyType::Any) => true,
-            (_, RubyType::Any) => true,
-            (RubyType::Any, _) => false,
-
-            // Unknown is subtype of nothing except Any and itself
+            // Unknown is subtype of nothing except itself
             (RubyType::Unknown, RubyType::Unknown) => true,
             (RubyType::Unknown, _) => false,
 
@@ -220,12 +216,8 @@ impl RubyType {
         }
 
         match (self, other) {
-            // Any absorbs everything
-            (RubyType::Any, _) | (_, RubyType::Any) => RubyType::Any,
-
-            // Unknown is identity for union
-            (RubyType::Unknown, other) => other.clone(),
-            (this, RubyType::Unknown) => this.clone(),
+            // Unknown absorbs everything (Strict merging)
+            (RubyType::Unknown, _) | (_, RubyType::Unknown) => RubyType::Unknown,
 
             // Merge unions
             (RubyType::Union(types1), RubyType::Union(types2)) => {
@@ -273,7 +265,6 @@ impl Display for RubyType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             RubyType::Unknown => write!(f, "?"),
-            RubyType::Any => write!(f, "Any"),
             RubyType::Class(fqn) => write!(f, "{}", fqn),
             RubyType::Module(fqn) => write!(f, "module {}", fqn),
             RubyType::ClassReference(fqn) => write!(f, "Class<{}>", fqn),
@@ -358,10 +349,8 @@ mod tests {
 
     #[test]
     fn test_subtype_relationships() {
-        assert!(RubyType::integer().is_subtype_of(&RubyType::Any));
         assert!(RubyType::integer().is_subtype_of(&RubyType::integer()));
         assert!(!RubyType::integer().is_subtype_of(&RubyType::string()));
-        assert!(!RubyType::Any.is_subtype_of(&RubyType::integer()));
     }
 
     #[test]
@@ -399,7 +388,7 @@ mod tests {
             _ => panic!("Expected union type"),
         }
 
-        let int_any = RubyType::integer().common_supertype(&RubyType::Any);
-        assert_eq!(int_any, RubyType::Any);
+        let int_unknown = RubyType::integer().union_with(&RubyType::Unknown);
+        assert_eq!(int_unknown, RubyType::Unknown);
     }
 }

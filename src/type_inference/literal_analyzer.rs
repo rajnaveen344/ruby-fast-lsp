@@ -183,8 +183,8 @@ impl LiteralAnalyzer {
             if let Some(element_type) = self.analyze_literal(&element) {
                 element_types.push(element_type);
             } else {
-                // If we can't infer the type, use Any
-                element_types.push(RubyType::Any);
+                // If we can't infer the type, use Unknown
+                element_types.push(RubyType::Unknown);
             }
         }
 
@@ -212,14 +212,14 @@ impl LiteralAnalyzer {
                 if let Some(key_type) = self.analyze_literal(&assoc_node.key()) {
                     key_types.push(key_type);
                 } else {
-                    key_types.push(RubyType::Any);
+                    key_types.push(RubyType::Unknown);
                 }
 
                 // Analyze value
                 if let Some(value_type) = self.analyze_literal(&assoc_node.value()) {
                     value_types.push(value_type);
                 } else {
-                    value_types.push(RubyType::Any);
+                    value_types.push(RubyType::Unknown);
                 }
             } else if let Some(assoc_splat_node) = element.as_assoc_splat_node() {
                 // Handle splat operator (**hash)
@@ -232,9 +232,9 @@ impl LiteralAnalyzer {
                                 value_types.extend(values);
                             }
                             _ => {
-                                // Unknown hash splat, assume Any types
-                                key_types.push(RubyType::Any);
-                                value_types.push(RubyType::Any);
+                                // Unknown hash splat, assume Unknown types
+                                key_types.push(RubyType::Unknown);
+                                value_types.push(RubyType::Unknown);
                             }
                         }
                     }

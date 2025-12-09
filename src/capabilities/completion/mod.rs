@@ -464,12 +464,15 @@ fn infer_literal_type(text: &str) -> Option<crate::type_inference::ruby_type::Ru
 
     // Array literal
     if text.starts_with('[') {
-        return Some(RubyType::Array(vec![RubyType::Any]));
+        return Some(RubyType::Array(vec![RubyType::Unknown]));
     }
 
     // Hash literal
     if text.starts_with('{') {
-        return Some(RubyType::Hash(vec![RubyType::Any], vec![RubyType::Any]));
+        return Some(RubyType::Hash(
+            vec![RubyType::Unknown],
+            vec![RubyType::Unknown],
+        ));
     }
 
     // Integer literal (must check before float)

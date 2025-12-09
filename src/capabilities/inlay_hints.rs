@@ -155,7 +155,7 @@ pub async fn handle_inlay_hints(
                         .and_then(|doc| doc.format_return_type())
                         .or_else(|| {
                             return_type.as_ref().and_then(|rt| {
-                                if *rt != RubyType::Unknown && *rt != RubyType::Any {
+                                if *rt != RubyType::Unknown {
                                     Some(rt.to_string())
                                 } else {
                                     None
