@@ -449,7 +449,7 @@ impl<'a> Visitor<'a> {
             if let Some(arrow_pos) = text.rfind("->") {
                 let return_type_str = text[arrow_pos + 2..].trim();
                 if !return_type_str.is_empty() {
-                    let return_type = self.parse_simple_type(return_type_str);
+                    let return_type = Self::parse_simple_type(return_type_str);
                     method.overloads.push(MethodType::new(return_type));
                 }
             }
@@ -615,7 +615,7 @@ impl<'a> Visitor<'a> {
             let parts: Vec<&str> = text.split_whitespace().collect();
             if !parts.is_empty() {
                 let type_str = parts[0].trim_start_matches('?').trim_start_matches('*');
-                param.r#type = self.parse_simple_type(type_str);
+                param.r#type = Self::parse_simple_type(type_str);
                 if parts.len() > 1 {
                     param.name = Some(parts[1].to_string());
                 }
@@ -872,7 +872,7 @@ impl<'a> Visitor<'a> {
             }
 
             // Default: try to parse as simple type
-            _ => Ok(self.parse_simple_type(text)),
+            _ => Ok(Self::parse_simple_type(text)),
         }
     }
 
@@ -931,12 +931,12 @@ impl<'a> Visitor<'a> {
     }
 
     /// Parse a simple type from text
-    fn parse_simple_type(&self, text: &str) -> RbsType {
+    fn parse_simple_type(text: &str) -> RbsType {
         let text = text.trim();
 
         // Handle optional types
-        if text.ends_with('?') {
-            let inner = self.parse_simple_type(&text[..text.len() - 1]);
+        if let Some(stripped) = text.strip_suffix('?') {
+            let inner = Self::parse_simple_type(stripped);
             return RbsType::optional(inner);
         }
 
@@ -962,7 +962,7 @@ impl<'a> Visitor<'a> {
                             let args_str = &text[bracket_pos + 1..close_bracket];
                             let args: Vec<RbsType> = args_str
                                 .split(',')
-                                .map(|s| self.parse_simple_type(s.trim()))
+                                .map(|s| Self::parse_simple_type(s.trim()))
                                 .collect();
                             return RbsType::generic(name, args);
                         }
@@ -1010,23 +1010,19 @@ mod tests {
 
     #[test]
     fn test_parse_simple_type() {
-        let visitor = Visitor::new("");
-
         assert_eq!(
-            visitor.parse_simple_type("String"),
+            Visitor::parse_simple_type("String"),
             RbsType::Class("String".to_string())
         );
-        assert_eq!(visitor.parse_simple_type("void"), RbsType::Void);
-        assert_eq!(visitor.parse_simple_type("nil"), RbsType::Nil);
-        assert_eq!(visitor.parse_simple_type("bool"), RbsType::Bool);
-        assert_eq!(visitor.parse_simple_type("self"), RbsType::SelfType);
+        assert_eq!(Visitor::parse_simple_type("void"), RbsType::Void);
+        assert_eq!(Visitor::parse_simple_type("nil"), RbsType::Nil);
+        assert_eq!(Visitor::parse_simple_type("bool"), RbsType::Bool);
+        assert_eq!(Visitor::parse_simple_type("self"), RbsType::SelfType);
     }
 
     #[test]
     fn test_parse_optional_type() {
-        let visitor = Visitor::new("");
-
-        let result = visitor.parse_simple_type("String?");
+        let result = Visitor::parse_simple_type("String?");
         assert_eq!(
             result,
             RbsType::optional(RbsType::Class("String".to_string()))
@@ -1035,9 +1031,7 @@ mod tests {
 
     #[test]
     fn test_parse_generic_type() {
-        let visitor = Visitor::new("");
-
-        let result = visitor.parse_simple_type("Array[String]");
+        let result = Visitor::parse_simple_type("Array[String]");
         assert_eq!(
             result,
             RbsType::generic("Array", vec![RbsType::Class("String".to_string())])

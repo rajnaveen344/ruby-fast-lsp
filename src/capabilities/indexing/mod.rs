@@ -1,18 +1,28 @@
-pub mod processor;
+// pub mod processor; // DEPRECATED
 
-use crate::capabilities;
+use crate::indexer::coordinator::IndexingCoordinator;
+use crate::indexer::file_processor::{get_unresolved_diagnostics, ProcessingOptions};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
+use crate::{capabilities, indexer::file_processor::FileProcessor};
+
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
-use self::processor::{get_unresolved_diagnostics, process_file, ReferenceOptions};
-
 /// Initialize workspace and run complete indexing
 pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> anyhow::Result<()> {
-    processor::init_workspace(server, folder_uri).await
+    let workspace_path = folder_uri
+        .to_file_path()
+        .map_err(|_| anyhow::anyhow!("Failed to convert folder URI to file path"))?;
+
+    info!("Initializing workspace: {:?}", workspace_path);
+
+    let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
+    coordinator.run_complete_indexing(server).await?;
+
+    Ok(())
 }
 
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
@@ -30,18 +40,20 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     // Track file for type narrowing analysis
     server.type_narrowing.on_file_open(&uri, &content);
 
-    // Process file with single parse (definitions + references + diagnostics)
-    // This avoids re-parsing the file for diagnostics
-    let (affected_uris, mut diagnostics) = match process_file(
-        server,
-        uri.clone(),
-        &content,
-        false, // resolve mixins on open
-        ReferenceOptions::default().with_unresolved_tracking(true),
-    ) {
-        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    // Process file with unified FileProcessor::process_file
+    let indexer = FileProcessor::new(server.index.clone());
+    let options = ProcessingOptions {
+        index_definitions: true,
+        index_references: true,
+        resolve_mixins: true, // resolve mixins on open
+        include_local_vars: true,
     };
+
+    let (affected_uris, mut diagnostics) =
+        match indexer.process_file(&uri, &content, server, options) {
+            Ok(result) => (result.affected_uris, result.diagnostics),
+            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        };
 
     // Invalidate namespace tree cache with debouncing
     server.invalidate_namespace_tree_cache_debounced();
@@ -93,23 +105,29 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Update type narrowing engine with new content
     server.type_narrowing.on_file_change(&uri, &final_content);
 
-    // INSTANT PROCESSING: Do full indexing on every change (no debouncing)
-    // This provides immediate feedback for completions/definitions
-    // Skip mixin resolution and unresolved tracking for speed - defer to save
-    let (affected_uris, mut diagnostics) = match process_file(
-        server,
-        uri.clone(),
-        &final_content,
-        true, // skip mixin resolution on change
-        ReferenceOptions::default().with_unresolved_tracking(false),
-    ) {
-        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    // Full processing on every change - includes unresolved diagnostics
+    let indexer = FileProcessor::new(server.index.clone());
+    let options = ProcessingOptions {
+        index_definitions: true,
+        index_references: true,
+        resolve_mixins: false, // Skip mixin resolution for performance
+        include_local_vars: true,
     };
 
-    // Add unresolved diagnostics (fast - just index lookup)
+    let (affected_uris, mut diagnostics) =
+        match indexer.process_file(&uri, &final_content, server, options) {
+            Ok(result) => (result.affected_uris, result.diagnostics),
+            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        };
+
+    // Add unresolved diagnostics (now freshly computed with correct positions)
     diagnostics.extend(get_unresolved_diagnostics(server, &uri));
 
+    debug!(
+        "Publishing {} diagnostics for {} on change",
+        diagnostics.len(),
+        uri.path().split('/').next_back().unwrap_or("unknown")
+    );
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Invalidate namespace tree cache with debouncing
@@ -145,17 +163,19 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     };
 
     // On save: do full indexing with unresolved tracking (for cross-file diagnostics)
-    // This is the only place we track unresolved references for accurate diagnostics
-    let (affected_uris, mut diagnostics) = match process_file(
-        server,
-        uri.clone(),
-        &content,
-        false, // resolve mixins on save
-        ReferenceOptions::default().with_unresolved_tracking(true),
-    ) {
-        Ok(result) => (result.affected_uris, result.syntax_diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    let indexer = FileProcessor::new(server.index.clone());
+    let options = ProcessingOptions {
+        index_definitions: true,
+        index_references: true,
+        resolve_mixins: true, // resolve mixins on save
+        include_local_vars: true,
     };
+
+    let (affected_uris, mut diagnostics) =
+        match indexer.process_file(&uri, &content, server, options) {
+            Ok(result) => (result.affected_uris, result.diagnostics),
+            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        };
 
     // Invalidate namespace tree cache
     server.invalidate_namespace_tree_cache_debounced();

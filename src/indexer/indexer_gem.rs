@@ -4,7 +4,7 @@
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
 use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::indexer_core::IndexerCore;
+use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -40,7 +40,7 @@ pub struct GemInfo {
 /// Manages gem discovery, prioritization, and selective indexing.
 #[derive(Debug)]
 pub struct IndexerGem {
-    core: Arc<Mutex<IndexerCore>>,
+    file_processor: Arc<Mutex<FileProcessor>>,
     workspace_root: Option<PathBuf>,
     required_gems: HashSet<String>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
@@ -48,9 +48,9 @@ pub struct IndexerGem {
 }
 
 impl IndexerGem {
-    pub fn new(core: Arc<Mutex<IndexerCore>>, workspace_root: Option<PathBuf>) -> Self {
+    pub fn new(core: Arc<Mutex<FileProcessor>>, workspace_root: Option<PathBuf>) -> Self {
         Self {
-            core,
+            file_processor: core,
             workspace_root,
             required_gems: HashSet::new(),
             discovered_gems: HashMap::new(),
@@ -166,7 +166,7 @@ impl IndexerGem {
             if lib_path.exists() && lib_path.is_dir() {
                 debug!("Collecting files from gem lib path: {:?}", lib_path);
 
-                let core = self.core.lock();
+                let core = self.file_processor.lock();
                 let ruby_files = core.collect_ruby_files(lib_path);
                 drop(core);
 
@@ -567,7 +567,7 @@ mod tests {
     fn create_test_indexer() -> IndexerGem {
         let temp_dir = TempDir::new().unwrap();
         let index = Arc::new(Mutex::new(RubyIndex::new()));
-        let core = Arc::new(Mutex::new(IndexerCore::new(index)));
+        let core = Arc::new(Mutex::new(FileProcessor::new(index)));
         IndexerGem::new(core, Some(temp_dir.path().to_path_buf()))
     }
 

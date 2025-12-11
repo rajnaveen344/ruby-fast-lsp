@@ -1,12 +1,12 @@
 use log::warn;
-use ruby_prism::DefNode;
+use ruby_prism::*;
 
 use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
     Entry, MethodKind, MethodOrigin, MethodVisibility,
 };
 use crate::type_inference::ruby_type::RubyType;
-use crate::type_inference::ReturnTypeInferrer;
+
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 use crate::yard::{YardParser, YardTypeConverter};
@@ -135,10 +135,20 @@ impl IndexVisitor {
             (None, Vec::new())
         };
 
-        // If no YARD return type, try to infer from method body using CFG analysis
+        // If no YARD return type, try to look up in RBS
         let return_type = yard_return_type.or_else(|| {
-            let inferrer = ReturnTypeInferrer::new(self.index.clone());
-            inferrer.infer_return_type(self.document.content.as_bytes(), node)
+            let class_name = namespace_parts
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            let is_singleton = method_kind == MethodKind::Class;
+
+            crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type(
+                &class_name,
+                &method_name_str,
+                is_singleton,
+            )
         });
 
         let entry = Entry {

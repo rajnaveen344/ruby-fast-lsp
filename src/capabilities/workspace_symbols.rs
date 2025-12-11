@@ -98,20 +98,12 @@ async fn get_top_level_symbols(lang_server: &RubyLanguageServer) -> Vec<SymbolIn
 #[derive(Debug)]
 struct WorkspaceSymbolQuery {
     pattern: String,
-    case_insensitive: bool,
-    is_camel_case: bool,
 }
 
 impl WorkspaceSymbolQuery {
     fn new(query: &str) -> Self {
-        let case_insensitive = query.chars().all(|c| !c.is_uppercase());
-        let is_camel_case =
-            query.chars().any(|c| c.is_uppercase()) && query.chars().any(|c| c.is_lowercase());
-
         Self {
             pattern: query.to_string(),
-            case_insensitive,
-            is_camel_case,
         }
     }
 }
@@ -341,7 +333,7 @@ impl SymbolMatcher {
         let raw_score = coverage_score + consecutive_bonus + early_match_bonus - gap_penalty;
 
         // Clamp to fuzzy match range
-        (raw_score * 0.45 + 0.3).min(0.75).max(0.3)
+        (raw_score * 0.45 + 0.3).clamp(0.3, 0.75)
     }
 }
 
@@ -436,13 +428,9 @@ mod tests {
     fn test_workspace_symbol_query_creation() {
         let query = WorkspaceSymbolQuery::new("test");
         assert_eq!(query.pattern, "test");
-        assert!(query.case_insensitive);
-        assert!(!query.is_camel_case);
 
         let query = WorkspaceSymbolQuery::new("TestClass");
         assert_eq!(query.pattern, "TestClass");
-        assert!(!query.case_insensitive);
-        assert!(query.is_camel_case);
     }
 
     #[test]

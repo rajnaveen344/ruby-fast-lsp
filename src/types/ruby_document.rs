@@ -99,15 +99,12 @@ impl RubyDocument {
         let line_end = self.line_offsets[line + 1];
         let target_char = position.character as usize;
 
-        // Count characters until we reach the target position
-        let mut chars_seen = 0;
         let mut byte_offset = 0;
 
-        for c in self.content[line_start..line_end].chars() {
+        for (chars_seen, c) in self.content[line_start..line_end].chars().enumerate() {
             if chars_seen >= target_char || c == '\n' {
                 break;
             }
-            chars_seen += 1;
             byte_offset += c.len_utf8();
         }
 

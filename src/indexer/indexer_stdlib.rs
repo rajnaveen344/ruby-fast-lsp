@@ -4,7 +4,7 @@
 //! Ruby version and required modules from project dependencies.
 
 use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::indexer_core::IndexerCore;
+use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
@@ -19,16 +19,16 @@ use std::time::Instant;
 
 /// Handles standard library indexing
 pub struct IndexerStdlib {
-    core: IndexerCore,
+    file_processor: FileProcessor,
     ruby_version: Option<RubyVersion>,
     stdlib_paths: Vec<PathBuf>,
     required_modules: HashSet<String>,
 }
 
 impl IndexerStdlib {
-    pub fn new(core: IndexerCore, ruby_version: Option<RubyVersion>) -> Self {
+    pub fn new(core: FileProcessor, ruby_version: Option<RubyVersion>) -> Self {
         Self {
-            core,
+            file_processor: core,
             ruby_version,
             stdlib_paths: Vec::new(),
             required_modules: HashSet::new(),
@@ -95,13 +95,13 @@ impl IndexerStdlib {
 
         info!("Indexing core stubs from: {:?}", stubs_path);
 
-        let stub_files = self.core.collect_ruby_files(&stubs_path);
+        let stub_files = self.file_processor.collect_ruby_files(&stubs_path);
         if stub_files.is_empty() {
             warn!("No stub files found in: {:?}", stubs_path);
             return Ok(());
         }
 
-        self.core
+        self.file_processor
             .index_definitions_parallel(&stub_files, server)
             .await?;
         info!("Indexed {} core stub files", stub_files.len());
@@ -142,7 +142,11 @@ impl IndexerStdlib {
             );
 
             for file_path in files {
-                if let Err(e) = self.core.index_file_definitions(&file_path, server).await {
+                if let Err(e) = self
+                    .file_processor
+                    .index_file_definitions(&file_path, server)
+                    .await
+                {
                     warn!("Failed to index stdlib file {:?}: {}", file_path, e);
                 } else {
                     indexed_count += 1;
@@ -283,7 +287,7 @@ impl IndexerStdlib {
 
                 let module_dir = stdlib_path.join(module_name);
                 if module_dir.exists() && module_dir.is_dir() {
-                    files.extend(self.core.collect_ruby_files(&module_dir));
+                    files.extend(self.file_processor.collect_ruby_files(&module_dir));
                 }
             }
         }
@@ -311,7 +315,7 @@ impl IndexerStdlib {
         self.required_modules.contains(module_name)
     }
 
-    pub fn core(&self) -> &IndexerCore {
-        &self.core
+    pub fn core(&self) -> &FileProcessor {
+        &self.file_processor
     }
 }

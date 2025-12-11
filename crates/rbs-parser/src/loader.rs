@@ -127,7 +127,7 @@ impl Loader {
         let mut count = 0;
 
         if path.is_file() {
-            if path.extension().map_or(false, |ext| ext == "rbs") {
+            if path.extension().is_some_and(|ext| ext == "rbs") {
                 self.load_file(path)?;
                 count += 1;
             }
@@ -138,7 +138,7 @@ impl Loader {
 
                 if entry_path.is_dir() {
                     count += self.load_directory(&entry_path)?;
-                } else if entry_path.extension().map_or(false, |ext| ext == "rbs") {
+                } else if entry_path.extension().is_some_and(|ext| ext == "rbs") {
                     self.load_file(&entry_path)?;
                     count += 1;
                 }
@@ -431,16 +431,13 @@ end
 
     #[test]
     fn test_embedded_core_exists() {
-        #[allow(deprecated)]
-        let has_core = Loader::has_bundled_core();
+        let has_core = Loader::has_embedded_core();
         assert!(has_core, "Embedded core RBS types should be available");
     }
 
     #[test]
     fn test_embedded_stdlib_exists() {
-        // Stdlib might or might not be embedded depending on build
-        #[allow(deprecated)]
-        let has_stdlib = Loader::has_bundled_stdlib();
+        let has_stdlib = Loader::has_embedded_stdlib();
         println!("Embedded stdlib available: {}", has_stdlib);
     }
 

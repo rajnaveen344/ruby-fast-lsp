@@ -88,7 +88,7 @@ fn collect_rbs_files(base_path: &Path, current_path: &Path, files: &mut Vec<(Str
             let path = entry.path();
             if path.is_dir() {
                 collect_rbs_files(base_path, &path, files);
-            } else if path.extension().map_or(false, |ext| ext == "rbs") {
+            } else if path.extension().is_some_and(|ext| ext == "rbs") {
                 if let Ok(content) = fs::read(&path) {
                     // Get relative path from base
                     let relative = path.strip_prefix(base_path).unwrap_or(&path);

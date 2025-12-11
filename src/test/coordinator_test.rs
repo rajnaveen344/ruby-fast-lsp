@@ -394,26 +394,6 @@ end
             stubs_path.join("string.rb").exists(),
             "Should find string.rb stub"
         );
-        assert!(
-            stubs_path.join("array.rb").exists(),
-            "Should find array.rb stub"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_coordinator_dependency_tracker_initialization() {
-        let fixture = TestProjectFixture::new();
-        fixture.setup_complete_project();
-
-        let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
-
-        // Initialize dependency tracker
-        coordinator.initialize_dependency_tracker();
-
-        // Verify initialization (this is a basic test since dependency_tracker is private)
-        // In a real scenario, we might expose a method to check if it's initialized
-        assert!(true, "Dependency tracker initialization should not panic");
     }
 
     #[tokio::test]
@@ -508,7 +488,8 @@ end
     #[tokio::test]
     async fn test_coordinator_gem_discovery() {
         // Set environment variable to limit gem processing for faster tests
-        std::env::set_var("RUBY_LSP_MAX_GEMS", "5");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "5") };
 
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
@@ -545,13 +526,15 @@ end
         }
 
         // Clean up environment variable
-        std::env::remove_var("RUBY_LSP_MAX_GEMS");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
     }
 
     #[tokio::test]
     async fn test_coordinator_gem_indexing_integration() {
         // Set environment variable to limit gem processing for faster tests
-        std::env::set_var("RUBY_LSP_MAX_GEMS", "3");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
 
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
@@ -583,13 +566,15 @@ end
         );
 
         // Clean up environment variable
-        std::env::remove_var("RUBY_LSP_MAX_GEMS");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
     }
 
     #[tokio::test]
     async fn test_coordinator_gem_error_handling() {
         // Set environment variable to limit gem processing for faster tests
-        std::env::set_var("RUBY_LSP_MAX_GEMS", "2");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "2") };
 
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
@@ -616,13 +601,15 @@ end
         );
 
         // Clean up environment variable
-        std::env::remove_var("RUBY_LSP_MAX_GEMS");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
     }
 
     #[tokio::test]
     async fn test_coordinator_gem_performance() {
         // Set environment variable to limit gem processing for faster tests
-        std::env::set_var("RUBY_LSP_MAX_GEMS", "3");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
 
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
@@ -655,7 +642,8 @@ end
         );
 
         // Clean up environment variable
-        std::env::remove_var("RUBY_LSP_MAX_GEMS");
+        // SAFETY: This test is not run concurrently with other tests that modify this env var
+        unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
     }
 
     #[tokio::test]

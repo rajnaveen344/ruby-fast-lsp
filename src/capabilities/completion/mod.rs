@@ -554,7 +554,7 @@ end
 "#;
 
         // Explicitly call processing function to ensure local variables are indexed
-        use crate::capabilities::indexing::processor::{process_definitions, DefinitionOptions};
+        use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
         use crate::types::ruby_document::RubyDocument;
         use parking_lot::RwLock;
         use std::sync::Arc;
@@ -565,7 +565,12 @@ end
         server.docs.lock().insert(uri.clone(), doc_arc);
 
         // Process for definitions (which includes local variables)
-        let _ = process_definitions(&server, uri.clone(), content, DefinitionOptions::default());
+        let indexer = FileProcessor::new(server.index.clone());
+        let options = ProcessingOptions {
+            index_definitions: true,
+            ..ProcessingOptions::default()
+        };
+        let _ = indexer.process_file(&uri, content, &server, options);
 
         // Give a small delay to ensure processing completes
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

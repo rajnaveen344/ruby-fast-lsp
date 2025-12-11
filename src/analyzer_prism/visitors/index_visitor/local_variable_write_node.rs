@@ -180,7 +180,7 @@ mod tests {
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
 
-    fn create_test_visitor(content: &str) -> (IndexVisitor, ruby_prism::ParseResult) {
+    fn create_test_visitor(content: &str) -> (IndexVisitor, ruby_prism::ParseResult<'_>) {
         let uri = Url::parse("file:///test.rb").unwrap();
         let index = Arc::new(Mutex::new(RubyIndex::new()));
         let document =
@@ -192,7 +192,6 @@ mod tests {
             index,
             document,
             scope_tracker,
-            dependency_tracker: None,
             literal_analyzer,
         };
 

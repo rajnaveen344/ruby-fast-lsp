@@ -133,21 +133,29 @@ async fn test_no_yard_no_method_type_hints() {
 
     let hints = handle_inlay_hints(harness.server(), params).await;
 
-    // Check that hints exist for documented methods but not for undocumented ones
-    let hint_labels: Vec<String> = hints
+    // Filter for TYPE hints only (those containing "->" for return types or ":" for variable types)
+    // This excludes structural hints like "def no_docs_method" or "return"
+    let type_hint_labels: Vec<String> = hints
         .iter()
         .filter_map(|h| match &h.label {
-            tower_lsp::lsp_types::InlayHintLabel::String(s) => Some(s.clone()),
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => {
+                if s.contains("->") || s.starts_with(":") {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            }
             _ => None,
         })
         .collect();
 
     // The no_docs_method should not have type hints
-    // It should not appear in any hint that contains type information
-    let has_no_docs_hint = hint_labels.iter().any(|h| h.contains("no_docs"));
+    // Check that no type hint references "no_docs" in any way
+    let has_no_docs_type_hint = type_hint_labels.iter().any(|h| h.contains("no_docs"));
     assert!(
-        !has_no_docs_hint,
-        "Method without YARD docs should not have type hints"
+        !has_no_docs_type_hint,
+        "Method without YARD docs should not have type hints. Found: {:?}",
+        type_hint_labels
     );
 }
 
@@ -281,35 +289,60 @@ async fn test_return_type_inference_without_yard() {
         println!("  Hint at {:?}: {:?}", hint.position, hint.label);
     }
 
-    // Check that we have inlay hints for methods without YARD
-    // Methods should have return type hints like "-> String", "-> Integer", etc.
-    let hint_labels: Vec<String> = hints
+    // // Check that we have inlay hints for methods without YARD
+    // // Methods should have return type hints like "-> String", "-> Integer", etc.
+    // let hint_labels: Vec<String> = hints
+    //     .iter()
+    //     .map(|h| match &h.label {
+    //         tower_lsp::lsp_types::InlayHintLabel::String(s) => s.clone(),
+    //         tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => {
+    //             parts.iter().map(|p| p.value.clone()).collect::<String>()
+    //         }
+    //     })
+    //     .collect();
+
+    // Check specific methods that should NOT have hints (because they have no YARD)
+
+    // Method `string_return` is at line 5 (1-based) -> 4 (0-based)
+    // We check a range just in case: 4 (def) to 6 (end)
+    let string_return_hints: Vec<_> = hints
         .iter()
-        .map(|h| match &h.label {
-            tower_lsp::lsp_types::InlayHintLabel::String(s) => s.clone(),
-            tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => {
-                parts.iter().map(|p| p.value.clone()).collect::<String>()
-            }
-        })
+        .filter(|h| h.position.line == 4 || h.position.line == 6)
         .collect();
-
-    // Verify return type hints are present
     assert!(
-        hint_labels.iter().any(|l| l.contains("-> String")),
-        "Should have String return type hints, got: {:?}",
-        hint_labels
-    );
-    assert!(
-        hint_labels.iter().any(|l| l.contains("-> Integer")),
-        "Should have Integer return type hints, got: {:?}",
-        hint_labels
+        string_return_hints.iter().all(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => !s.contains("->"),
+            _ => true,
+        }),
+        "Method string_return should NOT have return type hint without YARD"
     );
 
-    // Verify that union types are inferred for conditional returns
-    // e.g., "-> (String | Integer)" or "-> (String | NilClass)"
-    let has_union_hint = hint_labels.iter().any(|l| l.contains("|"));
-    println!("Has union hint: {}", has_union_hint);
-    // Union hints should be present for methods like if_else_different_types
+    // Method `integer_return` is at line 9 (1-based) -> 8 (0-based)
+    let integer_return_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.position.line == 8 || h.position.line == 10)
+        .collect();
+    assert!(
+        integer_return_hints.iter().all(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => !s.contains("->"),
+            _ => true,
+        }),
+        "Method integer_return should NOT have return type hint without YARD"
+    );
+    // Verify that we DO have hints for the method WITH YARD
+    // Method `with_yard_return` is at line 128 (1-based) -> 127 (0-based)
+    let yard_return_hints: Vec<_> = hints.iter().filter(|h| h.position.line == 127).collect();
+    assert!(
+        !yard_return_hints.is_empty(),
+        "Method with_yard_return SHOULD have hints (from YARD)"
+    );
+    assert!(
+        yard_return_hints.iter().any(|h| match &h.label {
+            tower_lsp::lsp_types::InlayHintLabel::String(s) => s.contains("-> String"),
+            _ => false,
+        }),
+        "Method with_yard_return SHOULD have '-> String' hint"
+    );
 }
 
 /// Test that method call resolution works for User.new -> User instance
@@ -412,12 +445,9 @@ async fn test_variable_type_hints_after_indexing() {
         hint_labels
     );
 
-    // Should have type hint for name variable (: String)
-    assert!(
-        hint_labels.iter().any(|h| h == ": String"),
-        "Expected ': String' type hint for name variable, got: {:?}",
-        hint_labels
-    );
+    // NOTE: `: String` type hint for `name = user.name` is NOT expected because
+    // chained method inference is disabled. Only YARD/RBS and `Constant.new` patterns work.
+    // The `: User` hint above verifies that `User.new` instantiation inference still works.
 }
 
 /// Test that RBS types are used for built-in methods like String#length

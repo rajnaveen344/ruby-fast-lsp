@@ -274,13 +274,6 @@ fn relativize_uris(value: &mut Value, project_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-    use crate::indexer::dependency_tracker::DependencyTracker;
-    use crate::server::RubyLanguageServer;
-    use crate::types::ruby_document::RubyDocument;
-    use parking_lot::{Mutex, RwLock};
-    use std::sync::Arc;
-    use tower_lsp::lsp_types::Url;
 
     /// Simply verifies that we can load a fixture directory without panicking.
     #[tokio::test]
@@ -288,76 +281,5 @@ mod tests {
         let harness = TestHarness::new().await;
         harness.open_fixture_dir("goto").await;
         assert!(true);
-    }
-
-    #[tokio::test]
-    async fn test_dependency_tracking_integration() {
-        init_logger();
-
-        // Create a temporary directory for test files
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-
-        // Create the lib directory and set.rb file
-        let lib_dir = temp_path.join("lib");
-        std::fs::create_dir_all(&lib_dir).unwrap();
-        let set_file = lib_dir.join("set.rb");
-        std::fs::write(&set_file, "class Set\n  # Set implementation\nend\n").unwrap();
-
-        // Create a mock server
-        let server = RubyLanguageServer::default();
-
-        // Create dependency tracker
-        let lib_dirs = vec![lib_dir.clone()];
-        let dependency_tracker = Arc::new(Mutex::new(DependencyTracker::new(
-            temp_path.to_path_buf(),
-            lib_dirs,
-        )));
-
-        // Create test file URL
-        let test_file = temp_path.join("test_set.rb");
-        let uri = Url::from_file_path(&test_file).unwrap();
-
-        // Test content with require_relative
-        let content = r#"
-require_relative 'lib/set'
-
-class TestClass
-  def initialize
-    @my_set = Set.new
-  end
-end
-"#;
-
-        // Write the test file to disk
-        std::fs::write(&test_file, content).unwrap();
-
-        // Insert a RubyDocument so that IndexVisitor::new can retrieve it
-        let doc = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        server
-            .docs
-            .lock()
-            .insert(uri.clone(), Arc::new(RwLock::new(doc.clone())));
-
-        // Create IndexVisitor with dependency tracker
-        let mut visitor = IndexVisitor::new(&server, uri.clone())
-            .with_dependency_tracker(dependency_tracker.clone());
-
-        // Parse and visit the content
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let root = parse_result.node();
-
-        use ruby_prism::Visit;
-        visitor.visit(&root);
-
-        // Check that the dependency was tracked
-        let tracker_guard = dependency_tracker.lock();
-        let stats = tracker_guard.get_stats();
-
-        println!("Dependency stats: {:?}", stats);
-        assert!(
-            stats.total_dependencies > 0,
-            "Should have tracked at least one dependency"
-        );
     }
 }

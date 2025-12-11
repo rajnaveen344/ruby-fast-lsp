@@ -5,11 +5,10 @@ use ruby_prism::*;
 use tower_lsp::lsp_types::Url;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::dependency_tracker::DependencyTracker;
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
-use crate::type_inference::method_resolver::MethodResolver;
+
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::ruby_document::RubyDocument;
 
@@ -31,7 +30,6 @@ pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
-    pub dependency_tracker: Option<Arc<Mutex<DependencyTracker>>>,
     pub literal_analyzer: LiteralAnalyzer,
 }
 
@@ -44,17 +42,8 @@ impl IndexVisitor {
             index,
             document,
             scope_tracker,
-            dependency_tracker: None,
             literal_analyzer: LiteralAnalyzer::new(),
         }
-    }
-
-    pub fn with_dependency_tracker(
-        mut self,
-        dependency_tracker: Arc<Mutex<DependencyTracker>>,
-    ) -> Self {
-        self.dependency_tracker = Some(dependency_tracker);
-        self
     }
 
     /// Infer type from a value node during indexing.
@@ -66,6 +55,9 @@ impl IndexVisitor {
         }
 
         // Try method call resolution
+        // Optimization: Disabled for now to improve indexing performance on file open.
+        // Deep resolution traversing ancestor chains for every local variable assignment is too slow.
+        /*
         if let Some(call_node) = value_node.as_call_node() {
             let ns_stack = self.scope_tracker.get_ns_stack();
             log::debug!(
@@ -79,6 +71,27 @@ impl IndexVisitor {
                 return return_type;
             }
             log::debug!("infer_type_from_value: could not resolve type");
+        }
+        */
+
+        // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` without full resolution
+        // This restores basic type inference for object instantiation which is critical for many tests
+        if let Some(call_node) = value_node.as_call_node() {
+            // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` without full resolution
+            if call_node.name().as_slice() == b"new" {
+                if let Some(receiver) = call_node.receiver() {
+                    // Check for simple constant receiver: `MyClass.new`
+                    if let Some(const_node) = receiver.as_constant_read_node() {
+                        let name =
+                            String::from_utf8_lossy(const_node.name().as_slice()).to_string();
+                        // We assume it's a class in the current scope or top level.
+                        use crate::types::fully_qualified_name::FullyQualifiedName;
+                        if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
+                            return RubyType::Class(fqn);
+                        }
+                    }
+                }
+            }
         }
 
         // Default to unknown type

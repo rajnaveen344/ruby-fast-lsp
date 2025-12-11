@@ -1,33 +1,27 @@
-use crate::indexer::dependency_tracker::DependencyTracker;
-use crate::indexer::indexer_core::{IndexerCore, ReferenceIndexOptions};
+use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{info, warn};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+use tower_lsp::lsp_types::Url;
 
 /// Handles project-specific indexing and tracks required stdlib and gems
 pub struct IndexerProject {
     workspace_root: PathBuf,
-    core: IndexerCore,
-    dependency_tracker: Arc<Mutex<DependencyTracker>>,
+    file_processor: FileProcessor,
     required_stdlib: Arc<Mutex<HashSet<String>>>,
     required_gems: Arc<Mutex<HashSet<String>>>,
 }
 
 impl IndexerProject {
-    pub fn new(
-        workspace_root: PathBuf,
-        core: IndexerCore,
-        dependency_tracker: Arc<Mutex<DependencyTracker>>,
-    ) -> Self {
+    pub fn new(workspace_root: PathBuf, core: FileProcessor) -> Self {
         Self {
             workspace_root,
-            core,
-            dependency_tracker,
+            file_processor: core,
             required_stdlib: Arc::new(Mutex::new(HashSet::new())),
             required_gems: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -56,9 +50,6 @@ impl IndexerProject {
         // Resolve all mixin references now that all definitions are indexed
         info!("Resolving mixin references");
         server.index().lock().resolve_all_mixins();
-
-        // Update dependency tracker with discovered dependencies
-        self.update_dependency_tracker();
 
         info!(
             "Project definitions indexing completed in {:?}. Found {} stdlib deps, {} gem deps",
@@ -102,10 +93,10 @@ impl IndexerProject {
     fn collect_project_files(&self) -> Vec<PathBuf> {
         // Simply collect all Ruby files from the workspace root recursively
         // This ensures we don't miss any Ruby files regardless of project structure
-        self.core.collect_ruby_files(&self.workspace_root)
+        self.file_processor.collect_ruby_files(&self.workspace_root)
     }
 
-    /// Index definitions from files and track their dependencies
+    /// Index definitions from files and track their dependencies (Parallelized)
     async fn index_definitions_and_track_dependencies(
         &self,
         files: &[PathBuf],
@@ -113,31 +104,111 @@ impl IndexerProject {
         total_files: usize,
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
+        use tokio::fs;
 
-        for (index, file_path) in files.iter().enumerate() {
-            // Report progress
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Indexing".to_string(),
-                index + 1,
-                total_files,
-            )
-            .await;
+        const BATCH_SIZE: usize = 50;
 
-            // Index only definitions from the file
-            if let Err(e) = self.core.index_file_definitions(file_path, server).await {
-                warn!(
-                    "Failed to index definitions from file {:?}: {}",
-                    file_path, e
-                );
-                continue;
+        info!("Indexing definitions in parallel batches of {}", BATCH_SIZE);
+
+        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
+            let mut tasks = Vec::new();
+
+            for (i, file_path) in batch.iter().enumerate() {
+                let global_index = batch_idx * BATCH_SIZE + i;
+                let file_path = file_path.clone();
+                let server = server.clone();
+                let core = self.file_processor.clone();
+                let required_stdlib = self.required_stdlib.clone();
+                let required_gems = self.required_gems.clone();
+
+                tasks.push(tokio::spawn(async move {
+                    // 1. Report progress (best effort)
+                    if global_index.is_multiple_of(10) {
+                        IndexingCoordinator::send_progress_report(
+                            &server,
+                            "Indexing".to_string(),
+                            global_index + 1,
+                            total_files,
+                        )
+                        .await;
+                    }
+
+                    // 2. Read file content ONCE
+                    let content = match fs::read_to_string(&file_path).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("Failed to read file {:?}: {}", file_path, e);
+                            return;
+                        }
+                    };
+
+                    // 3. Index Definitions
+                    // In-line URL conversion to avoid visibility issues
+                    match Url::from_file_path(&file_path) {
+                        Ok(uri) => {
+                            // core.index_definitions parses content, cpu intensive
+                            if let Err(e) = core.index_definitions(&uri, &content, &server).await {
+                                warn!("Failed to index definitions {:?}: {}", file_path, e);
+                            }
+                        }
+                        Err(_) => {
+                            warn!("Failed to convert path to URI: {:?}", file_path);
+                        }
+                    }
+
+                    // 4. Track dependencies
+                    Self::extract_and_track_dependencies(
+                        &content,
+                        &required_stdlib,
+                        &required_gems,
+                    );
+                }));
             }
 
-            // Track dependencies from this file
-            self.track_file_dependencies(file_path).await;
+            // Await all tasks in this batch
+            for task in tasks {
+                if let Err(e) = task.await {
+                    warn!("Task join error: {}", e);
+                }
+            }
         }
 
+        // Final progress report
+        IndexingCoordinator::send_progress_report(
+            server,
+            "Indexing".to_string(),
+            total_files,
+            total_files,
+        )
+        .await;
+
         Ok(())
+    }
+
+    /// Extract dependencies from content and update trackers (Static helper for parallelism)
+    fn extract_and_track_dependencies(
+        content: &str,
+        required_stdlib: &Arc<Mutex<HashSet<String>>>,
+        required_gems: &Arc<Mutex<HashSet<String>>>,
+    ) {
+        let mut stdlib_deps = required_stdlib.lock();
+        let mut gem_deps = required_gems.lock();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // Require
+            if let Some(required) = Self::parse_require_statement(trimmed) {
+                if Self::is_stdlib_module(&required) {
+                    stdlib_deps.insert(required);
+                }
+            }
+
+            // Gem
+            if let Some(gem_name) = Self::parse_gem_statement(trimmed) {
+                gem_deps.insert(gem_name);
+            }
+        }
     }
 
     /// Index only references from files with unresolved constant tracking
@@ -149,63 +220,54 @@ impl IndexerProject {
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
 
-        let options = ReferenceIndexOptions::new().with_unresolved_tracking(true);
+        const BATCH_SIZE: usize = 50;
 
-        for (index, file_path) in files.iter().enumerate() {
-            // Report progress
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Collecting References".to_string(),
-                index + 1,
-                total_files,
-            )
-            .await;
+        info!("Indexing references in parallel batches of {}", BATCH_SIZE);
 
-            // Index only references from the file with unresolved constant tracking enabled
-            if let Err(e) = self
-                .core
-                .index_file_references(file_path, server, options)
-                .await
-            {
-                warn!(
-                    "Failed to index references from file {:?}: {}",
-                    file_path, e
-                );
-                continue;
+        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
+            let mut tasks = Vec::new();
+
+            for (i, file_path) in batch.iter().enumerate() {
+                let global_index = batch_idx * BATCH_SIZE + i;
+                let file_path = file_path.clone();
+                let server = server.clone();
+                let core = self.file_processor.clone();
+
+                tasks.push(tokio::spawn(async move {
+                    // Report progress
+                    if global_index.is_multiple_of(10) {
+                        IndexingCoordinator::send_progress_report(
+                            &server,
+                            "Collecting References".to_string(),
+                            global_index + 1,
+                            total_files,
+                        )
+                        .await;
+                    }
+
+                    // Index only references from the file with unresolved constant tracking enabled
+                    if let Err(e) = core.index_file_references(&file_path, &server).await {
+                        warn!(
+                            "Failed to index references from file {:?}: {}",
+                            file_path, e
+                        );
+                    }
+                }));
+            }
+
+            // Await all tasks in this batch
+            for task in tasks {
+                if let Err(e) = task.await {
+                    warn!("Task join error: {}", e);
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Track dependencies from a specific file
-    async fn track_file_dependencies(&self, file_path: &Path) {
-        if let Ok(content) = std::fs::read_to_string(file_path) {
-            self.extract_require_statements(&content);
-            self.extract_gem_dependencies(&content);
-        }
-    }
-
-    /// Extract require statements to identify stdlib dependencies
-    fn extract_require_statements(&self, content: &str) {
-        let mut stdlib_deps = self.required_stdlib.lock();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Match require statements
-            if let Some(required) = self.parse_require_statement(trimmed) {
-                // Check if it's a stdlib module
-                if self.is_stdlib_module(&required) {
-                    debug!("Found stdlib dependency: {}", required);
-                    stdlib_deps.insert(required);
-                }
-            }
-        }
-    }
-
     /// Parse a require statement and extract the module name
-    fn parse_require_statement(&self, line: &str) -> Option<String> {
+    fn parse_require_statement(line: &str) -> Option<String> {
         // Handle various require patterns:
         // require 'module'
         // require "module"
@@ -226,7 +288,7 @@ impl IndexerProject {
     }
 
     /// Check if a module is part of Ruby's standard library
-    fn is_stdlib_module(&self, module_name: &str) -> bool {
+    fn is_stdlib_module(module_name: &str) -> bool {
         // Common stdlib modules
         const STDLIB_MODULES: &[&str] = &[
             "json",
@@ -299,23 +361,8 @@ impl IndexerProject {
         STDLIB_MODULES.contains(&module_name)
     }
 
-    /// Extract gem dependencies from various sources
-    fn extract_gem_dependencies(&self, content: &str) {
-        let mut gem_deps = self.required_gems.lock();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Match gem statements in Gemfile
-            if let Some(gem_name) = self.parse_gem_statement(trimmed) {
-                debug!("Found gem dependency: {}", gem_name);
-                gem_deps.insert(gem_name);
-            }
-        }
-    }
-
     /// Parse a gem statement from Gemfile
-    fn parse_gem_statement(&self, line: &str) -> Option<String> {
+    fn parse_gem_statement(line: &str) -> Option<String> {
         if line.starts_with("gem ") {
             // Find the quoted gem name
             if let Some(start) = line.find('"').or_else(|| line.find('\'')) {
@@ -334,21 +381,6 @@ impl IndexerProject {
     fn clear_dependencies(&self) {
         self.required_stdlib.lock().clear();
         self.required_gems.lock().clear();
-    }
-
-    /// Update the dependency tracker with discovered dependencies
-    fn update_dependency_tracker(&self) {
-        let mut tracker = self.dependency_tracker.lock();
-
-        // Add stdlib dependencies
-        for stdlib_dep in self.required_stdlib.lock().iter() {
-            tracker.add_stdlib_dependency(stdlib_dep.clone());
-        }
-
-        // Add gem dependencies
-        for gem_dep in self.required_gems.lock().iter() {
-            tracker.add_gem_dependency(gem_dep.clone());
-        }
     }
 
     /// Get the list of required stdlib modules
@@ -377,7 +409,7 @@ impl IndexerProject {
     }
 
     /// Get a reference to the core indexer
-    pub fn core(&self) -> &IndexerCore {
-        &self.core
+    pub fn core(&self) -> &FileProcessor {
+        &self.file_processor
     }
 }

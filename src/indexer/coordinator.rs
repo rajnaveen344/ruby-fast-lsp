@@ -1,6 +1,5 @@
 use crate::config::RubyFastLspConfig;
-use crate::indexer::dependency_tracker::DependencyTracker;
-use crate::indexer::indexer_core::IndexerCore;
+use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
@@ -38,11 +37,10 @@ pub struct IndexingCoordinator {
     detected_ruby_version: Option<RubyVersion>,
 
     // The main indexing engine
-    core_indexer: Option<IndexerCore>,
+    core_indexer: Option<FileProcessor>,
 
     // Project-specific indexer
     project_indexer: Option<IndexerProject>,
-    dependency_tracker: Arc<Mutex<DependencyTracker>>,
 
     // Standard library indexer
     stdlib_indexer: Option<IndexerStdlib>,
@@ -61,10 +59,6 @@ impl IndexingCoordinator {
     /// Call `run_complete_indexing()` to actually start the indexing process.
     pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig) -> Self {
         let version_detector = RubyVersionDetector::from_path(workspace_root.clone());
-        let dependency_tracker = Arc::new(Mutex::new(DependencyTracker::new(
-            workspace_root.clone(),
-            Vec::new(),
-        )));
 
         Self {
             workspace_root,
@@ -73,7 +67,6 @@ impl IndexingCoordinator {
             detected_ruby_version: None,
             core_indexer: None,
             project_indexer: None,
-            dependency_tracker,
             stdlib_indexer: None,
             gem_indexer: None,
             ruby_library_paths: Vec::new(),
@@ -196,7 +189,7 @@ impl IndexingCoordinator {
 
     /// Step 3: Set up the main indexing engine
     fn setup_core_indexer(&mut self, server: &RubyLanguageServer) {
-        self.core_indexer = Some(IndexerCore::new(server.index()));
+        self.core_indexer = Some(FileProcessor::new(server.index()));
     }
 
     /// Phase 1 Step 4: Index definitions from project files and track what libraries they need
@@ -204,7 +197,6 @@ impl IndexingCoordinator {
         let mut project_indexer = IndexerProject::new(
             self.workspace_root.clone(),
             self.core_indexer.as_ref().unwrap().clone(),
-            self.dependency_tracker.clone(),
         );
 
         project_indexer.index_project_definitions(server).await?;
@@ -224,7 +216,7 @@ impl IndexingCoordinator {
 
     /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::capabilities::indexing::processor::get_unresolved_diagnostics;
+        use crate::indexer::file_processor::get_unresolved_diagnostics;
 
         // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
@@ -353,16 +345,6 @@ impl IndexingCoordinator {
                 }
             }
         }
-    }
-
-    /// Set up the dependency tracker with the Ruby library paths we found
-    ///
-    /// The dependency tracker helps us figure out what external libraries
-    /// the project is using so we can index them too.
-    pub fn initialize_dependency_tracker(&mut self) {
-        let tracker =
-            DependencyTracker::new(self.workspace_root.clone(), self.ruby_library_paths.clone());
-        self.dependency_tracker = Arc::new(Mutex::new(tracker));
     }
 
     /// Find all Ruby files in a directory and its subdirectories
