@@ -209,7 +209,7 @@ fn build_class_method_ancestor_chain(
     visited: &mut HashSet<FullyQualifiedName>,
 ) {
     // Process extends for class methods
-    if let Some(entries) = index.definitions.get(fqn) {
+    if let Some(entries) = index.get(fqn) {
         if let Some(entry) = entries.first() {
             if let EntryKind::Class { extends, .. } | EntryKind::Module { extends, .. } =
                 &entry.kind
@@ -267,7 +267,7 @@ fn build_chain_recursive(
         return;
     }
 
-    if let Some(entries) = index.definitions.get(fqn) {
+    if let Some(entries) = index.get(fqn) {
         if let Some(entry) = entries.first() {
             match &entry.kind {
                 EntryKind::Class {

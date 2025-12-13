@@ -29,7 +29,10 @@ pub struct DocumentState {
 
 impl DocumentState {
     pub fn new(content: String) -> Self {
-        Self { content, version: 1 }
+        Self {
+            content,
+            version: 1,
+        }
     }
 
     /// Apply a text edit to the document
@@ -225,4 +228,3 @@ mod tests {
         assert_eq!(model.get_content("test.rb"), Some("class Bar\nend"));
     }
 }
-

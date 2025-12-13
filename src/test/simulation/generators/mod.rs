@@ -80,4 +80,3 @@ pub fn tracked_code() -> impl Strategy<Value = TrackedCodeV2> {
         3 => graph_comprehensive_inheritance(),
     ]
 }
-

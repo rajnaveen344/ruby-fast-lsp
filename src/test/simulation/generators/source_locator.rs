@@ -299,4 +299,3 @@ mod tests {
         assert_eq!(pos_line_1, None);
     }
 }
-

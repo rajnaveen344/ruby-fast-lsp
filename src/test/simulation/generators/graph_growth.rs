@@ -503,4 +503,3 @@ pub fn graph_type_edge_cases() -> impl Strategy<Value = TrackedCodeV2> {
         TrackedCodeV2::from_state(state, format!("{}.rb", test_name))
     })
 }
-

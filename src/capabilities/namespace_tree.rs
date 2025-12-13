@@ -83,13 +83,13 @@ pub async fn handle_namespace_tree(
     let index = lang_server.index.lock();
     debug!(
         "[NAMESPACE_TREE] Index has {} definition entries",
-        index.definitions.len()
+        index.definitions_len()
     );
 
     // Early filtering and deduplication: collect only project class/module entries
     // Group entries by FQN to avoid duplicate processing
     let mut fqn_to_entries: HashMap<&FullyQualifiedName, Vec<&Entry>> = HashMap::new();
-    for (fqn, entries) in &index.definitions {
+    for (fqn, entries) in index.definitions() {
         let mut project_entries_for_fqn = Vec::new();
         for entry in entries {
             if !crate::utils::is_project_file(&entry.location.uri) {
@@ -110,7 +110,7 @@ pub async fn handle_namespace_tree(
     debug!(
         "[NAMESPACE_TREE] Found {} unique project namespaces (filtered from {} total definitions)",
         fqn_to_entries.len(),
-        index.definitions.len()
+        index.definitions_len()
     );
 
     // Batch mixin resolution to avoid repeated lookups
@@ -233,12 +233,11 @@ pub async fn handle_namespace_tree(
 // Compute a hash of the index for caching
 fn compute_index_hash(index: &RubyIndex) -> u64 {
     let mut hasher = DefaultHasher::new();
-    index.definitions.len().hash(&mut hasher);
+    index.definitions_len().hash(&mut hasher);
     // Hash a sample of FQN strings to detect changes
     let mut fqn_strings: Vec<String> = index
-        .definitions
-        .keys()
-        .map(|fqn| fqn.to_string())
+        .definitions()
+        .map(|(fqn, _)| fqn.to_string())
         .collect();
     fqn_strings.sort();
     for fqn_str in fqn_strings.iter().take(100) {

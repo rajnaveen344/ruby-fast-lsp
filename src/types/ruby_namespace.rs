@@ -1,7 +1,8 @@
 use std::fmt::{self, Display, Formatter};
+use ustr::Ustr;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyConstant(String);
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct RubyConstant(Ustr);
 
 impl RubyConstant {
     /// Creates a validated namespace segment.
@@ -24,7 +25,7 @@ impl RubyConstant {
             return Err("Namespace contains invalid characters");
         }
 
-        Ok(Self(name.to_string()))
+        Ok(Self(Ustr::from(name)))
     }
 
     /// Splits a "Foo::Bar::Baz" string into validated segments.

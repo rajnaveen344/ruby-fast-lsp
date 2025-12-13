@@ -210,10 +210,7 @@ mod tests {
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         // Find the variable entry and check its type
         let variable_entry = entries
@@ -227,7 +224,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::string(), "Expected String type");
+                assert_eq!(r#type, &RubyType::string(), "Expected String type");
             }
         }
     }
@@ -243,10 +240,7 @@ mod tests {
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         // Find the variable entry and check its type
         let variable_entry = entries
@@ -260,7 +254,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::integer(), "Expected Integer type");
+                assert_eq!(r#type, &RubyType::integer(), "Expected Integer type");
             }
         }
     }
@@ -276,10 +270,7 @@ mod tests {
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         // Find the variable entry and check its type
         let variable_entry = entries
@@ -293,7 +284,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::float(), "Expected Float type");
+                assert_eq!(r#type, &RubyType::float(), "Expected Float type");
             }
         }
     }
@@ -309,10 +300,7 @@ mod tests {
         // Check that type information was stored in Variable entries
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         // Find the variable entry and check its type
         let variable_entry = entries
@@ -326,7 +314,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::true_class(), "Expected TrueClass type");
+                assert_eq!(r#type, &RubyType::true_class(), "Expected TrueClass type");
             }
         }
     }
@@ -343,7 +331,7 @@ mod tests {
         let index = visitor.index.lock();
 
         // Find variable entries and check they don't have type information for unknown types
-        for entry_vec in index.definitions.values() {
+        for entry_vec in index.definitions().map(|(_, e)| e) {
             for entry in entry_vec {
                 match &entry.kind {
                     crate::indexer::entry::entry_kind::EntryKind::LocalVariable {
@@ -384,7 +372,7 @@ mod tests {
         let mut found_string_type = false;
         let mut found_integer_type = false;
 
-        for entry_vec in index.definitions.values() {
+        for entry_vec in index.definitions().map(|(_, e)| e) {
             for entry in entry_vec {
                 match &entry.kind {
                     crate::indexer::entry::entry_kind::EntryKind::LocalVariable {

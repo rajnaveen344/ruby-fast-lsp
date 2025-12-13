@@ -361,8 +361,7 @@ async fn test_method_call_type_resolution() {
 
     // Verify User class is indexed
     let user_entries: Vec<_> = index
-        .definitions
-        .iter()
+        .definitions()
         .filter(|(fqn, _)| {
             matches!(fqn, crate::types::fully_qualified_name::FullyQualifiedName::Constant(parts)
             if parts.len() == 1 && parts[0].to_string() == "User")
@@ -373,8 +372,7 @@ async fn test_method_call_type_resolution() {
 
     // Verify User#name method is indexed with return type
     let name_methods: Vec<_> = index
-        .methods_by_name
-        .iter()
+        .methods_by_name()
         .filter(|(method, _)| method.to_string().contains("name"))
         .collect();
 
@@ -386,8 +384,7 @@ async fn test_method_call_type_resolution() {
 
     // Verify User.find class method is indexed
     let find_methods: Vec<_> = index
-        .methods_by_name
-        .iter()
+        .methods_by_name()
         .filter(|(method, _)| method.to_string().contains("find"))
         .collect();
 

@@ -164,4 +164,3 @@ pub fn safe_edit_for(tracked: &TrackedCodeV2) -> BoxedStrategy<SafeEdit> {
     ]
     .boxed()
 }
-

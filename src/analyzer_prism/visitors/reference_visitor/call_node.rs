@@ -162,14 +162,14 @@ impl ReferenceVisitor {
         };
 
         // Check if the method exists by name (loose check)
-        if index.methods_by_name.contains_key(&method) {
+        if index.contains_method(&method) {
             return true;
         }
 
         // Also check with Unknown kind for flexibility
         if method_kind != MethodKind::Unknown {
             if let Ok(unknown_method) = RubyMethod::new(method_name, MethodKind::Unknown) {
-                if index.methods_by_name.contains_key(&unknown_method) {
+                if index.contains_method(&unknown_method) {
                     return true;
                 }
             }
@@ -177,7 +177,7 @@ impl ReferenceVisitor {
 
         // Check the specific FQN
         let method_fqn = FullyQualifiedName::method(target_namespace.to_vec(), method);
-        if index.definitions.contains_key(&method_fqn) {
+        if index.contains_fqn(&method_fqn) {
             return true;
         }
 
@@ -193,7 +193,7 @@ impl ReferenceVisitor {
         while !ancestors.is_empty() {
             if let Ok(m) = RubyMethod::new(method_name, method_kind) {
                 let fqn = FullyQualifiedName::method(ancestors.clone(), m);
-                if index.definitions.contains_key(&fqn) {
+                if index.contains_fqn(&fqn) {
                     return true;
                 }
             }

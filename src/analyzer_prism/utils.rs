@@ -171,7 +171,7 @@ pub fn resolve_constant_fqn_from_parts(
     // Search through all candidate paths and return the first match
     for candidate_parts in search_paths {
         let candidate_fqn = FullyQualifiedName::Constant(candidate_parts);
-        if index.definitions.contains_key(&candidate_fqn) {
+        if index.contains_fqn(&candidate_fqn) {
             return Some(candidate_fqn);
         }
     }

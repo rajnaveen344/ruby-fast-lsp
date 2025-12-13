@@ -697,4 +697,3 @@ pub fn transition_for_state(model: &LspModel) -> BoxedStrategy<Transition> {
         .boxed()
     }
 }
-

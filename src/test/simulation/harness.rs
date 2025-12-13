@@ -127,11 +127,7 @@ impl SimulationHarness {
                     .unwrap_or(1);
 
                 // For full sync, we send the entire new content
-                let new_content = self
-                    .model
-                    .get_content(filename)
-                    .unwrap_or("")
-                    .to_string();
+                let new_content = self.model.get_content(filename).unwrap_or("").to_string();
 
                 // Update file on disk
                 let path = self.file_paths.get(filename).unwrap();
@@ -140,10 +136,7 @@ impl SimulationHarness {
 
                 self.server
                     .did_change(DidChangeTextDocumentParams {
-                        text_document: VersionedTextDocumentIdentifier {
-                            uri,
-                            version,
-                        },
+                        text_document: VersionedTextDocumentIdentifier { uri, version },
                         content_changes: vec![TextDocumentContentChangeEvent {
                             range: None, // Full sync
                             range_length: None,
@@ -457,4 +450,3 @@ impl std::fmt::Display for SimulationError {
 }
 
 impl std::error::Error for SimulationError {}
-

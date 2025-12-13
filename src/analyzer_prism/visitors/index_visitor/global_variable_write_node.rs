@@ -198,10 +198,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -214,7 +211,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::true_class(), "Expected TrueClass type");
+                assert_eq!(r#type, &RubyType::true_class(), "Expected TrueClass type");
             }
         }
     }
@@ -229,10 +226,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -245,7 +239,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::string(), "Expected String type");
+                assert_eq!(r#type, &RubyType::string(), "Expected String type");
             }
         }
     }
@@ -260,10 +254,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -276,7 +267,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::float(), "Expected Float type");
+                assert_eq!(r#type, &RubyType::float(), "Expected Float type");
             }
         }
     }
@@ -291,10 +282,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -307,7 +295,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::false_class(), "Expected FalseClass type");
+                assert_eq!(r#type, &RubyType::false_class(), "Expected FalseClass type");
             }
         }
     }

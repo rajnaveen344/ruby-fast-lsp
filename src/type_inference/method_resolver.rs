@@ -92,7 +92,7 @@ impl MethodResolver {
             };
 
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
-                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
                         if let EntryKind::Method {
                             owner, return_type, ..
@@ -312,7 +312,7 @@ impl MethodResolver {
 
             // Search through the ancestor chain for the method
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
-                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     // Find method that belongs to any class in the ancestor chain
                     for entry in entries {
                         if let EntryKind::Method {
@@ -340,7 +340,7 @@ impl MethodResolver {
             };
 
             if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
-                if let Some(entries) = index.methods_by_name.get(&ruby_method) {
+                if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
                         if let EntryKind::Method {
                             owner, return_type, ..
@@ -411,7 +411,7 @@ impl MethodResolver {
         let index = self.index.lock();
 
         // Search through all definitions for local variables with matching name
-        for (fqn, entries) in &index.definitions {
+        for (fqn, entries) in index.definitions() {
             if let FullyQualifiedName::LocalVariable(name, _) = fqn {
                 if name == var_name {
                     log::debug!("Found local variable {} in index", var_name);
@@ -436,7 +436,7 @@ impl MethodResolver {
         let index = self.index.lock();
 
         // Search through all definitions for instance variables with matching name
-        for (fqn, entries) in &index.definitions {
+        for (fqn, entries) in index.definitions() {
             if let FullyQualifiedName::InstanceVariable(name) = fqn {
                 if name == var_name {
                     for entry in entries {

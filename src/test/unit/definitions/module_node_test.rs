@@ -15,8 +15,9 @@ fn module_node_with_body() {
     let expected_fqn = FullyQualifiedName::from(vec![RubyConstant::try_from("Foo").unwrap()]);
 
     let index_lock = visitor.index.lock();
-    let defs = &index_lock.definitions;
-    let entries = defs.get(&expected_fqn).expect("Foo module entry missing");
+    let entries = index_lock
+        .get(&expected_fqn)
+        .expect("Foo module entry missing");
 
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
@@ -40,7 +41,6 @@ fn module_node_namespaced_constant_path_with_body() {
 
     let index_lock = visitor.index.lock();
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("A::B module entry missing");
 
@@ -67,7 +67,6 @@ fn module_node_deep_namespaced_constant_path() {
 
     let index_lock = visitor.index.lock();
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("A::B::C module entry missing");
 
@@ -88,7 +87,6 @@ fn module_node_without_body() {
 
     let index_lock = visitor.index.lock();
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("Foo module entry missing");
 
@@ -108,8 +106,12 @@ fn module_node_invalid_constant() {
     // The visitor should complete without panicking
     // No entries should be created for invalid module names
     let index_lock = visitor.index.lock();
-    let defs = &index_lock.definitions;
 
     // Should not contain any entries for invalid module names
-    assert!(defs.is_empty() || !defs.iter().any(|(fqn, _)| fqn.to_string().contains("foo")));
+    assert!(
+        index_lock.definitions_len() == 0
+            || !index_lock
+                .definitions()
+                .any(|(fqn, _)| fqn.to_string().contains("foo"))
+    );
 }

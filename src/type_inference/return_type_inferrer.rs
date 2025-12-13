@@ -367,7 +367,7 @@ impl ReturnTypeInferrer {
     fn lookup_local_variable_type(&self, var_name: &str) -> Option<RubyType> {
         let index = self.index.lock();
 
-        for (fqn, entries) in &index.definitions {
+        for (fqn, entries) in index.definitions() {
             if let FullyQualifiedName::LocalVariable(name, _) = fqn {
                 if name == var_name {
                     for entry in entries {

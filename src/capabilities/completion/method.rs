@@ -176,7 +176,7 @@ fn get_index_methods_with_ancestors(
     };
 
     // Search through methods_by_name
-    for (ruby_method, entries) in &index.methods_by_name {
+    for (ruby_method, entries) in index.methods_by_name() {
         // Check if method name matches partial
         let method_name = ruby_method.get_name();
         if !method_name.starts_with(partial_method) {

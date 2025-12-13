@@ -29,7 +29,7 @@ impl ReferenceVisitor {
             debug!("Searching for variable: {:?}", fqn);
 
             // Check if this variable is defined in the current scope level
-            if index.definitions.contains_key(&fqn) {
+            if index.contains_fqn(&fqn) {
                 debug!(
                     "Adding local variable reference: {:?} at {:?}",
                     fqn, location

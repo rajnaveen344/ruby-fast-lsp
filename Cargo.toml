@@ -37,6 +37,8 @@ chrono = { version = "0.4.31", features = ["serde"] }
 flate2 = "1.0.28"
 clap = { version = "4.4.0", features = ["derive"] }
 regex = "1.10"
+slotmap = "1.0"
+ustr = "1.0"
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]

@@ -73,7 +73,7 @@ async fn get_top_level_symbols(lang_server: &RubyLanguageServer) -> Vec<SymbolIn
     let mut count = 0;
     const MAX_SYMBOLS: usize = 50;
 
-    for (fqn, entries) in &index.definitions {
+    for (fqn, entries) in index.definitions() {
         if count >= MAX_SYMBOLS {
             break;
         }
@@ -133,7 +133,7 @@ impl SymbolSearchEngine {
         let matcher = SymbolMatcher::new();
 
         // Search through definitions
-        for entries in index.definitions.values() {
+        for entries in index.definitions().map(|(_, e)| e) {
             for entry in entries {
                 if let Some(symbol) = convert_entry_to_symbol_information(entry) {
                     if let Some(relevance) =
@@ -146,7 +146,7 @@ impl SymbolSearchEngine {
         }
 
         // Search through methods by name
-        for (method, entries) in &index.methods_by_name {
+        for (method, entries) in index.methods_by_name() {
             for entry in entries {
                 if let Some(symbol) = convert_entry_to_symbol_information(entry) {
                     let method_name = method.get_name();
@@ -373,6 +373,7 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
         | EntryKind::InstanceVariable { .. }
         | EntryKind::ClassVariable { .. }
         | EntryKind::GlobalVariable { .. } => SymbolKind::VARIABLE,
+        EntryKind::Reference { .. } => SymbolKind::KEY, // References use KEY symbol
     }
 }
 
@@ -383,10 +384,10 @@ fn extract_display_name(fqn: &FullyQualifiedName) -> String {
             parts.last().map(|c| c.to_string()).unwrap_or_default()
         }
         FullyQualifiedName::Method(_, method) => method.get_name(),
-        FullyQualifiedName::LocalVariable(name, _) => name.clone(),
-        FullyQualifiedName::InstanceVariable(name) => name.clone(),
-        FullyQualifiedName::ClassVariable(name) => name.clone(),
-        FullyQualifiedName::GlobalVariable(name) => name.clone(),
+        FullyQualifiedName::LocalVariable(name, _) => name.to_string(),
+        FullyQualifiedName::InstanceVariable(name) => name.to_string(),
+        FullyQualifiedName::ClassVariable(name) => name.to_string(),
+        FullyQualifiedName::GlobalVariable(name) => name.to_string(),
     }
 }
 

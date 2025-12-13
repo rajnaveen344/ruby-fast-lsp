@@ -17,8 +17,9 @@ fn class_node_with_body() {
 
     // The `RubyIndex` stores definitions keyed by FQN → Vec<Entry>.
     let index_lock = visitor.index.lock();
-    let defs = &index_lock.definitions;
-    let entries = defs.get(&expected_fqn).expect("Foo class entry missing");
+    let entries = index_lock
+        .get(&expected_fqn)
+        .expect("Foo class entry missing");
 
     // Exactly one entry of kind `Class` should have been produced.
     assert_eq!(entries.len(), 1);
@@ -43,7 +44,6 @@ fn class_node_namespaced_constant_path_with_body() {
 
     let index_lock = visitor.index.lock();
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("A::B class entry missing");
 
@@ -70,7 +70,6 @@ fn class_node_deep_namespaced_constant_path() {
 
     let index_lock = visitor.index.lock();
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("A::B::C class entry missing");
 
@@ -91,7 +90,6 @@ fn class_node_without_body() {
     let index_lock = visitor.index.lock();
 
     let entries = index_lock
-        .definitions
         .get(&expected_fqn)
         .expect("Foo class entry missing");
     assert_eq!(entries.len(), 1);
@@ -110,8 +108,12 @@ fn class_node_invalid_constant() {
     // The visitor should complete without panicking
     // No entries should be created for invalid class names
     let index_lock = visitor.index.lock();
-    let defs = &index_lock.definitions;
 
     // Should not contain any entries for invalid class names
-    assert!(defs.is_empty() || !defs.iter().any(|(fqn, _)| fqn.to_string().contains("foo")));
+    assert!(
+        index_lock.definitions_len() == 0
+            || !index_lock
+                .definitions()
+                .any(|(fqn, _)| fqn.to_string().contains("foo"))
+    );
 }

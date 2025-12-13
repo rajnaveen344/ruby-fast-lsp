@@ -29,7 +29,7 @@ pub fn find_constant_definitions(
 
         debug!("Searching for constant: {:?}", search_fqn);
 
-        if let Some(entries) = index.definitions.get(&search_fqn.clone().into()) {
+        if let Some(entries) = index.get(&search_fqn.clone().into()) {
             if !entries.is_empty() {
                 // Add all locations to our result
                 for entry in entries {
@@ -55,7 +55,7 @@ pub fn find_constant_definitions(
         root_search_fqn
     );
 
-    if let Some(entries) = index.definitions.get(&root_search_fqn.into()) {
+    if let Some(entries) = index.get(&root_search_fqn.into()) {
         if !entries.is_empty() {
             for entry in entries {
                 found_locations.push(entry.location.clone());

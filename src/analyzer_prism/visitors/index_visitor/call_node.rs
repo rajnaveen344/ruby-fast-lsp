@@ -43,14 +43,12 @@ impl IndexVisitor {
             }
 
             let mut index = self.index.lock();
-            if let Some(entries) = index.get_mut(&current_fqn) {
-                if let Some(entry) = entries.last_mut() {
-                    match method_name.as_ref() {
-                        "include" => entry.add_includes(mixin_refs),
-                        "extend" => entry.add_extends(mixin_refs),
-                        "prepend" => entry.add_prepends(mixin_refs),
-                        _ => {}
-                    }
+            if let Some(entry) = index.get_last_definition_mut(&current_fqn) {
+                match method_name.as_ref() {
+                    "include" => entry.add_includes(mixin_refs),
+                    "extend" => entry.add_extends(mixin_refs),
+                    "prepend" => entry.add_prepends(mixin_refs),
+                    _ => {}
                 }
             }
         }

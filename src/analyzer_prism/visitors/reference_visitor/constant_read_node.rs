@@ -28,7 +28,7 @@ impl ReferenceVisitor {
             combined_ns.push(constant.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            if index.definitions.contains_key(&fqn) {
+            if index.contains_fqn(&fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
@@ -41,7 +41,7 @@ impl ReferenceVisitor {
 
         // Check in root namespace
         let fqn = FullyQualifiedName::namespace(vec![constant]);
-        if index.definitions.contains_key(&fqn) {
+        if index.contains_fqn(&fqn) {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());

@@ -52,55 +52,35 @@ pub async fn handle_inlay_hints(
     // Generate type hints from indexed entries - ONLY for entries in the requested range
     let index = server.index.lock();
 
-    if let Some(entries) = index.file_entries.get(&uri) {
-        for entry in entries {
-            // Skip entries outside the requested range
-            if !is_position_in_range(&entry.location.range.start, &requested_range)
-                && !is_position_in_range(&entry.location.range.end, &requested_range)
-            {
-                continue;
-            }
+    let entries = index.file_entries(&uri);
+    for entry in &entries {
+        // Skip entries outside the requested range
+        if !is_position_in_range(&entry.location.range.start, &requested_range)
+            && !is_position_in_range(&entry.location.range.end, &requested_range)
+        {
+            continue;
+        }
 
-            match &entry.kind {
-                EntryKind::LocalVariable { r#type, name, .. } => {
-                    // For variable assignments, prefer the indexed type from the RHS expression
-                    // since CFG gives the type BEFORE the assignment, not after.
-                    // Only use CFG for reads when the indexed type is Unknown.
-                    let final_type = if *r#type != RubyType::Unknown {
-                        // Use the indexed type (from analyzing the RHS)
-                        Some(r#type.clone())
-                    } else {
-                        // Fallback to CFG-based type narrowing (for reads, etc.)
-                        let offset = position_to_offset(&content, entry.location.range.start);
-                        server.type_narrowing.get_narrowed_type(&uri, name, offset)
-                    };
+        match &entry.kind {
+            EntryKind::LocalVariable { r#type, name, .. } => {
+                // For variable assignments, prefer the indexed type from the RHS expression
+                // since CFG gives the type BEFORE the assignment, not after.
+                // Only use CFG for reads when the indexed type is Unknown.
+                let final_type = if *r#type != RubyType::Unknown {
+                    // Use the indexed type (from analyzing the RHS)
+                    Some(r#type.clone())
+                } else {
+                    // Fallback to CFG-based type narrowing (for reads, etc.)
+                    let offset = position_to_offset(&content, entry.location.range.start);
+                    server.type_narrowing.get_narrowed_type(&uri, name, offset)
+                };
 
-                    if let Some(ty) = final_type {
-                        if ty != RubyType::Unknown {
-                            let end_position = entry.location.range.end;
-                            let type_hint = InlayHint {
-                                position: end_position,
-                                label: InlayHintLabel::String(format!(": {}", ty)),
-                                kind: Some(InlayHintKind::TYPE),
-                                text_edits: None,
-                                tooltip: None,
-                                padding_left: None,
-                                padding_right: None,
-                                data: None,
-                            };
-                            all_hints.push(type_hint);
-                        }
-                    }
-                }
-                EntryKind::InstanceVariable { r#type, .. }
-                | EntryKind::ClassVariable { r#type, .. }
-                | EntryKind::GlobalVariable { r#type, .. } => {
-                    if *r#type != RubyType::Unknown {
-                        // Create type hint at the end of the variable name
+                if let Some(ty) = final_type {
+                    if ty != RubyType::Unknown {
                         let end_position = entry.location.range.end;
                         let type_hint = InlayHint {
                             position: end_position,
-                            label: InlayHintLabel::String(format!(": {}", r#type)),
+                            label: InlayHintLabel::String(format!(": {}", ty)),
                             kind: Some(InlayHintKind::TYPE),
                             text_edits: None,
                             tooltip: None,
@@ -111,77 +91,96 @@ pub async fn handle_inlay_hints(
                         all_hints.push(type_hint);
                     }
                 }
-                // Generate inlay hints for methods
-                EntryKind::Method {
-                    yard_doc,
-                    params,
-                    return_type_position,
-                    return_type,
-                    ..
-                } => {
-                    // Generate individual type hints for each parameter (from YARD only for now)
-                    if let Some(doc) = yard_doc {
-                        for param in params {
-                            if let Some(type_str) = doc.get_param_type_str(&param.name) {
-                                let yard_param = doc.params.iter().find(|p| p.name == param.name);
-                                // Keyword params already have a colon, so just add space + type
-                                // Other params need ": type"
-                                let label = if param.has_colon() {
-                                    format!(" {}", type_str)
-                                } else {
-                                    format!(": {}", type_str)
-                                };
-                                let hint = InlayHint {
-                                    position: param.end_position,
-                                    label: InlayHintLabel::String(label),
-                                    kind: Some(InlayHintKind::TYPE),
-                                    text_edits: None,
-                                    tooltip: yard_param
-                                        .and_then(|p| p.description.clone())
-                                        .map(InlayHintTooltip::String),
-                                    padding_left: None,
-                                    padding_right: None,
-                                    data: None,
-                                };
-                                all_hints.push(hint);
-                            }
+            }
+            EntryKind::InstanceVariable { r#type, .. }
+            | EntryKind::ClassVariable { r#type, .. }
+            | EntryKind::GlobalVariable { r#type, .. } => {
+                if *r#type != RubyType::Unknown {
+                    // Create type hint at the end of the variable name
+                    let end_position = entry.location.range.end;
+                    let type_hint = InlayHint {
+                        position: end_position,
+                        label: InlayHintLabel::String(format!(": {}", r#type)),
+                        kind: Some(InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    };
+                    all_hints.push(type_hint);
+                }
+            }
+            // Generate inlay hints for methods
+            EntryKind::Method {
+                yard_doc,
+                params,
+                return_type_position,
+                return_type,
+                ..
+            } => {
+                // Generate individual type hints for each parameter (from YARD only for now)
+                if let Some(doc) = yard_doc {
+                    for param in params {
+                        if let Some(type_str) = doc.get_param_type_str(&param.name) {
+                            let yard_param = doc.params.iter().find(|p| p.name == param.name);
+                            // Keyword params already have a colon, so just add space + type
+                            // Other params need ": type"
+                            let label = if param.has_colon() {
+                                format!(" {}", type_str)
+                            } else {
+                                format!(": {}", type_str)
+                            };
+                            let hint = InlayHint {
+                                position: param.end_position,
+                                label: InlayHintLabel::String(label),
+                                kind: Some(InlayHintKind::TYPE),
+                                text_edits: None,
+                                tooltip: yard_param
+                                    .and_then(|p| p.description.clone())
+                                    .map(InlayHintTooltip::String),
+                                padding_left: None,
+                                padding_right: None,
+                                data: None,
+                            };
+                            all_hints.push(hint);
                         }
                     }
-
-                    // Generate return type hint at the end of the method signature
-                    // Priority: YARD documentation > inferred return type
-                    let return_type_str = yard_doc
-                        .as_ref()
-                        .and_then(|doc| doc.format_return_type())
-                        .or_else(|| {
-                            return_type.as_ref().and_then(|rt| {
-                                if *rt != RubyType::Unknown {
-                                    Some(rt.to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                        });
-
-                    if let (Some(type_str), Some(pos)) = (return_type_str, return_type_position) {
-                        let hint = InlayHint {
-                            position: *pos,
-                            label: InlayHintLabel::String(format!(" -> {}", type_str)),
-                            kind: Some(InlayHintKind::TYPE),
-                            text_edits: None,
-                            tooltip: yard_doc
-                                .as_ref()
-                                .and_then(|doc| doc.get_return_description().cloned())
-                                .map(InlayHintTooltip::String),
-                            padding_left: None,
-                            padding_right: None,
-                            data: None,
-                        };
-                        all_hints.push(hint);
-                    }
                 }
-                _ => {}
+
+                // Generate return type hint at the end of the method signature
+                // Priority: YARD documentation > inferred return type
+                let return_type_str = yard_doc
+                    .as_ref()
+                    .and_then(|doc| doc.format_return_type())
+                    .or_else(|| {
+                        return_type.as_ref().and_then(|rt| {
+                            if *rt != RubyType::Unknown {
+                                Some(rt.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    });
+
+                if let (Some(type_str), Some(pos)) = (return_type_str, return_type_position) {
+                    let hint = InlayHint {
+                        position: *pos,
+                        label: InlayHintLabel::String(format!(" -> {}", type_str)),
+                        kind: Some(InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: yard_doc
+                            .as_ref()
+                            .and_then(|doc| doc.get_return_description().cloned())
+                            .map(InlayHintTooltip::String),
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    };
+                    all_hints.push(hint);
+                }
             }
+            _ => {}
         }
     }
 

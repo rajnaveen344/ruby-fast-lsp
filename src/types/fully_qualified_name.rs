@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use ustr::Ustr;
 
 use crate::{analyzer_prism::Identifier, indexer::entry::MethodKind, types::scope::LVScopeStack};
 
@@ -15,16 +16,16 @@ pub enum FullyQualifiedName {
     Method(Vec<RubyConstant>, RubyMethod),
 
     /// Local variable, e.g., `a = 1` → `LocalVariable("a", scope)`
-    LocalVariable(String, LVScopeStack),
+    LocalVariable(Ustr, LVScopeStack),
 
     /// Instance variable, e.g., `@name` → `InstanceVariable("@name")`
-    InstanceVariable(String),
+    InstanceVariable(Ustr),
 
     /// Class variable, e.g., `@@count` → `ClassVariable("@@count")`
-    ClassVariable(String),
+    ClassVariable(Ustr),
 
     /// Global variable, e.g., `$global` → `GlobalVariable("$global")`
-    GlobalVariable(String),
+    GlobalVariable(Ustr),
 }
 
 impl FullyQualifiedName {
@@ -39,22 +40,22 @@ impl FullyQualifiedName {
 
     pub fn local_variable(name: String, scope: LVScopeStack) -> Result<Self, &'static str> {
         Self::validate_local_variable(&name)?;
-        Ok(Self::LocalVariable(name, scope))
+        Ok(Self::LocalVariable(Ustr::from(&name), scope))
     }
 
     pub fn instance_variable(name: String) -> Result<Self, &'static str> {
         Self::validate_instance_variable(&name)?;
-        Ok(Self::InstanceVariable(name))
+        Ok(Self::InstanceVariable(Ustr::from(&name)))
     }
 
     pub fn class_variable(name: String) -> Result<Self, &'static str> {
         Self::validate_class_variable(&name)?;
-        Ok(Self::ClassVariable(name))
+        Ok(Self::ClassVariable(Ustr::from(&name)))
     }
 
     pub fn global_variable(name: String) -> Result<Self, &'static str> {
         Self::validate_global_variable(&name)?;
-        Ok(Self::GlobalVariable(name))
+        Ok(Self::GlobalVariable(Ustr::from(&name)))
     }
 
     fn validate_local_variable(name: &str) -> Result<(), &'static str> {
@@ -210,10 +211,10 @@ impl FullyQualifiedName {
                 ns.last().map(|c| c.to_string()).unwrap_or_default()
             }
             FullyQualifiedName::Method(_, method) => method.to_string(),
-            FullyQualifiedName::LocalVariable(name, _) => name.clone(),
-            FullyQualifiedName::InstanceVariable(name) => name.clone(),
-            FullyQualifiedName::ClassVariable(name) => name.clone(),
-            FullyQualifiedName::GlobalVariable(name) => name.clone(),
+            FullyQualifiedName::LocalVariable(name, _) => name.to_string(),
+            FullyQualifiedName::InstanceVariable(name) => name.to_string(),
+            FullyQualifiedName::ClassVariable(name) => name.to_string(),
+            FullyQualifiedName::GlobalVariable(name) => name.to_string(),
         }
     }
 
@@ -241,13 +242,17 @@ impl From<Identifier> for FullyQualifiedName {
                 namespace, iden, ..
             } => FullyQualifiedName::Method(namespace, iden),
             Identifier::RubyLocalVariable { name, scope, .. } => {
-                FullyQualifiedName::LocalVariable(name, scope)
+                FullyQualifiedName::LocalVariable(Ustr::from(&name), scope)
             }
             Identifier::RubyInstanceVariable { name, .. } => {
-                FullyQualifiedName::InstanceVariable(name)
+                FullyQualifiedName::InstanceVariable(Ustr::from(&name))
             }
-            Identifier::RubyClassVariable { name, .. } => FullyQualifiedName::ClassVariable(name),
-            Identifier::RubyGlobalVariable { name, .. } => FullyQualifiedName::GlobalVariable(name),
+            Identifier::RubyClassVariable { name, .. } => {
+                FullyQualifiedName::ClassVariable(Ustr::from(&name))
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                FullyQualifiedName::GlobalVariable(Ustr::from(&name))
+            }
             Identifier::YardType { type_name, .. } => {
                 // Try to parse type name as a constant path
                 let parts: Vec<&str> = type_name.split("::").collect();

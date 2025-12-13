@@ -203,7 +203,7 @@ fn search_by_name_filtered(
 
     let mut filtered_locations = Vec::new();
 
-    if let Some(entries) = index.methods_by_name.get(method) {
+    if let Some(entries) = index.get_methods_by_name(method) {
         for entry in entries.iter() {
             // Check if this method belongs to one of the receiver's types
             let method_class = entry.fqn.namespace_parts();
@@ -370,7 +370,7 @@ fn get_included_modules(
     let ancestor_chain = get_ancestor_chain(index, class_fqn, false);
 
     for ancestor_fqn in &ancestor_chain {
-        if let Some(entries) = index.definitions.get(ancestor_fqn) {
+        if let Some(entries) = index.get(ancestor_fqn) {
             for entry in entries.iter() {
                 process_entry_mixins(
                     index,
@@ -464,7 +464,7 @@ fn process_mixins(
 
 /// Search for methods by name across the entire index
 fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location>> {
-    index.methods_by_name.get(method).and_then(|entries| {
+    index.get_methods_by_name(method).and_then(|entries| {
         let locations: Vec<Location> = entries.iter().map(|entry| entry.location.clone()).collect();
         if locations.is_empty() {
             None
@@ -480,7 +480,7 @@ fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location
 
 /// Check if the given FQN represents a class context
 fn is_class_context(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
-    if let Some(entries) = index.definitions.get(fqn) {
+    if let Some(entries) = index.get(fqn) {
         for entry in entries {
             match &entry.kind {
                 EntryKind::Class { .. } => return true,
@@ -555,7 +555,7 @@ fn search_method_in_class_hierarchy(
 
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
-        if let Some(entries) = index.definitions.get(&method_fqn) {
+        if let Some(entries) = index.get(&method_fqn) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
         }
     }
@@ -607,7 +607,7 @@ fn search_method_in_including_classes(
 
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
-        if let Some(entries) = index.definitions.get(&method_fqn) {
+        if let Some(entries) = index.get(&method_fqn) {
             found_locations.extend(entries.iter().map(|e| e.location.clone()));
         }
     }

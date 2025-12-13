@@ -376,7 +376,7 @@ fn find_method_references_by_name(
     let mut all_references = Vec::new();
 
     // Search through all method definitions to find references
-    if let Some(entries) = index.methods_by_name.get(method) {
+    if let Some(entries) = index.get_methods_by_name(method) {
         for entry in entries {
             if let EntryKind::Method { .. } = &entry.kind {
                 // For each method definition, find its FQN and look for references

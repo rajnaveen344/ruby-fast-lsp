@@ -32,49 +32,40 @@ mod tests {
             },
         };
 
-        index.definitions.insert(
-            foo_fqn,
-            vec![Entry {
-                fqn: FullyQualifiedName::Constant(vec![RubyConstant::new("Foo").unwrap()]),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    prepends: vec![],
-                    extends: vec![],
-                },
-                location: test_location.clone(),
-            }],
-        );
+        let foo_entry = Entry {
+            fqn: foo_fqn,
+            kind: EntryKind::Module {
+                includes: vec![],
+                prepends: vec![],
+                extends: vec![],
+            },
+            location: test_location.clone(),
+        };
+        index.add_entry(foo_entry);
 
-        index.definitions.insert(
-            foo_bar_fqn,
-            vec![Entry {
-                fqn: FullyQualifiedName::Constant(vec![
-                    RubyConstant::new("Foo").unwrap(),
-                    RubyConstant::new("Bar").unwrap(),
-                ]),
-                kind: EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    prepends: vec![],
-                    extends: vec![],
-                },
-                location: test_location.clone(),
-            }],
-        );
+        let foo_bar_entry = Entry {
+            fqn: foo_bar_fqn,
+            kind: EntryKind::Class {
+                superclass: None,
+                includes: vec![],
+                prepends: vec![],
+                extends: vec![],
+            },
+            location: test_location.clone(),
+        };
+        index.add_entry(foo_bar_entry);
 
-        index.definitions.insert(
-            baz_fqn,
-            vec![Entry {
-                fqn: FullyQualifiedName::Constant(vec![RubyConstant::new("Baz").unwrap()]),
-                kind: EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    prepends: vec![],
-                    extends: vec![],
-                },
-                location: test_location.clone(),
-            }],
-        );
+        let baz_entry = Entry {
+            fqn: baz_fqn,
+            kind: EntryKind::Class {
+                superclass: None,
+                includes: vec![],
+                prepends: vec![],
+                extends: vec![],
+            },
+            location: test_location.clone(),
+        };
+        index.add_entry(baz_entry);
 
         index
     }

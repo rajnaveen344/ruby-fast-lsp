@@ -259,7 +259,7 @@ impl ConstantCompletionEngine {
         let mut seen_fqns = std::collections::HashSet::new();
 
         // Search through all definitions in the index
-        for (fqn, entries) in &index.definitions {
+        for (fqn, entries) in index.definitions() {
             // Skip if we've already processed this FQN
             if seen_fqns.contains(fqn) {
                 continue;
@@ -300,7 +300,7 @@ impl ConstantCompletionEngine {
                     }
                 }
 
-                candidates.push(ConstantCompletionItem::new(entry.clone(), context));
+                candidates.push(ConstantCompletionItem::new((*entry).clone(), context));
                 seen_fqns.insert(fqn.clone());
             }
         }

@@ -179,10 +179,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -192,7 +189,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::ClassVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::integer(), "Expected Integer type");
+                assert_eq!(r#type, &RubyType::integer(), "Expected Integer type");
             }
         }
     }
@@ -207,10 +204,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -239,10 +233,7 @@ mod tests {
 
         let index = visitor.index.lock();
         let uri = visitor.document.uri.clone();
-        let entries = index
-            .file_entries
-            .get(&uri)
-            .expect("Should have entries for file");
+        let entries = index.file_entries(&uri);
 
         let variable_entry = entries
             .iter()
@@ -252,7 +243,7 @@ mod tests {
 
         if let Some(entry) = variable_entry {
             if let EntryKind::ClassVariable { r#type, .. } = &entry.kind {
-                assert_eq!(*r#type, RubyType::nil_class(), "Expected NilClass type");
+                assert_eq!(r#type, &RubyType::nil_class(), "Expected NilClass type");
             }
         }
     }

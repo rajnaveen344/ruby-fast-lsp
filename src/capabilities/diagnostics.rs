@@ -106,86 +106,83 @@ fn extract_syntax_diagnostics(
 pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    if let Some(entries) = index.file_entries.get(uri) {
-        for entry in entries {
-            if let EntryKind::Method {
-                yard_doc: Some(yard_doc),
-                params: method_params,
-                ..
-            } = &entry.kind
-            {
-                // Get actual parameter names from the method
-                let actual_param_names: Vec<&str> =
-                    method_params.iter().map(|p| p.name.as_str()).collect();
+    let entries = index.file_entries(uri);
+    for entry in entries {
+        if let EntryKind::Method {
+            yard_doc: Some(yard_doc),
+            params: method_params,
+            ..
+        } = &entry.kind
+        {
+            // Get actual parameter names from the method
+            let actual_param_names: Vec<&str> =
+                method_params.iter().map(|p| p.name.as_str()).collect();
 
-                // Find YARD @param tags that don't match any actual parameter
-                let unmatched = yard_doc.find_unmatched_params(&actual_param_names);
+            // Find YARD @param tags that don't match any actual parameter
+            let unmatched = yard_doc.find_unmatched_params(&actual_param_names);
 
-                for (yard_param, range) in unmatched {
-                    let diagnostic = Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                            "yard-unknown-param".to_string(),
-                        )),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message: format!(
-                            "YARD @param '{}' does not match any method parameter",
-                            yard_param.name
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    };
-                    diagnostics.push(diagnostic);
-                }
+            for (yard_param, range) in unmatched {
+                let diagnostic = Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "yard-unknown-param".to_string(),
+                    )),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message: format!(
+                        "YARD @param '{}' does not match any method parameter",
+                        yard_param.name
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                };
+                diagnostics.push(diagnostic);
+            }
 
-                // Check for unresolved types in @param tags
-                for param in &yard_doc.params {
-                    let result = YardTypeConverter::convert_multiple_with_validation(
-                        &param.types,
-                        Some(index),
-                    );
-                    for unresolved in result.unresolved_types {
-                        // Prefer types_range (just the [Type] portion) over range (entire line)
-                        let diagnostic_range = param.types_range.or(param.range);
-                        if let Some(range) = diagnostic_range {
-                            let diagnostic = Diagnostic {
-                                range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                                    "yard-unknown-type".to_string(),
-                                )),
-                                code_description: None,
-                                source: Some("ruby-fast-lsp".to_string()),
-                                message: format!(
-                                    "Unknown type '{}' in YARD @param documentation",
-                                    unresolved.type_name
-                                ),
-                                related_information: None,
-                                tags: None,
-                                data: None,
-                            };
-                            diagnostics.push(diagnostic);
-                        }
+            // Check for unresolved types in @param tags
+            for param in &yard_doc.params {
+                let result =
+                    YardTypeConverter::convert_multiple_with_validation(&param.types, Some(index));
+                for unresolved in result.unresolved_types {
+                    // Prefer types_range (just the [Type] portion) over range (entire line)
+                    let diagnostic_range = param.types_range.or(param.range);
+                    if let Some(range) = diagnostic_range {
+                        let diagnostic = Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                                "yard-unknown-type".to_string(),
+                            )),
+                            code_description: None,
+                            source: Some("ruby-fast-lsp".to_string()),
+                            message: format!(
+                                "Unknown type '{}' in YARD @param documentation",
+                                unresolved.type_name
+                            ),
+                            related_information: None,
+                            tags: None,
+                            data: None,
+                        };
+                        diagnostics.push(diagnostic);
                     }
                 }
+            }
 
-                // Check for unresolved types in @return tags
-                for return_doc in &yard_doc.returns {
-                    let result = YardTypeConverter::convert_multiple_with_validation(
-                        &return_doc.types,
-                        Some(index),
+            // Check for unresolved types in @return tags
+            for return_doc in &yard_doc.returns {
+                let result = YardTypeConverter::convert_multiple_with_validation(
+                    &return_doc.types,
+                    Some(index),
+                );
+                for unresolved in result.unresolved_types {
+                    // For return types, we don't have a specific range stored
+                    // We could add range tracking to YardReturn in the future
+                    debug!(
+                        "Unresolved return type '{}' (no range available for diagnostic)",
+                        unresolved.type_name
                     );
-                    for unresolved in result.unresolved_types {
-                        // For return types, we don't have a specific range stored
-                        // We could add range tracking to YardReturn in the future
-                        debug!(
-                            "Unresolved return type '{}' (no range available for diagnostic)",
-                            unresolved.type_name
-                        );
-                    }
                 }
             }
         }

@@ -6,7 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use log::debug;
+use log::{debug, info};
+use slotmap::{new_key_type, SlotMap};
+use std::time::Instant;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
@@ -21,6 +23,9 @@ pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
 // Types
 // ============================================================================
 
+// SlotMap key type for entries
+new_key_type! { pub struct EntryId; }
+
 /// Represents a single mixin usage with its type and location
 #[derive(Debug, Clone, PartialEq)]
 pub struct MixinUsage {
@@ -32,54 +37,48 @@ pub struct MixinUsage {
     pub location: Location,
 }
 
-// ============================================================================
-// RubyIndex
-// ============================================================================
-
-/// The main index storing all Ruby code information.
 #[derive(Debug)]
 pub struct RubyIndex {
-    /// File URI to entries map (e.g., file:///test.rb => [Entry1, Entry2, ...])
-    pub file_entries: HashMap<Url, Vec<Entry>>,
+    // Central Store - Single source of truth
+    entries: SlotMap<EntryId, Entry>,
 
-    /// FQN to definition entries map
-    pub definitions: HashMap<FullyQualifiedName, Vec<Entry>>,
+    // Indexes - Just IDs, no data duplication
+    by_uri: HashMap<Url, Vec<EntryId>>,
+    by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
+    by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
 
-    /// FQN to reference locations map
+    // Reference Tracking
     pub references: HashMap<FullyQualifiedName, Vec<Location>>,
+    references_by_uri: HashMap<Url, HashSet<FullyQualifiedName>>,
 
-    /// Reverse index: URI to FQNs that have references from that file
-    /// Used for O(1) removal of references when a file changes
-    references_by_uri: HashMap<Url, std::collections::HashSet<FullyQualifiedName>>,
-
-    /// Method name to entries map (for method lookup without receiver type)
-    pub methods_by_name: HashMap<RubyMethod, Vec<Entry>>,
-
-    /// Reverse mixin tracking: module FQN -> list of classes/modules that include/extend/prepend it
+    // Mixin & Other Tracking
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
-
-    /// Detailed mixin usage tracking for CodeLens (module FQN -> usages with type and location)
     pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
+    mixin_usages_by_uri: HashMap<Url, HashSet<FullyQualifiedName>>,
 
-    /// Reverse index: URI to module FQNs that have mixin usages from that file
-    /// Used for O(1) removal of mixin usages when a file changes
-    mixin_usages_by_uri: HashMap<Url, std::collections::HashSet<FullyQualifiedName>>,
-
-    /// Prefix tree for fast auto-completion lookups
+    // Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
 
-    /// Unresolved entries index (encapsulates forward and reverse lookups)
+    // Unresolved entries index
     pub unresolved: UnresolvedIndex,
 }
 
 impl RubyIndex {
     pub fn new() -> Self {
         RubyIndex {
-            file_entries: HashMap::new(),
-            definitions: HashMap::new(),
+            // Central store
+            entries: SlotMap::with_key(),
+
+            // Indexes
+            by_uri: HashMap::new(),
+            by_fqn: HashMap::new(),
+            by_method_name: HashMap::new(),
+
+            // Reference tracking
             references: HashMap::new(),
             references_by_uri: HashMap::new(),
-            methods_by_name: HashMap::new(),
+
+            // Mixin tracking
             reverse_mixins: HashMap::new(),
             mixin_usages: HashMap::new(),
             mixin_usages_by_uri: HashMap::new(),
@@ -92,26 +91,21 @@ impl RubyIndex {
     // Entry Management
     // ========================================================================
 
-    /// Add an entry to the index
-    pub fn add_entry(&mut self, entry: Entry) {
-        // Add to file entries
-        self.file_entries
-            .entry(entry.location.uri.clone())
-            .or_default()
-            .push(entry.clone());
+    /// Add an entry to the index and return its ID
+    pub fn add_entry(&mut self, entry: Entry) -> EntryId {
+        let uri = entry.location.uri.clone();
+        let fqn = entry.fqn.clone();
 
-        // Add to definitions
-        self.definitions
-            .entry(entry.fqn.clone())
-            .or_default()
-            .push(entry.clone());
+        // Insert into central store
+        let id = self.entries.insert(entry.clone());
 
-        // Add to methods_by_name if it's a method
+        // Add to indexes
+        self.by_uri.entry(uri).or_default().push(id);
+        self.by_fqn.entry(fqn).or_default().push(id);
+
+        // Add to method name index if it's a method
         if let EntryKind::Method { name, .. } = &entry.kind {
-            self.methods_by_name
-                .entry(name.clone())
-                .or_default()
-                .push(entry.clone());
+            self.by_method_name.entry(*name).or_default().push(id);
         }
 
         // Update mixin tracking
@@ -119,59 +113,86 @@ impl RubyIndex {
 
         // Add to prefix tree
         self.add_to_prefix_tree(&entry);
+
+        id
     }
 
     /// Remove all entries for a URI and return the FQNs that were completely removed
     /// (i.e., had no remaining definitions in other files)
     pub fn remove_entries_for_uri(&mut self, uri: &Url) -> Vec<FullyQualifiedName> {
-        let Some(entries) = self.file_entries.remove(uri) else {
-            return Vec::new();
-        };
+        let start_total = Instant::now();
+        let start_slotmap = Instant::now();
+        let ids_to_remove = self.by_uri.remove(uri).unwrap_or_default();
+        let entries_count = ids_to_remove.len();
 
-        // Track FQNs that are completely removed (no definitions left)
-        let mut removed_fqns = Vec::new();
+        info!(
+            "[perf_debug] remove_entries_for_uri: Processing {} entries",
+            entries_count
+        );
 
-        // Remove from definitions
-        for entry in &entries {
-            if let Some(fqn_entries) = self.definitions.get_mut(&entry.fqn) {
-                fqn_entries.retain(|e| e.location.uri != *uri);
-                if fqn_entries.is_empty() {
-                    self.definitions.remove(&entry.fqn);
-                    removed_fqns.push(entry.fqn.clone());
+        // Collect FQNs and method names before removing entries
+        let mut entry_fqns: Vec<FullyQualifiedName> = Vec::with_capacity(entries_count);
+        let mut method_names: Vec<RubyMethod> = Vec::new();
+
+        for id in &ids_to_remove {
+            if let Some(entry) = self.entries.get(*id) {
+                entry_fqns.push(entry.fqn.clone());
+                if let EntryKind::Method { name, .. } = &entry.kind {
+                    method_names.push(*name);
                 }
             }
         }
 
+        // Remove entries from SlotMap
+        for id in &ids_to_remove {
+            self.entries.remove(*id);
+        }
+
+        // Clean up by_fqn index (remove stale IDs)
+        for fqn in &entry_fqns {
+            if let Some(ids) = self.by_fqn.get_mut(fqn) {
+                ids.retain(|id| self.entries.contains_key(*id));
+                if ids.is_empty() {
+                    self.by_fqn.remove(fqn);
+                }
+            }
+        }
+
+        // Clean up by_method_name index
+        for method_name in &method_names {
+            if let Some(ids) = self.by_method_name.get_mut(method_name) {
+                ids.retain(|id| self.entries.contains_key(*id));
+                if ids.is_empty() {
+                    self.by_method_name.remove(method_name);
+                }
+            }
+        }
+
+        info!(
+            "[perf_debug] remove_entries_for_uri SlotMap removal in {:?}",
+            start_slotmap.elapsed()
+        );
+
+        // Compute removed FQNs (FQNs with no remaining entries)
+        let removed_fqns: Vec<FullyQualifiedName> = entry_fqns
+            .iter()
+            .filter(|fqn| !self.by_fqn.contains_key(*fqn))
+            .cloned()
+            .collect();
+
         // Clean up mixin tracking for completely removed FQNs
-        // This handles the case where a module is deleted but files that include it
-        // haven't been re-indexed yet
+        let start_mixins = Instant::now();
         for fqn in &removed_fqns {
             self.reverse_mixins.remove(fqn);
             self.mixin_usages.remove(fqn);
         }
+        info!(
+            "[perf_debug] remove_entries_for_uri mixin cleanups in {:?}",
+            start_mixins.elapsed()
+        );
 
-        // Remove from methods_by_name
-        let method_names: Vec<RubyMethod> = entries
-            .iter()
-            .filter_map(|e| {
-                if let EntryKind::Method { name, .. } = &e.kind {
-                    Some(name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for method_name in method_names {
-            if let Some(method_entries) = self.methods_by_name.get_mut(&method_name) {
-                method_entries.retain(|e| e.location.uri != *uri);
-                if method_entries.is_empty() {
-                    self.methods_by_name.remove(&method_name);
-                }
-            }
-        }
-
-        // Remove mixin usages - O(usages_in_file) instead of O(total_usages)
+        // Remove mixin usages
+        let start_usages = Instant::now();
         if let Some(module_fqns) = self.mixin_usages_by_uri.remove(uri) {
             for module_fqn in module_fqns {
                 if let Some(usages) = self.mixin_usages.get_mut(&module_fqn) {
@@ -182,9 +203,28 @@ impl RubyIndex {
                 }
             }
         }
+        info!(
+            "[perf_debug] remove_entries_for_uri mixin usages in {:?}",
+            start_usages.elapsed()
+        );
 
-        // Remove from prefix tree
-        self.remove_from_prefix_tree(&entries);
+        // Prefix tree cleanup: only remove keys if the FQN is completely gone
+        let start_prefix = Instant::now();
+        for fqn in &removed_fqns {
+            let key = fqn.name();
+            if !key.is_empty() {
+                self.prefix_tree.delete(&key);
+            }
+        }
+        info!(
+            "[perf_debug] remove_entries_for_uri prefix tree cleanup in {:?}",
+            start_prefix.elapsed()
+        );
+
+        info!(
+            "[perf_debug] remove_entries_for_uri TOTAL in {:?}",
+            start_total.elapsed()
+        );
 
         removed_fqns
     }
@@ -258,14 +298,137 @@ impl RubyIndex {
         added_fqns.contains(unresolved_name)
     }
 
-    /// Get entries by FQN
-    pub fn get(&self, fqn: &FullyQualifiedName) -> Option<&Vec<Entry>> {
-        self.definitions.get(fqn)
+    /// Get entries by FQN (returns Vec for compatibility)
+    pub fn get(&self, fqn: &FullyQualifiedName) -> Option<Vec<&Entry>> {
+        let entries = self.get_definitions_iter(fqn);
+        if entries.is_empty() {
+            None
+        } else {
+            Some(entries)
+        }
     }
 
-    /// Get mutable entries by FQN
-    pub fn get_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Vec<Entry>> {
-        self.definitions.get_mut(fqn)
+    /// Check if FQN has any definitions
+    pub fn contains_fqn(&self, fqn: &FullyQualifiedName) -> bool {
+        self.by_fqn
+            .get(fqn)
+            .map(|ids| !ids.is_empty())
+            .unwrap_or(false)
+    }
+
+    // ========================================================================
+    // COMPATIBILITY METHODS (for callers that used old field access)
+    // ========================================================================
+
+    /// Iterate over all definitions grouped by FQN
+    pub fn definitions(&self) -> impl Iterator<Item = (&FullyQualifiedName, Vec<&Entry>)> {
+        self.by_fqn.iter().filter_map(|(fqn, ids)| {
+            let entries: Vec<&Entry> = ids
+                .iter()
+                .filter_map(|id| self.entries.get(*id))
+                .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                .collect();
+            if entries.is_empty() {
+                None
+            } else {
+                Some((fqn, entries))
+            }
+        })
+    }
+
+    /// Get entries for a file (compatibility method)
+    pub fn file_entries(&self, uri: &Url) -> Vec<&Entry> {
+        self.get_entries_for_uri(uri)
+    }
+
+    /// Iterate over all methods grouped by name
+    pub fn methods_by_name(&self) -> impl Iterator<Item = (&RubyMethod, Vec<&Entry>)> {
+        self.by_method_name.iter().filter_map(|(method, ids)| {
+            let entries: Vec<&Entry> = ids.iter().filter_map(|id| self.entries.get(*id)).collect();
+            if entries.is_empty() {
+                None
+            } else {
+                Some((method, entries))
+            }
+        })
+    }
+
+    /// Get methods by name (compatibility method)
+    pub fn get_methods_by_name(&self, method: &RubyMethod) -> Option<Vec<&Entry>> {
+        let entries: Vec<&Entry> = self
+            .by_method_name
+            .get(method)?
+            .iter()
+            .filter_map(|id| self.entries.get(*id))
+            .collect();
+        if entries.is_empty() {
+            None
+        } else {
+            Some(entries)
+        }
+    }
+
+    /// Check if method exists in index
+    pub fn contains_method(&self, method: &RubyMethod) -> bool {
+        self.by_method_name
+            .get(method)
+            .map(|ids| !ids.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Get number of unique FQNs in index
+    pub fn definitions_len(&self) -> usize {
+        self.by_fqn.len()
+    }
+
+    // ========================================================================
+    // NEW: SlotMap-based access methods
+    // ========================================================================
+
+    /// Get an entry by ID
+    pub fn get_entry(&self, id: EntryId) -> Option<&Entry> {
+        self.entries.get(id)
+    }
+
+    /// Get entries for a URI (using new SlotMap)
+    pub fn get_entries_for_uri(&self, uri: &Url) -> Vec<&Entry> {
+        self.by_uri
+            .get(uri)
+            .map(|ids| ids.iter().filter_map(|id| self.entries.get(*id)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get mutable reference to the last definition entry (for updating mixins)
+    pub fn get_last_definition_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Entry> {
+        let id = *self.by_fqn.get(fqn)?.last()?;
+        self.entries.get_mut(id)
+    }
+
+    /// Get definitions by FQN (using new SlotMap, filters out Reference entries)
+    pub fn get_definitions_iter(&self, fqn: &FullyQualifiedName) -> Vec<&Entry> {
+        self.by_fqn
+            .get(fqn)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.entries.get(*id))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get reference locations for FQN (using new SlotMap)
+    pub fn get_references_iter(&self, fqn: &FullyQualifiedName) -> Vec<Location> {
+        self.by_fqn
+            .get(fqn)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.entries.get(*id))
+                    .filter(|e| matches!(e.kind, EntryKind::Reference { .. }))
+                    .map(|e| e.location.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     // ========================================================================
@@ -449,7 +612,11 @@ impl RubyIndex {
     pub fn resolve_all_mixins(&mut self) {
         debug!("Resolving all mixin references");
 
-        let entries: Vec<_> = self.definitions.values().flatten().cloned().collect();
+        // Collect entries first to avoid borrow conflicts
+        let entries: Vec<Entry> = self
+            .definitions()
+            .flat_map(|(_, entries)| entries.into_iter().cloned())
+            .collect();
 
         for entry in entries {
             self.update_reverse_mixins(&entry);
@@ -466,10 +633,10 @@ impl RubyIndex {
     pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
         // Get FQNs from file_entries (O(1) lookup), then fetch from definitions
         let fqns_to_resolve: Vec<_> = self
-            .file_entries
-            .get(uri)
-            .map(|entries| entries.iter().map(|e| e.fqn.clone()).collect())
-            .unwrap_or_default();
+            .file_entries(uri)
+            .iter()
+            .map(|e| e.fqn.clone())
+            .collect();
 
         self.resolve_mixins_for_fqns(&fqns_to_resolve);
     }
@@ -477,14 +644,17 @@ impl RubyIndex {
     /// Resolve mixin references for specific FQNs
     /// More efficient than iterating all definitions
     pub fn resolve_mixins_for_fqns(&mut self, fqns: &[FullyQualifiedName]) {
-        for fqn in fqns {
-            // Look up the entry in definitions (where mixins have been added)
-            if let Some(entries) = self.definitions.get(fqn) {
-                // Get the last entry (most recent definition)
-                if let Some(entry) = entries.last().cloned() {
-                    self.update_reverse_mixins(&entry);
-                }
-            }
+        // Collect entries first to avoid borrow conflicts
+        let entries_to_update: Vec<Entry> = fqns
+            .iter()
+            .filter_map(|fqn| {
+                self.get(fqn)
+                    .and_then(|entries| entries.last().copied().cloned())
+            })
+            .collect();
+
+        for entry in entries_to_update {
+            self.update_reverse_mixins(&entry);
         }
     }
 
@@ -512,7 +682,7 @@ impl RubyIndex {
         self.get_transitive_mixin_classes(module_fqn)
             .keys()
             .filter_map(|class_fqn| {
-                self.definitions.get(class_fqn).and_then(|entries| {
+                self.get(class_fqn).and_then(|entries| {
                     entries.first().and_then(|entry| {
                         if matches!(entry.kind, EntryKind::Class { .. }) {
                             Some(entry.location.clone())
@@ -549,7 +719,7 @@ impl RubyIndex {
 
         if let Some(usages) = self.mixin_usages.get(module_fqn) {
             for usage in usages {
-                if let Some(entries) = self.definitions.get(&usage.user_fqn) {
+                if let Some(entries) = self.get(&usage.user_fqn) {
                     if let Some(entry) = entries.first() {
                         let mut current_path = path.clone();
                         current_path.push(module_fqn.clone());
@@ -594,16 +764,6 @@ impl RubyIndex {
             self.prefix_tree.insert(&key, entry.clone());
         }
     }
-
-    fn remove_from_prefix_tree(&mut self, entries: &[Entry]) {
-        for entry in entries {
-            let key = entry.fqn.name();
-            if !key.is_empty() {
-                self.prefix_tree.delete(&key);
-                debug!("Removed entry from prefix tree: {}", key);
-            }
-        }
-    }
 }
 
 impl Default for RubyIndex {
@@ -643,7 +803,7 @@ mod tests {
 
         index.add_entry(entry);
 
-        assert_eq!(index.definitions.len(), 1);
+        assert_eq!(index.definitions_len(), 1);
         assert_eq!(index.references.len(), 0);
     }
 
@@ -654,10 +814,10 @@ mod tests {
         let entry = create_test_entry("Test", &uri);
 
         index.add_entry(entry);
-        assert_eq!(index.definitions.len(), 1);
+        assert_eq!(index.definitions_len(), 1);
 
         index.remove_entries_for_uri(&uri);
-        assert_eq!(index.definitions.len(), 0);
+        assert_eq!(index.definitions_len(), 0);
     }
 
     #[test]

@@ -48,7 +48,7 @@ impl ReferenceVisitor {
             combined_ns.extend(namespaces.clone());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let entries = index.definitions.get(&fqn);
+            let entries = index.get(&fqn);
             if entries.is_some() {
                 let location = self
                     .document
@@ -62,7 +62,7 @@ impl ReferenceVisitor {
 
         // Check from root namespace
         let fqn = FullyQualifiedName::namespace(namespaces.clone());
-        let entries = index.definitions.get(&fqn);
+        let entries = index.get(&fqn);
         if entries.is_some() {
             let location = self
                 .document

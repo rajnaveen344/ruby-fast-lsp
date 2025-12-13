@@ -1,9 +1,10 @@
 use std::fmt;
+use ustr::Ustr;
 
 use crate::indexer::entry::MethodKind;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct RubyMethod(String, MethodKind);
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct RubyMethod(Ustr, MethodKind);
 
 impl RubyMethod {
     pub fn new(name: &str, kind: MethodKind) -> Result<Self, &'static str> {
@@ -13,7 +14,7 @@ impl RubyMethod {
 
         // Check if it's a valid Ruby method name
         if Self::is_valid_ruby_method_name(name) {
-            Ok(Self(name.to_string(), kind))
+            Ok(Self(Ustr::from(name), kind))
         } else {
             Err("Invalid Ruby method name")
         }
@@ -81,7 +82,7 @@ impl RubyMethod {
     }
 
     pub fn get_name(&self) -> String {
-        self.0.clone()
+        self.0.to_string()
     }
 
     pub fn get_kind(&self) -> MethodKind {

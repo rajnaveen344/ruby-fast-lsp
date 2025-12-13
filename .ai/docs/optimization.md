@@ -6,20 +6,19 @@
 
 **Goal**: Reduce `did_change` latency to **<50ms sync** + **~300ms async debounce**.
 
-## Current Performance (2025-12-12)
+## Current Performance (2025-12-13) - `commerce.rb`
 
-| Component                      | Before    | After     | Status        |
-| ------------------------------ | --------- | --------- | ------------- |
-| Parsing                        | 26ms      | 26ms      | ✅ OK         |
-| Cleanup (`remove_entries`)     | 175ms     | 160ms     | ⚠️ Acceptable |
-| IndexVisitor Walk              | **447ms** | **430ms** | ❌ HIGH       |
-| Cross-file: `mark_references`  | **985ms** | **57ms**  | ✅ FIXED      |
-| Cross-file: `clear_resolved`   | 3ms       | 3ms       | ✅ OK         |
-| Cross-file Diagnostics (total) | **1s**    | **88ms**  | ✅ FIXED      |
-| Index Definitions (total)      | 1.6s      | 688ms     | ⚠️ Improved   |
-| ReferenceVisitor Walk          | 353ms     | 326ms     | ⚠️ High       |
-| Index References               | 500ms     | 412ms     | ⚠️ High       |
-| **Total**                      | **2.1s**  | **1.15s** | ⚠️ 45% faster |
+| Component                      | Previous (12/12) | Current (12/13) | Status        |
+| ------------------------------ | ---------------- | --------------- | ------------- |
+| Parsing                        | 26ms             | ~25ms           | ✅ OK         |
+| Cleanup (`remove_entries`)     | 160ms            | **125ms**       | ⚠️ Needs Work |
+| IndexVisitor Walk              | 430ms            | **87ms**        | ✅ FIXED      |
+| Cross-file: `mark_references`  | 57ms             | 53ms            | ✅ OK         |
+| Cross-file Diagnostics (total) | 88ms             | 86ms            | ✅ OK         |
+| Index Definitions (total)      | 688ms            | **310ms**       | ✅ Improved   |
+| ReferenceVisitor Walk          | 326ms            | **322ms**       | ❌ HIGH       |
+| Index References               | 412ms            | **375ms**       | ❌ HIGH       |
+| **Total**                      | **1.15s**        | **~730ms**      | ⚠️ 36% faster |
 
 ## Optimization Plan
 

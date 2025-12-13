@@ -19,8 +19,8 @@ fn def_node_instance_method() {
     let method = RubyMethod::new("bar", MethodKind::Instance).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
-    let defs = &visitor.index.lock().definitions;
-    let entries = defs.get(&fqn).expect("bar method entry missing");
+    let index_lock = visitor.index.lock();
+    let entries = index_lock.get(&fqn).expect("bar method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
 }
@@ -36,8 +36,8 @@ fn def_node_class_method_self() {
     let method = RubyMethod::new("baz", MethodKind::Class).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
-    let defs = &visitor.index.lock().definitions;
-    let entries = defs.get(&fqn).expect("baz method entry missing");
+    let index_lock = visitor.index.lock();
+    let entries = index_lock.get(&fqn).expect("baz method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
 }
@@ -53,8 +53,8 @@ fn def_node_initialize_as_new() {
     let method = RubyMethod::new("new", MethodKind::Class).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
-    let defs = &visitor.index.lock().definitions;
-    let entries = defs.get(&fqn).expect("new method entry missing");
+    let index_lock = visitor.index.lock();
+    let entries = index_lock.get(&fqn).expect("new method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
 }
@@ -70,8 +70,8 @@ fn def_node_singleton_class_method() {
     let method = RubyMethod::new("qux", MethodKind::Class).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
-    let defs = &visitor.index.lock().definitions;
-    let entries = defs.get(&fqn).expect("qux method entry missing");
+    let index_lock = visitor.index.lock();
+    let entries = index_lock.get(&fqn).expect("qux method entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
 }
@@ -86,8 +86,8 @@ fn def_node_constant_receiver_class_method() {
 
     let method = RubyMethod::new("bar", MethodKind::Class).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
-    let defs = &visitor.index.lock().definitions;
-    assert!(defs.get(&fqn).is_none());
+    let index_lock = visitor.index.lock();
+    assert!(index_lock.get(&fqn).is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -106,8 +106,8 @@ fn def_node_namespaced_constant_receiver_class_method() {
         ],
         method,
     );
-    let defs = &visitor.index.lock().definitions;
-    assert!(defs.get(&fqn).is_none());
+    let index_lock = visitor.index.lock();
+    assert!(index_lock.get(&fqn).is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -119,10 +119,11 @@ fn def_node_invalid_method_name() {
     let visitor = visit_code(code);
 
     // Index should have no method entries for 123invalid
-    let defs = &visitor.index.lock().definitions;
+    let index_lock = visitor.index.lock();
     // Ensure none of the FQNs contain 123invalid
-    assert!(defs
-        .keys()
+    assert!(index_lock
+        .definitions()
+        .map(|(fqn, _)| fqn)
         .all(|fqn| !fqn.to_string().contains("123invalid")));
 }
 
@@ -137,8 +138,8 @@ fn def_node_uppercase_method_name() {
     let method = RubyMethod::new("UppercaseMethod", MethodKind::Instance).unwrap();
     let fqn = FullyQualifiedName::method(vec![RubyConstant::try_from("Foo").unwrap()], method);
 
-    let defs = &visitor.index.lock().definitions;
-    let entries = defs.get(&fqn).expect("UppercaseMethod entry missing");
+    let index_lock = visitor.index.lock();
+    let entries = index_lock.get(&fqn).expect("UppercaseMethod entry missing");
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
 }
@@ -182,13 +183,12 @@ fn def_node_special_method_names() {
     let visitor = visit_code(code);
 
     let index_lock = visitor.index.lock();
-    let defs = &index_lock.definitions;
 
     // Check that all special methods are indexed
     let special_methods = ["[]", "^", "==", "+@", "-@", "<=>", "[]="];
 
     for method_name in special_methods {
-        let found = defs.iter().any(|(fqn, _)| {
+        let found = index_lock.definitions().any(|(fqn, _)| {
             fqn.to_string()
                 .contains(&format!("TestClass#{}", method_name))
         });
