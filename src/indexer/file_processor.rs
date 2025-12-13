@@ -112,9 +112,7 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         options: ProcessingOptions,
     ) -> Result<ProcessResult> {
-        let start = Instant::now();
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
-        // This relies on the document version being updated BEFORE calling this method
         let already_indexed = {
             let docs = server.docs.lock();
             if let Some(doc_arc) = docs.get(uri) {
@@ -148,9 +146,8 @@ impl FileProcessor {
         // 2. Generate Syntax Diagnostics
         let diagnostics = generate_diagnostics(&parse_result, &document);
 
-        // If severe parse errors, we might want to skip indexing, but usually we try best-effort.
+        // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
-            // Arbitrary threshold for "totally broken"
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -172,9 +169,13 @@ impl FileProcessor {
             let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
             visitor.visit(&node);
 
-            // Update document with visitor's state
-            if let Some(doc_arc) = server.docs.lock().get(uri) {
-                *doc_arc.write() = visitor.document.clone();
+            // Update document with visitor's state (includes lvars for LocalVariable lookup)
+            {
+                let mut docs = server.docs.lock();
+                docs.insert(
+                    uri.clone(),
+                    std::sync::Arc::new(parking_lot::RwLock::new(visitor.document.clone())),
+                );
             }
 
             if options.resolve_mixins {
@@ -192,7 +193,6 @@ impl FileProcessor {
             };
 
             let added_fqn_set: HashSet<_> = added_fqns.iter().cloned().collect();
-
             let truly_removed: Vec<_> = removed_fqn_set
                 .difference(&added_fqn_set)
                 .cloned()
@@ -205,20 +205,20 @@ impl FileProcessor {
                     .mark_references_as_unresolved(&truly_removed);
                 affected_uris.extend(removed_affected);
             }
+
             if !added_fqns.is_empty() {
                 let resolved_affected = self.index.lock().clear_resolved_entries(&added_fqns);
                 affected_uris.extend(resolved_affected);
             }
         }
 
-        // 4. Index References (Phase 2) - always tracks unresolved
+        // 4. Index References (Phase 2)
         if options.index_references {
             let mut index = self.index.lock();
             index.remove_references_for_uri(uri);
             index.remove_unresolved_entries_for_uri(uri);
-            drop(index); // unlock
+            drop(index);
 
-            // Always use with_unresolved_tracking - combined reference + unresolved indexing
             let mut visitor = ReferenceVisitor::with_unresolved_tracking(
                 server,
                 uri.clone(),
@@ -226,15 +226,25 @@ impl FileProcessor {
             );
             visitor.visit(&node);
 
-            // Update document with visitor's state
-            if let Some(doc_arc) = server.docs.lock().get(uri) {
-                *doc_arc.write() = visitor.document;
+            // Merge lvar_references from visitor's document into existing document
+            {
+                let docs = server.docs.lock();
+                if let Some(doc_arc) = docs.get(uri) {
+                    let mut doc = doc_arc.write();
+                    doc.clear_lvar_references();
+                    for ((scope_id, name), locations) in visitor.document.get_all_lvar_references()
+                    {
+                        for location in locations {
+                            doc.add_lvar_reference(*scope_id, *name, location.clone());
+                        }
+                    }
+                }
             }
         }
+
         // 5. Run InlayVisitor (Structural Hints)
         if options.index_definitions {
             if let Some(doc_arc) = server.docs.lock().get(uri) {
-                // InlayVisitor is lightweight
                 let document = doc_arc.read();
                 let mut inlay_visitor = InlayVisitor::new(&document);
                 inlay_visitor.visit(&node);
@@ -250,8 +260,7 @@ impl FileProcessor {
             doc.indexed_version = Some(doc.version);
         }
 
-        let total_time = start.elapsed();
-        debug!("Processed file {:?} in {:?}", uri, total_time);
+        debug!("Processed file {:?}", uri);
 
         Ok(ProcessResult {
             affected_uris,
@@ -276,12 +285,18 @@ impl FileProcessor {
         // Remove existing entries for this URI
         self.index.lock().remove_entries_for_uri(uri);
 
-        // Create and cache the document
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        server
-            .docs
-            .lock()
-            .insert(uri.clone(), Arc::new(parking_lot::RwLock::new(document)));
+        // Create or update the document
+        // IMPORTANT: Don't overwrite existing document that may have been opened via did_open
+        {
+            let mut docs = server.docs.lock();
+            if let Some(existing_doc) = docs.get(uri) {
+                let mut doc_guard = existing_doc.write();
+                doc_guard.update(content.to_string(), 0);
+            } else {
+                let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+                docs.insert(uri.clone(), Arc::new(parking_lot::RwLock::new(document)));
+            }
+        }
 
         // Parse and visit AST for definitions
         let parse_result = ruby_prism::parse(content.as_bytes());
@@ -294,6 +309,15 @@ impl FileProcessor {
         }
         let mut index_visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
         index_visitor.visit(&node);
+
+        // Save IndexVisitor's document (with lvars) back to server.docs
+        {
+            let mut docs = server.docs.lock();
+            docs.insert(
+                uri.clone(),
+                Arc::new(parking_lot::RwLock::new(index_visitor.document.clone())),
+            );
+        }
 
         // Run InlayVisitor to populate structural hints
         if let Some(doc_arc) = server.docs.lock().get(uri) {

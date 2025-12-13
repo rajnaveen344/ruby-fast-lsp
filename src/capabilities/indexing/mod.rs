@@ -29,12 +29,19 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
 
-    let document = RubyDocument::new(uri.clone(), content.clone(), params.text_document.version);
-
-    server
-        .docs
-        .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document)));
+    // Only create a fresh document if one doesn't exist
+    // IMPORTANT: Don't overwrite existing document that may have lvars from workspace indexing
+    {
+        let mut docs = server.docs.lock();
+        if let Some(existing_doc) = docs.get(&uri) {
+            let mut doc_guard = existing_doc.write();
+            doc_guard.update(content.clone(), params.text_document.version);
+        } else {
+            let document =
+                RubyDocument::new(uri.clone(), content.clone(), params.text_document.version);
+            docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
+        }
+    }
     debug!("Doc cache size: {}", server.docs.lock().len());
 
     // Track file for type narrowing analysis

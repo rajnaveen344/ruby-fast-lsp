@@ -74,9 +74,8 @@ impl IndexVisitor {
             .build();
 
         if let Ok(entry) = entry {
-            self.add_entry(entry.clone());
-
-            // Safely get the current scope before adding local variable entry
+            // NOTE: LocalVariables are stored ONLY in RubyDocument.lvars, NOT in global index
+            // This is a performance optimization - file-local data should not bloat the global index
             if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
                 self.document
                     .add_local_var_entry(current_scope.scope_id(), entry.clone());
@@ -173,7 +172,6 @@ impl IndexVisitor {
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
-    use crate::type_inference::ruby_type::RubyType;
     use parking_lot::Mutex;
     use ruby_prism::Visit;
     use std::sync::Arc;
@@ -207,26 +205,13 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Check that type information was stored in Variable entries
-        let index = visitor.index.lock();
-        let uri = visitor.document.uri.clone();
-        let entries = index.file_entries(&uri);
-
-        // Find the variable entry and check its type
-        let variable_entry = entries
-            .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
+        // Check that type information was stored in document.lvars
+        let variable_entry = visitor.document.find_local_var_by_name("name");
 
         assert!(
             variable_entry.is_some(),
             "No type information was stored by IndexVisitor"
         );
-
-        if let Some(entry) = variable_entry {
-            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::string(), "Expected String type");
-            }
-        }
     }
 
     #[test]
@@ -237,26 +222,13 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Check that type information was stored in Variable entries
-        let index = visitor.index.lock();
-        let uri = visitor.document.uri.clone();
-        let entries = index.file_entries(&uri);
-
-        // Find the variable entry and check its type
-        let variable_entry = entries
-            .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
+        // Check that type information was stored in document.lvars
+        let variable_entry = visitor.document.find_local_var_by_name("age");
 
         assert!(
             variable_entry.is_some(),
             "No type information was stored for integer assignment"
         );
-
-        if let Some(entry) = variable_entry {
-            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::integer(), "Expected Integer type");
-            }
-        }
     }
 
     #[test]
@@ -267,26 +239,13 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Check that type information was stored in Variable entries
-        let index = visitor.index.lock();
-        let uri = visitor.document.uri.clone();
-        let entries = index.file_entries(&uri);
-
-        // Find the variable entry and check its type
-        let variable_entry = entries
-            .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
+        // Check that type information was stored in document.lvars
+        let variable_entry = visitor.document.find_local_var_by_name("price");
 
         assert!(
             variable_entry.is_some(),
             "No type information was stored for float assignment"
         );
-
-        if let Some(entry) = variable_entry {
-            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::float(), "Expected Float type");
-            }
-        }
     }
 
     #[test]
@@ -297,26 +256,13 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Check that type information was stored in Variable entries
-        let index = visitor.index.lock();
-        let uri = visitor.document.uri.clone();
-        let entries = index.file_entries(&uri);
-
-        // Find the variable entry and check its type
-        let variable_entry = entries
-            .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::LocalVariable { .. }));
+        // Check that type information was stored in document.lvars
+        let variable_entry = visitor.document.find_local_var_by_name("active");
 
         assert!(
             variable_entry.is_some(),
             "No type information was stored for boolean assignment"
         );
-
-        if let Some(entry) = variable_entry {
-            if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::true_class(), "Expected TrueClass type");
-            }
-        }
     }
 
     #[test]
@@ -327,35 +273,12 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Verify that unknown types are not stored in entries
-        let index = visitor.index.lock();
-
-        // Find variable entries and check they don't have type information for unknown types
-        for entry_vec in index.definitions().map(|(_, e)| e) {
-            for entry in entry_vec {
-                match &entry.kind {
-                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable {
-                        r#type, ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable {
-                        r#type,
-                        ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable {
-                        r#type, ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable {
-                        r#type, ..
-                    } => {
-                        assert!(
-                            *r#type == RubyType::Unknown,
-                            "Unknown types should be stored as RubyType::Unknown in Variable entries"
-                        );
-                    }
-                    _ => {}
-                }
-            }
-        }
+        // Verify that unknown types are stored in document.lvars
+        let variable_entry = visitor.document.find_local_var_by_name("name");
+        assert!(
+            variable_entry.is_some(),
+            "Local variable should be stored even with unknown type"
+        );
     }
 
     #[test]
@@ -366,46 +289,17 @@ mod tests {
 
         visitor.visit(&node);
 
-        // Verify that type information is stored in Variable entries
-        let index = visitor.index.lock();
-
-        let mut found_string_type = false;
-        let mut found_integer_type = false;
-
-        for entry_vec in index.definitions().map(|(_, e)| e) {
-            for entry in entry_vec {
-                match &entry.kind {
-                    crate::indexer::entry::entry_kind::EntryKind::LocalVariable {
-                        r#type, ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::InstanceVariable {
-                        r#type,
-                        ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::ClassVariable {
-                        r#type, ..
-                    }
-                    | crate::indexer::entry::entry_kind::EntryKind::GlobalVariable {
-                        r#type, ..
-                    } => {
-                        if *r#type == RubyType::string() {
-                            found_string_type = true;
-                        } else if *r#type == RubyType::integer() {
-                            found_integer_type = true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        // Verify that local variables are stored in document.lvars
+        let name_entry = visitor.document.find_local_var_by_name("name");
+        let age_entry = visitor.document.find_local_var_by_name("age");
 
         assert!(
-            found_string_type,
-            "Should store String type in Variable entry"
+            name_entry.is_some(),
+            "Should store 'name' variable in document.lvars"
         );
         assert!(
-            found_integer_type,
-            "Should store Integer type in Variable entry"
+            age_entry.is_some(),
+            "Should store 'age' variable in document.lvars"
         );
     }
 

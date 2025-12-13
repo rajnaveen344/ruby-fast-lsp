@@ -46,31 +46,21 @@ pub async fn handle_inlay_hints(
         .into_iter()
         .filter(|h| is_position_in_range(&h.position, &requested_range))
         .collect();
-    drop(document);
-    drop(document_guard);
 
-    // Generate type hints from indexed entries - ONLY for entries in the requested range
-    let index = server.index.lock();
+    // Generate type hints from document.lvars for local variables
+    for entries in document.get_all_lvars().values() {
+        for entry in entries {
+            // Skip entries outside the requested range
+            if !is_position_in_range(&entry.location.range.start, &requested_range)
+                && !is_position_in_range(&entry.location.range.end, &requested_range)
+            {
+                continue;
+            }
 
-    let entries = index.file_entries(&uri);
-    for entry in &entries {
-        // Skip entries outside the requested range
-        if !is_position_in_range(&entry.location.range.start, &requested_range)
-            && !is_position_in_range(&entry.location.range.end, &requested_range)
-        {
-            continue;
-        }
-
-        match &entry.kind {
-            EntryKind::LocalVariable { r#type, name, .. } => {
-                // For variable assignments, prefer the indexed type from the RHS expression
-                // since CFG gives the type BEFORE the assignment, not after.
-                // Only use CFG for reads when the indexed type is Unknown.
-                let final_type = if *r#type != RubyType::Unknown {
-                    // Use the indexed type (from analyzing the RHS)
+            if let EntryKind::LocalVariable { r#type, name, .. } = &entry.kind {
+                let final_type = if r#type != &RubyType::Unknown {
                     Some(r#type.clone())
                 } else {
-                    // Fallback to CFG-based type narrowing (for reads, etc.)
                     let offset = position_to_offset(&content, entry.location.range.start);
                     server.type_narrowing.get_narrowed_type(&uri, name, offset)
                 };
@@ -92,6 +82,24 @@ pub async fn handle_inlay_hints(
                     }
                 }
             }
+        }
+    }
+    drop(document);
+    drop(document_guard);
+
+    // Generate type hints from indexed entries (non-local variables)
+    let index = server.index.lock();
+
+    let entries = index.file_entries(&uri);
+    for entry in &entries {
+        // Skip entries outside the requested range
+        if !is_position_in_range(&entry.location.range.start, &requested_range)
+            && !is_position_in_range(&entry.location.range.end, &requested_range)
+        {
+            continue;
+        }
+
+        match &entry.kind {
             EntryKind::InstanceVariable { r#type, .. }
             | EntryKind::ClassVariable { r#type, .. }
             | EntryKind::GlobalVariable { r#type, .. } => {

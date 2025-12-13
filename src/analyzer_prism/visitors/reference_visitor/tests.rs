@@ -57,8 +57,14 @@ fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, conten
         let loc = comment.location();
         comment_ranges.push((loc.start_offset(), loc.end_offset()));
     }
-    let mut visitor = IndexVisitor::new(server, uri, comment_ranges);
+    let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
     visitor.visit(&parse_result.node());
+
+    // Persist the document with LocalVariable entries back to server.docs
+    server
+        .docs
+        .lock()
+        .insert(uri, Arc::new(RwLock::new(visitor.document)));
 }
 
 // Helper function to process content for references without reading from filesystem
@@ -136,40 +142,53 @@ my_method
     let server = create_server().await;
     let uri = Url::parse("file:///local_vars.rb").unwrap();
 
-    // First test with local vars enabled
+    // Test with local vars enabled - should store in document.lvars (NOT global index)
     open_file_with_options(&server, code, &uri, true);
-    let index = server.index();
-    let index_guard = index.lock();
 
-    // Should find local variable references
-    let entries = index_guard.get_entries_for_uri(&uri);
-    let local_var_refs: Vec<_> = entries
-        .iter()
-        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::Reference { .. }))
-        .filter(|e| e.fqn.to_string().contains("local_var"))
-        .collect();
+    // Verify LocalVariables are in document.lvars
+    let doc_guard = server.docs.lock();
+    let doc = doc_guard.get(&uri).expect("Document should exist");
+    let doc_read = doc.read();
+
+    // Check that the document has local variable entries
+    // Method body scope starts at a specific offset
+    let mut found_local_var = false;
+    for scope_id in 0..100 {
+        if let Some(entries) = doc_read.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let crate::indexer::entry::EntryKind::LocalVariable { name, .. } = &entry.kind {
+                    if name == "local_var" {
+                        found_local_var = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    drop(doc_read);
+    drop(doc_guard);
 
     assert!(
-        !local_var_refs.is_empty(),
-        "Should find local variable references when include_local_vars is true"
+        found_local_var,
+        "Should find local_var in document.lvars when include_local_vars is true"
     );
 
-    // Now test with local vars disabled
-    let server = create_server().await;
-    open_file_with_options(&server, code, &uri, false);
+    // Verify LocalVariables are NOT in global index
     let index = server.index();
     let index_guard = index.lock();
-
-    // Should not find any local variable references
     let entries = index_guard.get_entries_for_uri(&uri);
-    let local_var_refs: Vec<_> = entries
+    let local_var_entries: Vec<_> = entries
         .iter()
-        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::Reference { .. }))
-        .filter(|e| e.fqn.to_string().contains("local_var"))
+        .filter(|e| {
+            matches!(
+                e.kind,
+                crate::indexer::entry::EntryKind::LocalVariable { .. }
+            )
+        })
         .collect();
 
     assert!(
-        local_var_refs.is_empty(),
-        "Should not find local variable references when include_local_vars is false"
+        local_var_entries.is_empty(),
+        "LocalVariables should NOT be in global index (they're file-local)"
     );
 }

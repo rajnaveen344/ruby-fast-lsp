@@ -57,7 +57,7 @@ impl Entry {
 // ============================================================================
 
 /// Distinguishes between instance and class methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MethodKind {
     /// Instance method called on objects: `obj.method`
     Instance,

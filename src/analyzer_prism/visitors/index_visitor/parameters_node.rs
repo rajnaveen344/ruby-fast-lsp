@@ -101,12 +101,9 @@ impl IndexVisitor {
             ))
             .build();
 
-        // Add the entry to the index
+        // Add the entry to RubyDocument only (NOT global index)
+        // Parameters are LocalVariables - file-local data should not bloat the global index
         if let Ok(entry) = entry {
-            let mut index = self.index.lock();
-            index.add_entry(entry.clone());
-
-            // Safely get the current scope before adding local variable entry
             if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
                 self.document
                     .add_local_var_entry(current_scope.scope_id(), entry.clone());

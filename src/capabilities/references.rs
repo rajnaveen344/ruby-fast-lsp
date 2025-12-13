@@ -49,8 +49,9 @@ pub async fn find_references_at_position(
             iden,
         } => find_method_references(namespace, receiver, iden, &index, &ancestors),
         Identifier::RubyLocalVariable { name, scope, .. } => {
-            let fqn = FullyQualifiedName::local_variable(name.clone(), scope.clone()).unwrap();
-            find_local_variable_references(&fqn, &index, uri, position)
+            drop(index); // Release lock before accessing document
+                         // LocalVariables are file-local - get definition from document.lvars
+            find_local_variable_references_from_document(server, uri, name, scope, position)
         }
         Identifier::RubyInstanceVariable { name, .. } => {
             let fqn = FullyQualifiedName::instance_variable(name.clone()).unwrap();
@@ -89,33 +90,49 @@ fn find_constant_references(fqn: &FullyQualifiedName, index: &RubyIndex) -> Opti
     None
 }
 
-/// Find references to a local variable with position filtering
-fn find_local_variable_references(
-    fqn: &FullyQualifiedName,
-    index: &crate::indexer::index::RubyIndex,
+/// Find references to a local variable using document.lvars and lvar_references (file-local storage)
+fn find_local_variable_references_from_document(
+    server: &RubyLanguageServer,
     uri: &Url,
-    position: Position,
+    name: &str,
+    scope: &crate::types::scope::LVScopeStack,
+    _position: Position,
 ) -> Option<Vec<Location>> {
-    let entries = index.references(fqn);
-    if !entries.is_empty() {
-        let filtered_entries: Vec<Location> = entries
-            .iter()
-            .filter(|loc| loc.uri == *uri && loc.range.start >= position)
-            .cloned()
-            .collect();
+    use crate::indexer::entry::entry_kind::EntryKind;
 
-        if !filtered_entries.is_empty() {
-            info!(
-                "Found {} local variable references to: {}",
-                filtered_entries.len(),
-                fqn
-            );
-            return Some(filtered_entries);
+    let docs_guard = server.docs.lock();
+    let doc_arc = docs_guard.get(uri)?;
+    let doc = doc_arc.read();
+
+    let mut all_locations = Vec::new();
+    let scope_ids: Vec<_> = scope.iter().rev().map(|s| s.scope_id()).collect();
+
+    // First, get the definition location
+    for &scope_id in &scope_ids {
+        if let Some(entries) = doc.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
+                    if var_name == name {
+                        all_locations.push(entry.location.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        if !all_locations.is_empty() {
+            break;
         }
     }
 
-    info!("No local variable references found for {}", fqn);
-    None
+    // Then, get all references to this local variable (scoped)
+    let refs = doc.get_lvar_references(name, &scope_ids);
+    all_locations.extend(refs);
+
+    if all_locations.is_empty() {
+        None
+    } else {
+        Some(all_locations)
+    }
 }
 
 /// Find references to non-local variables (instance, class, global)

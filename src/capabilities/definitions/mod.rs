@@ -66,7 +66,17 @@ pub async fn find_definition_at_position(
             )
         }
         Identifier::RubyLocalVariable { name, scope, .. } => {
-            variable::find_local_variable_definitions_at_position(name, scope, &index, position)
+            drop(index); // Release lock before accessing document
+
+            // LocalVariables are stored in document.lvars, not global index
+            if let Some(doc_arc) = server.docs.lock().get(&uri).cloned() {
+                let doc_read = doc_arc.read();
+                variable::find_local_variable_definitions_at_position(
+                    name, scope, &doc_read, position,
+                )
+            } else {
+                None
+            }
         }
         Identifier::RubyInstanceVariable { name, .. } => {
             variable::find_instance_variable_definitions(name, &index, &ancestors)

@@ -1,7 +1,5 @@
-use log::debug;
 use ruby_prism::LocalVariableReadNode;
-
-use crate::types::fully_qualified_name::FullyQualifiedName;
+use ustr::ustr;
 
 use super::ReferenceVisitor;
 
@@ -16,35 +14,17 @@ impl ReferenceVisitor {
             .document
             .prism_location_to_lsp_location(&node.location());
 
-        let mut index = self.index.lock();
-
-        // Search through scope stack from innermost to outermost scope
+        // LocalVariable references are stored in document.lvar_references (NOT global index)
         let lv_stack = self.scope_tracker.get_lv_stack();
-        for i in (0..lv_stack.len()).rev() {
-            // Take all scopes up to the current level
-            let scopes = lv_stack[0..=i].to_vec();
+        let scope_ids: Vec<_> = lv_stack.iter().map(|s| s.scope_id()).collect();
 
-            let fqn =
-                FullyQualifiedName::local_variable(variable_name.clone(), scopes.clone()).unwrap();
-
-            debug!("Searching for variable: {:?}", fqn);
-
-            // Check if this variable is defined in the current scope level
-            if index.contains_fqn(&fqn) {
-                debug!(
-                    "Adding local variable reference: {:?} at {:?}",
-                    fqn, location
-                );
-                index.add_reference(fqn, location);
-                return;
-            }
+        if let Some(found_scope_id) = self
+            .document
+            .find_local_var_scope(&variable_name, &scope_ids)
+        {
+            self.document
+                .add_lvar_reference(found_scope_id, ustr(&variable_name), location);
         }
-
-        // If we get here, no matching definition was found in any scope
-        debug!(
-            "No definition found for local variable '{}' at {:?}",
-            variable_name, location
-        );
     }
 
     pub fn process_local_variable_read_node_exit(&mut self, _node: &LocalVariableReadNode) {

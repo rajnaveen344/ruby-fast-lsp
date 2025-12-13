@@ -110,43 +110,52 @@ impl RubyIndex {
 
     /// Remove all entries for a URI and return the FQNs that were completely removed
     /// (i.e., had no remaining definitions in other files)
+    ///
+    /// # Logic & Optimization
+    /// 1. **Identify**: Look up `by_uri` to find all Entry IDs belonging to this file.
+    /// 2. **Collect & Remove**: Iterate through these IDs and remove them from the central `SlotMap`.
+    ///    - *Optimization*: We remove immediately to take ownership of the `Entry` struct.
+    ///    - This allows us to reuse the `FullyQualifiedName` (string) without cloning it.
+    /// 3. **Dedup**: Sort and deduplicate the collected FQNs to ensure we only process each unique FQN once.
+    /// 4. **Cleanup Indexes**:
+    ///    - For each unique FQN, update the secondary index `by_fqn` (maps FQN -> List of IDs).
+    ///    - Remove the stale IDs we just deleted.
+    ///    - If a FQN has no more entries (definitions) left system-wide, it counts as "completely removed".
     pub fn remove_entries_for_uri(&mut self, uri: &Url) -> Vec<FullyQualifiedName> {
         let ids_to_remove = self.by_uri.remove(uri).unwrap_or_default();
 
-        // Collect UNIQUE FQNs and method names to clean up (OPTIMIZATION: avoid N^2 cleanup)
-        let mut unique_fqns = HashSet::new();
-        let mut unique_method_names = HashSet::new();
+        // Use HashSet for O(1) amortized dedup
+        let mut unique_fqns: HashSet<FullyQualifiedName> =
+            HashSet::with_capacity(ids_to_remove.len() / 4);
+        let mut unique_method_names: HashSet<RubyMethod> =
+            HashSet::with_capacity(ids_to_remove.len() / 100);
+        let mut removed_ids_set: HashSet<_> = HashSet::with_capacity(ids_to_remove.len());
 
+        // 1. Remove entries and collect metadata
         for id in &ids_to_remove {
-            if let Some(entry) = self.entries.get(*id) {
-                unique_fqns.insert(entry.fqn.clone());
-                if let EntryKind::Method { name, .. } = &entry.kind {
-                    unique_method_names.insert(*name);
+            removed_ids_set.insert(*id);
+            if let Some(entry) = self.entries.remove(*id) {
+                unique_fqns.insert(entry.fqn);
+                if let EntryKind::Method { name, .. } = entry.kind {
+                    unique_method_names.insert(name);
                 }
             }
         }
 
-        // Remove entries from SlotMap
-        for id in &ids_to_remove {
-            self.entries.remove(*id);
-        }
-
-        // Clean up by_fqn index (remove stale IDs)
-        // OPTIMIZED: Iterate only unique FQNs, so we perform O(N) scan only once per FQN
+        // 2. Clean up by_fqn index
         for fqn in &unique_fqns {
             if let Some(ids) = self.by_fqn.get_mut(fqn) {
-                ids.retain(|id| self.entries.contains_key(*id));
+                ids.retain(|id| !removed_ids_set.contains(id));
                 if ids.is_empty() {
                     self.by_fqn.remove(fqn);
                 }
             }
         }
 
-        // Clean up by_method_name index
-        // OPTIMIZED: Iterate only unique methods
+        // 3. Clean up by_method_name index
         for method_name in &unique_method_names {
             if let Some(ids) = self.by_method_name.get_mut(method_name) {
-                ids.retain(|id| self.entries.contains_key(*id));
+                ids.retain(|id| !removed_ids_set.contains(id));
                 if ids.is_empty() {
                     self.by_method_name.remove(method_name);
                 }

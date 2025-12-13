@@ -22,8 +22,11 @@ pub struct RubyDocument {
     /// Inlay hints in the document for modules, classes, methods, etc.
     inlay_hints: Vec<InlayHint>,
 
-    /// Local variables in the document
+    /// Local variables in the document (definitions)
     lvars: BTreeMap<LVScopeId, Vec<Entry>>,
+
+    /// Local variable references (keyed by (scope_id, variable_name) for proper scoping)
+    lvar_references: std::collections::HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>>,
 }
 
 impl RubyDocument {
@@ -37,6 +40,7 @@ impl RubyDocument {
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
             lvars: BTreeMap::new(),
+            lvar_references: std::collections::HashMap::new(),
         };
         doc.compute_line_offsets();
         doc.compute_inlay_hints();
@@ -44,9 +48,12 @@ impl RubyDocument {
     }
 
     /// Updates document content and version, recomputing line offsets
+    /// Also clears lvars and lvar_references since they will be re-indexed
     pub fn update(&mut self, content: String, version: i32) {
         self.content = content;
         self.version = version;
+        self.lvars.clear();
+        self.lvar_references.clear();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }
@@ -161,6 +168,90 @@ impl RubyDocument {
 
     pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
         self.lvars.get(&scope_id)
+    }
+
+    /// Returns a reference to the entire lvars map for iteration
+    pub fn get_all_lvars(&self) -> &std::collections::BTreeMap<LVScopeId, Vec<Entry>> {
+        &self.lvars
+    }
+
+    /// Check if a local variable with the given name exists in any of the provided scope IDs
+    /// Returns the scope_id where the variable was found, or None if not found
+    pub fn find_local_var_scope(&self, name: &str, scope_ids: &[LVScopeId]) -> Option<LVScopeId> {
+        use crate::indexer::entry::entry_kind::EntryKind;
+
+        // Search from innermost to outermost scope
+        for &scope_id in scope_ids.iter().rev() {
+            if let Some(entries) = self.lvars.get(&scope_id) {
+                for entry in entries {
+                    if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
+                        if var_name == name {
+                            return Some(scope_id);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Search ALL scopes in the document for a local variable by name (fallback method)
+    /// Returns the first matching location found
+    pub fn find_local_var_by_name(&self, name: &str) -> Option<tower_lsp::lsp_types::Location> {
+        use crate::indexer::entry::entry_kind::EntryKind;
+
+        for (_scope_id, entries) in &self.lvars {
+            for entry in entries {
+                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
+                    if var_name == name {
+                        return Some(entry.location.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Add a reference to a local variable (scoped by scope_id)
+    pub fn add_lvar_reference(
+        &mut self,
+        scope_id: LVScopeId,
+        name: ustr::Ustr,
+        location: LspLocation,
+    ) {
+        self.lvar_references
+            .entry((scope_id, name))
+            .or_default()
+            .push(location);
+    }
+
+    /// Get all references to a local variable by name within specific scopes
+    pub fn get_lvar_references(&self, name: &str, scope_ids: &[LVScopeId]) -> Vec<LspLocation> {
+        let uname = ustr::ustr(name);
+        let mut refs = Vec::new();
+        for &scope_id in scope_ids {
+            if let Some(locations) = self.lvar_references.get(&(scope_id, uname)) {
+                refs.extend(locations.iter().cloned());
+            }
+        }
+        refs
+    }
+
+    /// Clear all local variable references (called before re-indexing)
+    pub fn clear_lvar_references(&mut self) {
+        self.lvar_references.clear();
+    }
+
+    /// Get all local variable references (for merging into another document)
+    pub fn get_all_lvar_references(
+        &self,
+    ) -> &std::collections::HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>> {
+        &self.lvar_references
+    }
+
+    /// Count total number of local variable entries (for diagnostics)
+    pub fn count_lvars(&self) -> usize {
+        self.lvars.values().map(|v| v.len()).sum()
     }
 }
 
