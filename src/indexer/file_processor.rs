@@ -130,10 +130,6 @@ impl FileProcessor {
                 "Skipping re-indexing {} (version already indexed)",
                 uri.path().split('/').next_back().unwrap_or("unknown")
             );
-            info!(
-                "[perf_debug] Skipped re-indexing for {} (already indexed)",
-                uri.path()
-            );
             // Still parse for syntax diagnostics
             let parse_result = ruby_prism::parse(content.as_bytes());
             let doc = RubyDocument::new(uri.clone(), content.to_string(), 0);
@@ -145,23 +141,12 @@ impl FileProcessor {
         }
 
         // 1. Parse ONLY ONCE
-        let parse_start = Instant::now();
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        info!(
-            "[perf_debug] Parsed {} in {:?}",
-            uri.path(),
-            parse_start.elapsed()
-        );
 
         // 2. Generate Syntax Diagnostics
-        let diag_start = Instant::now();
         let diagnostics = generate_diagnostics(&parse_result, &document);
-        info!(
-            "[perf_debug] Generated diagnostics in {:?}",
-            diag_start.elapsed()
-        );
 
         // If severe parse errors, we might want to skip indexing, but usually we try best-effort.
         if parse_result.errors().count() > 10 {
@@ -176,15 +161,9 @@ impl FileProcessor {
 
         // 3. Index Definitions (Phase 1)
         if options.index_definitions {
-            let def_start = Instant::now();
             let removed_fqns = self.index.lock().remove_entries_for_uri(uri);
             let removed_fqn_set: HashSet<_> = removed_fqns.into_iter().collect();
-            info!(
-                "[perf_debug] Cleanup (remove_entries) in {:?}",
-                def_start.elapsed()
-            );
 
-            let visit_start = Instant::now();
             let mut comment_ranges = Vec::new();
             for comment in parse_result.comments() {
                 let loc = comment.location();
@@ -192,10 +171,6 @@ impl FileProcessor {
             }
             let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
             visitor.visit(&node);
-            info!(
-                "[perf_debug] IndexVisitor walk in {:?}",
-                visit_start.elapsed()
-            );
 
             // Update document with visitor's state
             if let Some(doc_arc) = server.docs.lock().get(uri) {
@@ -203,13 +178,10 @@ impl FileProcessor {
             }
 
             if options.resolve_mixins {
-                let mixin_start = Instant::now();
                 self.index.lock().resolve_mixins_for_uri(uri);
-                info!("[perf_debug] Resolve mixins in {:?}", mixin_start.elapsed());
             }
 
             // Calculate diff for cross-file diagnostics
-            let cross_start = Instant::now();
             let added_fqns: Vec<_> = {
                 let index = self.index.lock();
                 index
@@ -237,49 +209,27 @@ impl FileProcessor {
                 let resolved_affected = self.index.lock().clear_resolved_entries(&added_fqns);
                 affected_uris.extend(resolved_affected);
             }
-            info!(
-                "[perf_debug] Cross-file analysis in {:?}",
-                cross_start.elapsed()
-            );
-            info!(
-                "[perf_debug] Index Definitions total in {:?}",
-                def_start.elapsed()
-            );
         }
 
         // 4. Index References (Phase 2) - always tracks unresolved
         if options.index_references {
-            let ref_start = Instant::now();
             let mut index = self.index.lock();
             index.remove_references_for_uri(uri);
             index.remove_unresolved_entries_for_uri(uri);
             drop(index); // unlock
-            info!(
-                "[perf_debug] Cleanup references in {:?}",
-                ref_start.elapsed()
-            );
 
             // Always use with_unresolved_tracking - combined reference + unresolved indexing
-            let visit_start = Instant::now();
             let mut visitor = ReferenceVisitor::with_unresolved_tracking(
                 server,
                 uri.clone(),
                 options.include_local_vars,
             );
             visitor.visit(&node);
-            info!(
-                "[perf_debug] ReferenceVisitor walk in {:?}",
-                visit_start.elapsed()
-            );
 
             // Update document with visitor's state
             if let Some(doc_arc) = server.docs.lock().get(uri) {
                 *doc_arc.write() = visitor.document;
             }
-            info!(
-                "[perf_debug] Index References total in {:?}",
-                ref_start.elapsed()
-            );
         }
         // 5. Run InlayVisitor (Structural Hints)
         if options.index_definitions {
@@ -302,7 +252,6 @@ impl FileProcessor {
 
         let total_time = start.elapsed();
         debug!("Processed file {:?} in {:?}", uri, total_time);
-        info!("[perf_debug] TOTAL process_file in {:?}", total_time);
 
         Ok(ProcessResult {
             affected_uris,

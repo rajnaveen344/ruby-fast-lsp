@@ -4,8 +4,8 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::analyzer_prism::{Identifier, MethodReceiver};
 use crate::indexer::ancestor_chain::get_ancestor_chain;
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::MethodKind;
+use crate::indexer::entry::{EntryKind, MethodKind};
+use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
@@ -78,15 +78,11 @@ pub async fn find_references_at_position(
 }
 
 /// Find references to a constant
-fn find_constant_references(
-    fqn: &FullyQualifiedName,
-    index: &crate::indexer::index::RubyIndex,
-) -> Option<Vec<Location>> {
-    if let Some(entries) = index.references.get(fqn) {
-        if !entries.is_empty() {
-            info!("Found {} constant references to: {}", entries.len(), fqn);
-            return Some(entries.clone());
-        }
+fn find_constant_references(fqn: &FullyQualifiedName, index: &RubyIndex) -> Option<Vec<Location>> {
+    let entries = index.references(fqn);
+    if !entries.is_empty() {
+        info!("Found {} constant references to: {}", entries.len(), fqn);
+        return Some(entries);
     }
 
     info!("No constant references found for {}", fqn);
@@ -100,22 +96,21 @@ fn find_local_variable_references(
     uri: &Url,
     position: Position,
 ) -> Option<Vec<Location>> {
-    if let Some(entries) = index.references.get(fqn) {
-        if !entries.is_empty() {
-            let filtered_entries: Vec<Location> = entries
-                .iter()
-                .filter(|loc| loc.uri == *uri && loc.range.start >= position)
-                .cloned()
-                .collect();
+    let entries = index.references(fqn);
+    if !entries.is_empty() {
+        let filtered_entries: Vec<Location> = entries
+            .iter()
+            .filter(|loc| loc.uri == *uri && loc.range.start >= position)
+            .cloned()
+            .collect();
 
-            if !filtered_entries.is_empty() {
-                info!(
-                    "Found {} local variable references to: {}",
-                    filtered_entries.len(),
-                    fqn
-                );
-                return Some(filtered_entries);
-            }
+        if !filtered_entries.is_empty() {
+            info!(
+                "Found {} local variable references to: {}",
+                filtered_entries.len(),
+                fqn
+            );
+            return Some(filtered_entries);
         }
     }
 
@@ -128,11 +123,10 @@ fn find_non_local_variable_references(
     fqn: &FullyQualifiedName,
     index: &crate::indexer::index::RubyIndex,
 ) -> Option<Vec<Location>> {
-    if let Some(entries) = index.references.get(fqn) {
-        if !entries.is_empty() {
-            info!("Found {} variable references to: {}", entries.len(), fqn);
-            return Some(entries.clone());
-        }
+    let entries = index.references(fqn);
+    if !entries.is_empty() {
+        info!("Found {} variable references to: {}", entries.len(), fqn);
+        return Some(entries);
     }
 
     info!("No variable references found for {}", fqn);
@@ -293,8 +287,9 @@ fn find_method_references_in_ancestor_chain(
         let method_fqn = FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
 
         // Find direct references to this method FQN
-        if let Some(refs) = index.references.get(&method_fqn) {
-            all_references.extend(refs.clone());
+        let refs = index.references(&method_fqn);
+        if !refs.is_empty() {
+            all_references.extend(refs);
         }
 
         // Also find references where this method might be called from classes that include the ancestor
@@ -356,8 +351,9 @@ fn find_method_references_in_including_classes(
         let method_fqn =
             FullyQualifiedName::method(including_class_fqn.namespace_parts(), method.clone());
 
-        if let Some(refs) = index.references.get(&method_fqn) {
-            all_references.extend(refs.clone());
+        let refs = index.references(&method_fqn);
+        if !refs.is_empty() {
+            all_references.extend(refs);
         }
     }
 
@@ -380,8 +376,10 @@ fn find_method_references_by_name(
         for entry in entries {
             if let EntryKind::Method { .. } = &entry.kind {
                 // For each method definition, find its FQN and look for references
-                if let Some(refs) = index.references.get(&entry.fqn) {
-                    all_references.extend(refs.clone());
+                // For each method definition, find its FQN and look for references
+                let refs = index.references(&entry.fqn);
+                if !refs.is_empty() {
+                    all_references.extend(refs);
                 }
             }
         }

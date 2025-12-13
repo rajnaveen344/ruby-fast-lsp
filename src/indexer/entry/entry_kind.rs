@@ -121,10 +121,7 @@ pub enum EntryKind {
         name: String,
         r#type: RubyType,
     },
-    /// Reference to another entry (for goto definition, find references)
-    /// Works for ALL FQN types: constants, methods, variables, etc.
     Reference {
-        /// The FQN this reference points to (can be any FQN variant)
         target_fqn: FullyQualifiedName,
     },
 }

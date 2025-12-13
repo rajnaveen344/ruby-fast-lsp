@@ -32,47 +32,48 @@ impl ReferenceVisitor {
         // Core::Platform::API::Users
         //
         // If not found, track as unresolved when enabled
-        let current_namespace = self.scope_tracker.get_ns_stack();
         let mut namespaces = Vec::new();
         collect_namespaces(node, &mut namespaces);
 
-        let mut found = false;
+        if namespaces.is_empty() {
+            return;
+        }
 
-        // Acquire lock once for all lookups (avoid lock thrashing)
+        // Get namespace stack once
+        let current_namespace = self.scope_tracker.get_ns_stack();
+        let ns_len = current_namespace.len();
+
+        let mut found_any = false;
+
+        // Acquire lock once for all lookups
         let mut index = self.index.lock();
 
-        // Check from current namespace to root namespace
-        let mut ancestors = current_namespace.clone();
-        while !ancestors.is_empty() {
-            let mut combined_ns = ancestors.clone();
-            combined_ns.extend(namespaces.clone());
+        // Optimized ancestor search: avoid cloning in loop
+        // Check from current namespace down to root
+        for depth in (0..=ns_len).rev() {
+            // Build namespace: current_namespace[0..depth] + namespaces
+            // We slice the current namespace to the current depth and extend with the path namespaces
+            let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
+            combined_ns.extend(namespaces.iter().cloned());
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
-            let entries = index.get(&fqn);
-            if entries.is_some() {
+
+            // Use contains_fqn instead of get() to avoid expensive Vec allocation for lookups
+            if index.contains_fqn(&fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                index.add_reference(fqn.clone(), location);
-                found = true;
+
+                index.add_reference(fqn, location);
+
+                found_any = true;
+                // Once found, we stop searching up the ancestor chain
+                break;
             }
-
-            ancestors.pop();
         }
 
-        // Check from root namespace
-        let fqn = FullyQualifiedName::namespace(namespaces.clone());
-        let entries = index.get(&fqn);
-        if entries.is_some() {
-            let location = self
-                .document
-                .prism_location_to_lsp_location(&node.location());
-            index.add_reference(fqn.clone(), location);
-            found = true;
-        }
-
-        // If not found anywhere and tracking is enabled, add as unresolved
-        if !found && self.track_unresolved && !namespaces.is_empty() {
+        // If not found and tracking is enabled, add as unresolved
+        if !found_any && self.track_unresolved {
             let name = namespaces
                 .iter()
                 .map(|c| c.to_string())

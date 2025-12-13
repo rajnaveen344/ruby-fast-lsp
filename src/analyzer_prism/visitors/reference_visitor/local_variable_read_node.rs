@@ -15,6 +15,7 @@ impl ReferenceVisitor {
         let location = self
             .document
             .prism_location_to_lsp_location(&node.location());
+
         let mut index = self.index.lock();
 
         // Search through scope stack from innermost to outermost scope
@@ -35,7 +36,6 @@ impl ReferenceVisitor {
                     fqn, location
                 );
                 index.add_reference(fqn, location);
-                drop(index);
                 return;
             }
         }
@@ -45,7 +45,6 @@ impl ReferenceVisitor {
             "No definition found for local variable '{}' at {:?}",
             variable_name, location
         );
-        drop(index);
     }
 
     pub fn process_local_variable_read_node_exit(&mut self, _node: &LocalVariableReadNode) {

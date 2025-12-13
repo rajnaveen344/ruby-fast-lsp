@@ -13,7 +13,7 @@ pub mod entry_kind;
 
 use std::cmp::PartialEq;
 
-use entry_kind::EntryKind;
+pub use entry_kind::EntryKind;
 use tower_lsp::lsp_types::Location;
 
 use crate::types::fully_qualified_name::FullyQualifiedName;

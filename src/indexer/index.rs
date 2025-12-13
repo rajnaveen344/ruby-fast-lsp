@@ -6,9 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use log::{debug, info};
+use log::debug;
 use slotmap::{new_key_type, SlotMap};
-use std::time::Instant;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
@@ -47,10 +46,6 @@ pub struct RubyIndex {
     by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
     by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
 
-    // Reference Tracking
-    pub references: HashMap<FullyQualifiedName, Vec<Location>>,
-    references_by_uri: HashMap<Url, HashSet<FullyQualifiedName>>,
-
     // Mixin & Other Tracking
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
     pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
@@ -73,10 +68,6 @@ impl RubyIndex {
             by_uri: HashMap::new(),
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
-
-            // Reference tracking
-            references: HashMap::new(),
-            references_by_uri: HashMap::new(),
 
             // Mixin tracking
             reverse_mixins: HashMap::new(),
@@ -120,25 +111,17 @@ impl RubyIndex {
     /// Remove all entries for a URI and return the FQNs that were completely removed
     /// (i.e., had no remaining definitions in other files)
     pub fn remove_entries_for_uri(&mut self, uri: &Url) -> Vec<FullyQualifiedName> {
-        let start_total = Instant::now();
-        let start_slotmap = Instant::now();
         let ids_to_remove = self.by_uri.remove(uri).unwrap_or_default();
-        let entries_count = ids_to_remove.len();
 
-        info!(
-            "[perf_debug] remove_entries_for_uri: Processing {} entries",
-            entries_count
-        );
-
-        // Collect FQNs and method names before removing entries
-        let mut entry_fqns: Vec<FullyQualifiedName> = Vec::with_capacity(entries_count);
-        let mut method_names: Vec<RubyMethod> = Vec::new();
+        // Collect UNIQUE FQNs and method names to clean up (OPTIMIZATION: avoid N^2 cleanup)
+        let mut unique_fqns = HashSet::new();
+        let mut unique_method_names = HashSet::new();
 
         for id in &ids_to_remove {
             if let Some(entry) = self.entries.get(*id) {
-                entry_fqns.push(entry.fqn.clone());
+                unique_fqns.insert(entry.fqn.clone());
                 if let EntryKind::Method { name, .. } = &entry.kind {
-                    method_names.push(*name);
+                    unique_method_names.insert(*name);
                 }
             }
         }
@@ -149,7 +132,8 @@ impl RubyIndex {
         }
 
         // Clean up by_fqn index (remove stale IDs)
-        for fqn in &entry_fqns {
+        // OPTIMIZED: Iterate only unique FQNs, so we perform O(N) scan only once per FQN
+        for fqn in &unique_fqns {
             if let Some(ids) = self.by_fqn.get_mut(fqn) {
                 ids.retain(|id| self.entries.contains_key(*id));
                 if ids.is_empty() {
@@ -159,7 +143,8 @@ impl RubyIndex {
         }
 
         // Clean up by_method_name index
-        for method_name in &method_names {
+        // OPTIMIZED: Iterate only unique methods
+        for method_name in &unique_method_names {
             if let Some(ids) = self.by_method_name.get_mut(method_name) {
                 ids.retain(|id| self.entries.contains_key(*id));
                 if ids.is_empty() {
@@ -168,31 +153,20 @@ impl RubyIndex {
             }
         }
 
-        info!(
-            "[perf_debug] remove_entries_for_uri SlotMap removal in {:?}",
-            start_slotmap.elapsed()
-        );
-
         // Compute removed FQNs (FQNs with no remaining entries)
-        let removed_fqns: Vec<FullyQualifiedName> = entry_fqns
+        let removed_fqns: Vec<FullyQualifiedName> = unique_fqns
             .iter()
             .filter(|fqn| !self.by_fqn.contains_key(*fqn))
             .cloned()
             .collect();
 
         // Clean up mixin tracking for completely removed FQNs
-        let start_mixins = Instant::now();
         for fqn in &removed_fqns {
             self.reverse_mixins.remove(fqn);
             self.mixin_usages.remove(fqn);
         }
-        info!(
-            "[perf_debug] remove_entries_for_uri mixin cleanups in {:?}",
-            start_mixins.elapsed()
-        );
 
         // Remove mixin usages
-        let start_usages = Instant::now();
         if let Some(module_fqns) = self.mixin_usages_by_uri.remove(uri) {
             for module_fqn in module_fqns {
                 if let Some(usages) = self.mixin_usages.get_mut(&module_fqn) {
@@ -203,28 +177,14 @@ impl RubyIndex {
                 }
             }
         }
-        info!(
-            "[perf_debug] remove_entries_for_uri mixin usages in {:?}",
-            start_usages.elapsed()
-        );
 
         // Prefix tree cleanup: only remove keys if the FQN is completely gone
-        let start_prefix = Instant::now();
         for fqn in &removed_fqns {
             let key = fqn.name();
             if !key.is_empty() {
                 self.prefix_tree.delete(&key);
             }
         }
-        info!(
-            "[perf_debug] remove_entries_for_uri prefix tree cleanup in {:?}",
-            start_prefix.elapsed()
-        );
-
-        info!(
-            "[perf_debug] remove_entries_for_uri TOTAL in {:?}",
-            start_total.elapsed()
-        );
 
         removed_fqns
     }
@@ -233,12 +193,22 @@ impl RubyIndex {
     /// Returns the set of URIs that were affected (for diagnostic publishing)
     ///
     /// OPTIMIZED: Uses HashSet for batch deduplication instead of O(N) Vec::contains()
+    /// Mark references to the given FQNs as unresolved in their respective files
+    /// Returns the set of URIs that were affected (for diagnostic publishing)
     pub fn mark_references_as_unresolved(
         &mut self,
         removed_fqns: &[FullyQualifiedName],
     ) -> HashSet<Url> {
+        let mut references_map: HashMap<FullyQualifiedName, Vec<Location>> = HashMap::new();
+        for fqn in removed_fqns {
+            let refs = self.get_references_iter(fqn);
+            if !refs.is_empty() {
+                references_map.insert(fqn.clone(), refs);
+            }
+        }
+
         self.unresolved
-            .mark_references_as_unresolved(removed_fqns, &self.references)
+            .mark_references_as_unresolved(removed_fqns, &references_map)
     }
 
     /// Clear unresolved entries that match the given FQNs (now that they're defined)
@@ -299,20 +269,36 @@ impl RubyIndex {
     }
 
     /// Get entries by FQN (returns Vec for compatibility)
+    /// Filters out references to return only definitions (legacy behavior)
     pub fn get(&self, fqn: &FullyQualifiedName) -> Option<Vec<&Entry>> {
-        let entries = self.get_definitions_iter(fqn);
-        if entries.is_empty() {
-            None
-        } else {
-            Some(entries)
-        }
+        self.by_fqn
+            .get(fqn)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.entries.get(*id))
+                    // Only return definitions, not references
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                    .collect()
+            })
+            .filter(|v: &Vec<&Entry>| !v.is_empty())
+    }
+
+    /// Get all references for a given FQN
+    pub fn references(&self, fqn: &FullyQualifiedName) -> Vec<Location> {
+        self.get_references_iter(fqn)
     }
 
     /// Check if FQN has any definitions
     pub fn contains_fqn(&self, fqn: &FullyQualifiedName) -> bool {
         self.by_fqn
             .get(fqn)
-            .map(|ids| !ids.is_empty())
+            .map(|ids| {
+                ids.iter().any(|id| {
+                    self.entries
+                        .get(*id)
+                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference { .. }))
+                })
+            })
             .unwrap_or(false)
     }
 
@@ -436,29 +422,20 @@ impl RubyIndex {
     // ========================================================================
 
     /// Add a reference to a FQN
+    /// Add a reference to a FQN
     pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
-        debug!("Adding reference: {:?}", fqn);
-        // Track which FQNs have references from this URI (for fast removal)
-        self.references_by_uri
-            .entry(location.uri.clone())
-            .or_default()
-            .insert(fqn.clone());
-        self.references.entry(fqn).or_default().push(location);
+        let entry = Entry {
+            fqn: fqn.clone(),
+            location,
+            kind: EntryKind::Reference { target_fqn: fqn },
+        };
+        self.add_entry(entry);
     }
 
-    /// Remove all references for a URI - O(refs_in_file) instead of O(total_refs)
-    pub fn remove_references_for_uri(&mut self, uri: &Url) {
-        // Use the reverse index to only touch FQNs that have references from this URI
-        if let Some(fqns) = self.references_by_uri.remove(uri) {
-            for fqn in fqns {
-                if let Some(refs) = self.references.get_mut(&fqn) {
-                    refs.retain(|loc| loc.uri != *uri);
-                    if refs.is_empty() {
-                        self.references.remove(&fqn);
-                    }
-                }
-            }
-        }
+    /// Remove all references for a URI - Now handled by remove_entries_for_uri
+    pub fn remove_references_for_uri(&mut self, _uri: &Url) {
+        // No-op: References are now stored in the central SlotMap and removed automatically
+        // by remove_entries_for_uri via the by_file index.
     }
 
     // ========================================================================
@@ -759,6 +736,11 @@ impl RubyIndex {
     }
 
     fn add_to_prefix_tree(&mut self, entry: &Entry) {
+        // Do not index references in the prefix tree (too many, and not useful for completion)
+        if matches!(entry.kind, EntryKind::Reference { .. }) {
+            return;
+        }
+
         let key = entry.fqn.name();
         if !key.is_empty() {
             self.prefix_tree.insert(&key, entry.clone());
@@ -804,7 +786,7 @@ mod tests {
         index.add_entry(entry);
 
         assert_eq!(index.definitions_len(), 1);
-        assert_eq!(index.references.len(), 0);
+        assert_eq!(index.definitions_len(), 1);
     }
 
     #[test]

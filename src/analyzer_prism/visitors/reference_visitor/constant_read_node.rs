@@ -8,7 +8,6 @@ use super::ReferenceVisitor;
 
 impl ReferenceVisitor {
     pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
-        let current_namespace = self.scope_tracker.get_ns_stack();
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let constant = match RubyConstant::new(&name) {
             Ok(c) => c,
@@ -18,14 +17,20 @@ impl ReferenceVisitor {
             }
         };
 
+        // Get namespace stack once (this clones, but only once)
+        let current_namespace = self.scope_tracker.get_ns_stack();
+        let ns_len = current_namespace.len();
+
         // Acquire lock once for all lookups (avoid lock thrashing)
         let mut index = self.index.lock();
 
         // Check from current namespace to root namespace
-        let mut ancestors = current_namespace.clone();
-        while !ancestors.is_empty() {
-            let mut combined_ns = ancestors.clone();
-            combined_ns.push(constant.clone());
+        // Optimized ancestor search: avoid cloning in loop
+        // Instead of cloning Vec, we build FQN directly with slices
+        for depth in (0..=ns_len).rev() {
+            // Build namespace: current_namespace[0..depth] + constant
+            let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
+            combined_ns.push(constant);
 
             let fqn = FullyQualifiedName::namespace(combined_ns);
             if index.contains_fqn(&fqn) {
@@ -36,19 +41,10 @@ impl ReferenceVisitor {
                 index.add_reference(fqn, location);
                 return;
             }
-            ancestors.pop();
         }
 
-        // Check in root namespace
-        let fqn = FullyQualifiedName::namespace(vec![constant]);
-        if index.contains_fqn(&fqn) {
-            let location = self
-                .document
-                .prism_location_to_lsp_location(&node.location());
-            debug!("Adding reference: {}", fqn);
-            index.add_reference(fqn, location);
-        } else if self.track_unresolved {
-            // Constant not found - track as unresolved with namespace context
+        // If tracking unresolved (constant not found anywhere)
+        if self.track_unresolved {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());

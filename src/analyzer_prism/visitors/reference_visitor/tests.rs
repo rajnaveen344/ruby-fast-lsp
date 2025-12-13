@@ -142,10 +142,11 @@ my_method
     let index_guard = index.lock();
 
     // Should find local variable references
-    let local_var_refs: Vec<_> = index_guard
-        .references
+    let entries = index_guard.get_entries_for_uri(&uri);
+    let local_var_refs: Vec<_> = entries
         .iter()
-        .filter(|(fqn, _)| fqn.to_string().contains("local_var"))
+        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::Reference { .. }))
+        .filter(|e| e.fqn.to_string().contains("local_var"))
         .collect();
 
     assert!(
@@ -160,10 +161,11 @@ my_method
     let index_guard = index.lock();
 
     // Should not find any local variable references
-    let local_var_refs: Vec<_> = index_guard
-        .references
+    let entries = index_guard.get_entries_for_uri(&uri);
+    let local_var_refs: Vec<_> = entries
         .iter()
-        .filter(|(fqn, _)| fqn.to_string().contains("local_var"))
+        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::Reference { .. }))
+        .filter(|e| e.fqn.to_string().contains("local_var"))
         .collect();
 
     assert!(
