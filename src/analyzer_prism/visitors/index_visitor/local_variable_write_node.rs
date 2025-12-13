@@ -74,8 +74,7 @@ impl IndexVisitor {
             .build();
 
         if let Ok(entry) = entry {
-            let mut index = self.index.lock();
-            index.add_entry(entry.clone());
+            self.add_entry(entry.clone());
 
             // Safely get the current scope before adding local variable entry
             if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
@@ -193,6 +192,7 @@ mod tests {
             document,
             scope_tracker,
             literal_analyzer,
+            comments: Vec::new(),
         };
 
         let parse_result = ruby_prism::parse(content.as_bytes());

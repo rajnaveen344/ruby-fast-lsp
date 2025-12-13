@@ -52,7 +52,12 @@ fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, conten
         return;
     }
 
-    let mut visitor = IndexVisitor::new(server, uri);
+    let mut comment_ranges = Vec::new();
+    for comment in parse_result.comments() {
+        let loc = comment.location();
+        comment_ranges.push((loc.start_offset(), loc.end_offset()));
+    }
+    let mut visitor = IndexVisitor::new(server, uri, comment_ranges);
     visitor.visit(&parse_result.node());
 }
 

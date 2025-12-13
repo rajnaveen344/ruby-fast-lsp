@@ -65,8 +65,7 @@ impl IndexVisitor {
             .build();
 
         if let Ok(entry) = entry {
-            let mut index = self.index.lock();
-            index.add_entry(entry);
+            self.add_entry(entry);
             debug!(
                 "Added global variable entry: {} -> {:?}",
                 variable_name, inferred_type
@@ -182,6 +181,7 @@ mod tests {
             document,
             scope_tracker,
             literal_analyzer,
+            comments: Vec::new(),
         };
 
         let parse_result = ruby_prism::parse(content.as_bytes());

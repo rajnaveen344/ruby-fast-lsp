@@ -38,10 +38,15 @@ pub fn visit_code(code: &str) -> IndexVisitor {
 
     // Parse with Prism and run the visitor.
     let parse_result = ruby_prism::parse(code.as_bytes());
-    let root = parse_result.node();
+    let _root = parse_result.node();
 
-    let mut visitor = IndexVisitor::new(&server, uri);
-    visitor.visit(&root);
+    let mut comment_ranges = Vec::new();
+    for comment in parse_result.comments() {
+        let loc = comment.location();
+        comment_ranges.push((loc.start_offset(), loc.end_offset()));
+    }
+    let mut visitor = IndexVisitor::new(&server, uri, comment_ranges);
+    visitor.visit(&parse_result.node());
 
     visitor
 }

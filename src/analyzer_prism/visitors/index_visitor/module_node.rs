@@ -55,7 +55,7 @@ impl IndexVisitor {
             return;
         }
 
-        self.index.lock().add_entry(entry.unwrap());
+        self.add_entry(entry.unwrap());
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {

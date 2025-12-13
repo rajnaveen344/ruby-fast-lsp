@@ -40,7 +40,7 @@ impl IndexVisitor {
                 entry.set_superclass(superclass_ref);
             }
 
-            self.index.lock().add_entry(entry);
+            self.add_entry(entry);
         } else {
             error!("Error creating entry: {:?}", entry.err());
         }

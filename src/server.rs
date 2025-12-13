@@ -165,7 +165,12 @@ impl RubyLanguageServer {
 
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
-        let mut visitor = IndexVisitor::new(self, uri.clone());
+        let mut comment_ranges = Vec::new();
+        for comment in parse_result.comments() {
+            let loc = comment.location();
+            comment_ranges.push((loc.start_offset(), loc.end_offset()));
+        }
+        let mut visitor = IndexVisitor::new(self, uri.clone(), comment_ranges);
 
         visitor.visit(&node);
 

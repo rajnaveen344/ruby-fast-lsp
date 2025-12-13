@@ -76,11 +76,13 @@ static DEPRECATED_REGEX: LazyLock<Regex> =
 // =============================================================================
 
 /// Information about a comment line for position tracking
-struct CommentLineInfo<'a> {
-    content: &'a str,
-    line_number: u32,
-    content_start_char: u32,
-    line_length: u32,
+/// Information about a comment line for position tracking
+#[derive(Debug, Clone)]
+pub struct CommentLineInfo<'a> {
+    pub content: &'a str,
+    pub line_number: u32,
+    pub content_start_char: u32,
+    pub line_length: u32,
 }
 
 // =============================================================================
@@ -313,7 +315,7 @@ impl YardParser {
     }
 
     /// Core parsing logic shared between `parse` and `extract_from_source`.
-    fn parse_lines(lines: &[CommentLineInfo], track_positions: bool) -> YardMethodDoc {
+    pub fn parse_lines(lines: &[CommentLineInfo], track_positions: bool) -> YardMethodDoc {
         let mut doc = YardMethodDoc::new();
         let mut description_lines: Vec<&str> = Vec::new();
         let mut in_description = true;

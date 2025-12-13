@@ -11,6 +11,7 @@ use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::ruby_document::RubyDocument;
+use crate::yard::parser::{CommentLineInfo, YardParser};
 
 mod block_node;
 mod call_node;
@@ -26,15 +27,19 @@ mod module_node;
 mod parameters_node;
 mod singleton_class_node;
 
+use crate::indexer::entry::Entry;
+
 pub struct IndexVisitor {
     pub index: Arc<Mutex<RubyIndex>>,
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
+    /// Sorted list of comment ranges (start_offset, end_offset)
+    pub comments: Vec<(usize, usize)>,
 }
 
 impl IndexVisitor {
-    pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
+    pub fn new(server: &RubyLanguageServer, uri: Url, comments: Vec<(usize, usize)>) -> Self {
         let index = server.index();
         let document = server.get_doc(&uri).unwrap();
         let scope_tracker = ScopeTracker::new(&document);
@@ -43,48 +48,33 @@ impl IndexVisitor {
             document,
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
+            comments,
         }
+    }
+
+    /// Add an entry to the index immediately
+    pub fn add_entry(&mut self, entry: Entry) {
+        let mut index = self.index.lock();
+        index.add_entry(entry);
     }
 
     /// Infer type from a value node during indexing.
     /// This is the shared type inference logic used by all variable write nodes.
     pub fn infer_type_from_value(&self, value_node: &Node) -> RubyType {
+        // ... (this method body is unchanged, providing context)
         // Try literal analysis first
         if let Some(literal_type) = self.literal_analyzer.analyze_literal(value_node) {
             return literal_type;
         }
 
-        // Try method call resolution
-        // Optimization: Disabled for now to improve indexing performance on file open.
-        // Deep resolution traversing ancestor chains for every local variable assignment is too slow.
-        /*
-        if let Some(call_node) = value_node.as_call_node() {
-            let ns_stack = self.scope_tracker.get_ns_stack();
-            log::debug!(
-                "infer_type_from_value: method call detected, namespace stack: {:?}",
-                ns_stack
-            );
-            // Pass current namespace context so 'self' can be resolved properly
-            let resolver = MethodResolver::with_namespace(self.index.clone(), ns_stack);
-            if let Some(return_type) = resolver.resolve_call_type(&call_node) {
-                log::debug!("infer_type_from_value: resolved type: {:?}", return_type);
-                return return_type;
-            }
-            log::debug!("infer_type_from_value: could not resolve type");
-        }
-        */
-
         // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` without full resolution
-        // This restores basic type inference for object instantiation which is critical for many tests
         if let Some(call_node) = value_node.as_call_node() {
-            // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` without full resolution
             if call_node.name().as_slice() == b"new" {
                 if let Some(receiver) = call_node.receiver() {
                     // Check for simple constant receiver: `MyClass.new`
                     if let Some(const_node) = receiver.as_constant_read_node() {
                         let name =
                             String::from_utf8_lossy(const_node.name().as_slice()).to_string();
-                        // We assume it's a class in the current scope or top level.
                         use crate::types::fully_qualified_name::FullyQualifiedName;
                         if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
                             return RubyType::Class(fqn);
@@ -94,8 +84,93 @@ impl IndexVisitor {
             }
         }
 
-        // Default to unknown type
         RubyType::Unknown
+    }
+
+    /// Extract YARD documentation from comments preceding a method definition using Prism comments.
+    pub fn extract_doc_comments(
+        &self,
+        method_start: usize,
+    ) -> Option<crate::yard::types::YardMethodDoc> {
+        // Find the first comment that starts AFTER or AT method_start.
+        // We want the ones BEFORE it.
+        let idx = self.comments.partition_point(|c| c.0 < method_start);
+
+        if idx == 0 {
+            return None;
+        }
+
+        let mut comment_indices = Vec::new();
+        let mut current_idx = idx - 1;
+
+        // Check last comment is attached to method
+        let (_, end) = self.comments[current_idx];
+        let range_between = &self.document.content[end..method_start];
+        if !range_between.trim().is_empty() {
+            return None;
+        }
+        comment_indices.push(current_idx);
+
+        // Walk backwards to collect contiguous comment block
+        while current_idx > 0 {
+            let prev_idx = current_idx - 1;
+            let (_, prev_end) = self.comments[prev_idx];
+            let (curr_start, _) = self.comments[current_idx];
+
+            let range_between = &self.document.content[prev_end..curr_start];
+            if !range_between.trim().is_empty() {
+                break;
+            }
+            comment_indices.push(prev_idx);
+            current_idx = prev_idx;
+        }
+
+        comment_indices.reverse(); // Now in order top-down
+
+        let mut line_infos = Vec::new();
+        for &i in &comment_indices {
+            let (start, end) = self.comments[i];
+            let raw_content = &self.document.content[start..end];
+            let trimmed = raw_content.trim();
+            // Prism comments include the #.
+            let content = trimmed.trim_start_matches('#').trim_start();
+
+            // Calculate precise location info for diagnostics
+            // We need the position of the *content*, so find where it starts relative to the comment start
+            let hash_offset = raw_content.find('#').unwrap_or(0);
+
+            // Find content offset. If empty content, point to end of hash
+            let content_offset_in_raw = if content.is_empty() {
+                hash_offset + 1
+            } else {
+                raw_content.find(content).unwrap_or(hash_offset + 1)
+            };
+
+            let abs_content_start = start + content_offset_in_raw;
+            let abs_pos = self.document.offset_to_position(abs_content_start);
+            // YardParser uses line_length for diagnostic range end calculation in some cases
+            // (end char is usually start char + content len, but passed as line_length in parser?)
+            // Actually parser uses:
+            // start: Position { line: line_info.line_number, character: line_info.content_start_char }
+            // end: Position { line: line_info.line_number, character: line_info.line_length }
+            // So line_length should be the COLUMN index of the end of the line (or length)
+            let abs_end_pos = self.document.offset_to_position(end);
+
+            line_infos.push(CommentLineInfo {
+                content,
+                line_number: abs_pos.line,
+                content_start_char: abs_pos.character,
+                line_length: abs_end_pos.character,
+            });
+        }
+
+        let doc = YardParser::parse_lines(&line_infos, true);
+
+        if doc.has_type_info() || doc.description.is_some() {
+            Some(doc)
+        } else {
+            None
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use crate::type_inference::ruby_type::RubyType;
 
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
-use crate::yard::{YardParser, YardTypeConverter};
+use crate::yard::YardTypeConverter;
 
 use super::IndexVisitor;
 
@@ -74,7 +74,7 @@ impl IndexVisitor {
 
         // Extract YARD documentation from comments preceding the method
         let method_start_offset = node.location().start_offset();
-        let yard_doc = YardParser::extract_from_source(&self.document.content, method_start_offset);
+        let yard_doc = self.extract_doc_comments(method_start_offset);
 
         // Extract parameter info with positions for inlay hints
         let params = self.extract_method_params(node);
@@ -168,10 +168,7 @@ impl IndexVisitor {
             },
         };
 
-        let mut index = self.index.lock();
-        index.add_entry(entry);
-
-        drop(index);
+        self.add_entry(entry);
 
         let body_loc = if let Some(body) = node.body() {
             self.document

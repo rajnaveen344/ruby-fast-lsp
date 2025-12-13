@@ -59,8 +59,11 @@ impl IndexVisitor {
 
         // Add the entry to the index
         if let Ok(entry) = entry {
-            let mut index = self.index.lock();
-            index.add_entry(entry);
+            self.add_entry(entry);
+            // NOTE: `inferred_type` is not defined in this context.
+            // The instruction provided a snippet that included it, but to maintain
+            // syntactical correctness and avoid unrelated edits, it's omitted here.
+            // debug!("Added constant path entry: {} -> {:?}", fqn, inferred_type);
         } else {
             error!("Error creating entry for constant path: {}", constant_name);
         }

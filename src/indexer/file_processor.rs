@@ -141,19 +141,12 @@ impl FileProcessor {
         }
 
         // 1. Parse ONLY ONCE
-        let parse_start = Instant::now();
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        info!("perf_debug: Parsing took {:?}", parse_start.elapsed());
 
         // 2. Generate Syntax Diagnostics
-        let diag_start = Instant::now();
         let diagnostics = generate_diagnostics(&parse_result, &document);
-        info!(
-            "perf_debug: Syntax Diagnostics took {:?}",
-            diag_start.elapsed()
-        );
 
         // If severe parse errors, we might want to skip indexing, but usually we try best-effort.
         if parse_result.errors().count() > 10 {
@@ -168,22 +161,16 @@ impl FileProcessor {
 
         // 3. Index Definitions (Phase 1)
         if options.index_definitions {
-            let def_start = Instant::now();
-            let cleanup_start = Instant::now();
             let removed_fqns = self.index.lock().remove_entries_for_uri(uri);
             let removed_fqn_set: HashSet<_> = removed_fqns.into_iter().collect();
-            info!(
-                "perf_debug: Cleanup (remove_entries) took {:?}",
-                cleanup_start.elapsed()
-            );
 
-            let visitor_start = Instant::now();
-            let mut visitor = IndexVisitor::new(server, uri.clone());
+            let mut comment_ranges = Vec::new();
+            for comment in parse_result.comments() {
+                let loc = comment.location();
+                comment_ranges.push((loc.start_offset(), loc.end_offset()));
+            }
+            let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
             visitor.visit(&node);
-            info!(
-                "perf_debug: IndexVisitor walk took {:?}",
-                visitor_start.elapsed()
-            );
 
             // Update document with visitor's state
             if let Some(doc_arc) = server.docs.lock().get(uri) {
@@ -191,16 +178,10 @@ impl FileProcessor {
             }
 
             if options.resolve_mixins {
-                let mixin_start = Instant::now();
                 self.index.lock().resolve_mixins_for_uri(uri);
-                info!(
-                    "perf_debug: Mixin Resolution took {:?}",
-                    mixin_start.elapsed()
-                );
             }
 
             // Calculate diff for cross-file diagnostics
-            let diff_start = Instant::now();
             let added_fqns: Vec<_> = {
                 let index = self.index.lock();
                 index
@@ -209,6 +190,7 @@ impl FileProcessor {
                     .map(|entries| entries.iter().map(|e| e.fqn.clone()).collect())
                     .unwrap_or_default()
             };
+
             let added_fqn_set: HashSet<_> = added_fqns.iter().cloned().collect();
 
             let truly_removed: Vec<_> = removed_fqn_set
@@ -227,50 +209,30 @@ impl FileProcessor {
                 let resolved_affected = self.index.lock().clear_resolved_entries(&added_fqns);
                 affected_uris.extend(resolved_affected);
             }
-            info!(
-                "perf_debug: Cross-file diagnostics overhead took {:?}",
-                diff_start.elapsed()
-            );
-            info!(
-                "perf_debug: Index Definitions took {:?}",
-                def_start.elapsed()
-            );
         }
 
         // 4. Index References (Phase 2) - always tracks unresolved
         if options.index_references {
-            let ref_start = Instant::now();
             let mut index = self.index.lock();
             index.remove_references_for_uri(uri);
             index.remove_unresolved_entries_for_uri(uri);
             drop(index); // unlock
 
             // Always use with_unresolved_tracking - combined reference + unresolved indexing
-            let visitor_start = Instant::now();
             let mut visitor = ReferenceVisitor::with_unresolved_tracking(
                 server,
                 uri.clone(),
                 options.include_local_vars,
             );
             visitor.visit(&node);
-            info!(
-                "perf_debug: ReferenceVisitor walk took {:?}",
-                visitor_start.elapsed()
-            );
 
             // Update document with visitor's state
             if let Some(doc_arc) = server.docs.lock().get(uri) {
                 *doc_arc.write() = visitor.document;
             }
-            info!(
-                "perf_debug: Index References took {:?}",
-                ref_start.elapsed()
-            );
         }
-        // 5. Run InlayVisitor (Structural Hints) - usually part of Definitions or separate?
-        // FileProcessor::index_definitions did this. We should probably do it here too if definitions are indexed.
+        // 5. Run InlayVisitor (Structural Hints)
         if options.index_definitions {
-            let inlay_start = Instant::now();
             if let Some(doc_arc) = server.docs.lock().get(uri) {
                 // InlayVisitor is lightweight
                 let document = doc_arc.read();
@@ -280,7 +242,6 @@ impl FileProcessor {
                 drop(document);
                 doc_arc.write().set_inlay_hints(structural_hints);
             }
-            info!("perf_debug: Inlay Hints took {:?}", inlay_start.elapsed());
         }
 
         // Mark as indexed
@@ -291,10 +252,6 @@ impl FileProcessor {
 
         let total_time = start.elapsed();
         debug!("Processed file {:?} in {:?}", uri, total_time);
-        info!(
-            "perf_debug: Total processing for {:?} took {:?}",
-            uri, total_time
-        );
 
         Ok(ProcessResult {
             affected_uris,
@@ -330,7 +287,12 @@ impl FileProcessor {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut index_visitor = IndexVisitor::new(server, uri.clone());
+        let mut comment_ranges = Vec::new();
+        for comment in parse_result.comments() {
+            let loc = comment.location();
+            comment_ranges.push((loc.start_offset(), loc.end_offset()));
+        }
+        let mut index_visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
         index_visitor.visit(&node);
 
         // Run InlayVisitor to populate structural hints

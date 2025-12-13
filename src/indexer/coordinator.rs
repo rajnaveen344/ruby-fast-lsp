@@ -222,12 +222,12 @@ impl IndexingCoordinator {
         let uris: Vec<_> = {
             let index_arc = server.index();
             let index = index_arc.lock();
-            let count = index.unresolved_entries.len();
+            let count = index.unresolved.len();
             info!(
                 "Publishing diagnostics for {} files with unresolved entries",
                 count
             );
-            index.unresolved_entries.keys().cloned().collect()
+            index.unresolved.uris()
         };
 
         // Publish diagnostics for each file (lock released, safe to await)

@@ -10,16 +10,20 @@ impl IndexVisitor {
     /// To index meta-programming
     /// Implemented: include, extend, prepend
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
-        let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-
+        // Optimization: Fast fail for method calls with receivers (e.g. obj.method)
         if node.receiver().is_some() {
             return;
         }
 
-        // Skip require statements - we no longer track file dependencies
-        if matches!(method_name.as_str(), "require" | "require_relative") {
-            return;
+        // Optimization: Fast fail for non-mixin methods without string allocation
+        // We only care about include, extend, prepend
+        let name_slice = node.name().as_slice();
+        match name_slice {
+            b"include" | b"extend" | b"prepend" => {}
+            _ => return,
         }
+
+        let method_name = String::from_utf8_lossy(name_slice);
 
         if let Some(arguments) = node.arguments() {
             let mixin_refs: Vec<MixinRef> = arguments
@@ -27,6 +31,10 @@ impl IndexVisitor {
                 .iter()
                 .filter_map(|arg| self.resolve_mixin_ref(&arg))
                 .collect();
+
+            if mixin_refs.is_empty() {
+                return;
+            }
 
             let current_fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
@@ -37,17 +45,10 @@ impl IndexVisitor {
             let mut index = self.index.lock();
             if let Some(entries) = index.get_mut(&current_fqn) {
                 if let Some(entry) = entries.last_mut() {
-                    // Store the mixin refs in the entry - resolution will happen later
-                    match method_name.as_str() {
-                        "include" => {
-                            entry.add_includes(mixin_refs);
-                        }
-                        "extend" => {
-                            entry.add_extends(mixin_refs);
-                        }
-                        "prepend" => {
-                            entry.add_prepends(mixin_refs);
-                        }
+                    match method_name.as_ref() {
+                        "include" => entry.add_includes(mixin_refs),
+                        "extend" => entry.add_extends(mixin_refs),
+                        "prepend" => entry.add_prepends(mixin_refs),
                         _ => {}
                     }
                 }

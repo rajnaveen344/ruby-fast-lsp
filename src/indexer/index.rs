@@ -4,14 +4,18 @@
 //! This includes definitions, references, method lookups, mixin relationships,
 //! and prefix-based search capabilities.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::debug;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
 use crate::indexer::prefix_tree::PrefixTree;
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
+use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_method::RubyMethod;
+
+// Re-export for backward compatibility
+pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
 
 // ============================================================================
 // Types
@@ -26,85 +30,6 @@ pub struct MixinUsage {
     pub mixin_type: MixinType,
     /// Location of the mixin call
     pub location: Location,
-}
-
-/// Represents an unresolved reference for diagnostics.
-/// Used to report missing constants/classes/modules/methods.
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnresolvedEntry {
-    /// An unresolved constant reference (e.g., `Foo::Bar`)
-    Constant {
-        /// The constant name as written in the source (e.g., "Foo::Bar" or just "Bar")
-        name: String,
-        /// The namespace context where this reference was written
-        /// e.g., ["Outer", "Inner"] for code inside `module Outer; module Inner; ... end; end`
-        /// Used to determine if a newly defined constant would resolve this reference
-        /// via Ruby's reverse namespace lookup
-        namespace_context: Vec<String>,
-        /// Location where the constant was referenced
-        location: Location,
-    },
-    /// An unresolved method call (e.g., `foo.bar` or `bar`)
-    Method {
-        /// The method name as written in the source
-        name: String,
-        /// The receiver type if known (e.g., "Foo::Bar" for `Foo::Bar.method`)
-        /// None for method calls without explicit receiver
-        receiver: Option<String>,
-        /// Location where the method was called
-        location: Location,
-    },
-}
-
-impl UnresolvedEntry {
-    /// Create an unresolved constant entry with namespace context
-    pub fn constant_with_context(
-        name: String,
-        namespace_context: Vec<String>,
-        location: Location,
-    ) -> Self {
-        Self::Constant {
-            name,
-            namespace_context,
-            location,
-        }
-    }
-
-    /// Create an unresolved constant entry (legacy, assumes root context)
-    pub fn constant(name: String, location: Location) -> Self {
-        Self::Constant {
-            name,
-            namespace_context: Vec::new(),
-            location,
-        }
-    }
-
-    /// Create an unresolved method entry
-    pub fn method(name: String, receiver: Option<String>, location: Location) -> Self {
-        Self::Method {
-            name,
-            receiver,
-            location,
-        }
-    }
-
-    /// Get the location of this unresolved entry
-    pub fn location(&self) -> &Location {
-        match self {
-            Self::Constant { location, .. } => location,
-            Self::Method { location, .. } => location,
-        }
-    }
-
-    /// Check if this is a constant entry
-    pub fn is_constant(&self) -> bool {
-        matches!(self, Self::Constant { .. })
-    }
-
-    /// Check if this is a method entry
-    pub fn is_method(&self) -> bool {
-        matches!(self, Self::Method { .. })
-    }
 }
 
 // ============================================================================
@@ -143,8 +68,8 @@ pub struct RubyIndex {
     /// Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
 
-    /// Unresolved entries per file for diagnostics (constants and methods)
-    pub unresolved_entries: HashMap<Url, Vec<UnresolvedEntry>>,
+    /// Unresolved entries index (encapsulates forward and reverse lookups)
+    pub unresolved: UnresolvedIndex,
 }
 
 impl RubyIndex {
@@ -159,7 +84,7 @@ impl RubyIndex {
             mixin_usages: HashMap::new(),
             mixin_usages_by_uri: HashMap::new(),
             prefix_tree: PrefixTree::new(),
-            unresolved_entries: HashMap::new(),
+            unresolved: UnresolvedIndex::new(),
         }
     }
 
@@ -266,83 +191,27 @@ impl RubyIndex {
 
     /// Mark references to the given FQNs as unresolved in their respective files
     /// Returns the set of URIs that were affected (for diagnostic publishing)
+    ///
+    /// OPTIMIZED: Uses HashSet for batch deduplication instead of O(N) Vec::contains()
     pub fn mark_references_as_unresolved(
         &mut self,
         removed_fqns: &[FullyQualifiedName],
-    ) -> std::collections::HashSet<Url> {
-        let mut affected_uris = std::collections::HashSet::new();
-
-        for fqn in removed_fqns {
-            if let Some(ref_locations) = self.references.get(fqn) {
-                for location in ref_locations {
-                    affected_uris.insert(location.uri.clone());
-
-                    // Add unresolved entry for this reference (avoiding duplicates)
-                    let unresolved = UnresolvedEntry::constant(fqn.to_string(), location.clone());
-                    let entries = self
-                        .unresolved_entries
-                        .entry(location.uri.clone())
-                        .or_default();
-
-                    // Only add if not already present
-                    if !entries.contains(&unresolved) {
-                        entries.push(unresolved);
-                    }
-                }
-            }
-        }
-
-        affected_uris
+    ) -> HashSet<Url> {
+        self.unresolved
+            .mark_references_as_unresolved(removed_fqns, &self.references)
     }
 
     /// Clear unresolved entries that match the given FQNs (now that they're defined)
     /// Returns the set of URIs that were affected (for diagnostic publishing)
     ///
     /// Uses Ruby's reverse namespace lookup to determine if a newly defined FQN
-    /// would resolve an unresolved reference:
+    /// would resolve an unresolved reference.
     ///
-    /// For example, if we have unresolved "Inner" written inside `module Outer`:
-    /// - Defining `Outer::Inner` WOULD resolve it (Ruby finds Outer::Inner first)
-    /// - Defining `Other::Inner` would NOT resolve it (different namespace)
-    /// - Defining `::Inner` (root) WOULD resolve it (Ruby falls back to root)
-    pub fn clear_resolved_entries(
-        &mut self,
-        added_fqns: &[FullyQualifiedName],
-    ) -> std::collections::HashSet<Url> {
-        let mut affected_uris = std::collections::HashSet::new();
-
-        // Build a set of all FQN strings for quick lookup
-        let fqn_strings: std::collections::HashSet<String> =
-            added_fqns.iter().map(|fqn| fqn.to_string()).collect();
-
-        for (uri, entries) in self.unresolved_entries.iter_mut() {
-            let original_len = entries.len();
-
-            entries.retain(|entry| {
-                if let UnresolvedEntry::Constant {
-                    name,
-                    namespace_context,
-                    ..
-                } = entry
-                {
-                    // Check if any added FQN would resolve this reference
-                    // using Ruby's reverse namespace lookup
-                    !Self::would_fqn_resolve_reference(name, namespace_context, &fqn_strings)
-                } else {
-                    true // Keep non-constant entries
-                }
-            });
-
-            if entries.len() != original_len {
-                affected_uris.insert(uri.clone());
-            }
-        }
-
-        // Clean up empty entries
-        self.unresolved_entries
-            .retain(|_, entries| !entries.is_empty());
-
-        affected_uris
+    /// OPTIMIZED: Uses `unresolved_by_name` reverse index to only check files
+    /// that have unresolved refs matching the added FQN names.
+    pub fn clear_resolved_entries(&mut self, added_fqns: &[FullyQualifiedName]) -> HashSet<Url> {
+        self.unresolved
+            .clear_resolved(added_fqns, Self::would_fqn_resolve_reference)
     }
 
     /// Check if any of the added FQNs would resolve the given unresolved reference
@@ -435,53 +304,35 @@ impl RubyIndex {
 
     /// Add an unresolved entry for a file
     pub fn add_unresolved_entry(&mut self, uri: Url, entry: UnresolvedEntry) {
-        match &entry {
-            UnresolvedEntry::Constant { name, .. } => {
-                debug!("Adding unresolved constant: {} at {:?}", name, uri);
-            }
-            UnresolvedEntry::Method { name, receiver, .. } => {
-                if let Some(recv) = receiver {
-                    debug!("Adding unresolved method: {}.{} at {:?}", recv, name, uri);
-                } else {
-                    debug!("Adding unresolved method: {} at {:?}", name, uri);
-                }
-            }
-        }
-
-        // Avoid adding duplicate entries
-        let entries = self.unresolved_entries.entry(uri).or_default();
-        if !entries.contains(&entry) {
-            entries.push(entry);
-        }
+        self.unresolved.add(uri, entry);
     }
 
     /// Remove all unresolved entries for a file
     pub fn remove_unresolved_entries_for_uri(&mut self, uri: &Url) {
-        self.unresolved_entries.remove(uri);
+        self.unresolved.remove_for_uri(uri);
     }
 
     /// Get all unresolved entries for a file
     pub fn get_unresolved_entries(&self, uri: &Url) -> Vec<UnresolvedEntry> {
-        self.unresolved_entries
-            .get(uri)
-            .cloned()
-            .unwrap_or_default()
+        self.unresolved.get(uri)
     }
 
     /// Get all unresolved constants for a file
-    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<&UnresolvedEntry> {
-        self.unresolved_entries
+    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<UnresolvedEntry> {
+        self.unresolved
             .get(uri)
-            .map(|entries| entries.iter().filter(|e| e.is_constant()).collect())
-            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.is_constant())
+            .collect()
     }
 
     /// Get all unresolved methods for a file
-    pub fn get_unresolved_methods(&self, uri: &Url) -> Vec<&UnresolvedEntry> {
-        self.unresolved_entries
+    pub fn get_unresolved_methods(&self, uri: &Url) -> Vec<UnresolvedEntry> {
+        self.unresolved
             .get(uri)
-            .map(|entries| entries.iter().filter(|e| e.is_method()).collect())
-            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.is_method())
+            .collect()
     }
 
     // ========================================================================

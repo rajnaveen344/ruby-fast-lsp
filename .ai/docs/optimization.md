@@ -2,76 +2,39 @@
 
 ## Problem Statement
 
-**Symptom**: `did_change` events take **~1.3 seconds** for a single file, causing noticeable latency for the user.
+**Symptom**: `did_open` and `did_change` events take **~1.3s-2s** for a single file, causing noticeable latency.
 
-**Goal**: Reduce `did_change` latency to **< 200ms**.
+**Goal**: Reduce `did_change` latency to **<50ms sync** + **~300ms async debounce**.
 
-## Performance Breakdown
+## Current Performance (2025-12-12)
 
-Logs from `src/indexer/file_processor.rs` reveal the following breakdown for a single file update:
-
-| Component                      | Time       | Status                               |
-| ------------------------------ | ---------- | ------------------------------------ |
-| **Parsing**                    | ~30ms      | ✅ OK                                |
-| **Cleanup (`remove_entries`)** | **~150ms** | ❌ **Bottleneck** (Should be < 5ms)  |
-| **IndexVisitor Walk**          | **~420ms** | ❌ **Bottleneck** (Should be < 50ms) |
-| **Cross-file Diagnostics**     | **~185ms** | ❌ **Bottleneck** (Should be < 20ms) |
-| **Index References**           | ~400ms     | ⚠️ High, but secondary               |
-| **Mixin Resolution**           | Skipped    | ✅ OK                                |
-
-**Total Overhead**: ~755ms (60% of total time) is spent in pure overhead (cleanup, walking, diagnostics), not core logic.
-
----
-
-## Root Cause Analysis
-
-### 1. Cleanup Overhead (`remove_entries_for_uri`) - 150ms
-
-**Cause**: Inefficient data structures in `RubyIndex`.
-
-- `methods_by_name`: Stores a `Vec<Entry>` for each method name (e.g., `initialize`, `run`).
-- **Algorithm**: To remove entries for a file, we perform a linear scan (`retain`) on these vectors.
-- **Scale**: Popular methods like `initialize` can have thousands of entries. Scanning them on every keystroke is O(N \* M) where N is number of methods in file and M is total definitions of those methods in project.
-
-### 2. Cross-file Diagnostics Overhead - 185ms
-
-**Cause**: `mark_references_as_unresolved` iterates linearly.
-
-- When an identifier is removed, we check _every_ unresolved entry in the system to see if it matches.
-- This is an O(Unresolved \* Removed) operation.
-
-### 3. IndexVisitor Overhead - 420ms
-
-**Cause**: Excessive allocation and parsing during AST traversal.
-
-- **ScopeTracker**: Re-allocates the namespace stack `Vec` on every node visit? (Need to verify)
-- **YardParser**: Runs regex-based parsing on every method definition, even if comments are empty or simple.
-
----
+| Component                      | Before    | After     | Status        |
+| ------------------------------ | --------- | --------- | ------------- |
+| Parsing                        | 26ms      | 26ms      | ✅ OK         |
+| Cleanup (`remove_entries`)     | 175ms     | 160ms     | ⚠️ Acceptable |
+| IndexVisitor Walk              | **447ms** | **430ms** | ❌ HIGH       |
+| Cross-file: `mark_references`  | **985ms** | **57ms**  | ✅ FIXED      |
+| Cross-file: `clear_resolved`   | 3ms       | 3ms       | ✅ OK         |
+| Cross-file Diagnostics (total) | **1s**    | **88ms**  | ✅ FIXED      |
+| Index Definitions (total)      | 1.6s      | 688ms     | ⚠️ Improved   |
+| ReferenceVisitor Walk          | 353ms     | 326ms     | ⚠️ High       |
+| Index References               | 500ms     | 412ms     | ⚠️ High       |
+| **Total**                      | **2.1s**  | **1.15s** | ⚠️ 45% faster |
 
 ## Optimization Plan
 
-### Phase 1: Optimize `RubyIndex` Data Structures (Target: < 20ms combined)
+### ✅ Completed
 
-Refactor `src/indexer/index.rs` to use O(1) lookups for removal.
+1. **`clear_resolved_entries` O(1) lookup** - Added `unresolved_by_name` reverse index
+2. **`mark_references_as_unresolved` HashSet dedup** - O(N²) → O(N)
+3. **`UnresolvedIndex` refactor** - Encapsulated forward/reverse maps atomically
+4. **`YardParser` Optimization** - Uses Prism comments API to avoid O(N²) line scanning
 
-1.  **Optimize `methods_by_name`**:
+### 🔄 Remaining
 
-    - Change `HashMap<String, Vec<Entry>>` -> `HashMap<String, HashMap<Url, Entry>>` (or similar).
-    - **Result**: Removal becomes O(1) hash lookup instead of O(N) scan.
-
-2.  **Optimize `unresolved_entries`**:
-    - Index unresolved entries by name for faster lookup during invalidation.
-
-### Phase 2: Optimize `IndexVisitor` (Target: < 100ms)
-
-1.  **Refactor `ScopeTracker`**:
-
-    - Use a persistent/copy-on-write stack or just references to avoid `Vec` cloning in hot loops.
-
-2.  **Optimize `YardParser`**:
-    - Add a "fast path" to skip regex allocation if the comment block doesn't look like YARD (e.g., doesn't contain `@param`, `@return`).
-
-### Phase 3: Reference Indexing
-
-- Parallelize or defer reference indexing if it remains a bottleneck after fixing the overheads.
+| Optimization                      | Expected Impact | Complexity |
+| --------------------------------- | --------------- | ---------- |
+| **Debounced Indexing**            | <50ms sync UX   | Medium     |
+| **ReferenceVisitor Batching**     | -200ms          | Medium     |
+| **Memory: Entry/RubyType intern** | Reduce allocs   | Low        |
+| **HashMap Pre-sizing**            | Reduce reallocs | Low        |
