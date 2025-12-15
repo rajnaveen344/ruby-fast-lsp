@@ -43,22 +43,11 @@ fn open_file_with_options(
 // Helper function to process content for definitions without reading from filesystem
 fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, content: &str) {
     use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-    use ruby_prism::{parse, Visit};
+    use ruby_prism::Visit;
 
-    let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
-        println!("Parse errors in content: {} errors", errors_count);
-        return;
-    }
-
-    let mut comment_ranges = Vec::new();
-    for comment in parse_result.comments() {
-        let loc = comment.location();
-        comment_ranges.push((loc.start_offset(), loc.end_offset()));
-    }
     let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-    let mut visitor = IndexVisitor::new(server.index(), document, comment_ranges);
+    let parse_result = document.parse();
+    let mut visitor = IndexVisitor::new(server.index(), document.clone());
     visitor.visit(&parse_result.node());
 
     // Persist the document with LocalVariable entries back to server.docs

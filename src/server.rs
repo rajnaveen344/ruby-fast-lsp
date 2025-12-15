@@ -1,4 +1,3 @@
-use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::capabilities::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
@@ -8,7 +7,6 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
-use ruby_prism::Visit;
 use std::collections::HashMap;
 use std::process::exit;
 use std::sync::Arc;
@@ -152,39 +150,6 @@ impl RubyLanguageServer {
             .lock()
             .get(uri)
             .map(|doc_arc| doc_arc.read().clone())
-    }
-
-    pub fn process_file(&mut self, uri: Url, content: &str) -> Result<(), String> {
-        self.index.lock().remove_entries_for_uri(&uri);
-
-        // Create or update document in the docs HashMap
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        self.docs
-            .lock()
-            .insert(uri.clone(), Arc::new(RwLock::new(document)));
-
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-        let mut comment_ranges = Vec::new();
-        for comment in parse_result.comments() {
-            let loc = comment.location();
-            comment_ranges.push((loc.start_offset(), loc.end_offset()));
-        }
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        let mut visitor = IndexVisitor::new(self.index(), document, comment_ranges);
-
-        visitor.visit(&node);
-
-        // Persist mutations made by the visitor back to the server's document store
-        // TODO: This is a temporary fix. We should be able to mutate the document in place
-        //       using docs: Arc<Mutex<HashMap<Url, Arc<Mutex<RubyDocument>>>>>
-        // self.docs
-        //     .lock()
-        //     .unwrap()
-        //     .insert(uri.clone(), Arc::new(RwLock::new(visitor.document.clone())));
-
-        debug!("Processed file: {}", uri);
-        Ok(())
     }
 
     /// Publish diagnostics for a document

@@ -37,15 +37,9 @@ pub fn visit_code(code: &str) -> IndexVisitor {
         .insert(uri.clone(), Arc::new(RwLock::new(doc.clone())));
 
     // Parse with Prism and run the visitor.
-    let parse_result = ruby_prism::parse(code.as_bytes());
-    let _root = parse_result.node();
-
-    let mut comment_ranges = Vec::new();
-    for comment in parse_result.comments() {
-        let loc = comment.location();
-        comment_ranges.push((loc.start_offset(), loc.end_offset()));
-    }
-    let mut visitor = IndexVisitor::new(server.index(), doc.clone(), comment_ranges);
+    let doc = doc;
+    let parse_result = doc.parse();
+    let mut visitor = IndexVisitor::new(server.index(), doc.clone());
     visitor.visit(&parse_result.node());
 
     visitor

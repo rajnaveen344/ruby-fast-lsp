@@ -161,13 +161,10 @@ impl FileProcessor {
             let removed_fqns = self.index.lock().remove_entries_for_uri(uri);
             let removed_fqn_set: HashSet<_> = removed_fqns.into_iter().collect();
 
-            let mut comment_ranges = Vec::new();
-            for comment in parse_result.comments() {
-                let loc = comment.location();
-                comment_ranges.push((loc.start_offset(), loc.end_offset()));
-            }
-            let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-            let mut visitor = IndexVisitor::new(self.index.clone(), document, comment_ranges);
+            // The `document` variable from above is already initialized with content and parse_result
+            // We just need to ensure it's mutable for the visitor.
+            // Clone document because parse_result borrows from the original
+            let mut visitor = IndexVisitor::new(self.index.clone(), document.clone());
             visitor.visit(&node);
 
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
@@ -305,21 +302,15 @@ impl FileProcessor {
         self.index.lock().remove_entries_for_uri(uri);
 
         // Parse and visit AST for definitions
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-
-        let mut comment_ranges = Vec::new();
-        for comment in parse_result.comments() {
-            let loc = comment.location();
-            comment_ranges.push((loc.start_offset(), loc.end_offset()));
-        }
-
         // Create a document for the visitor (needed for position conversion)
         // NOTE: We don't store lvars here - they are computed on-demand when file is opened
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        let parse_result = document.parse();
+        let node = parse_result.node();
 
         let index = server.index();
-        let mut index_visitor = IndexVisitor::new(index, document, comment_ranges);
+        // Clone document because parse_result borrows from the original
+        let mut index_visitor = IndexVisitor::new(index, document.clone());
         index_visitor.visit(&node);
 
         debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());

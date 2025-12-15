@@ -32,23 +32,16 @@ pub struct IndexVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
-    /// Sorted list of comment ranges (start_offset, end_offset)
-    pub comments: Vec<(usize, usize)>,
 }
 
 impl IndexVisitor {
-    pub fn new(
-        index: Arc<Mutex<RubyIndex>>,
-        document: RubyDocument,
-        comments: Vec<(usize, usize)>,
-    ) -> Self {
+    pub fn new(index: Arc<Mutex<RubyIndex>>, document: RubyDocument) -> Self {
         let scope_tracker = ScopeTracker::new(&document);
         Self {
             index,
             document,
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
-            comments,
         }
     }
 
@@ -94,7 +87,10 @@ impl IndexVisitor {
     ) -> Option<crate::yard::types::YardMethodDoc> {
         // Find the first comment that starts AFTER or AT method_start.
         // We want the ones BEFORE it.
-        let idx = self.comments.partition_point(|c| c.0 < method_start);
+        let idx = self
+            .document
+            .get_comments()
+            .partition_point(|c| c.0 < method_start);
 
         if idx == 0 {
             return None;
@@ -104,7 +100,7 @@ impl IndexVisitor {
         let mut current_idx = idx - 1;
 
         // Check last comment is attached to method
-        let (_, end) = self.comments[current_idx];
+        let (_, end) = self.document.get_comments()[current_idx];
         let range_between = &self.document.content[end..method_start];
         if !range_between.trim().is_empty() {
             return None;
@@ -114,8 +110,8 @@ impl IndexVisitor {
         // Walk backwards to collect contiguous comment block
         while current_idx > 0 {
             let prev_idx = current_idx - 1;
-            let (_, prev_end) = self.comments[prev_idx];
-            let (curr_start, _) = self.comments[current_idx];
+            let (_, prev_end) = self.document.get_comments()[prev_idx];
+            let (curr_start, _) = self.document.get_comments()[current_idx];
 
             let range_between = &self.document.content[prev_end..curr_start];
             if !range_between.trim().is_empty() {
@@ -129,7 +125,7 @@ impl IndexVisitor {
 
         let mut line_infos = Vec::new();
         for &i in &comment_indices {
-            let (start, end) = self.comments[i];
+            let (start, end) = self.document.get_comments()[i];
             let raw_content = &self.document.content[start..end];
             let trimmed = raw_content.trim();
             // Prism comments include the #.

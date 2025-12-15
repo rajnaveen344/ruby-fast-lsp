@@ -27,11 +27,15 @@ pub struct RubyDocument {
 
     /// Local variable references (keyed by (scope_id, variable_name) for proper scoping)
     lvar_references: std::collections::HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>>,
+
+    /// Comments in the document (start_offset, end_offset)
+    comments: Vec<(usize, usize)>,
 }
 
 impl RubyDocument {
     /// Creates a new document with the given URI, content, and version
     pub fn new(uri: Url, content: String, version: i32) -> Self {
+        let comments = parse_comments(&content);
         let mut doc = Self {
             uri,
             content,
@@ -41,15 +45,28 @@ impl RubyDocument {
             inlay_hints: Vec::new(),
             lvars: BTreeMap::new(),
             lvar_references: std::collections::HashMap::new(),
+            comments,
         };
         doc.compute_line_offsets();
-        doc.compute_inlay_hints();
         doc
+    }
+
+    /// Parses the document content and returns a Prism ParseResult
+    pub fn parse(&self) -> ruby_prism::ParseResult<'_> {
+        ruby_prism::parse(self.content.as_bytes())
+    }
+
+    pub fn get_comments(&self) -> &Vec<(usize, usize)> {
+        &self.comments
     }
 
     /// Updates document content and version, recomputing line offsets
     /// Also clears lvars and lvar_references since they will be re-indexed
+    /// Note: comments are NOT cleared here because they are typically populated
+    /// immediately after by the indexer. However, we should probably clear them
+    /// to be safe, assuming the caller will re-populate them.
     pub fn update(&mut self, content: String, version: i32) {
+        self.comments = parse_comments(&content);
         self.content = content;
         self.version = version;
         self.lvars.clear();
@@ -253,6 +270,17 @@ impl RubyDocument {
     pub fn count_lvars(&self) -> usize {
         self.lvars.values().map(|v| v.len()).sum()
     }
+}
+
+/// Helper to parse comments from content
+fn parse_comments(content: &str) -> Vec<(usize, usize)> {
+    let parse_result = ruby_prism::parse(content.as_bytes());
+    let mut comments = Vec::new();
+    for comment in parse_result.comments() {
+        let loc = comment.location();
+        comments.push((loc.start_offset(), loc.end_offset()));
+    }
+    comments
 }
 
 #[cfg(test)]
