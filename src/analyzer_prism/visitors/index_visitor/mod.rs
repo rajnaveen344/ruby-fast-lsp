@@ -2,11 +2,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use ruby_prism::*;
-use tower_lsp::lsp_types::Url;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;
-use crate::server::RubyLanguageServer;
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 
 use crate::type_inference::ruby_type::RubyType;
@@ -39,9 +37,11 @@ pub struct IndexVisitor {
 }
 
 impl IndexVisitor {
-    pub fn new(server: &RubyLanguageServer, uri: Url, comments: Vec<(usize, usize)>) -> Self {
-        let index = server.index();
-        let document = server.get_doc(&uri).unwrap();
+    pub fn new(
+        index: Arc<Mutex<RubyIndex>>,
+        document: RubyDocument,
+        comments: Vec<(usize, usize)>,
+    ) -> Self {
         let scope_tracker = ScopeTracker::new(&document);
         Self {
             index,

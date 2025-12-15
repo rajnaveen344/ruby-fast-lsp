@@ -7,3 +7,5 @@ Cargo.lock
 .DS_Store
 # Simulation test outputs (keep regressions.txt tracked for reproducibility)
 src/test/simulation/soak_failures.log
+# DHAT heap profiling output
+*heap.json 

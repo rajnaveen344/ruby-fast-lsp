@@ -45,7 +45,7 @@ pub fn visit_code(code: &str) -> IndexVisitor {
         let loc = comment.location();
         comment_ranges.push((loc.start_offset(), loc.end_offset()));
     }
-    let mut visitor = IndexVisitor::new(&server, uri, comment_ranges);
+    let mut visitor = IndexVisitor::new(server.index(), doc.clone(), comment_ranges);
     visitor.visit(&parse_result.node());
 
     visitor

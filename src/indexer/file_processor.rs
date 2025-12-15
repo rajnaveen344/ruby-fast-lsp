@@ -166,7 +166,8 @@ impl FileProcessor {
                 let loc = comment.location();
                 comment_ranges.push((loc.start_offset(), loc.end_offset()));
             }
-            let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
+            let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+            let mut visitor = IndexVisitor::new(self.index.clone(), document, comment_ranges);
             visitor.visit(&node);
 
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
@@ -219,27 +220,40 @@ impl FileProcessor {
             index.remove_unresolved_entries_for_uri(uri);
             drop(index);
 
-            let mut visitor = ReferenceVisitor::with_unresolved_tracking(
-                server,
-                uri.clone(),
-                options.include_local_vars,
-            );
-            visitor.visit(&node);
-
-            // Merge lvar_references from visitor's document into existing document
-            {
+            // Retrieve document from cache (it was inserted in step 3)
+            let document = {
                 let docs = server.docs.lock();
-                if let Some(doc_arc) = docs.get(uri) {
-                    let mut doc = doc_arc.write();
-                    doc.clear_lvar_references();
-                    for ((scope_id, name), locations) in visitor.document.get_all_lvar_references()
-                    {
-                        for location in locations {
-                            doc.add_lvar_reference(*scope_id, *name, location.clone());
+                docs.get(uri).and_then(|d| Some(d.read().clone()))
+            };
+
+            if let Some(document) = document {
+                let mut visitor = ReferenceVisitor::with_unresolved_tracking(
+                    self.index.clone(),
+                    document,
+                    options.include_local_vars,
+                );
+                visitor.visit(&node);
+
+                // Merge lvar_references from visitor's document into existing document
+                {
+                    let docs = server.docs.lock();
+                    if let Some(doc_arc) = docs.get(uri) {
+                        let mut doc = doc_arc.write();
+                        doc.clear_lvar_references();
+                        for ((scope_id, name), locations) in
+                            visitor.document.get_all_lvar_references()
+                        {
+                            for location in locations {
+                                doc.add_lvar_reference(*scope_id, *name, location.clone());
+                            }
                         }
                     }
                 }
+            } else {
+                warn!("Document not found for reference indexing: {}", uri);
             }
+
+            // Merge lvar_references from visitor's document into existing document
         }
 
         // 5. Run InlayVisitor (Structural Hints)
@@ -273,6 +287,11 @@ impl FileProcessor {
     // ========================================================================
 
     /// Index definitions from Ruby content
+    /// NOTE: This is used during global workspace indexing.
+    /// It only populates the RubyIndex with definitions - it does NOT store
+    /// lvars or compute inlay hints. Those are computed on-demand when a file
+    /// is opened via did_open. The document is kept temporarily for the
+    /// reference indexing phase and cleared by the coordinator after indexing.
     pub async fn index_definitions(
         &self,
         uri: &Url,
@@ -285,19 +304,6 @@ impl FileProcessor {
         // Remove existing entries for this URI
         self.index.lock().remove_entries_for_uri(uri);
 
-        // Create or update the document
-        // IMPORTANT: Don't overwrite existing document that may have been opened via did_open
-        {
-            let mut docs = server.docs.lock();
-            if let Some(existing_doc) = docs.get(uri) {
-                let mut doc_guard = existing_doc.write();
-                doc_guard.update(content.to_string(), 0);
-            } else {
-                let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-                docs.insert(uri.clone(), Arc::new(parking_lot::RwLock::new(document)));
-            }
-        }
-
         // Parse and visit AST for definitions
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
@@ -307,28 +313,14 @@ impl FileProcessor {
             let loc = comment.location();
             comment_ranges.push((loc.start_offset(), loc.end_offset()));
         }
-        let mut index_visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
+
+        // Create a document for the visitor (needed for position conversion)
+        // NOTE: We don't store lvars here - they are computed on-demand when file is opened
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+
+        let index = server.index();
+        let mut index_visitor = IndexVisitor::new(index, document, comment_ranges);
         index_visitor.visit(&node);
-
-        // Save IndexVisitor's document (with lvars) back to server.docs
-        {
-            let mut docs = server.docs.lock();
-            docs.insert(
-                uri.clone(),
-                Arc::new(parking_lot::RwLock::new(index_visitor.document.clone())),
-            );
-        }
-
-        // Run InlayVisitor to populate structural hints
-        if let Some(doc_arc) = server.docs.lock().get(uri) {
-            let document = doc_arc.read();
-            let mut inlay_visitor = InlayVisitor::new(&document);
-            inlay_visitor.visit(&node);
-            let structural_hints = inlay_visitor.inlay_hints();
-
-            drop(document);
-            doc_arc.write().set_inlay_hints(structural_hints);
-        }
 
         debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
         Ok(())
@@ -355,7 +347,9 @@ impl FileProcessor {
         let node = parse_result.node();
 
         // Always track unresolved references now
-        let mut visitor = ReferenceVisitor::with_unresolved_tracking(server, uri.clone(), true);
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        let mut visitor =
+            ReferenceVisitor::with_unresolved_tracking(server.index(), document, true);
         visitor.visit(&node);
 
         debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());

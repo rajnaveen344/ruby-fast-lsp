@@ -170,7 +170,8 @@ impl RubyLanguageServer {
             let loc = comment.location();
             comment_ranges.push((loc.start_offset(), loc.end_offset()));
         }
-        let mut visitor = IndexVisitor::new(self, uri.clone(), comment_ranges);
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        let mut visitor = IndexVisitor::new(self.index(), document, comment_ranges);
 
         visitor.visit(&node);
 

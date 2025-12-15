@@ -72,4 +72,5 @@ cc = "1.0.83"
 
 [profile.release]
 opt-level = "z"
-strip = true
+strip = false   # Keep symbols for profiling
+debug = 2       # Full debug info for DHAT

@@ -2,11 +2,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use ruby_prism::*;
-use tower_lsp::lsp_types::Url;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;
-use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
@@ -31,13 +29,15 @@ pub struct ReferenceVisitor {
 }
 
 impl ReferenceVisitor {
-    pub fn new(server: &RubyLanguageServer, uri: Url) -> Self {
-        Self::with_options(server, uri, true)
+    pub fn new(index: Arc<Mutex<RubyIndex>>, document: RubyDocument) -> Self {
+        Self::with_options(index, document, true)
     }
 
-    pub fn with_options(server: &RubyLanguageServer, uri: Url, include_local_vars: bool) -> Self {
-        let index = server.index();
-        let document = server.get_doc(&uri).unwrap();
+    pub fn with_options(
+        index: Arc<Mutex<RubyIndex>>,
+        document: RubyDocument,
+        include_local_vars: bool,
+    ) -> Self {
         let scope_tracker = ScopeTracker::new(&document);
         Self {
             index,
@@ -50,12 +50,10 @@ impl ReferenceVisitor {
 
     /// Create a visitor that tracks unresolved constants
     pub fn with_unresolved_tracking(
-        server: &RubyLanguageServer,
-        uri: Url,
+        index: Arc<Mutex<RubyIndex>>,
+        document: RubyDocument,
         include_local_vars: bool,
     ) -> Self {
-        let index = server.index();
-        let document = server.get_doc(&uri).unwrap();
         let scope_tracker = ScopeTracker::new(&document);
         Self {
             index,

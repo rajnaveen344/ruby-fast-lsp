@@ -32,15 +32,21 @@ pub async fn handle_inlay_hints(
     let uri = params.text_document.uri;
     let requested_range = params.range;
 
+    // Only provide hints for open files (documents in memory)
     let document_guard = server.docs.lock();
-    let document = document_guard.get(&uri).unwrap().read();
-    let content = document.content.clone();
-    drop(document);
+    let doc_arc = match document_guard.get(&uri) {
+        Some(doc) => doc.clone(),
+        None => {
+            // File is not open - no inlay hints available
+            return Vec::new();
+        }
+    };
     drop(document_guard);
 
+    let document = doc_arc.read();
+    let content = document.content.clone();
+
     // Get structural hints from the document (filtered to range)
-    let document_guard = server.docs.lock();
-    let document = document_guard.get(&uri).unwrap().read();
     let mut all_hints: Vec<InlayHint> = document
         .get_inlay_hints()
         .into_iter()
@@ -85,7 +91,6 @@ pub async fn handle_inlay_hints(
         }
     }
     drop(document);
-    drop(document_guard);
 
     // Generate type hints from indexed entries (non-local variables)
     let index = server.index.lock();

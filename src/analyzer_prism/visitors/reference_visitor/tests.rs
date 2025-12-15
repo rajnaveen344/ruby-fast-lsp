@@ -57,7 +57,8 @@ fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, conten
         let loc = comment.location();
         comment_ranges.push((loc.start_offset(), loc.end_offset()));
     }
-    let mut visitor = IndexVisitor::new(server, uri.clone(), comment_ranges);
+    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+    let mut visitor = IndexVisitor::new(server.index(), document, comment_ranges);
     visitor.visit(&parse_result.node());
 
     // Persist the document with LocalVariable entries back to server.docs
@@ -84,10 +85,13 @@ fn process_content_for_references(
         return;
     }
 
+    // Create a temporary document since we're processing content directly
+    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+
     let mut visitor = if include_local_vars {
-        ReferenceVisitor::new(server, uri)
+        ReferenceVisitor::new(server.index(), document)
     } else {
-        ReferenceVisitor::with_options(server, uri, false)
+        ReferenceVisitor::with_options(server.index(), document, false)
     };
     visitor.visit(&parse_result.node());
 }

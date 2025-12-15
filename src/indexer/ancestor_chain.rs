@@ -34,7 +34,7 @@
 //! ```
 //!
 //! **Ancestor Chain for C2 instance methods:**
-//! ```
+//! ```text
 //! C2 → C1 → Object → BasicObject
 //! ```
 //!
@@ -56,7 +56,7 @@
 //! ```
 //!
 //! **Ancestor Chain for C1 instance methods:**
-//! ```
+//! ```text
 //! C1 → M2 → M1 → Object → BasicObject
 //! ```
 //! Note: M2 comes before M1 because it was included later
@@ -74,7 +74,7 @@
 //! ```
 //!
 //! **Ancestor Chain for C1 instance methods:**
-//! ```
+//! ```text
 //! M1 → C1 → Object → BasicObject
 //! ```
 //! Note: M1 comes before C1, so M1#method_shared will be called
@@ -92,7 +92,7 @@
 //! ```
 //!
 //! **Ancestor Chain for C1 class methods:**
-//! ```
+//! ```text
 //! C1 (extended: M1) → Class → Module → Object → BasicObject
 //! ```
 //!
@@ -123,12 +123,12 @@
 //! ```
 //!
 //! **Ancestor Chain for C2 instance methods:**
-//! ```
+//! ```text
 //! C2 → M3 → M1 → C1 → M2 → Object → BasicObject
 //! ```
 //!
 //! **Graph Representation:**
-//! ```
+//! ```text
 //!     BasicObject
 //!         ↑
 //!      Object
