@@ -63,7 +63,9 @@ pub async fn handle_inlay_hints(
                 continue;
             }
 
-            if let EntryKind::LocalVariable { r#type, name, .. } = &entry.kind {
+            if let EntryKind::LocalVariable(data) = &entry.kind {
+                let r#type = &data.r#type;
+                let name = &data.name;
                 let final_type = if r#type != &RubyType::Unknown {
                     Some(r#type.clone())
                 } else {
@@ -104,34 +106,39 @@ pub async fn handle_inlay_hints(
             continue;
         }
 
-        match &entry.kind {
-            EntryKind::InstanceVariable { r#type, .. }
-            | EntryKind::ClassVariable { r#type, .. }
-            | EntryKind::GlobalVariable { r#type, .. } => {
-                if *r#type != RubyType::Unknown {
-                    // Create type hint at the end of the variable name
-                    let end_position = entry.location.range.end;
-                    let type_hint = InlayHint {
-                        position: end_position,
-                        label: InlayHintLabel::String(format!(": {}", r#type)),
-                        kind: Some(InlayHintKind::TYPE),
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: None,
-                        padding_right: None,
-                        data: None,
-                    };
-                    all_hints.push(type_hint);
-                }
+        // Extract type from variable entries if present
+        let var_type = match &entry.kind {
+            EntryKind::InstanceVariable(data) => Some(&data.r#type),
+            EntryKind::ClassVariable(data) => Some(&data.r#type),
+            EntryKind::GlobalVariable(data) => Some(&data.r#type),
+            _ => None,
+        };
+
+        if let Some(r#type) = var_type {
+            if *r#type != RubyType::Unknown {
+                // Create type hint at the end of the variable name
+                let end_position = entry.location.range.end;
+                let type_hint = InlayHint {
+                    position: end_position,
+                    label: InlayHintLabel::String(format!(": {}", r#type)),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                };
+                all_hints.push(type_hint);
             }
+        }
+
+        match &entry.kind {
             // Generate inlay hints for methods
-            EntryKind::Method {
-                yard_doc,
-                params,
-                return_type_position,
-                return_type,
-                ..
-            } => {
+            EntryKind::Method(data) => {
+                let yard_doc = &data.yard_doc;
+                let params = &data.params;
+                let return_type_position = &data.return_type_position;
+                let return_type = &data.return_type;
                 // Generate individual type hints for each parameter (from YARD only for now)
                 if let Some(doc) = yard_doc {
                     for param in params {

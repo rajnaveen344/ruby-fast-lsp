@@ -22,7 +22,7 @@ fn def_node_instance_method() {
     let index_lock = visitor.index.lock();
     let entries = index_lock.get(&fqn).expect("bar method entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Method(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ fn def_node_class_method_self() {
     let index_lock = visitor.index.lock();
     let entries = index_lock.get(&fqn).expect("baz method entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Method(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ fn def_node_initialize_as_new() {
     let index_lock = visitor.index.lock();
     let entries = index_lock.get(&fqn).expect("new method entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Method(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ fn def_node_singleton_class_method() {
     let index_lock = visitor.index.lock();
     let entries = index_lock.get(&fqn).expect("qux method entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Method(_)));
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ fn def_node_uppercase_method_name() {
     let index_lock = visitor.index.lock();
     let entries = index_lock.get(&fqn).expect("UppercaseMethod entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Method { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Method(_)));
 }
 
 // ---------------------------------------------------------------------------

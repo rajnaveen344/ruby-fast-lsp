@@ -1,23 +1,9 @@
-pub mod analyzer_prism;
-pub mod capabilities;
-pub mod config;
-pub mod handlers;
-pub mod indexer;
-pub mod server;
-#[cfg(test)]
-pub mod test;
-pub mod type_inference;
-pub mod types;
-pub mod utils;
-pub mod yard;
-
+use ruby_fast_lsp::server::RubyLanguageServer;
 use std::process::exit;
 
 use anyhow::Result;
 use log::{error, info};
 use tower_lsp::{LspService, Server};
-
-use crate::server::RubyLanguageServer;
 
 #[tokio::main]
 async fn main() -> Result<()> {

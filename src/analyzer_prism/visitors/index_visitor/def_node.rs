@@ -154,18 +154,18 @@ impl IndexVisitor {
         let entry = Entry {
             fqn: fqn.clone(),
             location,
-            kind: EntryKind::Method {
-                name: method.clone(),
+            kind: EntryKind::new_method(
+                method.clone(),
                 params,
-                owner: owner_fqn,
-                visibility: MethodVisibility::Public,
-                origin: MethodOrigin::Direct,
-                origin_visibility: None,
+                owner_fqn,
+                MethodVisibility::Public,
+                MethodOrigin::Direct,
+                None,
                 yard_doc,
                 return_type_position,
                 return_type,
                 param_types,
-            },
+            ),
         };
 
         self.add_entry(entry);

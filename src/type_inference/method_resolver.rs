@@ -94,10 +94,9 @@ impl MethodResolver {
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
-                        if let EntryKind::Method {
-                            owner, return_type, ..
-                        } = &entry.kind
-                        {
+                        if let EntryKind::Method(data) = &entry.kind {
+                            let owner = &data.owner;
+                            let return_type = &data.return_type;
                             if *owner == owner_fqn {
                                 if let Some(rt) = return_type {
                                     return Some(rt.clone());
@@ -315,10 +314,9 @@ impl MethodResolver {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     // Find method that belongs to any class in the ancestor chain
                     for entry in entries {
-                        if let EntryKind::Method {
-                            owner, return_type, ..
-                        } = &entry.kind
-                        {
+                        if let EntryKind::Method(data) = &entry.kind {
+                            let owner = &data.owner;
+                            let return_type = &data.return_type;
                             // Check if owner is in ancestor chain
                             if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
@@ -342,10 +340,9 @@ impl MethodResolver {
             if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
-                        if let EntryKind::Method {
-                            owner, return_type, ..
-                        } = &entry.kind
-                        {
+                        if let EntryKind::Method(data) = &entry.kind {
+                            let owner = &data.owner;
+                            let return_type = &data.return_type;
                             // Check if owner is in ancestor chain
                             if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
@@ -416,7 +413,8 @@ impl MethodResolver {
                 if name == var_name {
                     log::debug!("Found local variable {} in index", var_name);
                     for entry in entries {
-                        if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
+                        if let EntryKind::LocalVariable(data) = &entry.kind {
+                            let r#type = &data.r#type;
                             log::debug!("Variable {} has type: {:?}", var_name, r#type);
                             if *r#type != RubyType::Unknown {
                                 return Some(r#type.clone());
@@ -440,7 +438,8 @@ impl MethodResolver {
             if let FullyQualifiedName::InstanceVariable(name) = fqn {
                 if name == var_name {
                     for entry in entries {
-                        if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
+                        if let EntryKind::InstanceVariable(data) = &entry.kind {
+                            let r#type = &data.r#type;
                             if *r#type != RubyType::Unknown {
                                 return Some(r#type.clone());
                             }
@@ -521,18 +520,18 @@ mod tests {
                 RubyMethod::new("name", MethodKind::Instance).unwrap(),
             ))
             .location(create_test_location())
-            .kind(EntryKind::Method {
-                name: RubyMethod::new("name", MethodKind::Instance).unwrap(),
-                params: vec![],
-                owner: user_fqn.clone(),
-                visibility: MethodVisibility::Public,
-                origin: MethodOrigin::Direct,
-                origin_visibility: None,
-                yard_doc: None,
-                return_type_position: None,
-                return_type: Some(RubyType::string()),
-                param_types: vec![],
-            })
+            .kind(EntryKind::new_method(
+                RubyMethod::new("name", MethodKind::Instance).unwrap(),
+                vec![],
+                user_fqn.clone(),
+                MethodVisibility::Public,
+                MethodOrigin::Direct,
+                None,
+                None,
+                None,
+                Some(RubyType::string()),
+                vec![],
+            ))
             .build()
             .unwrap();
 
@@ -564,18 +563,18 @@ mod tests {
                 RubyMethod::new("find", MethodKind::Class).unwrap(),
             ))
             .location(create_test_location())
-            .kind(EntryKind::Method {
-                name: RubyMethod::new("find", MethodKind::Class).unwrap(),
-                params: vec![],
-                owner: user_fqn.clone(),
-                visibility: MethodVisibility::Public,
-                origin: MethodOrigin::Direct,
-                origin_visibility: None,
-                yard_doc: None,
-                return_type_position: None,
-                return_type: Some(RubyType::Class(user_fqn.clone())),
-                param_types: vec![],
-            })
+            .kind(EntryKind::new_method(
+                RubyMethod::new("find", MethodKind::Class).unwrap(),
+                vec![],
+                user_fqn.clone(),
+                MethodVisibility::Public,
+                MethodOrigin::Direct,
+                None,
+                None,
+                None,
+                Some(RubyType::Class(user_fqn.clone())),
+                vec![],
+            ))
             .build()
             .unwrap();
 
@@ -623,18 +622,18 @@ mod tests {
                 RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
             ))
             .location(create_test_location())
-            .kind(EntryKind::Method {
-                name: RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
-                params: vec![],
-                owner: user_fqn.clone(),
-                visibility: MethodVisibility::Public,
-                origin: MethodOrigin::Direct,
-                origin_visibility: None,
-                yard_doc: None,
-                return_type_position: None,
-                return_type: None, // No return type
-                param_types: vec![],
-            })
+            .kind(EntryKind::new_method(
+                RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
+                vec![],
+                user_fqn.clone(),
+                MethodVisibility::Public,
+                MethodOrigin::Direct,
+                None,
+                None,
+                None,
+                None, // No return type
+                vec![],
+            ))
             .build()
             .unwrap();
 
@@ -690,14 +689,14 @@ mod tests {
         let var_entry = EntryBuilder::new()
             .fqn(var_fqn)
             .location(create_test_location())
-            .kind(EntryKind::LocalVariable {
-                name: "user".to_string(),
+            .kind(EntryKind::new_local_variable(
+                "user".to_string(),
                 scope_stack,
-                r#type: RubyType::Class(FullyQualifiedName::Constant(vec![RubyConstant::new(
+                RubyType::Class(FullyQualifiedName::Constant(vec![RubyConstant::new(
                     "User",
                 )
                 .unwrap()])),
-            })
+            ))
             .build()
             .unwrap();
 
@@ -731,10 +730,10 @@ mod tests {
         let ivar_entry = EntryBuilder::new()
             .fqn(ivar_fqn)
             .location(create_test_location())
-            .kind(EntryKind::InstanceVariable {
-                name: "@name".to_string(),
-                r#type: RubyType::string(),
-            })
+            .kind(EntryKind::new_instance_variable(
+                "@name".to_string(),
+                RubyType::string(),
+            ))
             .build()
             .unwrap();
 

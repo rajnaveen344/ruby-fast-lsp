@@ -342,7 +342,7 @@ fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformatio
     use crate::indexer::entry::entry_kind::EntryKind;
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
-    if let EntryKind::LocalVariable { .. } = &entry.kind {
+    if let EntryKind::LocalVariable(_) = &entry.kind {
         return None; // Exclude local variables
     }
 
@@ -365,15 +365,15 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
     use crate::indexer::entry::entry_kind::EntryKind;
 
     match kind {
-        EntryKind::Class { .. } => SymbolKind::CLASS,
-        EntryKind::Module { .. } => SymbolKind::MODULE,
-        EntryKind::Method { .. } => SymbolKind::METHOD,
-        EntryKind::Constant { .. } => SymbolKind::CONSTANT,
-        EntryKind::LocalVariable { .. }
-        | EntryKind::InstanceVariable { .. }
-        | EntryKind::ClassVariable { .. }
-        | EntryKind::GlobalVariable { .. } => SymbolKind::VARIABLE,
-        EntryKind::Reference { .. } => SymbolKind::KEY, // References use KEY symbol
+        EntryKind::Class(_) => SymbolKind::CLASS,
+        EntryKind::Module(_) => SymbolKind::MODULE,
+        EntryKind::Method(_) => SymbolKind::METHOD,
+        EntryKind::Constant(_) => SymbolKind::CONSTANT,
+        EntryKind::LocalVariable(_)
+        | EntryKind::InstanceVariable(_)
+        | EntryKind::ClassVariable(_)
+        | EntryKind::GlobalVariable(_) => SymbolKind::VARIABLE,
+        EntryKind::Reference(_) => SymbolKind::KEY, // References use KEY symbol
     }
 }
 

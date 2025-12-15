@@ -195,13 +195,10 @@ fn get_index_methods_with_ancestors(
 
         // Check if method belongs to any class in our search list
         for entry in entries {
-            if let EntryKind::Method {
-                owner,
-                return_type,
-                params,
-                ..
-            } = &entry.kind
-            {
+            if let EntryKind::Method(data) = &entry.kind {
+                let owner = &data.owner;
+                let return_type = &data.return_type;
+                let params = &data.params;
                 // Check if owner matches any class in our list
                 let owner_matches = match owner {
                     FullyQualifiedName::Constant(parts) => {

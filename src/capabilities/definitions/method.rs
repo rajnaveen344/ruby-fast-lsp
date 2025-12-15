@@ -394,46 +394,36 @@ fn process_entry_mixins(
     included_modules: &mut Vec<FullyQualifiedName>,
     seen_modules: &mut HashSet<FullyQualifiedName>,
 ) {
-    match entry_kind {
-        EntryKind::Class {
-            includes,
-            extends,
-            prepends,
-            ..
-        }
-        | EntryKind::Module {
-            includes,
-            extends,
-            prepends,
-            ..
-        } => {
-            process_mixins(
-                index,
-                prepends,
-                ancestor_fqn,
-                included_modules,
-                seen_modules,
-                true,
-            );
-            process_mixins(
-                index,
-                includes,
-                ancestor_fqn,
-                included_modules,
-                seen_modules,
-                false,
-            );
-            process_mixins(
-                index,
-                extends,
-                ancestor_fqn,
-                included_modules,
-                seen_modules,
-                false,
-            );
-        }
-        _ => {}
-    }
+    let (includes, extends, prepends) = match entry_kind {
+        EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
+        EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
+        _ => return,
+    };
+
+    process_mixins(
+        index,
+        prepends,
+        ancestor_fqn,
+        included_modules,
+        seen_modules,
+        true,
+    );
+    process_mixins(
+        index,
+        includes,
+        ancestor_fqn,
+        included_modules,
+        seen_modules,
+        false,
+    );
+    process_mixins(
+        index,
+        extends,
+        ancestor_fqn,
+        included_modules,
+        seen_modules,
+        false,
+    );
 }
 
 /// Process a list of mixins and add them to the included modules
@@ -483,8 +473,8 @@ fn is_class_context(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
     if let Some(entries) = index.get(fqn) {
         for entry in entries {
             match &entry.kind {
-                EntryKind::Class { .. } => return true,
-                EntryKind::Module { .. } => return false,
+                EntryKind::Class(_) => return true,
+                EntryKind::Module(_) => return false,
                 _ => continue,
             }
         }

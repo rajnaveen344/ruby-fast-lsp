@@ -40,6 +40,7 @@ clap = { version = "4.4.0", features = ["derive"] }
 regex = "1.10"
 slotmap = "1.0"
 ustr = "1.0"
+dhat = "0.3.2"
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]

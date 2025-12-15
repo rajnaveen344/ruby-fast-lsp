@@ -172,7 +172,7 @@ impl CompletionRanker {
         let mut score = 0.0;
 
         match &candidate.entry.kind {
-            EntryKind::Class { .. } => {
+            EntryKind::Class(_) => {
                 score += 2.0;
 
                 // Boost classes if the partial looks like a class name
@@ -185,7 +185,7 @@ impl CompletionRanker {
                     score += 1.0;
                 }
             }
-            EntryKind::Module { .. } => {
+            EntryKind::Module(_) => {
                 score += 1.8;
 
                 // Boost modules if the partial looks like a module name
@@ -198,7 +198,7 @@ impl CompletionRanker {
                     score += 0.8;
                 }
             }
-            EntryKind::Constant { .. } => {
+            EntryKind::Constant(_) => {
                 score += 1.5;
 
                 // Boost constants if the partial is all uppercase
@@ -285,33 +285,9 @@ mod tests {
             ConstantCompletionContext::new(Position::new(0, 0), vec![], "Str".to_string());
 
         let mut candidates = vec![
-            create_test_item(
-                "String",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            create_test_item(
-                "StringIO",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            create_test_item(
-                "MyString",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
+            create_test_item("String", EntryKind::new_class(None)),
+            create_test_item("StringIO", EntryKind::new_class(None)),
+            create_test_item("MyString", EntryKind::new_class(None)),
         ];
 
         ranker.rank_by_relevance(&mut candidates, &context);

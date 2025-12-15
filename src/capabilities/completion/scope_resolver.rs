@@ -49,12 +49,7 @@ mod tests {
     fn create_test_item(name: &str) -> ConstantCompletionItem {
         let entry = Entry {
             fqn: FullyQualifiedName::try_from(name).unwrap(),
-            kind: EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
+            kind: EntryKind::new_class(None),
             location: Location {
                 uri: Url::parse("file:///test.rb").unwrap(),
                 range: Range::default(),

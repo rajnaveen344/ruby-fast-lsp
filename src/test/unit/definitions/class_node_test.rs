@@ -23,7 +23,7 @@ fn class_node_with_body() {
 
     // Exactly one entry of kind `Class` should have been produced.
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Class(_)));
 
     // Scope tracker – after visitor completion the namespace stack must be empty.
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
@@ -48,7 +48,7 @@ fn class_node_namespaced_constant_path_with_body() {
         .expect("A::B class entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Class(_)));
 
     // After exit the namespace stack should be empty (no artificial prefix)
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
@@ -74,7 +74,7 @@ fn class_node_deep_namespaced_constant_path() {
         .expect("A::B::C class entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Class(_)));
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
@@ -93,7 +93,7 @@ fn class_node_without_body() {
         .get(&expected_fqn)
         .expect("Foo class entry missing");
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Class { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Class(_)));
 }
 
 // ---------------------------------------------------------------------------

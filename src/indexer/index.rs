@@ -95,8 +95,9 @@ impl RubyIndex {
         self.by_fqn.entry(fqn).or_default().push(id);
 
         // Add to method name index if it's a method
-        if let EntryKind::Method { name, .. } = &entry.kind {
-            self.by_method_name.entry(*name).or_default().push(id);
+        // Add to method name index if it's a method
+        if let EntryKind::Method(data) = &entry.kind {
+            self.by_method_name.entry(data.name).or_default().push(id);
         }
 
         // Update mixin tracking
@@ -136,8 +137,8 @@ impl RubyIndex {
             removed_ids_set.insert(*id);
             if let Some(entry) = self.entries.remove(*id) {
                 unique_fqns.insert(entry.fqn);
-                if let EntryKind::Method { name, .. } = entry.kind {
-                    unique_method_names.insert(name);
+                if let EntryKind::Method(data) = entry.kind {
+                    unique_method_names.insert(data.name);
                 }
             }
         }
@@ -286,7 +287,7 @@ impl RubyIndex {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
                     // Only return definitions, not references
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
                     .collect()
             })
             .filter(|v: &Vec<&Entry>| !v.is_empty())
@@ -305,7 +306,7 @@ impl RubyIndex {
                 ids.iter().any(|id| {
                     self.entries
                         .get(*id)
-                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference { .. }))
+                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference(_)))
                 })
             })
             .unwrap_or(false)
@@ -321,7 +322,7 @@ impl RubyIndex {
             let entries: Vec<&Entry> = ids
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
-                .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
                 .collect();
             if entries.is_empty() {
                 None
@@ -406,7 +407,7 @@ impl RubyIndex {
             .map(|ids| {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference { .. }))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
                     .collect()
             })
             .unwrap_or_default()
@@ -419,7 +420,7 @@ impl RubyIndex {
             .map(|ids| {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| matches!(e.kind, EntryKind::Reference { .. }))
+                    .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
                     .map(|e| e.location.clone())
                     .collect()
             })
@@ -436,7 +437,7 @@ impl RubyIndex {
         let entry = Entry {
             fqn: fqn.clone(),
             location,
-            kind: EntryKind::Reference { target_fqn: fqn },
+            kind: EntryKind::new_reference(fqn),
         };
         self.add_entry(entry);
     }
@@ -493,18 +494,8 @@ impl RubyIndex {
         use crate::indexer::ancestor_chain::resolve_mixin_ref;
 
         let (includes, extends, prepends) = match &entry.kind {
-            EntryKind::Class {
-                includes,
-                extends,
-                prepends,
-                ..
-            } => (includes, extends, prepends),
-            EntryKind::Module {
-                includes,
-                extends,
-                prepends,
-                ..
-            } => (includes, extends, prepends),
+            EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
+            EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
             _ => return,
         };
 
@@ -670,7 +661,7 @@ impl RubyIndex {
             .filter_map(|class_fqn| {
                 self.get(class_fqn).and_then(|entries| {
                     entries.first().and_then(|entry| {
-                        if matches!(entry.kind, EntryKind::Class { .. }) {
+                        if matches!(entry.kind, EntryKind::Class(_)) {
                             Some(entry.location.clone())
                         } else {
                             None
@@ -711,13 +702,13 @@ impl RubyIndex {
                         current_path.push(module_fqn.clone());
 
                         match &entry.kind {
-                            EntryKind::Class { .. } => {
+                            EntryKind::Class(_) => {
                                 result
                                     .entry(usage.user_fqn.clone())
                                     .or_default()
                                     .push(current_path);
                             }
-                            EntryKind::Module { .. } => {
+                            EntryKind::Module(_) => {
                                 self.collect_transitive_users(
                                     &usage.user_fqn,
                                     result,
@@ -746,7 +737,7 @@ impl RubyIndex {
 
     fn add_to_prefix_tree(&mut self, entry: &Entry) {
         // Do not index references in the prefix tree (too many, and not useful for completion)
-        if matches!(entry.kind, EntryKind::Reference { .. }) {
+        if matches!(entry.kind, EntryKind::Reference(_)) {
             return;
         }
 

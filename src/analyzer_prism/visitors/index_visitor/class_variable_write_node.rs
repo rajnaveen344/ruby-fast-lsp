@@ -182,13 +182,13 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable(_)));
 
         assert!(variable_entry.is_some(), "Should have class variable entry");
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::ClassVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::integer(), "Expected Integer type");
+            if let EntryKind::ClassVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::integer(), "Expected Integer type");
             }
         }
     }
@@ -207,16 +207,16 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable(_)));
 
         assert!(variable_entry.is_some(), "Should have class variable entry");
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::ClassVariable { r#type, .. } = &entry.kind {
+            if let EntryKind::ClassVariable(data) = &entry.kind {
                 assert!(
-                    matches!(r#type, RubyType::Hash(_, _)),
+                    matches!(&data.r#type, RubyType::Hash(_, _)),
                     "Expected Hash type, got {:?}",
-                    r#type
+                    &data.r#type
                 );
             }
         }
@@ -236,13 +236,17 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::ClassVariable(_)));
 
         assert!(variable_entry.is_some(), "Should have class variable entry");
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::ClassVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::nil_class(), "Expected NilClass type");
+            if let EntryKind::ClassVariable(data) = &entry.kind {
+                assert_eq!(
+                    &data.r#type,
+                    &RubyType::nil_class(),
+                    "Expected NilClass type"
+                );
             }
         }
     }

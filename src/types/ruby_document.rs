@@ -201,8 +201,8 @@ impl RubyDocument {
         for &scope_id in scope_ids.iter().rev() {
             if let Some(entries) = self.lvars.get(&scope_id) {
                 for entry in entries {
-                    if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
-                        if var_name == name {
+                    if let EntryKind::LocalVariable(data) = &entry.kind {
+                        if &data.name == name {
                             return Some(scope_id);
                         }
                     }
@@ -219,8 +219,8 @@ impl RubyDocument {
 
         for (_scope_id, entries) in &self.lvars {
             for entry in entries {
-                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
-                    if var_name == name {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name {
                         return Some(entry.location.clone());
                     }
                 }

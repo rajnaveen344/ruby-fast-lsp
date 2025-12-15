@@ -149,8 +149,8 @@ my_method
     for scope_id in 0..100 {
         if let Some(entries) = doc_read.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let crate::indexer::entry::EntryKind::LocalVariable { name, .. } = &entry.kind {
-                    if name == "local_var" {
+                if let crate::indexer::entry::EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == "local_var" {
                         found_local_var = true;
                         break;
                     }
@@ -172,12 +172,7 @@ my_method
     let entries = index_guard.get_entries_for_uri(&uri);
     let local_var_entries: Vec<_> = entries
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                crate::indexer::entry::EntryKind::LocalVariable { .. }
-            )
-        })
+        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::LocalVariable(_)))
         .collect();
 
     assert!(

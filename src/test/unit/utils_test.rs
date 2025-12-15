@@ -34,35 +34,21 @@ mod tests {
 
         let foo_entry = Entry {
             fqn: foo_fqn,
-            kind: EntryKind::Module {
-                includes: vec![],
-                prepends: vec![],
-                extends: vec![],
-            },
+            kind: EntryKind::new_module(),
             location: test_location.clone(),
         };
         index.add_entry(foo_entry);
 
         let foo_bar_entry = Entry {
             fqn: foo_bar_fqn,
-            kind: EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                prepends: vec![],
-                extends: vec![],
-            },
+            kind: EntryKind::new_class(None),
             location: test_location.clone(),
         };
         index.add_entry(foo_bar_entry);
 
         let baz_entry = Entry {
             fqn: baz_fqn,
-            kind: EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                prepends: vec![],
-                extends: vec![],
-            },
+            kind: EntryKind::new_class(None),
             location: test_location.clone(),
         };
         index.add_entry(baz_entry);

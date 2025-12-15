@@ -201,7 +201,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -209,8 +209,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::string(), "Expected String type");
+            if let EntryKind::InstanceVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::string(), "Expected String type");
             }
         }
     }
@@ -229,7 +229,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -237,8 +237,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::integer(), "Expected Integer type");
+            if let EntryKind::InstanceVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::integer(), "Expected Integer type");
             }
         }
     }
@@ -257,7 +257,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -265,11 +265,11 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
+            if let EntryKind::InstanceVariable(data) = &entry.kind {
                 assert!(
-                    matches!(r#type, RubyType::Array(_)),
+                    matches!(&data.r#type, RubyType::Array(_)),
                     "Expected Array type, got {:?}",
-                    r#type
+                    &data.r#type
                 );
             }
         }
@@ -289,7 +289,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::InstanceVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -297,8 +297,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::InstanceVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::string(), "Expected String type");
+            if let EntryKind::InstanceVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::string(), "Expected String type");
             }
         }
     }

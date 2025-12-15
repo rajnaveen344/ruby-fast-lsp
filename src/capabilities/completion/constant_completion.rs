@@ -111,7 +111,7 @@ impl ConstantCompletionItem {
 
     fn extract_constant_name(entry: &Entry) -> String {
         match &entry.kind {
-            EntryKind::Class { .. } | EntryKind::Module { .. } | EntryKind::Constant { .. } => {
+            EntryKind::Class { .. } | EntryKind::Module { .. } | EntryKind::Constant(_) => {
                 entry.fqn.name()
             }
             _ => entry.fqn.to_string(),
@@ -131,7 +131,8 @@ impl ConstantCompletionItem {
 
     fn extract_detail(entry: &Entry) -> Option<String> {
         match &entry.kind {
-            EntryKind::Class { superclass, .. } => {
+            EntryKind::Class(data) => {
+                let superclass = &data.superclass;
                 if let Some(_parent) = superclass {
                     // TODO: Resolve MixinRef to display superclass name
                     Some(" class".to_string())
@@ -139,9 +140,9 @@ impl ConstantCompletionItem {
                     Some(" class".to_string())
                 }
             }
-            EntryKind::Module { .. } => Some(" module".to_string()),
-            EntryKind::Constant { value, .. } => {
-                if let Some(val) = value {
+            EntryKind::Module(_) => Some(" module".to_string()),
+            EntryKind::Constant(data) => {
+                if let Some(val) = &data.value {
                     Some(format!(" = {}", val))
                 } else {
                     Some(" constant".to_string())
@@ -158,7 +159,7 @@ impl ConstantCompletionItem {
         score += match &entry.kind {
             EntryKind::Class { .. } => 1.0,
             EntryKind::Module { .. } => 0.9,
-            EntryKind::Constant { .. } => 0.8,
+            EntryKind::Constant(_) => 0.8,
             _ => 0.0,
         };
 
@@ -178,7 +179,7 @@ impl ConstantCompletionItem {
         let kind = match &self.entry.kind {
             EntryKind::Class { .. } => CompletionItemKind::CLASS,
             EntryKind::Module { .. } => CompletionItemKind::MODULE,
-            EntryKind::Constant { .. } => CompletionItemKind::CONSTANT,
+            EntryKind::Constant(_) => CompletionItemKind::CONSTANT,
             _ => CompletionItemKind::VALUE,
         };
 
@@ -344,7 +345,7 @@ impl ConstantCompletionEngine {
     fn is_constant_entry(&self, entry: &Entry) -> bool {
         matches!(
             entry.kind,
-            EntryKind::Class { .. } | EntryKind::Module { .. } | EntryKind::Constant { .. }
+            EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_)
         )
     }
 }
@@ -383,80 +384,25 @@ mod tests {
 
         // Add some test constants with nested namespaces
         let entries = vec![
-            (
-                "ActiveRecord",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "ActiveRecord::Base",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "ActiveRecord::Migration",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "ActiveRecord::Base::Connection",
-                EntryKind::Class {
-                    superclass: None,
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "ActiveSupport",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "ActiveSupport::Cache",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
+            ("ActiveRecord", EntryKind::new_module()),
+            ("ActiveRecord::Base", EntryKind::new_class(None)),
+            ("ActiveRecord::Migration", EntryKind::new_class(None)),
+            ("ActiveRecord::Base::Connection", EntryKind::new_class(None)),
+            ("ActiveSupport", EntryKind::new_module()),
+            ("ActiveSupport::Cache", EntryKind::new_module()),
             (
                 "String",
-                EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
             ),
             (
                 "StringIO",
-                EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
             ),
         ];
 
@@ -579,22 +525,8 @@ mod tests {
 
         // Add the exact scenario from the user's issue: module A with nested module B
         let entries = vec![
-            (
-                "A",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
-            (
-                "A::B",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            ),
+            ("A", EntryKind::new_module()),
+            ("A::B", EntryKind::new_module()),
         ];
 
         for (name, kind) in entries {

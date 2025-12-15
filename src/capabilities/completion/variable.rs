@@ -19,7 +19,8 @@ pub fn find_variable_completions(
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
                 match &entry.kind {
-                    EntryKind::LocalVariable { name, .. } => {
+                    EntryKind::LocalVariable(data) => {
+                        let name = &data.name;
                         if seen_variables.insert(name.clone()) {
                             completions.push(CompletionItem {
                                 label: name.clone(),
@@ -32,7 +33,8 @@ pub fn find_variable_completions(
                             });
                         }
                     }
-                    EntryKind::InstanceVariable { name, .. } => {
+                    EntryKind::InstanceVariable(data) => {
+                        let name = &data.name;
                         if seen_variables.insert(name.clone()) {
                             completions.push(CompletionItem {
                                 label: name.clone(),
@@ -45,7 +47,8 @@ pub fn find_variable_completions(
                             });
                         }
                     }
-                    EntryKind::ClassVariable { name, .. } => {
+                    EntryKind::ClassVariable(data) => {
+                        let name = &data.name;
                         if seen_variables.insert(name.clone()) {
                             completions.push(CompletionItem {
                                 label: name.clone(),
@@ -58,7 +61,8 @@ pub fn find_variable_completions(
                             });
                         }
                     }
-                    EntryKind::GlobalVariable { name, .. } => {
+                    EntryKind::GlobalVariable(data) => {
+                        let name = &data.name;
                         if seen_variables.insert(name.clone()) {
                             completions.push(CompletionItem {
                                 label: name.clone(),

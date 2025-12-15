@@ -111,8 +111,8 @@ fn find_local_variable_references_from_document(
     for &scope_id in &scope_ids {
         if let Some(entries) = doc.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
-                    if var_name == name {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name {
                         all_locations.push(entry.location.clone());
                         break;
                     }
@@ -391,7 +391,7 @@ fn find_method_references_by_name(
     // Search through all method definitions to find references
     if let Some(entries) = index.get_methods_by_name(method) {
         for entry in entries {
-            if let EntryKind::Method { .. } = &entry.kind {
+            if let EntryKind::Method(_) = &entry.kind {
                 // For each method definition, find its FQN and look for references
                 // For each method definition, find its FQN and look for references
                 let refs = index.references(&entry.fqn);

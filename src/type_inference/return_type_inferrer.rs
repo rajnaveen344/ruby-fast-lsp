@@ -371,7 +371,8 @@ impl ReturnTypeInferrer {
             if let FullyQualifiedName::LocalVariable(name, _) = fqn {
                 if name == var_name {
                     for entry in entries {
-                        if let EntryKind::LocalVariable { r#type, .. } = &entry.kind {
+                        if let EntryKind::LocalVariable(data) = &entry.kind {
+                            let r#type = &data.r#type;
                             if *r#type != RubyType::Unknown {
                                 return Some(r#type.clone());
                             }

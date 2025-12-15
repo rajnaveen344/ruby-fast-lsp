@@ -201,7 +201,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -209,8 +209,12 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::true_class(), "Expected TrueClass type");
+            if let EntryKind::GlobalVariable(data) = &entry.kind {
+                assert_eq!(
+                    &data.r#type,
+                    &RubyType::true_class(),
+                    "Expected TrueClass type"
+                );
             }
         }
     }
@@ -229,7 +233,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -237,8 +241,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::string(), "Expected String type");
+            if let EntryKind::GlobalVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::string(), "Expected String type");
             }
         }
     }
@@ -257,7 +261,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -265,8 +269,8 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::float(), "Expected Float type");
+            if let EntryKind::GlobalVariable(data) = &entry.kind {
+                assert_eq!(&data.r#type, &RubyType::float(), "Expected Float type");
             }
         }
     }
@@ -285,7 +289,7 @@ mod tests {
 
         let variable_entry = entries
             .iter()
-            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable { .. }));
+            .find(|entry| matches!(&entry.kind, EntryKind::GlobalVariable(_)));
 
         assert!(
             variable_entry.is_some(),
@@ -293,8 +297,12 @@ mod tests {
         );
 
         if let Some(entry) = variable_entry {
-            if let EntryKind::GlobalVariable { r#type, .. } = &entry.kind {
-                assert_eq!(r#type, &RubyType::false_class(), "Expected FalseClass type");
+            if let EntryKind::GlobalVariable(data) = &entry.kind {
+                assert_eq!(
+                    &data.r#type,
+                    &RubyType::false_class(),
+                    "Expected FalseClass type"
+                );
             }
         }
     }

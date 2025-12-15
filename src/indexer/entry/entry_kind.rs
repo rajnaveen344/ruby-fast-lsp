@@ -68,62 +68,98 @@ impl MethodParamInfo {
 // EntryKind
 // ============================================================================
 
+/// Data for Class entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassData {
+    pub superclass: Option<MixinRef>,
+    pub includes: Vec<MixinRef>,
+    pub prepends: Vec<MixinRef>,
+    pub extends: Vec<MixinRef>,
+}
+
+/// Data for Module entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleData {
+    pub includes: Vec<MixinRef>,
+    pub prepends: Vec<MixinRef>,
+    pub extends: Vec<MixinRef>,
+}
+
+/// Data for Method entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodData {
+    pub name: RubyMethod,
+    /// Parameter info with names and positions for inlay hints
+    pub params: Vec<MethodParamInfo>,
+    pub owner: FullyQualifiedName,
+    pub visibility: MethodVisibility,
+    pub origin: MethodOrigin,
+    pub origin_visibility: Option<MethodVisibility>,
+    /// YARD documentation with type annotations (raw strings for display)
+    pub yard_doc: Option<YardMethodDoc>,
+    /// Position for return type hint (after closing paren or last param)
+    pub return_type_position: Option<Position>,
+    /// Inferred or documented return type as RubyType (for type inference)
+    pub return_type: Option<RubyType>,
+    /// Parameter types as RubyType (for type inference within method body)
+    /// Maps parameter name to its type
+    pub param_types: Vec<(String, RubyType)>,
+}
+
+/// Data for Constant entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstantData {
+    pub value: Option<String>,
+    pub visibility: Option<ConstVisibility>,
+}
+
+/// Data for LocalVariable entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalVariableData {
+    pub name: String,
+    pub scope_stack: LVScopeStack,
+    pub r#type: RubyType,
+}
+
+/// Data for InstanceVariable entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceVariableData {
+    pub name: String,
+    pub r#type: RubyType,
+}
+
+/// Data for ClassVariable entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassVariableData {
+    pub name: String,
+    pub r#type: RubyType,
+}
+
+/// Data for GlobalVariable entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalVariableData {
+    pub name: String,
+    pub r#type: RubyType,
+}
+
+/// Data for Reference entries
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenceData {
+    pub target_fqn: FullyQualifiedName,
+}
+
 /// Type-specific metadata for indexed Ruby entities
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryKind {
-    Class {
-        superclass: Option<MixinRef>,
-        includes: Vec<MixinRef>,
-        prepends: Vec<MixinRef>,
-        extends: Vec<MixinRef>,
-    },
-    Module {
-        includes: Vec<MixinRef>,
-        prepends: Vec<MixinRef>,
-        extends: Vec<MixinRef>,
-    },
-    Method {
-        name: RubyMethod,
-        /// Parameter info with names and positions for inlay hints
-        params: Vec<MethodParamInfo>,
-        owner: FullyQualifiedName,
-        visibility: MethodVisibility,
-        origin: MethodOrigin,
-        origin_visibility: Option<MethodVisibility>,
-        /// YARD documentation with type annotations (raw strings for display)
-        yard_doc: Option<YardMethodDoc>,
-        /// Position for return type hint (after closing paren or last param)
-        return_type_position: Option<Position>,
-        /// Inferred or documented return type as RubyType (for type inference)
-        return_type: Option<RubyType>,
-        /// Parameter types as RubyType (for type inference within method body)
-        /// Maps parameter name to its type
-        param_types: Vec<(String, RubyType)>,
-    },
-    Constant {
-        value: Option<String>,
-        visibility: Option<ConstVisibility>,
-    },
-    LocalVariable {
-        name: String,
-        scope_stack: LVScopeStack,
-        r#type: RubyType,
-    },
-    InstanceVariable {
-        name: String,
-        r#type: RubyType,
-    },
-    ClassVariable {
-        name: String,
-        r#type: RubyType,
-    },
-    GlobalVariable {
-        name: String,
-        r#type: RubyType,
-    },
-    Reference {
-        target_fqn: FullyQualifiedName,
-    },
+    Class(Box<ClassData>),
+    Module(Box<ModuleData>),
+    Method(Box<MethodData>),
+    Constant(Box<ConstantData>),
+    LocalVariable(Box<LocalVariableData>),
+    InstanceVariable(Box<InstanceVariableData>),
+    ClassVariable(Box<ClassVariableData>),
+    GlobalVariable(Box<GlobalVariableData>),
+    Reference(Box<ReferenceData>),
 }
 
 impl EntryKind {
@@ -132,40 +168,74 @@ impl EntryKind {
     // ========================================================================
 
     pub fn new_class(superclass: Option<MixinRef>) -> Self {
-        Self::Class {
+        Self::Class(Box::new(ClassData {
             superclass,
             includes: Vec::new(),
             prepends: Vec::new(),
             extends: Vec::new(),
-        }
+        }))
+    }
+
+    pub fn new_constant(value: Option<String>, visibility: Option<ConstVisibility>) -> Self {
+        Self::Constant(Box::new(ConstantData { value, visibility }))
+    }
+
+    pub fn new_reference(target_fqn: FullyQualifiedName) -> Self {
+        Self::Reference(Box::new(ReferenceData { target_fqn }))
     }
 
     pub fn new_module() -> Self {
-        Self::Module {
+        Self::Module(Box::new(ModuleData {
             includes: Vec::new(),
             prepends: Vec::new(),
             extends: Vec::new(),
-        }
+        }))
+    }
+
+    pub fn new_method(
+        name: RubyMethod,
+        params: Vec<MethodParamInfo>,
+        owner: FullyQualifiedName,
+        visibility: MethodVisibility,
+        origin: MethodOrigin,
+        origin_visibility: Option<MethodVisibility>,
+        yard_doc: Option<YardMethodDoc>,
+        return_type_position: Option<Position>,
+        return_type: Option<RubyType>,
+        param_types: Vec<(String, RubyType)>,
+    ) -> Self {
+        Self::Method(Box::new(MethodData {
+            name,
+            params,
+            owner,
+            visibility,
+            origin,
+            origin_visibility,
+            yard_doc,
+            return_type_position,
+            return_type,
+            param_types,
+        }))
     }
 
     pub fn new_local_variable(name: String, scope_stack: LVScopeStack, r#type: RubyType) -> Self {
-        EntryKind::LocalVariable {
+        EntryKind::LocalVariable(Box::new(LocalVariableData {
             name,
             scope_stack,
             r#type,
-        }
+        }))
     }
 
     pub fn new_instance_variable(name: String, r#type: RubyType) -> Self {
-        EntryKind::InstanceVariable { name, r#type }
+        EntryKind::InstanceVariable(Box::new(InstanceVariableData { name, r#type }))
     }
 
     pub fn new_class_variable(name: String, r#type: RubyType) -> Self {
-        EntryKind::ClassVariable { name, r#type }
+        EntryKind::ClassVariable(Box::new(ClassVariableData { name, r#type }))
     }
 
     pub fn new_global_variable(name: String, r#type: RubyType) -> Self {
-        EntryKind::GlobalVariable { name, r#type }
+        EntryKind::GlobalVariable(Box::new(GlobalVariableData { name, r#type }))
     }
 
     // ========================================================================
@@ -174,35 +244,32 @@ impl EntryKind {
 
     pub fn add_includes(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
-            EntryKind::Class { includes, .. } | EntryKind::Module { includes, .. } => {
-                includes.extend(mixin_refs);
-            }
+            EntryKind::Class(data) => data.includes.extend(mixin_refs),
+            EntryKind::Module(data) => data.includes.extend(mixin_refs),
             _ => panic!("Cannot add includes to non-class/module entry"),
         }
     }
 
     pub fn add_extends(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
-            EntryKind::Class { extends, .. } | EntryKind::Module { extends, .. } => {
-                extends.extend(mixin_refs);
-            }
+            EntryKind::Class(data) => data.extends.extend(mixin_refs),
+            EntryKind::Module(data) => data.extends.extend(mixin_refs),
             _ => panic!("Cannot add extends to non-class/module entry"),
         }
     }
 
     pub fn add_prepends(&mut self, mixin_refs: Vec<MixinRef>) {
         match self {
-            EntryKind::Class { prepends, .. } | EntryKind::Module { prepends, .. } => {
-                prepends.extend(mixin_refs);
-            }
+            EntryKind::Class(data) => data.prepends.extend(mixin_refs),
+            EntryKind::Module(data) => data.prepends.extend(mixin_refs),
             _ => panic!("Cannot add prepends to non-class/module entry"),
         }
     }
 
     pub fn set_superclass(&mut self, superclass_ref: MixinRef) {
         match self {
-            EntryKind::Class { superclass, .. } => {
-                *superclass = Some(superclass_ref);
+            EntryKind::Class(data) => {
+                data.superclass = Some(superclass_ref);
             }
             _ => panic!("Cannot set superclass on non-class entry"),
         }
@@ -216,38 +283,38 @@ impl EntryKind {
 impl Display for EntryKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EntryKind::Class { .. } => write!(f, "Class"),
-            EntryKind::Module { .. } => write!(f, "Module"),
-            EntryKind::Method { name, .. } => {
-                let kind_str = match name.get_kind() {
+            EntryKind::Class(_) => write!(f, "Class"),
+            EntryKind::Module(_) => write!(f, "Module"),
+            EntryKind::Method(data) => {
+                let kind_str = match data.name.get_kind() {
                     MethodKind::Instance => " (Instance)",
                     MethodKind::Class => " (Class)",
                     MethodKind::Unknown => " (Unknown)",
                 };
-                write!(f, "Method{}: {}", kind_str, name)
+                write!(f, "Method{}: {}", kind_str, data.name)
             }
-            EntryKind::Constant { visibility, .. } => {
-                let vis_str = if visibility.is_some() {
+            EntryKind::Constant(data) => {
+                let vis_str = if data.visibility.is_some() {
                     " (Private)"
                 } else {
                     ""
                 };
                 write!(f, "Constant{}", vis_str)
             }
-            EntryKind::LocalVariable { name, r#type, .. } => {
-                write!(f, "Local Variable: {} ({})", name, r#type)
+            EntryKind::LocalVariable(data) => {
+                write!(f, "Local Variable: {} ({})", data.name, data.r#type)
             }
-            EntryKind::InstanceVariable { name, r#type, .. } => {
-                write!(f, "Instance Variable: {} ({})", name, r#type)
+            EntryKind::InstanceVariable(data) => {
+                write!(f, "Instance Variable: {} ({})", data.name, data.r#type)
             }
-            EntryKind::ClassVariable { name, r#type, .. } => {
-                write!(f, "Class Variable: {} ({})", name, r#type)
+            EntryKind::ClassVariable(data) => {
+                write!(f, "Class Variable: {} ({})", data.name, data.r#type)
             }
-            EntryKind::GlobalVariable { name, r#type, .. } => {
-                write!(f, "Global Variable: {} ({})", name, r#type)
+            EntryKind::GlobalVariable(data) => {
+                write!(f, "Global Variable: {} ({})", data.name, data.r#type)
             }
-            EntryKind::Reference { target_fqn } => {
-                write!(f, "Reference: {}", target_fqn)
+            EntryKind::Reference(data) => {
+                write!(f, "Reference: {}", data.target_fqn)
             }
         }
     }

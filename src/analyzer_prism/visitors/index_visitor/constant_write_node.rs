@@ -33,10 +33,7 @@ impl IndexVisitor {
                 self.document
                     .prism_location_to_lsp_location(&node.location()),
             )
-            .kind(EntryKind::Constant {
-                value: None,      // We could extract the value here if needed
-                visibility: None, // Default to public
-            })
+            .kind(EntryKind::new_constant(None, None))
             .build();
 
         // Add the entry to the index

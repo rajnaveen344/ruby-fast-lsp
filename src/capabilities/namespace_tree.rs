@@ -96,7 +96,7 @@ pub async fn handle_namespace_tree(
                 continue;
             }
             match &entry.kind {
-                EntryKind::Class { .. } | EntryKind::Module { .. } => {
+                EntryKind::Class(_) | EntryKind::Module(_) => {
                     project_entries_for_fqn.push(entry);
                 }
                 _ => {}
@@ -132,8 +132,8 @@ pub async fn handle_namespace_tree(
         }
 
         let kind = match &first_entry.kind {
-            EntryKind::Class { .. } => "Class".to_string(),
-            EntryKind::Module { .. } => "Module".to_string(),
+            EntryKind::Class(_) => "Class".to_string(),
+            EntryKind::Module(_) => "Module".to_string(),
             _ => continue,
         };
 
@@ -155,27 +155,18 @@ pub async fn handle_namespace_tree(
 
         for entry in &entries {
             match &entry.kind {
-                EntryKind::Class {
-                    superclass: sc,
-                    includes,
-                    prepends,
-                    extends,
-                } => {
+                EntryKind::Class(data) => {
                     if superclass.is_none() {
-                        superclass = sc.clone();
+                        superclass = data.superclass.clone();
                     }
-                    all_includes.extend(includes.clone());
-                    all_prepends.extend(prepends.clone());
-                    all_extends.extend(extends.clone());
+                    all_includes.extend(data.includes.clone());
+                    all_prepends.extend(data.prepends.clone());
+                    all_extends.extend(data.extends.clone());
                 }
-                EntryKind::Module {
-                    includes,
-                    prepends,
-                    extends,
-                } => {
-                    all_includes.extend(includes.clone());
-                    all_prepends.extend(prepends.clone());
-                    all_extends.extend(extends.clone());
+                EntryKind::Module(data) => {
+                    all_includes.extend(data.includes.clone());
+                    all_prepends.extend(data.prepends.clone());
+                    all_extends.extend(data.extends.clone());
                 }
                 _ => {}
             }

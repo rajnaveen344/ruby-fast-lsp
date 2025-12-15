@@ -20,7 +20,7 @@ fn module_node_with_body() {
         .expect("Foo module entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Module(_)));
 
     // After visitor completion the namespace stack must be empty (no artificial prefix)
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
@@ -45,7 +45,7 @@ fn module_node_namespaced_constant_path_with_body() {
         .expect("A::B module entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Module(_)));
 
     // Namespace stack should be empty after visiting (no artificial prefix)
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
@@ -71,7 +71,7 @@ fn module_node_deep_namespaced_constant_path() {
         .expect("A::B::C module entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Module(_)));
     assert!(visitor.scope_tracker.get_ns_stack().is_empty());
 }
 
@@ -91,7 +91,7 @@ fn module_node_without_body() {
         .expect("Foo module entry missing");
 
     assert_eq!(entries.len(), 1);
-    assert!(matches!(entries[0].kind, EntryKind::Module { .. }));
+    assert!(matches!(entries[0].kind, EntryKind::Module(_)));
 }
 
 // ---------------------------------------------------------------------------

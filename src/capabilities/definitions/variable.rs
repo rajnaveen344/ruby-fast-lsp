@@ -20,8 +20,8 @@ pub fn find_local_variable_definitions(
     for &scope_id in &scope_ids {
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
-                    if var_name == name {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name {
                         return Some(vec![entry.location.clone()]);
                     }
                 }
@@ -95,8 +95,8 @@ pub fn find_local_variable_definitions_at_position(
     for &scope_id in &scope_ids {
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
-                if let EntryKind::LocalVariable { name: var_name, .. } = &entry.kind {
-                    if var_name == name && entry.location.range.start < position {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name && entry.location.range.start < position {
                         return Some(vec![entry.location.clone()]);
                     }
                 }

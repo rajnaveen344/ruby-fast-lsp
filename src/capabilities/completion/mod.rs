@@ -629,30 +629,20 @@ end"#;
             // Add String class - use a simple name that should match
             let string_entry = create_test_entry(
                 "String",
-                EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
             );
             index_guard.add_entry(string_entry);
 
             // Add StringIO class for additional testing
             let stringio_entry = create_test_entry(
                 "StringIO",
-                EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
             );
             index_guard.add_entry(stringio_entry);
         }
@@ -741,15 +731,10 @@ end
 
             let string_entry = create_test_entry(
                 "String",
-                EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
             );
             index_guard.add_entry(string_entry);
         }
@@ -825,10 +810,7 @@ end
             // Add the same constant multiple times (simulating multiple definitions)
             let entry1 = Entry {
                 fqn: fqn.clone(),
-                kind: EntryKind::Constant {
-                    value: Some("42".to_string()),
-                    visibility: None,
-                },
+                kind: EntryKind::new_constant(Some("42".to_string()), None),
                 location: Location {
                     uri: uri.clone(),
                     range: Range {
@@ -846,10 +828,7 @@ end
 
             let entry2 = Entry {
                 fqn: fqn.clone(),
-                kind: EntryKind::Constant {
-                    value: Some("42".to_string()),
-                    visibility: None,
-                },
+                kind: EntryKind::new_constant(Some("42".to_string()), None),
                 location: Location {
                     uri: uri.clone(),
                     range: Range {
@@ -938,15 +917,10 @@ end
             // Create top-level entries
             let string_entry = Entry {
                 fqn: FullyQualifiedName::try_from("String").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -956,15 +930,10 @@ end
 
             let array_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Array").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1066,11 +1035,7 @@ end
             // Top-level modules and classes
             let outer_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("OuterModule").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1080,11 +1045,7 @@ end
 
             let another_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("AnotherModule").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1095,11 +1056,7 @@ end
             // Nested modules and classes
             let middle_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1109,15 +1066,10 @@ end
 
             let inner_class_entry = Entry {
                 fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule::InnerClass").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1128,15 +1080,10 @@ end
             // Add some built-in Ruby classes
             let string_entry = Entry {
                 fqn: FullyQualifiedName::try_from("String").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1146,15 +1093,10 @@ end
 
             let hash_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Hash").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1296,15 +1238,10 @@ end
 
                 let string_entry = Entry {
                     fqn: FullyQualifiedName::try_from("String").unwrap(),
-                    kind: EntryKind::Class {
-                        superclass: Some(MixinRef {
-                            parts: vec![RubyConstant::new("Object").unwrap()],
-                            absolute: false,
-                        }),
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_class(Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    })),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),
@@ -1314,15 +1251,10 @@ end
 
                 let test_class_entry = Entry {
                     fqn: FullyQualifiedName::try_from("TestClass").unwrap(),
-                    kind: EntryKind::Class {
-                        superclass: Some(MixinRef {
-                            parts: vec![RubyConstant::new("Object").unwrap()],
-                            absolute: false,
-                        }),
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_class(Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    })),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),
@@ -1386,24 +1318,10 @@ A::
             let index_arc = server.index();
             let mut index_guard = index_arc.lock();
 
-            let a_entry = create_test_entry(
-                "A",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            );
+            let a_entry = create_test_entry("A", EntryKind::new_module());
             index_guard.add_entry(a_entry);
 
-            let b_entry = create_test_entry(
-                "A::B",
-                EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
-            );
+            let b_entry = create_test_entry("A::B", EntryKind::new_module());
             index_guard.add_entry(b_entry);
         }
 
@@ -1499,11 +1417,7 @@ end
             for module_fqn in modules {
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(module_fqn).unwrap(),
-                    kind: EntryKind::Module {
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_module(),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),
@@ -1518,15 +1432,10 @@ end
             for class_fqn in classes {
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
-                    kind: EntryKind::Class {
-                        superclass: Some(MixinRef {
-                            parts: vec![RubyConstant::new("Object").unwrap()],
-                            absolute: false,
-                        }),
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_class(Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    })),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),
@@ -1538,15 +1447,10 @@ end
             // Add some built-in classes for comparison
             let builtin_entry = Entry {
                 fqn: FullyQualifiedName::try_from("Array").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1632,11 +1536,7 @@ end
 
             let my_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("MyModule").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1646,15 +1546,10 @@ end
 
             let my_class_entry = Entry {
                 fqn: FullyQualifiedName::try_from("MyModule::MyClass").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1664,15 +1559,10 @@ end
 
             let my_top_class_entry = Entry {
                 fqn: FullyQualifiedName::try_from("MyTopClass").unwrap(),
-                kind: EntryKind::Class {
-                    superclass: Some(MixinRef {
-                        parts: vec![RubyConstant::new("Object").unwrap()],
-                        absolute: false,
-                    }),
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_class(Some(MixinRef {
+                    parts: vec![RubyConstant::new("Object").unwrap()],
+                    absolute: false,
+                })),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1740,11 +1630,7 @@ A::B::"#;
             // Add the A module and its nested modules
             let a_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1754,11 +1640,7 @@ A::B::"#;
 
             let a_b_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A::B").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1768,11 +1650,7 @@ A::B::"#;
 
             let a_b_c_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A::B::C").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1786,15 +1664,10 @@ A::B::"#;
             for module_fqn in other_modules {
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(module_fqn).unwrap(),
-                    kind: EntryKind::Class {
-                        superclass: Some(MixinRef {
-                            parts: vec![RubyConstant::new("Object").unwrap()],
-                            absolute: false,
-                        }),
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_class(Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    })),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),
@@ -1890,11 +1763,7 @@ A::"#;
             // Add the A module and its nested modules
             let a_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1904,11 +1773,7 @@ A::"#;
 
             let a_b_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A::B").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1918,11 +1783,7 @@ A::"#;
 
             let a_a_module_entry = Entry {
                 fqn: FullyQualifiedName::try_from("A::A").unwrap(),
-                kind: EntryKind::Module {
-                    includes: vec![],
-                    extends: vec![],
-                    prepends: vec![],
-                },
+                kind: EntryKind::new_module(),
                 location: Location {
                     uri: uri.clone(),
                     range: Range::default(),
@@ -1952,15 +1813,10 @@ A::"#;
             for class_fqn in rails_classes {
                 let entry = Entry {
                     fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
-                    kind: EntryKind::Class {
-                        superclass: Some(MixinRef {
-                            parts: vec![RubyConstant::new("Object").unwrap()],
-                            absolute: false,
-                        }),
-                        includes: vec![],
-                        extends: vec![],
-                        prepends: vec![],
-                    },
+                    kind: EntryKind::new_class(Some(MixinRef {
+                        parts: vec![RubyConstant::new("Object").unwrap()],
+                        absolute: false,
+                    })),
                     location: Location {
                         uri: uri.clone(),
                         range: Range::default(),

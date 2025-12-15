@@ -46,9 +46,7 @@ impl ConstantMatcher {
 
     fn extract_name(&self, entry: &Entry) -> String {
         match &entry.kind {
-            EntryKind::Class { .. } | EntryKind::Module { .. } | EntryKind::Constant { .. } => {
-                entry.fqn.name()
-            }
+            EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_) => entry.fqn.name(),
             _ => entry.fqn.to_string(),
         }
     }
@@ -146,15 +144,7 @@ mod tests {
     #[test]
     fn test_prefix_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
-            "String",
-            EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
-        );
+        let entry = create_test_entry("String", EntryKind::new_class(None));
 
         assert!(matcher.matches(&entry, "Str"));
         assert!(matcher.matches(&entry, "String"));
@@ -164,15 +154,7 @@ mod tests {
     #[test]
     fn test_case_insensitive_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
-            "String",
-            EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
-        );
+        let entry = create_test_entry("String", EntryKind::new_class(None));
 
         assert!(matcher.matches(&entry, "str"));
         assert!(matcher.matches(&entry, "STRING"));
@@ -182,14 +164,7 @@ mod tests {
     #[test]
     fn test_fuzzy_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
-            "ActiveRecord",
-            EntryKind::Module {
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
-        );
+        let entry = create_test_entry("ActiveRecord", EntryKind::new_module());
 
         assert!(matcher.matches(&entry, "AcRe"));
         assert!(matcher.matches(&entry, "ActRec"));
@@ -199,14 +174,7 @@ mod tests {
     #[test]
     fn test_camel_case_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
-            "ActiveRecord",
-            EntryKind::Module {
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
-        );
+        let entry = create_test_entry("ActiveRecord", EntryKind::new_module());
 
         assert!(matcher.matches(&entry, "AR"));
         assert!(matcher.matches(&entry, "A"));
@@ -216,15 +184,7 @@ mod tests {
     #[test]
     fn test_empty_partial() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
-            "String",
-            EntryKind::Class {
-                superclass: None,
-                includes: vec![],
-                extends: vec![],
-                prepends: vec![],
-            },
-        );
+        let entry = create_test_entry("String", EntryKind::new_class(None));
 
         assert!(matcher.matches(&entry, ""));
     }
@@ -234,10 +194,7 @@ mod tests {
         let matcher = ConstantMatcher::new();
         let entry = create_test_entry(
             "MY_CONSTANT",
-            EntryKind::Constant {
-                value: Some("42".to_string()),
-                visibility: None,
-            },
+            EntryKind::new_constant(Some("42".to_string()), None),
         );
 
         assert!(matcher.matches(&entry, "MY"));

@@ -211,10 +211,10 @@ fn build_class_method_ancestor_chain(
     // Process extends for class methods
     if let Some(entries) = index.get(fqn) {
         if let Some(entry) = entries.first() {
-            if let EntryKind::Class { extends, .. } | EntryKind::Module { extends, .. } =
-                &entry.kind
-            {
-                process_mixins_for_ancestor_chain(index, extends, fqn, chain, visited, true);
+            if let EntryKind::Class(data) = &entry.kind {
+                process_mixins_for_ancestor_chain(index, &data.extends, fqn, chain, visited, true);
+            } else if let EntryKind::Module(data) = &entry.kind {
+                process_mixins_for_ancestor_chain(index, &data.extends, fqn, chain, visited, true);
             }
         }
     }
@@ -270,13 +270,8 @@ fn build_chain_recursive(
     if let Some(entries) = index.get(fqn) {
         if let Some(entry) = entries.first() {
             match &entry.kind {
-                EntryKind::Class {
-                    superclass,
-                    includes,
-                    prepends,
-                    ..
-                } => {
-                    for mixin_ref in prepends.iter().rev() {
+                EntryKind::Class(data) => {
+                    for mixin_ref in data.prepends.iter().rev() {
                         if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, fqn) {
                             build_chain_recursive(index, &resolved_fqn, chain, visited);
                         }
@@ -284,13 +279,13 @@ fn build_chain_recursive(
 
                     chain.push(fqn.clone());
 
-                    for mixin_ref in includes {
+                    for mixin_ref in &data.includes {
                         if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, fqn) {
                             build_chain_recursive(index, &resolved_fqn, chain, visited);
                         }
                     }
 
-                    if let Some(superclass_ref) = superclass {
+                    if let Some(superclass_ref) = &data.superclass {
                         if let Some(resolved_superclass) =
                             resolve_mixin_ref(index, superclass_ref, fqn)
                         {
@@ -298,16 +293,14 @@ fn build_chain_recursive(
                         }
                     }
                 }
-                EntryKind::Module {
-                    includes, prepends, ..
-                } => {
-                    for mixin_ref in prepends.iter().rev() {
+                EntryKind::Module(data) => {
+                    for mixin_ref in data.prepends.iter().rev() {
                         if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, fqn) {
                             build_chain_recursive(index, &resolved_fqn, chain, visited);
                         }
                     }
                     chain.push(fqn.clone());
-                    for mixin_ref in includes {
+                    for mixin_ref in &data.includes {
                         if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, fqn) {
                             build_chain_recursive(index, &resolved_fqn, chain, visited);
                         }
