@@ -1,7 +1,6 @@
-// pub mod processor; // DEPRECATED
-
+use crate::capabilities::diagnostics::get_unresolved_diagnostics;
 use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::file_processor::{get_unresolved_diagnostics, ProcessingOptions};
+use crate::indexer::file_processor::ProcessingOptions;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use crate::{capabilities, indexer::file_processor::FileProcessor};

@@ -9,10 +9,8 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, info, warn};
-use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::time::Instant;
 
 /// The IndexingCoordinator manages the entire indexing process.
@@ -37,7 +35,7 @@ pub struct IndexingCoordinator {
     detected_ruby_version: Option<RubyVersion>,
 
     // The main indexing engine
-    core_indexer: Option<FileProcessor>,
+    file_processor: Option<FileProcessor>,
 
     // Project-specific indexer
     project_indexer: Option<IndexerProject>,
@@ -65,7 +63,7 @@ impl IndexingCoordinator {
             config,
             version_detector,
             detected_ruby_version: None,
-            core_indexer: None,
+            file_processor: None,
             project_indexer: None,
             stdlib_indexer: None,
             gem_indexer: None,
@@ -98,7 +96,7 @@ impl IndexingCoordinator {
         self.discover_ruby_library_paths();
 
         // Step 3: Set up the main indexing engine
-        self.setup_core_indexer(server);
+        self.setup_file_processor(server);
 
         // PHASE 1: Index all definitions first
         info!("Phase 1: Indexing all definitions");
@@ -188,15 +186,15 @@ impl IndexingCoordinator {
     }
 
     /// Step 3: Set up the main indexing engine
-    fn setup_core_indexer(&mut self, server: &RubyLanguageServer) {
-        self.core_indexer = Some(FileProcessor::new(server.index()));
+    fn setup_file_processor(&mut self, server: &RubyLanguageServer) {
+        self.file_processor = Some(FileProcessor::new(server.index()));
     }
 
     /// Phase 1 Step 4: Index definitions from project files and track what libraries they need
     async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let mut project_indexer = IndexerProject::new(
             self.workspace_root.clone(),
-            self.core_indexer.as_ref().unwrap().clone(),
+            self.file_processor.as_ref().unwrap().clone(),
         );
 
         project_indexer.index_project_definitions(server).await?;
@@ -216,7 +214,7 @@ impl IndexingCoordinator {
 
     /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::indexer::file_processor::get_unresolved_diagnostics;
+        use crate::capabilities::diagnostics::get_unresolved_diagnostics;
 
         // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
@@ -253,7 +251,7 @@ impl IndexingCoordinator {
         let required_stdlib = self.get_required_stdlib_modules();
 
         let mut stdlib_indexer =
-            IndexerStdlib::new(self.core_indexer.as_ref().unwrap().clone(), *ruby_version);
+            IndexerStdlib::new(self.file_processor.as_ref().unwrap().clone(), *ruby_version);
 
         stdlib_indexer.set_required_modules(required_stdlib);
         stdlib_indexer.index_stdlib(server).await?;
@@ -265,10 +263,7 @@ impl IndexingCoordinator {
     async fn index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let required_gems = self.get_required_gems();
 
-        let mut gem_indexer = IndexerGem::new(
-            Arc::new(Mutex::new(self.core_indexer.as_ref().unwrap().clone())),
-            Some(self.workspace_root.clone()),
-        );
+        let mut gem_indexer = IndexerGem::new(Some(self.workspace_root.clone()));
 
         gem_indexer.set_required_gems(required_gems.into_iter().collect());
         gem_indexer.index_gems(true, server).await?; // selective = true

@@ -191,6 +191,58 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
     diagnostics
 }
 
+/// Get diagnostics for unresolved entries (constants and methods) from the index
+pub fn get_unresolved_diagnostics(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+) -> Vec<Diagnostic> {
+    use crate::indexer::index::UnresolvedEntry;
+    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
+
+    let index_arc = server.index();
+    let index = index_arc.lock();
+    let unresolved_list = index.get_unresolved_entries(uri);
+
+    unresolved_list
+        .iter()
+        .map(|entry| match entry {
+            UnresolvedEntry::Constant { name, location, .. } => Diagnostic {
+                range: location.range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("unresolved-constant".to_string())),
+                code_description: None,
+                source: Some("ruby-fast-lsp".to_string()),
+                message: format!("Unresolved constant `{}`", name),
+                related_information: None,
+                tags: None,
+                data: None,
+            },
+            UnresolvedEntry::Method {
+                name,
+                receiver,
+                location,
+            } => {
+                let message = match receiver {
+                    Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
+                    None => format!("Unresolved method `{}`", name),
+                };
+
+                Diagnostic {
+                    range: location.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unresolved-method".to_string())),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message,
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
+        })
+        .collect()
+}
+
 /// Validate that a diagnostic range is within document bounds
 ///
 /// This is a safety check to ensure we don't send invalid ranges to the client

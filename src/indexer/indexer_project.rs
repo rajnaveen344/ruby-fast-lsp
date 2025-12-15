@@ -1,5 +1,7 @@
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
+use crate::utils;
+use crate::utils::parallelizer::process_in_parallel;
 use anyhow::Result;
 use log::{info, warn};
 use parking_lot::Mutex;
@@ -18,10 +20,10 @@ pub struct IndexerProject {
 }
 
 impl IndexerProject {
-    pub fn new(workspace_root: PathBuf, core: FileProcessor) -> Self {
+    pub fn new(workspace_root: PathBuf, file_processor: FileProcessor) -> Self {
         Self {
             workspace_root,
-            file_processor: core,
+            file_processor,
             required_stdlib: Arc::new(Mutex::new(HashSet::new())),
             required_gems: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -93,7 +95,7 @@ impl IndexerProject {
     fn collect_project_files(&self) -> Vec<PathBuf> {
         // Simply collect all Ruby files from the workspace root recursively
         // This ensures we don't miss any Ruby files regardless of project structure
-        self.file_processor.collect_ruby_files(&self.workspace_root)
+        utils::collect_ruby_files(&self.workspace_root)
     }
 
     /// Index definitions from files and track their dependencies (Parallelized)
@@ -107,71 +109,71 @@ impl IndexerProject {
         use tokio::fs;
 
         const BATCH_SIZE: usize = 50;
-
         info!("Indexing definitions in parallel batches of {}", BATCH_SIZE);
 
-        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
-            let mut tasks = Vec::new();
+        // Prepare items with indices for progress reporting
+        let items: Vec<(usize, PathBuf)> = files
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p.clone()))
+            .collect();
 
-            for (i, file_path) in batch.iter().enumerate() {
-                let global_index = batch_idx * BATCH_SIZE + i;
-                let file_path = file_path.clone();
-                let server = server.clone();
-                let core = self.file_processor.clone();
-                let required_stdlib = self.required_stdlib.clone();
-                let required_gems = self.required_gems.clone();
+        let file_processor = self.file_processor.clone();
+        let required_stdlib = self.required_stdlib.clone();
+        let required_gems = self.required_gems.clone();
+        let server_ref = server.clone();
 
-                tasks.push(tokio::spawn(async move {
-                    // 1. Report progress (best effort)
-                    if global_index.is_multiple_of(10) {
-                        IndexingCoordinator::send_progress_report(
-                            &server,
-                            "Indexing".to_string(),
-                            global_index + 1,
-                            total_files,
-                        )
-                        .await;
-                    }
+        process_in_parallel(&items, BATCH_SIZE, move |(global_index, file_path)| {
+            let file_processor = file_processor.clone();
+            let required_stdlib = required_stdlib.clone();
+            let required_gems = required_gems.clone();
+            let server_ref = server_ref.clone();
 
-                    // 2. Read file content ONCE
-                    let content = match fs::read_to_string(&file_path).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            warn!("Failed to read file {:?}: {}", file_path, e);
-                            return;
-                        }
-                    };
-
-                    // 3. Index Definitions
-                    // In-line URL conversion to avoid visibility issues
-                    match Url::from_file_path(&file_path) {
-                        Ok(uri) => {
-                            // core.index_definitions parses content, cpu intensive
-                            if let Err(e) = core.index_definitions(&uri, &content, &server).await {
-                                warn!("Failed to index definitions {:?}: {}", file_path, e);
-                            }
-                        }
-                        Err(_) => {
-                            warn!("Failed to convert path to URI: {:?}", file_path);
-                        }
-                    }
-
-                    // 4. Track dependencies
-                    Self::extract_and_track_dependencies(
-                        &content,
-                        &required_stdlib,
-                        &required_gems,
-                    );
-                }));
-            }
-
-            // Await all tasks in this batch
-            for task in tasks {
-                if let Err(e) = task.await {
-                    warn!("Task join error: {}", e);
+            async move {
+                // 1. Report progress (best effort)
+                if global_index % 10 == 0 {
+                    IndexingCoordinator::send_progress_report(
+                        &server_ref,
+                        "Indexing".to_string(),
+                        global_index + 1,
+                        total_files,
+                    )
+                    .await;
                 }
+
+                // 2. Read file content ONCE
+                let content = match fs::read_to_string(&file_path).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("Failed to read file {:?}: {}", file_path, e);
+                        return Ok(());
+                    }
+                };
+
+                // 3. Index Definitions
+                // In-line URL conversion to avoid visibility issues
+                match Url::from_file_path(&file_path) {
+                    Ok(uri) => {
+                        // file_processor.index_definitions parses content, cpu intensive
+                        if let Err(e) = file_processor
+                            .index_definitions(&uri, &content, &server_ref)
+                            .await
+                        {
+                            warn!("Failed to index definitions {:?}: {}", file_path, e);
+                        }
+                    }
+                    Err(_) => {
+                        warn!("Failed to convert path to URI: {:?}", file_path);
+                    }
+                }
+
+                // 4. Track dependencies
+                Self::extract_and_track_dependencies(&content, &required_stdlib, &required_gems);
+
+                Ok(())
             }
-        }
+        })
+        .await?;
 
         // Final progress report
         IndexingCoordinator::send_progress_report(
@@ -221,47 +223,48 @@ impl IndexerProject {
         use crate::indexer::coordinator::IndexingCoordinator;
 
         const BATCH_SIZE: usize = 50;
-
         info!("Indexing references in parallel batches of {}", BATCH_SIZE);
 
-        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
-            let mut tasks = Vec::new();
+        // Prepare items with indices for progress reporting
+        let items: Vec<(usize, PathBuf)> = files
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, p.clone()))
+            .collect();
 
-            for (i, file_path) in batch.iter().enumerate() {
-                let global_index = batch_idx * BATCH_SIZE + i;
-                let file_path = file_path.clone();
-                let server = server.clone();
-                let core = self.file_processor.clone();
+        let file_processor = self.file_processor.clone();
+        let server_ref = server.clone();
 
-                tasks.push(tokio::spawn(async move {
-                    // Report progress
-                    if global_index.is_multiple_of(10) {
-                        IndexingCoordinator::send_progress_report(
-                            &server,
-                            "Collecting References".to_string(),
-                            global_index + 1,
-                            total_files,
-                        )
-                        .await;
-                    }
+        process_in_parallel(&items, BATCH_SIZE, move |(global_index, file_path)| {
+            let file_processor = file_processor.clone();
+            let server_ref = server_ref.clone();
 
-                    // Index only references from the file with unresolved constant tracking enabled
-                    if let Err(e) = core.index_file_references(&file_path, &server).await {
-                        warn!(
-                            "Failed to index references from file {:?}: {}",
-                            file_path, e
-                        );
-                    }
-                }));
-            }
-
-            // Await all tasks in this batch
-            for task in tasks {
-                if let Err(e) = task.await {
-                    warn!("Task join error: {}", e);
+            async move {
+                // Report progress
+                if global_index % 10 == 0 {
+                    IndexingCoordinator::send_progress_report(
+                        &server_ref,
+                        "Collecting References".to_string(),
+                        global_index + 1,
+                        total_files,
+                    )
+                    .await;
                 }
+
+                // Index only references from the file with unresolved constant tracking enabled
+                if let Err(e) = file_processor
+                    .index_file_references(&file_path, &server_ref)
+                    .await
+                {
+                    warn!(
+                        "Failed to index references from file {:?}: {}",
+                        file_path, e
+                    );
+                }
+                Ok(())
             }
-        }
+        })
+        .await?;
 
         Ok(())
     }
@@ -409,7 +412,7 @@ impl IndexerProject {
     }
 
     /// Get a reference to the core indexer
-    pub fn core(&self) -> &FileProcessor {
+    pub fn file_processor(&self) -> &FileProcessor {
         &self.file_processor
     }
 }

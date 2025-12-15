@@ -4,17 +4,15 @@
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
 use crate::indexer::coordinator::IndexingCoordinator;
-use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
+use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
 // ============================================================================
@@ -40,7 +38,6 @@ pub struct GemInfo {
 /// Manages gem discovery, prioritization, and selective indexing.
 #[derive(Debug)]
 pub struct IndexerGem {
-    file_processor: Arc<Mutex<FileProcessor>>,
     workspace_root: Option<PathBuf>,
     required_gems: HashSet<String>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
@@ -48,9 +45,8 @@ pub struct IndexerGem {
 }
 
 impl IndexerGem {
-    pub fn new(core: Arc<Mutex<FileProcessor>>, workspace_root: Option<PathBuf>) -> Self {
+    pub fn new(workspace_root: Option<PathBuf>) -> Self {
         Self {
-            file_processor: core,
             workspace_root,
             required_gems: HashSet::new(),
             discovered_gems: HashMap::new(),
@@ -166,9 +162,7 @@ impl IndexerGem {
             if lib_path.exists() && lib_path.is_dir() {
                 debug!("Collecting files from gem lib path: {:?}", lib_path);
 
-                let core = self.file_processor.lock();
-                let ruby_files = core.collect_ruby_files(lib_path);
-                drop(core);
+                let ruby_files = utils::collect_ruby_files(lib_path);
 
                 for file_path in ruby_files {
                     if let Ok(uri) = Url::from_file_path(&file_path) {
@@ -561,14 +555,11 @@ fn compare_versions(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::index::RubyIndex;
     use tempfile::TempDir;
 
     fn create_test_indexer() -> IndexerGem {
         let temp_dir = TempDir::new().unwrap();
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
-        let core = Arc::new(Mutex::new(FileProcessor::new(index)));
-        IndexerGem::new(core, Some(temp_dir.path().to_path_buf()))
+        IndexerGem::new(Some(temp_dir.path().to_path_buf()))
     }
 
     #[test]

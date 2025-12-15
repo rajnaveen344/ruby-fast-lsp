@@ -19,6 +19,7 @@ serde_json = "1.0.107"
 log = "0.4.20"
 env_logger = "0.10.0"
 anyhow = "1.0.75"
+futures = "0.3"
 
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"

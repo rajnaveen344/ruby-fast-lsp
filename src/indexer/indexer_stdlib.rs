@@ -7,6 +7,8 @@ use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
+use crate::utils;
+use crate::utils::parallelizer::process_in_parallel;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::collections::HashSet;
@@ -26,9 +28,9 @@ pub struct IndexerStdlib {
 }
 
 impl IndexerStdlib {
-    pub fn new(core: FileProcessor, ruby_version: Option<RubyVersion>) -> Self {
+    pub fn new(file_processor: FileProcessor, ruby_version: Option<RubyVersion>) -> Self {
         Self {
-            file_processor: core,
+            file_processor,
             ruby_version,
             stdlib_paths: Vec::new(),
             required_modules: HashSet::new(),
@@ -95,15 +97,21 @@ impl IndexerStdlib {
 
         info!("Indexing core stubs from: {:?}", stubs_path);
 
-        let stub_files = self.file_processor.collect_ruby_files(&stubs_path);
+        let stub_files = utils::collect_ruby_files(&stubs_path);
         if stub_files.is_empty() {
             warn!("No stub files found in: {:?}", stubs_path);
             return Ok(());
         }
 
-        self.file_processor
-            .index_definitions_parallel(&stub_files, server)
-            .await?;
+        let processor = self.file_processor.clone();
+        let server_ref = server.clone();
+
+        process_in_parallel(&stub_files, 50, move |path| {
+            let processor = processor.clone();
+            let server_ref = server_ref.clone();
+            async move { processor.index_file_definitions(&path, &server_ref).await }
+        })
+        .await?;
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
@@ -141,16 +149,26 @@ impl IndexerStdlib {
                 files.len()
             );
 
-            for file_path in files {
-                if let Err(e) = self
-                    .file_processor
-                    .index_file_definitions(&file_path, server)
-                    .await
-                {
-                    warn!("Failed to index stdlib file {:?}: {}", file_path, e);
-                } else {
-                    indexed_count += 1;
+            let processor = self.file_processor.clone();
+            let server_ref = server.clone();
+
+            let result = process_in_parallel(&files, 50, move |path| {
+                let processor = processor.clone();
+                let server_ref = server_ref.clone();
+                async move {
+                    processor
+                        .index_file_definitions(&path, &server_ref)
+                        .await
+                        .map_err(|e| {
+                            warn!("Failed to index stdlib file {:?}: {}", path, e);
+                            e
+                        })
                 }
+            })
+            .await;
+
+            if result.is_ok() {
+                indexed_count += files.len();
             }
         }
 
@@ -287,7 +305,7 @@ impl IndexerStdlib {
 
                 let module_dir = stdlib_path.join(module_name);
                 if module_dir.exists() && module_dir.is_dir() {
-                    files.extend(self.file_processor.collect_ruby_files(&module_dir));
+                    files.extend(utils::collect_ruby_files(&module_dir));
                 }
             }
         }
@@ -315,7 +333,7 @@ impl IndexerStdlib {
         self.required_modules.contains(module_name)
     }
 
-    pub fn core(&self) -> &FileProcessor {
+    pub fn file_processor(&self) -> &FileProcessor {
         &self.file_processor
     }
 }

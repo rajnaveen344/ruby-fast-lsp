@@ -19,17 +19,17 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
-use crate::indexer::index::RubyIndex;
-// use crate::indexer::utils; // Removed
 use crate::capabilities::diagnostics::generate_diagnostics;
+use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
+use crate::utils::file_ops;
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use parking_lot::Mutex;
 use ruby_prism::Visit;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::{Diagnostic, Url};
@@ -357,8 +357,8 @@ impl FileProcessor {
         file_path: &Path,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        let uri = path_to_uri(file_path)?;
-        let content = read_file_async(file_path).await?;
+        let uri = file_ops::path_to_uri(file_path)?;
+        let content = file_ops::read_file_async(file_path).await?;
         self.index_definitions(&uri, &content, server).await
     }
 
@@ -368,192 +368,8 @@ impl FileProcessor {
         file_path: &Path,
         server: &RubyLanguageServer,
     ) -> Result<()> {
-        let uri = path_to_uri(file_path)?;
-        let content = read_file_async(file_path).await?;
+        let uri = file_ops::path_to_uri(file_path)?;
+        let content = file_ops::read_file_async(file_path).await?;
         self.index_references(&uri, &content, server).await
     }
-
-    // ========================================================================
-    // Parallel Indexing
-    // ========================================================================
-
-    /// Index definitions from multiple files in parallel
-    pub async fn index_definitions_parallel(
-        &self,
-        file_paths: &[PathBuf],
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
-        let start = Instant::now();
-        info!(
-            "Indexing definitions from {} files in parallel",
-            file_paths.len()
-        );
-
-        const BATCH_SIZE: usize = 50;
-
-        for batch in file_paths.chunks(BATCH_SIZE) {
-            let mut tasks = Vec::new();
-
-            for file_path in batch {
-                let core = self.clone();
-                let server = server.clone();
-                let path = file_path.clone();
-
-                tasks.push(tokio::spawn(async move {
-                    core.index_file_definitions(&path, &server).await
-                }));
-            }
-
-            for task in tasks {
-                if let Err(e) = task.await? {
-                    warn!("Failed to index file definitions: {}", e);
-                }
-            }
-        }
-
-        info!(
-            "Indexed definitions from {} files in {:?}",
-            file_paths.len(),
-            start.elapsed()
-        );
-        Ok(())
-    }
-
-    /// Index references from multiple files in parallel
-    pub async fn index_references_parallel(
-        &self,
-        file_paths: &[PathBuf],
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
-        let start = Instant::now();
-        info!(
-            "Indexing references from {} files in parallel",
-            file_paths.len()
-        );
-
-        // Filter to only project files for reference indexing
-        let project_files: Vec<_> = file_paths
-            .iter()
-            .filter(|path| {
-                Url::from_file_path(path)
-                    .map(|uri| crate::utils::is_project_file(&uri))
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect();
-
-        if project_files.is_empty() {
-            debug!("No project files to index references for");
-            return Ok(());
-        }
-
-        const BATCH_SIZE: usize = 50;
-
-        for batch in project_files.chunks(BATCH_SIZE) {
-            let mut tasks = Vec::new();
-
-            for file_path in batch {
-                let core = self.clone();
-                let server = server.clone();
-                let path = file_path.clone();
-
-                tasks.push(tokio::spawn(async move {
-                    core.index_file_references(&path, &server).await
-                }));
-            }
-
-            for task in tasks {
-                if let Err(e) = task.await? {
-                    warn!("Failed to index file references: {}", e);
-                }
-            }
-        }
-
-        info!(
-            "Indexed references from {} project files in {:?}",
-            project_files.len(),
-            start.elapsed()
-        );
-        Ok(())
-    }
-
-    // ========================================================================
-    // Utility Methods
-    // ========================================================================
-
-    /// Check if a file should be indexed based on its extension
-    pub fn should_index_file(&self, path: &Path) -> bool {
-        crate::utils::should_index_file(path)
-    }
-
-    /// Collect Ruby files recursively from a directory
-    pub fn collect_ruby_files(&self, dir: &Path) -> Vec<PathBuf> {
-        crate::utils::collect_ruby_files(dir)
-    }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Convert a file path to a URI
-fn path_to_uri(path: &Path) -> Result<Url> {
-    Url::from_file_path(path)
-        .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", path))
-}
-
-/// Read file content asynchronously
-async fn read_file_async(path: &Path) -> Result<String> {
-    tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))
-}
-
-/// Get diagnostics for unresolved entries (constants and methods) from the index
-pub fn get_unresolved_diagnostics(server: &RubyLanguageServer, uri: &Url) -> Vec<Diagnostic> {
-    use crate::indexer::index::UnresolvedEntry;
-    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
-
-    let index_arc = server.index();
-    let index = index_arc.lock();
-    let unresolved_list = index.get_unresolved_entries(uri);
-
-    unresolved_list
-        .iter()
-        .map(|entry| match entry {
-            UnresolvedEntry::Constant { name, location, .. } => Diagnostic {
-                range: location.range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("unresolved-constant".to_string())),
-                code_description: None,
-                source: Some("ruby-fast-lsp".to_string()),
-                message: format!("Unresolved constant `{}`", name),
-                related_information: None,
-                tags: None,
-                data: None,
-            },
-            UnresolvedEntry::Method {
-                name,
-                receiver,
-                location,
-            } => {
-                let message = match receiver {
-                    Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
-                    None => format!("Unresolved method `{}`", name),
-                };
-
-                Diagnostic {
-                    range: location.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("unresolved-method".to_string())),
-                    code_description: None,
-                    source: Some("ruby-fast-lsp".to_string()),
-                    message,
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                }
-            }
-        })
-        .collect()
 }

@@ -113,6 +113,23 @@ pub fn is_project_file(uri: &Url) -> bool {
 }
 
 // ============================================================================
+// File Processing Helpers
+// ============================================================================
+
+/// Convert a file path to a URI
+pub fn path_to_uri(path: &Path) -> Result<Url> {
+    Url::from_file_path(path)
+        .map_err(|_| anyhow::anyhow!("Failed to convert path to URI: {:?}", path))
+}
+
+/// Read file content asynchronously
+pub async fn read_file_async(path: &Path) -> Result<String> {
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
