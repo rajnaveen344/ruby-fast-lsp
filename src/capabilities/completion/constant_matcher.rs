@@ -1,4 +1,5 @@
 use crate::indexer::entry::{entry_kind::EntryKind, Entry};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 /// Handles pattern matching for constant names
 pub struct ConstantMatcher {
@@ -18,8 +19,8 @@ impl ConstantMatcher {
     }
 
     /// Check if an entry matches the given partial name
-    pub fn matches(&self, entry: &Entry, partial: &str) -> bool {
-        let constant_name = self.extract_name(entry);
+    pub fn matches(&self, entry: &Entry, fqn: &FullyQualifiedName, partial: &str) -> bool {
+        let constant_name = self.extract_name(&entry.kind, fqn);
 
         // Empty partial matches everything
         if partial.is_empty() {
@@ -44,10 +45,10 @@ impl ConstantMatcher {
         false
     }
 
-    fn extract_name(&self, entry: &Entry) -> String {
-        match &entry.kind {
-            EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_) => entry.fqn.name(),
-            _ => entry.fqn.to_string(),
+    fn extract_name(&self, kind: &EntryKind, fqn: &FullyQualifiedName) -> String {
+        match kind {
+            EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_) => fqn.name(),
+            _ => fqn.to_string(),
         }
     }
 
@@ -125,80 +126,81 @@ impl Default for ConstantMatcher {
 mod tests {
     use super::*;
     use crate::{
-        indexer::entry::entry_kind::EntryKind, indexer::entry::Entry,
+        indexer::{
+            entry::{entry_kind::EntryKind, Entry},
+            index::FqnId,
+        },
         types::fully_qualified_name::FullyQualifiedName,
     };
-    use tower_lsp::lsp_types::{Location, Url};
 
-    fn create_test_entry(name: &str, kind: EntryKind) -> Entry {
-        Entry {
-            fqn: FullyQualifiedName::try_from(name).unwrap(),
+    fn create_test_entry(name: &str, kind: EntryKind) -> (Entry, FullyQualifiedName) {
+        let fqn = FullyQualifiedName::try_from(name).unwrap();
+        let entry = Entry {
+            fqn_id: FqnId::default(),
             kind,
-            location: Location {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Default::default(),
-            },
-        }
+            location: crate::types::compact_location::CompactLocation::default(),
+        };
+        (entry, fqn)
     }
 
     #[test]
     fn test_prefix_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::new_class(None));
+        let (entry, fqn) = create_test_entry("String", EntryKind::new_class(None));
 
-        assert!(matcher.matches(&entry, "Str"));
-        assert!(matcher.matches(&entry, "String"));
-        assert!(!matcher.matches(&entry, "Array"));
+        assert!(matcher.matches(&entry, &fqn, "Str"));
+        assert!(matcher.matches(&entry, &fqn, "String"));
+        assert!(!matcher.matches(&entry, &fqn, "Array"));
     }
 
     #[test]
     fn test_case_insensitive_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::new_class(None));
+        let (entry, fqn) = create_test_entry("String", EntryKind::new_class(None));
 
-        assert!(matcher.matches(&entry, "str"));
-        assert!(matcher.matches(&entry, "STRING"));
-        assert!(matcher.matches(&entry, "StRiNg"));
+        assert!(matcher.matches(&entry, &fqn, "str"));
+        assert!(matcher.matches(&entry, &fqn, "STRING"));
+        assert!(matcher.matches(&entry, &fqn, "StRiNg"));
     }
 
     #[test]
     fn test_fuzzy_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("ActiveRecord", EntryKind::new_module());
+        let (entry, fqn) = create_test_entry("ActiveRecord", EntryKind::new_module());
 
-        assert!(matcher.matches(&entry, "AcRe"));
-        assert!(matcher.matches(&entry, "ActRec"));
-        assert!(matcher.matches(&entry, "AR")); // This should work via camel case matching
+        assert!(matcher.matches(&entry, &fqn, "AcRe"));
+        assert!(matcher.matches(&entry, &fqn, "ActRec"));
+        assert!(matcher.matches(&entry, &fqn, "AR")); // This should work via camel case matching
     }
 
     #[test]
     fn test_camel_case_match() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("ActiveRecord", EntryKind::new_module());
+        let (entry, fqn) = create_test_entry("ActiveRecord", EntryKind::new_module());
 
-        assert!(matcher.matches(&entry, "AR"));
-        assert!(matcher.matches(&entry, "A"));
-        assert!(!matcher.matches(&entry, "B"));
+        assert!(matcher.matches(&entry, &fqn, "AR"));
+        assert!(matcher.matches(&entry, &fqn, "A"));
+        assert!(!matcher.matches(&entry, &fqn, "B"));
     }
 
     #[test]
     fn test_empty_partial() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry("String", EntryKind::new_class(None));
+        let (entry, fqn) = create_test_entry("String", EntryKind::new_class(None));
 
-        assert!(matcher.matches(&entry, ""));
+        assert!(matcher.matches(&entry, &fqn, ""));
     }
 
     #[test]
     fn test_constant_entry() {
         let matcher = ConstantMatcher::new();
-        let entry = create_test_entry(
+        let (entry, fqn) = create_test_entry(
             "MY_CONSTANT",
             EntryKind::new_constant(Some("42".to_string()), None),
         );
 
-        assert!(matcher.matches(&entry, "MY"));
-        assert!(matcher.matches(&entry, "CONST"));
-        assert!(matcher.matches(&entry, "MC")); // CamelCase matching
+        assert!(matcher.matches(&entry, &fqn, "MY"));
+        assert!(matcher.matches(&entry, &fqn, "CONST"));
+        assert!(matcher.matches(&entry, &fqn, "MC")); // CamelCase matching
     }
 }

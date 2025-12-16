@@ -71,6 +71,7 @@ fn convert_to_document_symbol(ruby_symbol: RubySymbolContext) -> DocumentSymbol 
         detail,
         kind: ruby_symbol.kind,
         tags: None,
+        #[allow(deprecated)]
         deprecated: None,
         range: ruby_symbol.range,
         selection_range: ruby_symbol.selection_range,

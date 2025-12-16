@@ -41,21 +41,24 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
-        let entry = EntryBuilder::new()
-            .fqn(fqn.clone())
-            .location(
-                self.document
-                    .prism_location_to_lsp_location(&node.location()),
-            )
-            .kind(EntryKind::new_module())
-            .build();
+        let entry_result = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn.clone())
+                .location(
+                    self.document
+                        .prism_location_to_lsp_location(&node.location()),
+                )
+                .kind(EntryKind::new_module())
+                .build(&mut index)
+        };
 
-        if let Err(e) = entry {
+        if let Err(e) = entry_result {
             error!("Error creating entry: {}", e);
             return;
         }
 
-        self.add_entry(entry.unwrap());
+        self.add_entry(entry_result.unwrap());
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {

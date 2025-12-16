@@ -227,24 +227,25 @@ impl Default for CompletionRanker {
 mod tests {
     use super::*;
     use crate::{
-        indexer::entry::{entry_kind::EntryKind, Entry},
+        indexer::{
+            entry::{entry_kind::EntryKind, Entry},
+            index::FqnId,
+        },
         types::fully_qualified_name::FullyQualifiedName,
     };
-    use tower_lsp::lsp_types::{Location, Position, Url};
+    use tower_lsp::lsp_types::Position;
 
     fn create_test_item(name: &str, kind: EntryKind) -> ConstantCompletionItem {
+        let fqn = FullyQualifiedName::try_from(name).unwrap();
         let entry = Entry {
-            fqn: FullyQualifiedName::try_from(name).unwrap(),
+            fqn_id: FqnId::default(),
             kind,
-            location: Location {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Default::default(),
-            },
+            location: crate::types::compact_location::CompactLocation::default(),
         };
 
         let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "".to_string());
 
-        ConstantCompletionItem::new(entry, &context)
+        ConstantCompletionItem::new(entry, fqn, &context)
     }
 
     #[test]

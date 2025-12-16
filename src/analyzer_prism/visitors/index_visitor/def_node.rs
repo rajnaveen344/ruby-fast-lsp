@@ -3,7 +3,7 @@ use ruby_prism::*;
 
 use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
-    Entry, MethodKind, MethodOrigin, MethodVisibility,
+    MethodKind, MethodOrigin, MethodVisibility,
 };
 use crate::type_inference::ruby_type::RubyType;
 
@@ -70,7 +70,11 @@ impl IndexVisitor {
         }
 
         let name_location = node.name_loc();
-        let location = self.document.prism_location_to_lsp_location(&name_location);
+        let lsp_location = self.document.prism_location_to_lsp_location(&name_location);
+        // Convert to CompactLocation
+        let file_id = self.index.lock().get_or_insert_file(&self.document.uri);
+        let location =
+            crate::types::compact_location::CompactLocation::new(file_id, lsp_location.range);
 
         // Extract YARD documentation from comments preceding the method
         let method_start_offset = node.location().start_offset();
@@ -151,21 +155,25 @@ impl IndexVisitor {
             )
         });
 
-        let entry = Entry {
-            fqn: fqn.clone(),
-            location,
-            kind: EntryKind::new_method(
-                method.clone(),
-                params,
-                owner_fqn,
-                MethodVisibility::Public,
-                MethodOrigin::Direct,
-                None,
-                yard_doc,
-                return_type_position,
-                return_type,
-                param_types,
-            ),
+        let entry = {
+            let mut index = self.index.lock();
+            crate::indexer::entry::EntryBuilder::new()
+                .fqn(fqn)
+                .compact_location(location)
+                .kind(EntryKind::new_method(
+                    method.clone(),
+                    params,
+                    owner_fqn,
+                    MethodVisibility::Public,
+                    MethodOrigin::Direct,
+                    None,
+                    yard_doc,
+                    return_type_position,
+                    return_type,
+                    param_types,
+                ))
+                .build(&mut index)
+                .unwrap()
         };
 
         self.add_entry(entry);

@@ -19,7 +19,7 @@ impl ScopeResolver {
             candidate.is_accessible = true;
 
             // Insert text is just the constant name
-            candidate.insert_text = candidate.entry.fqn.name();
+            candidate.insert_text = candidate.fqn.name();
         }
     }
 }
@@ -34,27 +34,28 @@ impl Default for ScopeResolver {
 mod tests {
     use super::*;
     use crate::{
-        indexer::entry::{entry_kind::EntryKind, Entry},
+        indexer::{
+            entry::{entry_kind::EntryKind, Entry},
+            index::FqnId,
+        },
         types::{fully_qualified_name::FullyQualifiedName, scope::LVScopeId},
     };
-    use tower_lsp::lsp_types::{Location, Position, Range, Url};
+    use tower_lsp::lsp_types::Position;
 
     fn create_test_context(partial_name: &str, scope_id: LVScopeId) -> ConstantCompletionContext {
         ConstantCompletionContext::new(Position::new(0, 0), scope_id, partial_name.to_string())
     }
 
     fn create_test_item(name: &str) -> ConstantCompletionItem {
+        let fqn = FullyQualifiedName::try_from(name).unwrap();
         let entry = Entry {
-            fqn: FullyQualifiedName::try_from(name).unwrap(),
+            fqn_id: FqnId::default(),
             kind: EntryKind::new_class(None),
-            location: Location {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Range::default(),
-            },
+            location: crate::types::compact_location::CompactLocation::default(),
         };
 
         let context = create_test_context("", 0);
-        ConstantCompletionItem::new(entry, &context)
+        ConstantCompletionItem::new(entry, fqn, &context)
     }
 
     #[test]

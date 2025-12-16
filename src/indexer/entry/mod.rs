@@ -13,9 +13,11 @@ pub mod entry_kind;
 
 use std::cmp::PartialEq;
 
+pub use entry_builder::EntryBuilder;
 pub use entry_kind::EntryKind;
-use tower_lsp::lsp_types::Location;
 
+use crate::indexer::index::FqnId;
+use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 
@@ -26,10 +28,10 @@ use crate::types::ruby_namespace::RubyConstant;
 /// An indexed Ruby entity (class, module, method, constant, variable)
 #[derive(Debug, Clone)]
 pub struct Entry {
-    /// The fully qualified name of this entity
-    pub fqn: FullyQualifiedName,
-    /// Location of the definition in source code
-    pub location: Location,
+    /// The fully qualified name ID of this entity
+    pub fqn_id: FqnId,
+    /// Location of the definition in source code (compact representation)
+    pub location: CompactLocation,
     /// Type-specific metadata
     pub kind: EntryKind,
 }

@@ -5,7 +5,6 @@ mod tests {
     use crate::indexer::index::RubyIndex;
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
-    use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
     fn create_test_index() -> RubyIndex {
         let mut index = RubyIndex::new();
@@ -18,38 +17,27 @@ mod tests {
         ]);
         let baz_fqn = FullyQualifiedName::Constant(vec![RubyConstant::new("Baz").unwrap()]);
 
-        let test_location = Location {
-            uri: Url::parse("file:///test.rb").unwrap(),
-            range: Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 10,
-                },
-            },
-        };
-
+        let foo_id = index.intern_fqn(foo_fqn);
         let foo_entry = Entry {
-            fqn: foo_fqn,
+            fqn_id: foo_id,
             kind: EntryKind::new_module(),
-            location: test_location.clone(),
+            location: crate::types::compact_location::CompactLocation::default(),
         };
         index.add_entry(foo_entry);
 
+        let foo_bar_id = index.intern_fqn(foo_bar_fqn);
         let foo_bar_entry = Entry {
-            fqn: foo_bar_fqn,
+            fqn_id: foo_bar_id,
             kind: EntryKind::new_class(None),
-            location: test_location.clone(),
+            location: crate::types::compact_location::CompactLocation::default(),
         };
         index.add_entry(foo_bar_entry);
 
+        let baz_id = index.intern_fqn(baz_fqn);
         let baz_entry = Entry {
-            fqn: baz_fqn,
+            fqn_id: baz_id,
             kind: EntryKind::new_class(None),
-            location: test_location.clone(),
+            location: crate::types::compact_location::CompactLocation::default(),
         };
         index.add_entry(baz_entry);
 

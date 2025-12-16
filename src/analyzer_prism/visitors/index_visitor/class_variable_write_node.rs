@@ -45,14 +45,17 @@ impl IndexVisitor {
             fqn, inferred_type
         );
 
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(self.document.prism_location_to_lsp_location(&name_loc))
-            .kind(EntryKind::new_class_variable(
-                variable_name.clone(),
-                inferred_type.clone(),
-            ))
-            .build();
+        let entry = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn)
+                .location(self.document.prism_location_to_lsp_location(&name_loc))
+                .kind(EntryKind::new_class_variable(
+                    variable_name.clone(),
+                    inferred_type.clone(),
+                ))
+                .build(&mut index)
+        };
 
         if let Ok(entry) = entry {
             self.add_entry(entry);

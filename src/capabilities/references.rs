@@ -111,7 +111,11 @@ fn find_local_variable_references_from_document(
         for entry in entries {
             if let EntryKind::LocalVariable(data) = &entry.kind {
                 if &data.name == name {
-                    all_locations.push(entry.location.clone());
+                    // Convert CompactLocation to Location using document URI
+                    all_locations.push(Location {
+                        uri: doc.uri.clone(),
+                        range: entry.location.range,
+                    });
                     break;
                 }
             }
@@ -120,6 +124,7 @@ fn find_local_variable_references_from_document(
 
     // Then, get all references to this local variable (scoped)
     let refs = doc.get_lvar_references(name, &[scope_id]);
+    // refs returns Vec<Location> which is already correct
     all_locations.extend(refs);
 
     if all_locations.is_empty() {
@@ -387,10 +392,11 @@ fn find_method_references_by_name(
         for entry in entries {
             if let EntryKind::Method(_) = &entry.kind {
                 // For each method definition, find its FQN and look for references
-                // For each method definition, find its FQN and look for references
-                let refs = index.references(&entry.fqn);
-                if !refs.is_empty() {
-                    all_references.extend(refs);
+                if let Some(fqn) = index.get_fqn(entry.fqn_id) {
+                    let refs = index.references(fqn);
+                    if !refs.is_empty() {
+                        all_references.extend(refs);
+                    }
                 }
             }
         }

@@ -186,7 +186,7 @@ impl FileProcessor {
                 index
                     .file_entries(uri)
                     .iter()
-                    .map(|e| e.fqn.clone())
+                    .filter_map(|e| index.get_fqn(e.fqn_id).cloned())
                     .collect()
             };
 

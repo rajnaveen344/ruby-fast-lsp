@@ -90,12 +90,11 @@ pub struct ConstantCompletionItem {
 }
 
 impl ConstantCompletionItem {
-    pub fn new(entry: Entry, context: &ConstantCompletionContext) -> Self {
-        let name = Self::extract_constant_name(&entry);
-        let fqn = entry.fqn.clone();
-        let insert_text = Self::calculate_insert_text(&entry, context);
-        let detail = Self::extract_detail(&entry);
-        let relevance_score = Self::calculate_relevance(&entry, context);
+    pub fn new(entry: Entry, fqn: FullyQualifiedName, context: &ConstantCompletionContext) -> Self {
+        let name = fqn.name();
+        let insert_text = Self::calculate_insert_text(&entry, fqn.clone(), context);
+        let detail = Self::extract_detail(&entry, &fqn);
+        let relevance_score = Self::calculate_relevance(&entry, &fqn, context);
 
         Self {
             name,
@@ -109,50 +108,51 @@ impl ConstantCompletionItem {
         }
     }
 
-    fn extract_constant_name(entry: &Entry) -> String {
-        match &entry.kind {
-            EntryKind::Class { .. } | EntryKind::Module { .. } | EntryKind::Constant(_) => {
-                entry.fqn.name()
-            }
-            _ => entry.fqn.to_string(),
-        }
-    }
-
-    fn calculate_insert_text(entry: &Entry, context: &ConstantCompletionContext) -> String {
-        if context.is_qualified || context.namespace_prefix.is_some() {
-            // For qualified names, just insert the final component
-            entry.fqn.name()
+    fn calculate_insert_text(
+        _entry: &Entry,
+        fqn: FullyQualifiedName,
+        context: &ConstantCompletionContext,
+    ) -> String {
+        if context.after_scope_resolution {
+            // Already typed "Scope::", just insert "Constant"
+            fqn.name()
         } else {
-            // For unqualified names, might need full path depending on scope
-            // This will be refined by the scope resolver
-            entry.fqn.name()
+            // Use just the name for now, auto-import might be needed later
+            fqn.name()
         }
     }
 
-    fn extract_detail(entry: &Entry) -> Option<String> {
+    fn extract_detail(entry: &Entry, fqn: &FullyQualifiedName) -> Option<String> {
         match &entry.kind {
-            EntryKind::Class(data) => {
-                let superclass = &data.superclass;
-                if let Some(_parent) = superclass {
-                    // TODO: Resolve MixinRef to display superclass name
-                    Some(" class".to_string())
-                } else {
-                    Some(" class".to_string())
-                }
+            EntryKind::Class(info) => {
+                let superclass = info
+                    .superclass
+                    .as_ref()
+                    .map(|s| {
+                        let fqn = FullyQualifiedName::from(s.parts.clone());
+                        format!(" < {}", fqn)
+                    })
+                    .unwrap_or_default();
+                Some(format!("class {}{}", fqn, superclass))
             }
-            EntryKind::Module(_) => Some(" module".to_string()),
-            EntryKind::Constant(data) => {
-                if let Some(val) = &data.value {
-                    Some(format!(" = {}", val))
-                } else {
-                    Some(" constant".to_string())
-                }
+            EntryKind::Module(_) => Some(format!("module {}", fqn)),
+            EntryKind::Constant(info) => {
+                let value = info
+                    .value
+                    .as_ref()
+                    .map(|v| format!(" = {}", v))
+                    .unwrap_or_default();
+                Some(format!("{}{}", fqn, value))
             }
-            _ => None,
+            _ => Some(fqn.to_string()),
         }
     }
 
-    fn calculate_relevance(entry: &Entry, context: &ConstantCompletionContext) -> f64 {
+    fn calculate_relevance(
+        entry: &Entry,
+        fqn: &FullyQualifiedName,
+        context: &ConstantCompletionContext,
+    ) -> f64 {
         let mut score = 0.0;
 
         // Base score by entry type
@@ -164,7 +164,7 @@ impl ConstantCompletionItem {
         };
 
         // Boost for exact prefix matches
-        let name = Self::extract_constant_name(entry);
+        let name = fqn.name();
         if name.starts_with(&context.partial_name) {
             score += 2.0;
         }
@@ -267,7 +267,10 @@ impl ConstantCompletionEngine {
             }
 
             // Find the best entry for this FQN (prefer the first constant-like entry)
-            let best_entry = entries.iter().find(|entry| self.is_constant_entry(entry));
+            let best_entry = entries
+                .iter()
+                .cloned()
+                .find(|entry| self.is_constant_entry(entry));
 
             if let Some(entry) = best_entry {
                 // Handle qualified completion (e.g., "ActiveRecord::" or "ActiveRecord::B")
@@ -296,12 +299,16 @@ impl ConstantCompletionEngine {
                     }
                 } else {
                     // Handle unqualified completion
-                    if !self.matcher.matches(entry, &context.partial_name) {
+                    if !self.matcher.matches(entry, fqn, &context.partial_name) {
                         continue;
                     }
                 }
 
-                candidates.push(ConstantCompletionItem::new((*entry).clone(), context));
+                candidates.push(ConstantCompletionItem::new(
+                    entry.clone(),
+                    fqn.clone(),
+                    context,
+                ));
                 seen_fqns.insert(fqn.clone());
             }
         }
@@ -366,16 +373,14 @@ mod tests {
         },
         types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
     };
-    use tower_lsp::lsp_types::{Location, Range, Url};
 
-    fn create_test_entry(name: &str, kind: EntryKind) -> Entry {
+    fn create_test_entry(index: &mut RubyIndex, name: &str, kind: EntryKind) -> Entry {
+        let fqn = FullyQualifiedName::try_from(name).unwrap();
+        let fqn_id = index.intern_fqn(fqn);
         Entry {
-            fqn: FullyQualifiedName::try_from(name).unwrap(),
+            fqn_id,
             kind,
-            location: Location {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Range::default(),
-            },
+            location: crate::types::compact_location::CompactLocation::default(),
         }
     }
 
@@ -407,7 +412,7 @@ mod tests {
         ];
 
         for (name, kind) in entries {
-            let entry = create_test_entry(name, kind);
+            let entry = create_test_entry(&mut index, name, kind);
             index.add_entry(entry);
         }
 
@@ -523,7 +528,7 @@ mod tests {
         ];
 
         for (name, kind) in entries {
-            let entry = create_test_entry(name, kind);
+            let entry = create_test_entry(&mut index, name, kind);
             index.add_entry(entry);
         }
 

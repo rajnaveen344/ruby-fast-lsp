@@ -519,7 +519,7 @@ mod tests {
     use tower_lsp::{
         lsp_types::{
             CompletionItemKind, CompletionTriggerKind, DidOpenTextDocumentParams, InitializeParams,
-            InsertTextFormat, Location, Range, TextDocumentItem, Url,
+            InsertTextFormat, TextDocumentItem, Url,
         },
         LanguageServer,
     };
@@ -530,15 +530,19 @@ mod tests {
         server
     }
 
-    fn create_test_entry(name: &str, kind: EntryKind) -> Entry {
-        Entry {
-            fqn: FullyQualifiedName::try_from(name).unwrap(),
-            kind,
-            location: Location {
-                uri: Url::parse("file:///test.rb").unwrap(),
-                range: Range::default(),
-            },
-        }
+    fn create_test_entry(
+        index: &mut crate::indexer::index::RubyIndex,
+        name: &str,
+        kind: EntryKind,
+    ) -> Entry {
+        use crate::indexer::entry::EntryBuilder;
+        let fqn = FullyQualifiedName::try_from(name).unwrap();
+        EntryBuilder::new()
+            .fqn(fqn)
+            .compact_location(crate::types::compact_location::CompactLocation::default())
+            .kind(kind)
+            .build(index)
+            .unwrap()
     }
 
     #[tokio::test]
@@ -628,6 +632,7 @@ end"#;
 
             // Add String class - use a simple name that should match
             let string_entry = create_test_entry(
+                &mut *index_guard,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -638,6 +643,7 @@ end"#;
 
             // Add StringIO class for additional testing
             let stringio_entry = create_test_entry(
+                &mut *index_guard,
                 "StringIO",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -730,6 +736,7 @@ end
             let mut index_guard = index_arc.lock();
 
             let string_entry = create_test_entry(
+                &mut *index_guard,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -805,44 +812,19 @@ end
             let mut index_guard = index_arc.lock();
 
             // Use the same FQN structure as the indexed constant (TestClass::MY_CONSTANT)
-            let fqn = FullyQualifiedName::try_from("TestClass::MY_CONSTANT").unwrap();
 
             // Add the same constant multiple times (simulating multiple definitions)
-            let entry1 = Entry {
-                fqn: fqn.clone(),
-                kind: EntryKind::new_constant(Some("42".to_string()), None),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range {
-                        start: Position {
-                            line: 1,
-                            character: 2,
-                        },
-                        end: Position {
-                            line: 1,
-                            character: 15,
-                        },
-                    },
-                },
-            };
+            let entry1 = create_test_entry(
+                &mut *index_guard,
+                "TestClass::MY_CONSTANT",
+                EntryKind::new_constant(Some("42".to_string()), None),
+            );
 
-            let entry2 = Entry {
-                fqn: fqn.clone(),
-                kind: EntryKind::new_constant(Some("42".to_string()), None),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range {
-                        start: Position {
-                            line: 1,
-                            character: 2,
-                        },
-                        end: Position {
-                            line: 1,
-                            character: 15,
-                        },
-                    },
-                },
-            };
+            let entry2 = create_test_entry(
+                &mut *index_guard,
+                "TestClass::MY_CONSTANT",
+                EntryKind::new_constant(Some("42".to_string()), None),
+            );
 
             // Add both entries to create duplicates
             index_guard.add_entry(entry1);
@@ -915,30 +897,24 @@ end
             let mut index_guard = index_arc.lock();
 
             // Create top-level entries
-            let string_entry = Entry {
-                fqn: FullyQualifiedName::try_from("String").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let string_entry = create_test_entry(
+                &mut *index_guard,
+                "String",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(string_entry);
 
-            let array_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Array").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let array_entry = create_test_entry(
+                &mut *index_guard,
+                "Array",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(array_entry);
         }
 
@@ -1033,75 +1009,51 @@ end
             let mut index_guard = index_arc.lock();
 
             // Top-level modules and classes
-            let outer_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("OuterModule").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let outer_module_entry =
+                create_test_entry(&mut *index_guard, "OuterModule", EntryKind::new_module());
             index_guard.add_entry(outer_module_entry);
 
-            let another_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("AnotherModule").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let another_module_entry =
+                create_test_entry(&mut *index_guard, "AnotherModule", EntryKind::new_module());
             index_guard.add_entry(another_module_entry);
 
             // Nested modules and classes
-            let middle_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let middle_module_entry = create_test_entry(
+                &mut *index_guard,
+                "OuterModule::MiddleModule",
+                EntryKind::new_module(),
+            );
             index_guard.add_entry(middle_module_entry);
 
-            let inner_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("OuterModule::MiddleModule::InnerClass").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let inner_class_entry = create_test_entry(
+                &mut *index_guard,
+                "OuterModule::MiddleModule::InnerClass",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(inner_class_entry);
 
             // Add some built-in Ruby classes
-            let string_entry = Entry {
-                fqn: FullyQualifiedName::try_from("String").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let string_entry = create_test_entry(
+                &mut *index_guard,
+                "String",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(string_entry);
 
-            let hash_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Hash").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let hash_entry = create_test_entry(
+                &mut *index_guard,
+                "Hash",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(hash_entry);
         }
 
@@ -1236,30 +1188,24 @@ end
                 let index_arc = server.index();
                 let mut index_guard = index_arc.lock();
 
-                let string_entry = Entry {
-                    fqn: FullyQualifiedName::try_from("String").unwrap(),
-                    kind: EntryKind::new_class(Some(MixinRef {
+                let string_entry = create_test_entry(
+                    &mut *index_guard,
+                    "String",
+                    EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
                     })),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                );
                 index_guard.add_entry(string_entry);
 
-                let test_class_entry = Entry {
-                    fqn: FullyQualifiedName::try_from("TestClass").unwrap(),
-                    kind: EntryKind::new_class(Some(MixinRef {
+                let test_class_entry = create_test_entry(
+                    &mut *index_guard,
+                    "TestClass",
+                    EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
                     })),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                );
                 index_guard.add_entry(test_class_entry);
             }
 
@@ -1318,10 +1264,10 @@ A::
             let index_arc = server.index();
             let mut index_guard = index_arc.lock();
 
-            let a_entry = create_test_entry("A", EntryKind::new_module());
+            let a_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
             index_guard.add_entry(a_entry);
 
-            let b_entry = create_test_entry("A::B", EntryKind::new_module());
+            let b_entry = create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
             index_guard.add_entry(b_entry);
         }
 
@@ -1415,14 +1361,8 @@ end
             ];
 
             for module_fqn in modules {
-                let entry = Entry {
-                    fqn: FullyQualifiedName::try_from(module_fqn).unwrap(),
-                    kind: EntryKind::new_module(),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                let entry =
+                    create_test_entry(&mut *index_guard, module_fqn, EntryKind::new_module());
                 index_guard.add_entry(entry);
             }
 
@@ -1430,32 +1370,26 @@ end
             let classes = vec!["A::B::C::D::E::DeepClass", "X::Y::YClass"];
 
             for class_fqn in classes {
-                let entry = Entry {
-                    fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
-                    kind: EntryKind::new_class(Some(MixinRef {
+                let entry = create_test_entry(
+                    &mut *index_guard,
+                    class_fqn,
+                    EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
                     })),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                );
                 index_guard.add_entry(entry);
             }
 
             // Add some built-in classes for comparison
-            let builtin_entry = Entry {
-                fqn: FullyQualifiedName::try_from("Array").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let builtin_entry = create_test_entry(
+                &mut *index_guard,
+                "Array",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(builtin_entry);
         }
 
@@ -1534,40 +1468,28 @@ end
             let index_arc = server.index();
             let mut index_guard = index_arc.lock();
 
-            let my_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("MyModule").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let my_module_entry =
+                create_test_entry(&mut *index_guard, "MyModule", EntryKind::new_module());
             index_guard.add_entry(my_module_entry);
 
-            let my_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("MyModule::MyClass").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let my_class_entry = create_test_entry(
+                &mut *index_guard,
+                "MyModule::MyClass",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(my_class_entry);
 
-            let my_top_class_entry = Entry {
-                fqn: FullyQualifiedName::try_from("MyTopClass").unwrap(),
-                kind: EntryKind::new_class(Some(MixinRef {
+            let my_top_class_entry = create_test_entry(
+                &mut *index_guard,
+                "MyTopClass",
+                EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
                 })),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            );
             index_guard.add_entry(my_top_class_entry);
         }
 
@@ -1628,51 +1550,29 @@ A::B::"#;
             let mut index_guard = index_arc.lock();
 
             // Add the A module and its nested modules
-            let a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_module_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
             index_guard.add_entry(a_module_entry);
 
-            let a_b_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A::B").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_b_module_entry =
+                create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
             index_guard.add_entry(a_b_module_entry);
 
-            let a_b_c_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A::B::C").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_b_c_module_entry =
+                create_test_entry(&mut *index_guard, "A::B::C", EntryKind::new_module());
             index_guard.add_entry(a_b_c_module_entry);
 
             // Add some other modules for comparison
             let other_modules = vec!["Array", "ActionController"];
 
             for module_fqn in other_modules {
-                let entry = Entry {
-                    fqn: FullyQualifiedName::try_from(module_fqn).unwrap(),
-                    kind: EntryKind::new_class(Some(MixinRef {
+                let entry = create_test_entry(
+                    &mut *index_guard,
+                    module_fqn,
+                    EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
                     })),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                );
                 index_guard.add_entry(entry);
             }
         }
@@ -1761,34 +1661,15 @@ A::"#;
             let mut index_guard = index_arc.lock();
 
             // Add the A module and its nested modules
-            let a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_module_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
             index_guard.add_entry(a_module_entry);
 
-            let a_b_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A::B").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_b_module_entry =
+                create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
             index_guard.add_entry(a_b_module_entry);
 
-            let a_a_module_entry = Entry {
-                fqn: FullyQualifiedName::try_from("A::A").unwrap(),
-                kind: EntryKind::new_module(),
-                location: Location {
-                    uri: uri.clone(),
-                    range: Range::default(),
-                },
-            };
+            let a_a_module_entry =
+                create_test_entry(&mut *index_guard, "A::A", EntryKind::new_module());
             index_guard.add_entry(a_a_module_entry);
 
             // Add some common Rails/Ruby classes that start with A
@@ -1811,17 +1692,14 @@ A::"#;
             ];
 
             for class_fqn in rails_classes {
-                let entry = Entry {
-                    fqn: FullyQualifiedName::try_from(class_fqn).unwrap(),
-                    kind: EntryKind::new_class(Some(MixinRef {
+                let entry = create_test_entry(
+                    &mut *index_guard,
+                    class_fqn,
+                    EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
                     })),
-                    location: Location {
-                        uri: uri.clone(),
-                        range: Range::default(),
-                    },
-                };
+                );
                 index_guard.add_entry(entry);
             }
         }

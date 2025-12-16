@@ -25,16 +25,19 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(
-                self.document
-                    .prism_location_to_lsp_location(&node.location()),
-            )
-            .kind(EntryKind::new_class(None))
-            .build();
+        let entry_result = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn)
+                .location(
+                    self.document
+                        .prism_location_to_lsp_location(&node.location()),
+                )
+                .kind(EntryKind::new_class(None))
+                .build(&mut index)
+        };
 
-        if let Ok(mut entry) = entry {
+        if let Ok(mut entry) = entry_result {
             // Set superclass using MixinRef for deferred resolution
             if let Some(superclass_ref) = self.create_superclass_mixin_ref(node) {
                 entry.set_superclass(superclass_ref);
@@ -42,7 +45,7 @@ impl IndexVisitor {
 
             self.add_entry(entry);
         } else {
-            error!("Error creating entry: {:?}", entry.err());
+            error!("Error creating entry: {:?}", entry_result.err());
         }
     }
 

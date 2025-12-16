@@ -33,7 +33,9 @@ pub fn find_constant_definitions(
             if !entries.is_empty() {
                 // Add all locations to our result
                 for entry in entries {
-                    found_locations.push(entry.location.clone());
+                    if let Some(loc) = index.to_lsp_location(&entry.location) {
+                        found_locations.push(loc);
+                    }
                 }
                 return Some(found_locations);
             }
@@ -58,7 +60,9 @@ pub fn find_constant_definitions(
     if let Some(entries) = index.get(&root_search_fqn.into()) {
         if !entries.is_empty() {
             for entry in entries {
-                found_locations.push(entry.location.clone());
+                if let Some(loc) = index.to_lsp_location(&entry.location) {
+                    found_locations.push(loc);
+                }
             }
             return Some(found_locations);
         }

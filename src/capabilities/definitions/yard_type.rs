@@ -62,7 +62,7 @@ pub fn find_yard_type_definitions(type_name: &str, index: &RubyIndex) -> Option<
         let locations: Vec<Location> = entries
             .iter()
             .filter(|e| matches!(e.kind, EntryKind::Class(_) | EntryKind::Module(_)))
-            .map(|e| e.location.clone())
+            .filter_map(|e| index.to_lsp_location(&e.location))
             .collect();
 
         if !locations.is_empty() {

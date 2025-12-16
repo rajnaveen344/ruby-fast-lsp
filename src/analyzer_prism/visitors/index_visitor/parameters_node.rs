@@ -100,15 +100,18 @@ impl IndexVisitor {
             FullyQualifiedName::local_variable(param_name.to_string(), current_scope).unwrap();
 
         // Create an entry with EntryKind::LocalVariable
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(self.document.prism_location_to_lsp_location(&location))
-            .kind(EntryKind::new_local_variable(
-                param_name.to_string(),
-                current_scope,
-                RubyType::Unknown,
-            ))
-            .build();
+        let entry = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn)
+                .location(self.document.prism_location_to_lsp_location(&location))
+                .kind(EntryKind::new_local_variable(
+                    param_name.to_string(),
+                    current_scope,
+                    RubyType::Unknown,
+                ))
+                .build(&mut index)
+        };
 
         // Add the entry to RubyDocument only (NOT global index)
         // Parameters are LocalVariables - file-local data should not bloat the global index

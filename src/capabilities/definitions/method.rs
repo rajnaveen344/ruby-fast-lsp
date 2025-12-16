@@ -206,7 +206,11 @@ fn search_by_name_filtered(
     if let Some(entries) = index.get_methods_by_name(method) {
         for entry in entries.iter() {
             // Check if this method belongs to one of the receiver's types
-            let method_class = entry.fqn.namespace_parts();
+            let fqn = match index.get_fqn(entry.fqn_id) {
+                Some(f) => f,
+                None => continue,
+            };
+            let method_class = fqn.namespace_parts();
             if !method_class.is_empty() {
                 let class_name = method_class
                     .iter()
@@ -215,7 +219,9 @@ fn search_by_name_filtered(
                     .join("::");
 
                 if type_names.iter().any(|t| *t == class_name) {
-                    filtered_locations.push(entry.location.clone());
+                    if let Some(loc) = index.to_lsp_location(&entry.location) {
+                        filtered_locations.push(loc);
+                    }
                 }
             }
         }
@@ -455,7 +461,10 @@ fn process_mixins(
 /// Search for methods by name across the entire index
 fn search_by_name(method: &RubyMethod, index: &RubyIndex) -> Option<Vec<Location>> {
     index.get_methods_by_name(method).and_then(|entries| {
-        let locations: Vec<Location> = entries.iter().map(|entry| entry.location.clone()).collect();
+        let locations: Vec<Location> = entries
+            .iter()
+            .filter_map(|entry| index.to_lsp_location(&entry.location))
+            .collect();
         if locations.is_empty() {
             None
         } else {
@@ -546,7 +555,11 @@ fn search_method_in_class_hierarchy(
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.get(&method_fqn) {
-            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+            found_locations.extend(
+                entries
+                    .iter()
+                    .filter_map(|e| index.to_lsp_location(&e.location)),
+            );
         }
     }
 
@@ -598,7 +611,11 @@ fn search_method_in_including_classes(
     for module_fqn in &modules_to_search {
         let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
         if let Some(entries) = index.get(&method_fqn) {
-            found_locations.extend(entries.iter().map(|e| e.location.clone()));
+            found_locations.extend(
+                entries
+                    .iter()
+                    .filter_map(|e| index.to_lsp_location(&e.location)),
+            );
         }
     }
 

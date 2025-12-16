@@ -27,17 +27,21 @@ impl IndexVisitor {
         let fqn = FullyQualifiedName::namespace(namespace);
 
         // Create an Entry with EntryKind::Constant
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(
-                self.document
-                    .prism_location_to_lsp_location(&node.location()),
-            )
-            .kind(EntryKind::new_constant(None, None))
-            .build();
+        // Create an Entry with EntryKind::Constant
+        let entry_result = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn)
+                .location(
+                    self.document
+                        .prism_location_to_lsp_location(&node.location()),
+                )
+                .kind(EntryKind::new_constant(None, None))
+                .build(&mut index)
+        };
 
         // Add the entry to the index
-        if let Ok(entry) = entry {
+        if let Ok(entry) = entry_result {
             self.add_entry(entry);
         } else {
             error!("Error creating entry for constant: {}", constant_name);

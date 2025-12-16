@@ -82,7 +82,7 @@ async fn get_top_level_symbols(lang_server: &RubyLanguageServer) -> Vec<SymbolIn
         if let FullyQualifiedName::Constant(parts) = fqn {
             if parts.len() == 1 {
                 if let Some(entry) = entries.first() {
-                    if let Some(symbol) = convert_entry_to_symbol_information(entry) {
+                    if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
                         symbols.push(symbol);
                         count += 1;
                     }
@@ -135,7 +135,7 @@ impl SymbolSearchEngine {
         // Search through definitions
         for entries in index.definitions().map(|(_, e)| e) {
             for entry in entries {
-                if let Some(symbol) = convert_entry_to_symbol_information(entry) {
+                if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
                     if let Some(relevance) =
                         matcher.calculate_relevance(&symbol.name, &query.pattern)
                     {
@@ -148,7 +148,7 @@ impl SymbolSearchEngine {
         // Search through methods by name
         for (method, entries) in index.methods_by_name() {
             for entry in entries {
-                if let Some(symbol) = convert_entry_to_symbol_information(entry) {
+                if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
                     let method_name = method.get_name();
                     if let Some(relevance) =
                         matcher.calculate_relevance(&method_name, &query.pattern)
@@ -338,7 +338,10 @@ impl SymbolMatcher {
 }
 
 /// Convert an Entry to SymbolInformation, filtering out unwanted symbol types
-fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformation> {
+fn convert_entry_to_symbol_information(
+    entry: &Entry,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<SymbolInformation> {
     use crate::indexer::entry::entry_kind::EntryKind;
 
     // Filter out local variables - only include class/modules/methods/constants/class_var/instance_var/global_var
@@ -346,16 +349,21 @@ fn convert_entry_to_symbol_information(entry: &Entry) -> Option<SymbolInformatio
         return None; // Exclude local variables
     }
 
-    let name = extract_display_name(&entry.fqn);
+    let fqn = index.get_fqn(entry.fqn_id)?;
+    let name = extract_display_name(fqn);
     let kind = entry_kind_to_symbol_kind(&entry.kind);
-    let container_name = extract_container_name(&entry.fqn);
+    let container_name = extract_container_name(fqn);
+
+    // Convert CompactLocation to Location
+    let location = index.to_lsp_location(&entry.location)?;
 
     Some(SymbolInformation {
         name,
         kind,
         tags: None,
+        #[allow(deprecated)]
         deprecated: Some(false),
-        location: entry.location.clone(),
+        location,
         container_name,
     })
 }

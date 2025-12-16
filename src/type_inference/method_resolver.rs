@@ -532,7 +532,7 @@ mod tests {
                 Some(RubyType::string()),
                 vec![],
             ))
-            .build()
+            .build(&mut *index.lock())
             .unwrap();
 
         {
@@ -575,7 +575,7 @@ mod tests {
                 Some(RubyType::Class(user_fqn.clone())),
                 vec![],
             ))
-            .build()
+            .build(&mut *index.lock())
             .unwrap();
 
         {
@@ -634,7 +634,7 @@ mod tests {
                 None, // No return type
                 vec![],
             ))
-            .build()
+            .build(&mut *index.lock())
             .unwrap();
 
         {
@@ -696,7 +696,7 @@ mod tests {
                 )
                 .unwrap()])),
             ))
-            .build()
+            .build(&mut *index.lock())
             .unwrap();
 
         {
@@ -733,7 +733,7 @@ mod tests {
                 "@name".to_string(),
                 RubyType::string(),
             ))
-            .build()
+            .build(&mut *index.lock())
             .unwrap();
 
         {

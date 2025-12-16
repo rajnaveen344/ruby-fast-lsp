@@ -22,9 +22,11 @@ use crate::indexer::entry::Entry;
 /// ```rust
 /// use ruby_fast_lsp::indexer::prefix_tree::PrefixTree;
 /// use ruby_fast_lsp::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+/// use ruby_fast_lsp::indexer::index::RubyIndex;
 /// use ruby_fast_lsp::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 /// use tower_lsp::lsp_types::{Location, Url};
 ///
+/// let mut index = RubyIndex::new();
 /// let mut tree = PrefixTree::new();
 /// let uri = Url::parse("file://test.rb").unwrap();
 ///
@@ -34,7 +36,7 @@ use crate::indexer::entry::Entry;
 ///     .fqn(fqn1)
 ///     .location(Location { uri: uri.clone(), range: Default::default() })
 ///     .kind(EntryKind::new_class(None))
-///     .build()
+///     .build(&mut index)
 ///     .unwrap();
 ///
 /// let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("Baz").unwrap()]);
@@ -42,7 +44,7 @@ use crate::indexer::entry::Entry;
 ///     .fqn(fqn2)
 ///     .location(Location { uri: uri.clone(), range: Default::default() })
 ///     .kind(EntryKind::new_class(None))
-///     .build()
+///     .build(&mut index)
 ///     .unwrap();
 ///
 /// // Insert entries using the same key and value
@@ -153,11 +155,13 @@ impl Default for PrefixTree {
 mod tests {
     use super::*;
     use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+    use crate::indexer::index::RubyIndex;
     use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
     use tower_lsp::lsp_types::{Location, Url};
 
     #[test]
     fn test_prefix_tree_insert_and_search() {
+        let mut index = RubyIndex::new();
         let mut tree = PrefixTree::new();
         let uri = Url::parse("file://test.rb").unwrap();
 
@@ -170,7 +174,7 @@ mod tests {
                 range: Default::default(),
             })
             .kind(EntryKind::new_class(None))
-            .build()
+            .build(&mut index)
             .unwrap();
 
         let fqn2 = FullyQualifiedName::from(vec![RubyConstant::try_from("FooBar").unwrap()]);
@@ -181,7 +185,7 @@ mod tests {
                 range: Default::default(),
             })
             .kind(EntryKind::new_class(None))
-            .build()
+            .build(&mut index)
             .unwrap();
 
         // Insert entries
@@ -210,6 +214,7 @@ mod tests {
 
     #[test]
     fn test_prefix_tree_delete() {
+        let mut index = RubyIndex::new();
         let mut tree = PrefixTree::new();
         let uri = Url::parse("file://test.rb").unwrap();
 
@@ -221,7 +226,7 @@ mod tests {
                 range: Default::default(),
             })
             .kind(EntryKind::new_class(None))
-            .build()
+            .build(&mut index)
             .unwrap();
 
         tree.insert("Foo", entry);

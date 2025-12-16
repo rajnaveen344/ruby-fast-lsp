@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::index::RubyIndex;
+use crate::indexer::index::{FileId, RubyIndex};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 
 use crate::type_inference::ruby_type::RubyType;
@@ -46,8 +46,13 @@ impl IndexVisitor {
     }
 
     /// Add an entry to the index immediately
-    pub fn add_entry(&mut self, entry: Entry) {
+    /// Converts placeholder FileId to actual FileId using document URI
+    pub fn add_entry(&mut self, mut entry: Entry) {
         let mut index = self.index.lock();
+        // Convert placeholder FileId::default() to actual FileId
+        if entry.location.file_id == FileId::default() {
+            entry.location.file_id = index.get_or_insert_file(&self.document.uri);
+        }
         index.add_entry(entry);
     }
 

@@ -19,7 +19,12 @@ pub fn find_local_variable_definitions(
         for entry in entries {
             if let EntryKind::LocalVariable(data) = &entry.kind {
                 if &data.name == name {
-                    return Some(vec![entry.location.clone()]);
+                    // Convert CompactLocation to Location using document's URI
+                    let loc = Location {
+                        uri: document.uri.clone(),
+                        range: entry.location.range,
+                    };
+                    return Some(vec![loc]);
                 }
             }
         }
@@ -41,7 +46,10 @@ pub fn find_instance_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::instance_variable(name.to_string()).unwrap();
     if let Some(entries) = index.get(&fqn) {
-        let locations = entries.iter().map(|e| e.location.clone()).collect();
+        let locations = entries
+            .iter()
+            .filter_map(|e| index.to_lsp_location(&e.location))
+            .collect();
         Some(locations)
     } else {
         None
@@ -56,7 +64,10 @@ pub fn find_class_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::class_variable(name.to_string()).unwrap();
     if let Some(entries) = index.get(&fqn) {
-        let locations = entries.iter().map(|e| e.location.clone()).collect();
+        let locations = entries
+            .iter()
+            .filter_map(|e| index.to_lsp_location(&e.location))
+            .collect();
         Some(locations)
     } else {
         None
@@ -71,7 +82,10 @@ pub fn find_global_variable_definitions(
 ) -> Option<Vec<Location>> {
     let fqn = FullyQualifiedName::global_variable(name.to_string()).unwrap();
     if let Some(entries) = index.get(&fqn) {
-        let locations = entries.iter().map(|e| e.location.clone()).collect();
+        let locations = entries
+            .iter()
+            .filter_map(|e| index.to_lsp_location(&e.location))
+            .collect();
         Some(locations)
     } else {
         None
@@ -90,7 +104,11 @@ pub fn find_local_variable_definitions_at_position(
         for entry in entries {
             if let EntryKind::LocalVariable(data) = &entry.kind {
                 if &data.name == name && entry.location.range.start < position {
-                    return Some(vec![entry.location.clone()]);
+                    let loc = Location {
+                        uri: document.uri.clone(),
+                        range: entry.location.range,
+                    };
+                    return Some(vec![loc]);
                 }
             }
         }

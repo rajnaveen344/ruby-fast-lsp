@@ -221,7 +221,11 @@ impl RubyDocument {
             for entry in entries {
                 if let EntryKind::LocalVariable(data) = &entry.kind {
                     if &data.name == name {
-                        return Some(entry.location.clone());
+                        // Convert CompactLocation to Location using document URI
+                        return Some(tower_lsp::lsp_types::Location {
+                            uri: self.uri.clone(),
+                            range: entry.location.range,
+                        });
                     }
                 }
             }

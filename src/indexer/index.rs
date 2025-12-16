@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{Location, Url};
 
 use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
 use crate::indexer::prefix_tree::PrefixTree;
+use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 
@@ -24,6 +25,8 @@ pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
 
 // SlotMap key type for entries
 new_key_type! { pub struct EntryId; }
+new_key_type! { pub struct FileId; }
+new_key_type! { pub struct FqnId; }
 
 /// Represents a single mixin usage with its type and location
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +48,14 @@ pub struct RubyIndex {
     by_uri: HashMap<Url, Vec<EntryId>>,
     by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
     by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
+
+    // File storage with reverse lookup
+    files: SlotMap<FileId, Url>,
+    url_to_file_id: HashMap<Url, FileId>,
+
+    // FQN storage with reverse lookup
+    fqns: SlotMap<FqnId, FullyQualifiedName>,
+    fqn_to_id: HashMap<FullyQualifiedName, FqnId>,
 
     // Mixin & Other Tracking
     pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
@@ -69,6 +80,14 @@ impl RubyIndex {
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
 
+            // File storage
+            files: SlotMap::with_key(),
+            url_to_file_id: HashMap::new(),
+
+            // FQN storage
+            fqns: SlotMap::with_key(),
+            fqn_to_id: HashMap::new(),
+
             // Mixin tracking
             reverse_mixins: HashMap::new(),
             mixin_usages: HashMap::new(),
@@ -79,22 +98,82 @@ impl RubyIndex {
     }
 
     // ========================================================================
+    // File ID Management
+    // ========================================================================
+
+    /// Get or insert a URL, returning its FileId
+    pub fn get_or_insert_file(&mut self, url: &Url) -> FileId {
+        if let Some(&file_id) = self.url_to_file_id.get(url) {
+            return file_id;
+        }
+        let file_id = self.files.insert(url.clone());
+        self.url_to_file_id.insert(url.clone(), file_id);
+        file_id
+    }
+
+    /// Get URL for a FileId
+    pub fn get_file_url(&self, file_id: FileId) -> Option<&Url> {
+        self.files.get(file_id)
+    }
+
+    /// Convert CompactLocation to LSP Location
+    pub fn to_lsp_location(&self, compact: &CompactLocation) -> Option<Location> {
+        let url = self.get_file_url(compact.file_id)?;
+        Some(Location {
+            uri: url.clone(),
+            range: compact.range,
+        })
+    }
+
+    // ========================================================================
+    // FQN Interning
+    // ========================================================================
+
+    /// Get or intern a FullyQualifiedName
+    pub fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
+        if let Some(&id) = self.fqn_to_id.get(&fqn) {
+            return id;
+        }
+        let id = self.fqns.insert(fqn.clone());
+        self.fqn_to_id.insert(fqn, id);
+        id
+    }
+
+    /// Get FQN for an ID
+    pub fn get_fqn(&self, id: FqnId) -> Option<&FullyQualifiedName> {
+        self.fqns.get(id)
+    }
+
+    /// Resolve FQN ID to owned FullyQualifiedName
+    pub fn resolve_fqn(&self, id: FqnId) -> Option<FullyQualifiedName> {
+        self.fqns.get(id).cloned()
+    }
+
+    // ========================================================================
     // Entry Management
     // ========================================================================
 
     /// Add an entry to the index and return its ID
     pub fn add_entry(&mut self, entry: Entry) -> EntryId {
-        let uri = entry.location.uri.clone();
-        let fqn = entry.fqn.clone();
+        // Look up URI from file_id for indexing
+        let uri = self.get_file_url(entry.location.file_id).cloned();
+
+        // Resolve FQN for indexing
+        // Note: We use unwrap here because the FQN ID must have been interned by EntryBuilder
+        let fqn = self
+            .get_fqn(entry.fqn_id)
+            .expect("FQN ID not found")
+            .clone();
 
         // Insert into central store
         let id = self.entries.insert(entry.clone());
 
         // Add to indexes
-        self.by_uri.entry(uri).or_default().push(id);
+        if let Some(uri) = uri {
+            self.by_uri.entry(uri).or_default().push(id);
+        }
         self.by_fqn.entry(fqn).or_default().push(id);
 
-        // Add to method name index if it's a method
         // Add to method name index if it's a method
         if let EntryKind::Method(data) = &entry.kind {
             self.by_method_name.entry(data.name).or_default().push(id);
@@ -136,7 +215,9 @@ impl RubyIndex {
         for id in &ids_to_remove {
             removed_ids_set.insert(*id);
             if let Some(entry) = self.entries.remove(*id) {
-                unique_fqns.insert(entry.fqn);
+                if let Some(fqn) = self.get_fqn(entry.fqn_id) {
+                    unique_fqns.insert(fqn.clone());
+                }
                 if let EntryKind::Method(data) = entry.kind {
                     unique_method_names.insert(data.name);
                 }
@@ -421,7 +502,7 @@ impl RubyIndex {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
                     .filter(|e| matches!(e.kind, EntryKind::Reference))
-                    .map(|e| e.location.clone())
+                    .filter_map(|e| self.to_lsp_location(&e.location))
                     .collect()
             })
             .unwrap_or_default()
@@ -439,7 +520,7 @@ impl RubyIndex {
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
                 .filter(|e| matches!(e.kind, EntryKind::Reference))
-                .map(|e| e.location.clone())
+                .filter_map(|e| self.to_lsp_location(&e.location))
                 .collect();
             if !locations.is_empty() {
                 refs.insert(fqn, locations);
@@ -473,11 +554,16 @@ impl RubyIndex {
     // ========================================================================
 
     /// Add a reference to a FQN
-    /// Add a reference to a FQN
     pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
+        // Convert Location to CompactLocation
+        let file_id = self.get_or_insert_file(&location.uri);
+        let compact_location =
+            crate::types::compact_location::CompactLocation::new(file_id, location.range);
+
+        let fqn_id = self.intern_fqn(fqn);
         let entry = Entry {
-            fqn,
-            location,
+            fqn_id,
+            location: compact_location,
             kind: EntryKind::new_reference(),
         };
         self.add_entry(entry);
@@ -540,7 +626,12 @@ impl RubyIndex {
             _ => return,
         };
 
-        debug!("Updating reverse mixins for entry: {:?}", entry.fqn);
+        let fqn = match self.get_fqn(entry.fqn_id).cloned() {
+            Some(f) => f,
+            None => return,
+        };
+
+        debug!("Updating reverse mixins for entry: {:?}", fqn);
 
         let mixin_groups = [
             (includes, MixinType::Include),
@@ -550,7 +641,7 @@ impl RubyIndex {
 
         for (mixin_refs, mixin_type) in mixin_groups {
             for mixin_ref in mixin_refs {
-                let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) else {
+                let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &fqn) else {
                     debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
                     continue;
                 };
@@ -559,26 +650,28 @@ impl RubyIndex {
 
                 // Update reverse_mixins
                 let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
-                if !including.contains(&entry.fqn) {
-                    including.push(entry.fqn.clone());
+                if !including.contains(&fqn) {
+                    including.push(fqn.clone());
                 }
 
-                // Update mixin_usages
-                let usage = MixinUsage {
-                    user_fqn: entry.fqn.clone(),
-                    mixin_type,
-                    location: entry.location.clone(),
-                };
+                // Update mixin_usages - need to convert CompactLocation to Location
+                if let Some(lsp_location) = self.to_lsp_location(&entry.location) {
+                    let usage = MixinUsage {
+                        user_fqn: fqn.clone(),
+                        mixin_type,
+                        location: lsp_location.clone(),
+                    };
 
-                // Track which modules have usages from this URI (for fast removal)
-                self.mixin_usages_by_uri
-                    .entry(entry.location.uri.clone())
-                    .or_default()
-                    .insert(resolved_fqn.clone());
+                    // Track which modules have usages from this URI (for fast removal)
+                    self.mixin_usages_by_uri
+                        .entry(lsp_location.uri.clone())
+                        .or_default()
+                        .insert(resolved_fqn.clone());
 
-                let usages = self.mixin_usages.entry(resolved_fqn).or_default();
-                if !usages.contains(&usage) {
-                    usages.push(usage);
+                    let usages = self.mixin_usages.entry(resolved_fqn).or_default();
+                    if !usages.contains(&usage) {
+                        usages.push(usage);
+                    }
                 }
             }
         }
@@ -594,21 +687,26 @@ impl RubyIndex {
     ) {
         use crate::indexer::ancestor_chain::resolve_mixin_ref;
 
+        let fqn = match self.get_fqn(entry.fqn_id).cloned() {
+            Some(f) => f,
+            None => return,
+        };
+
         for mixin_ref in mixin_refs {
-            let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &entry.fqn) else {
+            let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &fqn) else {
                 debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
                 continue;
             };
 
             // Update reverse_mixins
             let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
-            if !including.contains(&entry.fqn) {
-                including.push(entry.fqn.clone());
+            if !including.contains(&fqn) {
+                including.push(fqn.clone());
             }
 
             // Update mixin_usages with actual call location
             let usage = MixinUsage {
-                user_fqn: entry.fqn.clone(),
+                user_fqn: fqn.clone(),
                 mixin_type,
                 location: call_location.clone(),
             };
@@ -653,7 +751,7 @@ impl RubyIndex {
         let fqns_to_resolve: Vec<_> = self
             .file_entries(uri)
             .iter()
-            .map(|e| e.fqn.clone())
+            .filter_map(|e| self.get_fqn(e.fqn_id).cloned())
             .collect();
 
         self.resolve_mixins_for_fqns(&fqns_to_resolve);
@@ -703,7 +801,7 @@ impl RubyIndex {
                 self.get(class_fqn).and_then(|entries| {
                     entries.first().and_then(|entry| {
                         if matches!(entry.kind, EntryKind::Class(_)) {
-                            Some(entry.location.clone())
+                            self.to_lsp_location(&entry.location)
                         } else {
                             None
                         }
@@ -782,9 +880,12 @@ impl RubyIndex {
             return;
         }
 
-        let key = entry.fqn.name();
-        if !key.is_empty() {
-            self.prefix_tree.insert(&key, entry.clone());
+        // Get FQN from index
+        if let Some(fqn) = self.get_fqn(entry.fqn_id) {
+            let key = fqn.name();
+            if !key.is_empty() {
+                self.prefix_tree.insert(&key, entry.clone());
+            }
         }
     }
 }
@@ -805,24 +906,29 @@ mod tests {
     use crate::indexer::entry::entry_builder::EntryBuilder;
     use crate::types::ruby_namespace::RubyConstant;
 
-    fn create_test_entry(name: &str, uri: &Url) -> Entry {
+    fn create_test_entry(index: &mut RubyIndex, name: &str, uri: &Url) -> Entry {
         let fqn = FullyQualifiedName::from(vec![RubyConstant::try_from(name).unwrap()]);
-        EntryBuilder::new()
+        let mut entry = EntryBuilder::new()
             .fqn(fqn)
             .location(Location {
                 uri: uri.clone(),
                 range: Default::default(),
             })
             .kind(EntryKind::new_class(None))
-            .build()
-            .unwrap()
+            .build(index)
+            .unwrap();
+
+        // Register file and update entry
+        let file_id = index.get_or_insert_file(uri);
+        entry.location.file_id = file_id;
+        entry
     }
 
     #[test]
     fn test_add_entry() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file://test.rb").unwrap();
-        let entry = create_test_entry("Test", &uri);
+        let entry = create_test_entry(&mut index, "Test", &uri);
 
         index.add_entry(entry);
 
@@ -834,7 +940,7 @@ mod tests {
     fn test_remove_entries_for_uri() {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file:///test.rb").unwrap();
-        let entry = create_test_entry("Test", &uri);
+        let entry = create_test_entry(&mut index, "Test", &uri);
 
         index.add_entry(entry);
         assert_eq!(index.definitions_len(), 1);
@@ -848,8 +954,10 @@ mod tests {
         let mut index = RubyIndex::new();
         let uri = Url::parse("file://test.rb").unwrap();
 
-        index.add_entry(create_test_entry("TestClass", &uri));
-        index.add_entry(create_test_entry("TestModule", &uri));
+        let entry1 = create_test_entry(&mut index, "TestClass", &uri);
+        index.add_entry(entry1);
+        let entry2 = create_test_entry(&mut index, "TestModule", &uri);
+        index.add_entry(entry2);
 
         assert_eq!(index.search_by_prefix("Test").len(), 2);
         assert_eq!(index.search_by_prefix("TestC").len(), 1);

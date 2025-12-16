@@ -92,7 +92,11 @@ pub async fn handle_namespace_tree(
     for (fqn, entries) in index.definitions() {
         let mut project_entries_for_fqn = Vec::new();
         for entry in entries {
-            if !crate::utils::is_project_file(&entry.location.uri) {
+            // Get URL from file_id for project file check
+            let Some(uri) = index.get_file_url(entry.location.file_id) else {
+                continue;
+            };
+            if !crate::utils::is_project_file(uri) {
                 continue;
             }
             match &entry.kind {
@@ -139,11 +143,13 @@ pub async fn handle_namespace_tree(
 
         let name = fqn.name().to_string();
 
-        let location = Some(LocationInfo {
-            uri: first_entry.location.uri.to_string(),
-            line: first_entry.location.range.start.line,
-            character: first_entry.location.range.start.character,
-        });
+        let location = index
+            .get_file_url(first_entry.location.file_id)
+            .map(|uri| LocationInfo {
+                uri: uri.to_string(),
+                line: first_entry.location.range.start.line,
+                character: first_entry.location.range.start.character,
+            });
 
         let current_fqn = FullyQualifiedName::namespace(fqn.namespace_parts().clone());
 

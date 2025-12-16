@@ -71,15 +71,18 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::local_variable(variable_name.clone(), current_scope).unwrap();
 
-        let entry = EntryBuilder::new()
-            .fqn(fqn)
-            .location(self.document.prism_location_to_lsp_location(&name_loc))
-            .kind(EntryKind::new_local_variable(
-                variable_name.clone(),
-                current_scope,
-                inferred_type.clone(),
-            ))
-            .build();
+        let entry = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(fqn)
+                .location(self.document.prism_location_to_lsp_location(&name_loc))
+                .kind(EntryKind::new_local_variable(
+                    variable_name.clone(),
+                    current_scope,
+                    inferred_type.clone(),
+                ))
+                .build(&mut index)
+        };
 
         if let Ok(entry) = entry {
             // NOTE: LocalVariables are stored ONLY in RubyDocument.lvars, NOT in global index
