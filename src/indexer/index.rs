@@ -427,6 +427,47 @@ impl RubyIndex {
             .unwrap_or_default()
     }
 
+    pub fn entries_len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Iterate over all references grouped by FQN
+    pub fn all_references(&self) -> HashMap<&FullyQualifiedName, Vec<Location>> {
+        let mut refs: HashMap<&FullyQualifiedName, Vec<Location>> = HashMap::new();
+        for (fqn, ids) in &self.by_fqn {
+            let locations: Vec<Location> = ids
+                .iter()
+                .filter_map(|id| self.entries.get(*id))
+                .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
+                .map(|e| e.location.clone())
+                .collect();
+            if !locations.is_empty() {
+                refs.insert(fqn, locations);
+            }
+        }
+        refs
+    }
+
+    /// Count entries by type
+    pub fn count_entries_by_type(&self) -> HashMap<&'static str, usize> {
+        let mut counts = HashMap::new();
+        for entry in self.entries.values() {
+            let type_name = match &entry.kind {
+                EntryKind::Class(_) => "Class",
+                EntryKind::Module(_) => "Module",
+                EntryKind::Method(_) => "Method",
+                EntryKind::Constant(_) => "Constant",
+                EntryKind::LocalVariable(_) => "LocalVariable",
+                EntryKind::InstanceVariable(_) => "InstanceVariable",
+                EntryKind::ClassVariable(_) => "ClassVariable",
+                EntryKind::GlobalVariable(_) => "GlobalVariable",
+                EntryKind::Reference(_) => "Reference",
+            };
+            *counts.entry(type_name).or_insert(0) += 1;
+        }
+        counts
+    }
+
     // ========================================================================
     // Reference Management
     // ========================================================================

@@ -10,6 +10,14 @@ authors = ["Ruby Fast LSP Team"]
 description = "A fast Language Server Protocol implementation for Ruby"
 license = "MIT"
 
+[[bin]]
+name = "profile_indexer"
+path = "src/bin/profile_indexer.rs"
+
+[[bin]]
+name = "analyze_entries"
+path = "src/bin/analyze_entries.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"

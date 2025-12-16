@@ -1,4 +1,4 @@
-use crate::types::{fully_qualified_name::FullyQualifiedName, scope::LVScope as Scope};
+use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::constant_completion::{ConstantCompletionContext, ConstantCompletionItem};
 
@@ -52,7 +52,7 @@ impl CompletionRanker {
         }
 
         // Boost for same namespace
-        score += self.namespace_proximity_score(&candidate.fqn, &context.scope_stack);
+        score += self.namespace_proximity_score(&candidate.fqn, context.scope_id);
 
         // Boost for shorter names (prefer simpler constants)
         score += 1.0 / (candidate.name.len() as f64).max(1.0);
@@ -70,7 +70,7 @@ impl CompletionRanker {
         score
     }
 
-    fn namespace_proximity_score(&self, fqn: &FullyQualifiedName, _scope_stack: &[Scope]) -> f64 {
+    fn namespace_proximity_score(&self, fqn: &FullyQualifiedName, _scope_id: usize) -> f64 {
         // Calculate how "close" this constant is to the current scope
         // Higher score for constants in the same or nearby namespaces
 
@@ -242,7 +242,7 @@ mod tests {
             },
         };
 
-        let context = ConstantCompletionContext::new(Position::new(0, 0), vec![], "".to_string());
+        let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "".to_string());
 
         ConstantCompletionItem::new(entry, &context)
     }
@@ -281,8 +281,7 @@ mod tests {
     #[test]
     fn test_ranking_order() {
         let ranker = CompletionRanker::new();
-        let context =
-            ConstantCompletionContext::new(Position::new(0, 0), vec![], "Str".to_string());
+        let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "Str".to_string());
 
         let mut candidates = vec![
             create_test_item("String", EntryKind::new_class(None)),

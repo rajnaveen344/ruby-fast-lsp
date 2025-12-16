@@ -31,7 +31,7 @@ impl IdentifierVisitor {
                     }),
                     Some(IdentifierType::ClassDef),
                     self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.get_lv_stack(),
+                    self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
                 );
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
@@ -43,7 +43,7 @@ impl IdentifierVisitor {
                     }),
                     Some(IdentifierType::ClassDef),
                     self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.get_lv_stack(),
+                    self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
                 );
             }
 

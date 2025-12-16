@@ -1,6 +1,6 @@
 use crate::{
     analyzer_prism::{scope_tracker::ScopeTracker, Identifier},
-    types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeStack},
+    types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeId},
 };
 
 use ruby_prism::*;
@@ -43,7 +43,7 @@ pub struct IdentifierVisitor {
 
     // Output
     pub ns_stack_at_pos: Vec<RubyConstant>,
-    pub lv_stack_at_pos: LVScopeStack,
+    pub lv_scope_id_at_pos: Option<LVScopeId>,
     pub identifier: Option<Identifier>,
     pub identifier_type: Option<IdentifierType>,
 }
@@ -57,7 +57,7 @@ impl IdentifierVisitor {
             position,
             scope_tracker,
             ns_stack_at_pos: Vec::new(),
-            lv_stack_at_pos: Vec::new(),
+            lv_scope_id_at_pos: None,
             identifier: None,
             identifier_type: None,
         }
@@ -78,12 +78,12 @@ impl IdentifierVisitor {
         identifier: Option<Identifier>,
         identifier_type: Option<IdentifierType>,
         ns_stack_at_pos: Vec<RubyConstant>,
-        lv_stack_at_pos: LVScopeStack,
+        lv_scope_id_at_pos: Option<LVScopeId>,
     ) {
         self.identifier = identifier;
         self.identifier_type = identifier_type;
         self.ns_stack_at_pos = ns_stack_at_pos;
-        self.lv_stack_at_pos = lv_stack_at_pos;
+        self.lv_scope_id_at_pos = lv_scope_id_at_pos;
     }
 
     pub fn is_result_set(&self) -> bool {
@@ -96,7 +96,7 @@ impl IdentifierVisitor {
         Option<Identifier>,
         Option<IdentifierType>,
         Vec<RubyConstant>,
-        LVScopeStack,
+        LVScopeId,
     ) {
         let ns_stack = match self.ns_stack_at_pos.len() {
             // If ns_stack_at_pos is empty because no identifier was found,
@@ -105,18 +105,19 @@ impl IdentifierVisitor {
             _ => self.ns_stack_at_pos.clone(),
         };
 
-        let lv_stack = match self.lv_stack_at_pos.len() {
-            // If lv_stack_at_pos is empty because no identifier was found,
-            // use the scope tracker's lv_stack
-            0 => self.scope_tracker.get_lv_stack(),
-            _ => self.lv_stack_at_pos.clone(),
-        };
+        let lv_scope_id = self.lv_scope_id_at_pos.unwrap_or_else(|| {
+            // If lv_scope_id_at_pos is not set, use the current scope from tracker
+            self.scope_tracker
+                .current_lv_scope()
+                .map(|s| s.scope_id())
+                .unwrap_or(0)
+        });
 
         (
             self.identifier.clone(),
             self.identifier_type,
             ns_stack,
-            lv_stack,
+            lv_scope_id,
         )
     }
 }

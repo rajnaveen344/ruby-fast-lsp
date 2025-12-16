@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::Position;
 use crate::indexer::entry::MixinRef;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::{
-    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeStack,
+    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeId,
 };
 use crate::yard::YardMethodDoc;
 
@@ -117,7 +117,7 @@ pub struct ConstantData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalVariableData {
     pub name: String,
-    pub scope_stack: LVScopeStack,
+    pub scope_id: LVScopeId,
     pub r#type: RubyType,
 }
 
@@ -149,6 +149,7 @@ pub struct ReferenceData {
 }
 
 /// Type-specific metadata for indexed Ruby entities
+/// Values are boxed to prevent enum size from growing with large data just on single variant
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryKind {
     Class(Box<ClassData>),
@@ -218,10 +219,10 @@ impl EntryKind {
         }))
     }
 
-    pub fn new_local_variable(name: String, scope_stack: LVScopeStack, r#type: RubyType) -> Self {
+    pub fn new_local_variable(name: String, scope_id: LVScopeId, r#type: RubyType) -> Self {
         EntryKind::LocalVariable(Box::new(LocalVariableData {
             name,
-            scope_stack,
+            scope_id,
             r#type,
         }))
     }

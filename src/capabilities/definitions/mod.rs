@@ -72,7 +72,7 @@ pub async fn find_definition_at_position(
             if let Some(doc_arc) = server.docs.lock().get(&uri).cloned() {
                 let doc_read = doc_arc.read();
                 variable::find_local_variable_definitions_at_position(
-                    name, scope, &doc_read, position,
+                    name, *scope, &doc_read, position,
                 )
             } else {
                 None

@@ -83,12 +83,21 @@ impl IndexVisitor {
             return;
         }
 
+        // Get current scope id for the parameter
+        let current_scope = match self.scope_tracker.current_lv_scope() {
+            Some(scope) => scope.scope_id(),
+            None => {
+                error!(
+                    "No current local variable scope available for parameter: {}",
+                    param_name
+                );
+                return;
+            }
+        };
+
         // Create a fully qualified name for the parameter (local variable)
-        let fqn = FullyQualifiedName::local_variable(
-            param_name.to_string(),
-            self.scope_tracker.get_lv_stack().clone(),
-        )
-        .unwrap();
+        let fqn =
+            FullyQualifiedName::local_variable(param_name.to_string(), current_scope).unwrap();
 
         // Create an entry with EntryKind::LocalVariable
         let entry = EntryBuilder::new()
@@ -96,7 +105,7 @@ impl IndexVisitor {
             .location(self.document.prism_location_to_lsp_location(&location))
             .kind(EntryKind::new_local_variable(
                 param_name.to_string(),
-                self.scope_tracker.get_lv_stack().clone(),
+                current_scope,
                 RubyType::Unknown,
             ))
             .build();
@@ -104,15 +113,8 @@ impl IndexVisitor {
         // Add the entry to RubyDocument only (NOT global index)
         // Parameters are LocalVariables - file-local data should not bloat the global index
         if let Ok(entry) = entry {
-            if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
-                self.document
-                    .add_local_var_entry(current_scope.scope_id(), entry.clone());
-            } else {
-                error!(
-                    "No current local variable scope available for parameter: {}",
-                    param_name
-                );
-            }
+            self.document
+                .add_local_var_entry(current_scope, entry.clone());
         } else {
             error!("Error creating entry for parameter: {}", param_name);
         }

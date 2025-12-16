@@ -16,15 +16,20 @@ impl IdentifierVisitor {
             if let Some(param) = required.as_required_parameter_node() {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let scope_id = self
+                        .scope_tracker
+                        .current_lv_scope()
+                        .map(|s| s.scope_id())
+                        .unwrap_or(0);
                     self.set_result(
                         Some(Identifier::RubyLocalVariable {
                             namespace: self.scope_tracker.get_ns_stack(),
                             name: param_name,
-                            scope: self.scope_tracker.get_lv_stack().clone(),
+                            scope: scope_id,
                         }),
                         Some(IdentifierType::LVarDef),
                         self.scope_tracker.get_ns_stack(),
-                        self.scope_tracker.get_lv_stack(),
+                        Some(scope_id),
                     );
                 }
             }
@@ -47,15 +52,20 @@ impl IdentifierVisitor {
                     if self.is_position_in_location(&param.location()) {
                         let param_name =
                             String::from_utf8_lossy(param.name().as_slice()).to_string();
+                        let scope_id = self
+                            .scope_tracker
+                            .current_lv_scope()
+                            .map(|s| s.scope_id())
+                            .unwrap_or(0);
                         self.set_result(
                             Some(Identifier::RubyLocalVariable {
                                 namespace: self.scope_tracker.get_ns_stack(),
                                 name: param_name,
-                                scope: self.scope_tracker.get_lv_stack().clone(),
+                                scope: scope_id,
                             }),
                             Some(IdentifierType::LVarDef),
                             self.scope_tracker.get_ns_stack(),
-                            self.scope_tracker.get_lv_stack(),
+                            Some(scope_id),
                         );
                     }
                 }
@@ -68,15 +78,20 @@ impl IdentifierVisitor {
                 if let Some(name) = param.name() {
                     if self.is_position_in_location(&param.location()) {
                         let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
+                        let scope_id = self
+                            .scope_tracker
+                            .current_lv_scope()
+                            .map(|s| s.scope_id())
+                            .unwrap_or(0);
                         self.set_result(
                             Some(Identifier::RubyLocalVariable {
                                 namespace: self.scope_tracker.get_ns_stack(),
                                 name: param_name,
-                                scope: self.scope_tracker.get_lv_stack().clone(),
+                                scope: scope_id,
                             }),
                             Some(IdentifierType::LVarDef),
                             self.scope_tracker.get_ns_stack(),
-                            self.scope_tracker.get_lv_stack(),
+                            Some(scope_id),
                         );
                     }
                 }
@@ -88,15 +103,20 @@ impl IdentifierVisitor {
             if let Some(param) = post.as_required_parameter_node() {
                 if self.is_position_in_location(&param.location()) {
                     let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
+                    let scope_id = self
+                        .scope_tracker
+                        .current_lv_scope()
+                        .map(|s| s.scope_id())
+                        .unwrap_or(0);
                     self.set_result(
                         Some(Identifier::RubyLocalVariable {
                             namespace: self.scope_tracker.get_ns_stack(),
                             name: param_name,
-                            scope: self.scope_tracker.get_lv_stack().clone(),
+                            scope: scope_id,
                         }),
                         Some(IdentifierType::LVarDef),
                         self.scope_tracker.get_ns_stack(),
-                        self.scope_tracker.get_lv_stack(),
+                        Some(scope_id),
                     );
                 }
             }

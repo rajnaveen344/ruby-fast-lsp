@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
 use crate::{
     analyzer_prism::RubyPrismAnalyzer,
     indexer::{entry::entry_kind::EntryKind, entry::Entry, index::RubyIndex},
-    types::{fully_qualified_name::FullyQualifiedName, scope::LVScope as Scope},
+    types::{fully_qualified_name::FullyQualifiedName, scope::LVScopeId},
 };
 
 use super::{
@@ -18,8 +18,8 @@ use super::{
 pub struct ConstantCompletionContext {
     /// Current position in the document
     pub position: Position,
-    /// Current scope stack from analyzer
-    pub scope_stack: Vec<Scope>,
+    /// Current scope ID from analyzer
+    pub scope_id: LVScopeId,
     /// Partial constant name being typed
     pub partial_name: String,
     /// Whether this is a qualified constant reference (contains ::)
@@ -31,7 +31,7 @@ pub struct ConstantCompletionContext {
 }
 
 impl ConstantCompletionContext {
-    pub fn new(position: Position, scope_stack: Vec<Scope>, partial_name: String) -> Self {
+    pub fn new(position: Position, scope_id: LVScopeId, partial_name: String) -> Self {
         let is_qualified = partial_name.contains("::");
         let (namespace_prefix, clean_partial) = if is_qualified {
             Self::parse_qualified_name(&partial_name)
@@ -41,7 +41,7 @@ impl ConstantCompletionContext {
 
         Self {
             position,
-            scope_stack,
+            scope_id,
             partial_name: clean_partial,
             is_qualified,
             namespace_prefix,
@@ -434,11 +434,8 @@ mod tests {
         let index = create_test_index();
 
         // Test completion for "ActiveRecord::" - should only show direct children
-        let context = ConstantCompletionContext::new(
-            Position::new(0, 0),
-            vec![],
-            "ActiveRecord::".to_string(),
-        );
+        let context =
+            ConstantCompletionContext::new(Position::new(0, 0), 0, "ActiveRecord::".to_string());
 
         let candidates = engine.find_constant_candidates(&index, &context);
 
@@ -460,11 +457,8 @@ mod tests {
         let index = create_test_index();
 
         // Test completion for "ActiveRecord::B" - should only show Base
-        let context = ConstantCompletionContext::new(
-            Position::new(0, 0),
-            vec![],
-            "ActiveRecord::B".to_string(),
-        );
+        let context =
+            ConstantCompletionContext::new(Position::new(0, 0), 0, "ActiveRecord::B".to_string());
 
         let candidates = engine.find_constant_candidates(&index, &context);
 
@@ -480,8 +474,7 @@ mod tests {
         let index = create_test_index();
 
         // Test completion for "Str" - should show String and StringIO
-        let context =
-            ConstantCompletionContext::new(Position::new(0, 0), vec![], "Str".to_string());
+        let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "Str".to_string());
 
         let candidates = engine.find_constant_candidates(&index, &context);
 
@@ -501,7 +494,7 @@ mod tests {
         let index = create_test_index();
 
         // Test completion for "::" - should show top-level constants
-        let context = ConstantCompletionContext::new(Position::new(0, 0), vec![], "::".to_string());
+        let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "::".to_string());
 
         let candidates = engine.find_constant_candidates(&index, &context);
 
@@ -535,8 +528,7 @@ mod tests {
         }
 
         // Test completion for "A::" - should show nested module B
-        let context =
-            ConstantCompletionContext::new(Position::new(0, 0), vec![], "A::".to_string());
+        let context = ConstantCompletionContext::new(Position::new(0, 0), 0, "A::".to_string());
 
         let candidates = engine.find_constant_candidates(&index, &context);
 

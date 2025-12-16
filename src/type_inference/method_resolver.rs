@@ -680,18 +680,17 @@ mod tests {
         let index = create_test_index();
 
         // Add a local variable with a known type
-        use crate::types::scope::LVScopeStack;
+        use crate::types::scope::LVScopeId;
 
-        let scope_stack = LVScopeStack::default();
-        let var_fqn =
-            FullyQualifiedName::local_variable("user".to_string(), scope_stack.clone()).unwrap();
+        let scope_id: LVScopeId = 1; // A non-zero scope ID for method scope
+        let var_fqn = FullyQualifiedName::local_variable("user".to_string(), scope_id).unwrap();
 
         let var_entry = EntryBuilder::new()
             .fqn(var_fqn)
             .location(create_test_location())
             .kind(EntryKind::new_local_variable(
                 "user".to_string(),
-                scope_stack,
+                scope_id,
                 RubyType::Class(FullyQualifiedName::Constant(vec![RubyConstant::new(
                     "User",
                 )

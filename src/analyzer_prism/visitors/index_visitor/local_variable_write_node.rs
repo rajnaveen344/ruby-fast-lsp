@@ -57,18 +57,26 @@ impl IndexVisitor {
             return;
         }
 
-        let fqn = FullyQualifiedName::local_variable(
-            variable_name.clone(),
-            self.scope_tracker.get_lv_stack().clone(),
-        )
-        .unwrap();
+        // Get current scope id for the local variable
+        let current_scope = match self.scope_tracker.current_lv_scope() {
+            Some(scope) => scope.scope_id(),
+            None => {
+                error!(
+                    "No current local variable scope available for variable: {}",
+                    variable_name
+                );
+                return;
+            }
+        };
+
+        let fqn = FullyQualifiedName::local_variable(variable_name.clone(), current_scope).unwrap();
 
         let entry = EntryBuilder::new()
             .fqn(fqn)
             .location(self.document.prism_location_to_lsp_location(&name_loc))
             .kind(EntryKind::new_local_variable(
                 variable_name.clone(),
-                self.scope_tracker.get_lv_stack().clone(),
+                current_scope,
                 inferred_type.clone(),
             ))
             .build();
@@ -76,19 +84,12 @@ impl IndexVisitor {
         if let Ok(entry) = entry {
             // NOTE: LocalVariables are stored ONLY in RubyDocument.lvars, NOT in global index
             // This is a performance optimization - file-local data should not bloat the global index
-            if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
-                self.document
-                    .add_local_var_entry(current_scope.scope_id(), entry.clone());
-                debug!(
-                    "Added local variable entry with type: {:?} -> {:?}",
-                    variable_name, inferred_type
-                );
-            } else {
-                error!(
-                    "No current local variable scope available for variable: {}",
-                    variable_name
-                );
-            }
+            self.document
+                .add_local_var_entry(current_scope, entry.clone());
+            debug!(
+                "Added local variable entry with type: {:?} -> {:?}",
+                variable_name, inferred_type
+            );
         } else {
             error!("Error creating entry for local variable: {}", variable_name);
         }

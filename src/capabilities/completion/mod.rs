@@ -260,7 +260,7 @@ pub async fn find_completion_at_position(
         // Normal completion: include variables, constants, and snippets
 
         // Add local variable completions
-        let variable_completions = variable::find_variable_completions(&document, &lv_stack_at_pos);
+        let variable_completions = variable::find_variable_completions(&document, lv_stack_at_pos);
         completions.extend(variable_completions);
 
         // Add constant completions

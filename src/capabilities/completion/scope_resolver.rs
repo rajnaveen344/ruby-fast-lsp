@@ -35,15 +35,12 @@ mod tests {
     use super::*;
     use crate::{
         indexer::entry::{entry_kind::EntryKind, Entry},
-        types::{fully_qualified_name::FullyQualifiedName, scope::LVScope},
+        types::{fully_qualified_name::FullyQualifiedName, scope::LVScopeId},
     };
     use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-    fn create_test_context(
-        partial_name: &str,
-        scope_stack: Vec<LVScope>,
-    ) -> ConstantCompletionContext {
-        ConstantCompletionContext::new(Position::new(0, 0), scope_stack, partial_name.to_string())
+    fn create_test_context(partial_name: &str, scope_id: LVScopeId) -> ConstantCompletionContext {
+        ConstantCompletionContext::new(Position::new(0, 0), scope_id, partial_name.to_string())
     }
 
     fn create_test_item(name: &str) -> ConstantCompletionItem {
@@ -56,14 +53,14 @@ mod tests {
             },
         };
 
-        let context = create_test_context("", vec![]);
+        let context = create_test_context("", 0);
         ConstantCompletionItem::new(entry, &context)
     }
 
     #[test]
     fn test_resolve_accessibility() {
         let resolver = ScopeResolver::new();
-        let context = create_test_context("String", vec![]);
+        let context = create_test_context("String", 0);
         let mut candidates = vec![create_test_item("String"), create_test_item("Array")];
 
         resolver.resolve_accessibility(&mut candidates, &context);
@@ -78,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_qualified_constant_context() {
-        let context = create_test_context("Foo::Bar", vec![]);
+        let context = create_test_context("Foo::Bar", 0);
 
         assert!(context.is_qualified);
         assert_eq!(context.partial_name, "Bar");
@@ -87,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_unqualified_constant_context() {
-        let context = create_test_context("String", vec![]);
+        let context = create_test_context("String", 0);
 
         assert!(!context.is_qualified);
         assert_eq!(context.partial_name, "String");
@@ -96,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_scope_resolution_operator() {
-        let context = create_test_context("Foo::", vec![]);
+        let context = create_test_context("Foo::", 0);
 
         assert!(context.after_scope_resolution);
         assert_eq!(context.partial_name, "");

@@ -26,7 +26,7 @@ impl IdentifierVisitor {
             Some(identifier),
             Some(IdentifierType::GVarRead),
             self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.get_lv_stack(),
+            self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
         );
     }
 

@@ -15,16 +15,21 @@ impl IdentifierVisitor {
         }
 
         let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let current_scope_id = self
+            .scope_tracker
+            .current_lv_scope()
+            .map(|s| s.scope_id())
+            .unwrap_or(0);
 
         self.set_result(
             Some(Identifier::RubyLocalVariable {
                 namespace: self.scope_tracker.get_ns_stack(),
                 name: var_name,
-                scope: self.scope_tracker.get_lv_stack().clone(),
+                scope: current_scope_id,
             }),
             Some(IdentifierType::LVarRead),
             self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.get_lv_stack(),
+            Some(current_scope_id),
         );
     }
 
@@ -40,16 +45,21 @@ impl IdentifierVisitor {
         let name_loc = node.name_loc();
         if self.is_position_in_location(&name_loc) {
             let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+            let current_scope_id = self
+                .scope_tracker
+                .current_lv_scope()
+                .map(|s| s.scope_id())
+                .unwrap_or(0);
 
             self.set_result(
                 Some(Identifier::RubyLocalVariable {
                     namespace: self.scope_tracker.get_ns_stack(),
                     name: var_name,
-                    scope: self.scope_tracker.get_lv_stack().clone(),
+                    scope: current_scope_id,
                 }),
                 Some(IdentifierType::LVarDef),
                 self.scope_tracker.get_ns_stack(),
-                self.scope_tracker.get_lv_stack(),
+                Some(current_scope_id),
             );
         }
     }
@@ -72,7 +82,7 @@ impl IdentifierVisitor {
             }),
             Some(IdentifierType::CVarRead),
             self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.get_lv_stack(),
+            self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
         );
     }
 
@@ -96,7 +106,7 @@ impl IdentifierVisitor {
                 }),
                 Some(IdentifierType::CVarDef),
                 self.scope_tracker.get_ns_stack(),
-                self.scope_tracker.get_lv_stack(),
+                self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
             );
         }
     }
@@ -119,7 +129,7 @@ impl IdentifierVisitor {
             }),
             Some(IdentifierType::IVarRead),
             self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.get_lv_stack(),
+            self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
         );
     }
 
@@ -143,7 +153,7 @@ impl IdentifierVisitor {
                 }),
                 Some(IdentifierType::IVarDef),
                 self.scope_tracker.get_ns_stack(),
-                self.scope_tracker.get_lv_stack(),
+                self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
             );
         }
     }
@@ -166,7 +176,7 @@ impl IdentifierVisitor {
             }),
             Some(IdentifierType::GVarRead),
             self.scope_tracker.get_ns_stack(),
-            self.scope_tracker.get_lv_stack(),
+            self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
         );
     }
 
@@ -190,7 +200,7 @@ impl IdentifierVisitor {
                 }),
                 Some(IdentifierType::GVarDef),
                 self.scope_tracker.get_ns_stack(),
-                self.scope_tracker.get_lv_stack(),
+                self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
             );
         }
     }

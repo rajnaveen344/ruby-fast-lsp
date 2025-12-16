@@ -51,7 +51,7 @@ pub async fn find_references_at_position(
         Identifier::RubyLocalVariable { name, scope, .. } => {
             drop(index); // Release lock before accessing document
                          // LocalVariables are file-local - get definition from document.lvars
-            find_local_variable_references_from_document(server, uri, name, scope, position)
+            find_local_variable_references_from_document(server, uri, name, *scope, position)
         }
         Identifier::RubyInstanceVariable { name, .. } => {
             let fqn = FullyQualifiedName::instance_variable(name.clone()).unwrap();
@@ -95,7 +95,7 @@ fn find_local_variable_references_from_document(
     server: &RubyLanguageServer,
     uri: &Url,
     name: &str,
-    scope: &crate::types::scope::LVScopeStack,
+    scope_id: crate::types::scope::LVScopeId,
     _position: Position,
 ) -> Option<Vec<Location>> {
     use crate::indexer::entry::entry_kind::EntryKind;
@@ -105,27 +105,21 @@ fn find_local_variable_references_from_document(
     let doc = doc_arc.read();
 
     let mut all_locations = Vec::new();
-    let scope_ids: Vec<_> = scope.iter().rev().map(|s| s.scope_id()).collect();
 
-    // First, get the definition location
-    for &scope_id in &scope_ids {
-        if let Some(entries) = doc.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    if &data.name == name {
-                        all_locations.push(entry.location.clone());
-                        break;
-                    }
+    // Get the definition location for this scope
+    if let Some(entries) = doc.get_local_var_entries(scope_id) {
+        for entry in entries {
+            if let EntryKind::LocalVariable(data) = &entry.kind {
+                if &data.name == name {
+                    all_locations.push(entry.location.clone());
+                    break;
                 }
             }
-        }
-        if !all_locations.is_empty() {
-            break;
         }
     }
 
     // Then, get all references to this local variable (scoped)
-    let refs = doc.get_lvar_references(name, &scope_ids);
+    let refs = doc.get_lvar_references(name, &[scope_id]);
     all_locations.extend(refs);
 
     if all_locations.is_empty() {

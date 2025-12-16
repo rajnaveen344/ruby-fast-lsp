@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use ustr::Ustr;
 
-use crate::{analyzer_prism::Identifier, indexer::entry::MethodKind, types::scope::LVScopeStack};
+use crate::{analyzer_prism::Identifier, indexer::entry::MethodKind, types::scope::LVScopeId};
 
 use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant};
 
@@ -15,8 +15,8 @@ pub enum FullyQualifiedName {
     /// Example: `Foo::Bar#baz` → `Method(vec!["Foo", "Bar"], RubyMethod::new("baz"))`
     Method(Vec<RubyConstant>, RubyMethod),
 
-    /// Local variable, e.g., `a = 1` → `LocalVariable("a", scope)`
-    LocalVariable(Ustr, LVScopeStack),
+    /// Local variable, e.g., `a = 1` → `LocalVariable("a", scope_id)`
+    LocalVariable(Ustr, LVScopeId),
 
     /// Instance variable, e.g., `@name` → `InstanceVariable("@name")`
     InstanceVariable(Ustr),
@@ -38,9 +38,9 @@ impl FullyQualifiedName {
         FullyQualifiedName::Method(namespace, method)
     }
 
-    pub fn local_variable(name: String, scope: LVScopeStack) -> Result<Self, &'static str> {
+    pub fn local_variable(name: String, scope_id: LVScopeId) -> Result<Self, &'static str> {
         Self::validate_local_variable(&name)?;
-        Ok(Self::LocalVariable(Ustr::from(&name), scope))
+        Ok(Self::LocalVariable(Ustr::from(&name), scope_id))
     }
 
     pub fn instance_variable(name: String) -> Result<Self, &'static str> {

@@ -18,7 +18,7 @@ use std::future::Future;
 /// # Example
 ///
 /// ```rust
-/// use crate::utils::parallelizer::process_in_parallel;
+/// use ruby_fast_lsp::utils::parallelizer::process_in_parallel;
 ///
 /// async fn example() {
 ///     let items = vec![1, 2, 3, 4, 5];
