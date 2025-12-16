@@ -15,8 +15,8 @@ name = "profile_indexer"
 path = "src/bin/profile_indexer.rs"
 
 [[bin]]
-name = "analyze_entries"
-path = "src/bin/analyze_entries.rs"
+name = "check_size"
+path = "src/bin/check_size.rs"
 
 [dependencies]
 # LSP related dependencies

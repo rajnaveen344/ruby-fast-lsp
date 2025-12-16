@@ -1,5 +1,5 @@
 use ruby_fast_lsp::{
-    indexer::entry::{entry_kind::ReferenceData, Entry, EntryKind},
+    indexer::entry::{Entry, EntryKind},
     types::fully_qualified_name::FullyQualifiedName,
 };
 use std::mem;
@@ -17,21 +17,17 @@ fn main() {
     println!("Size of Location: {} bytes", mem::size_of::<Location>());
     println!("Size of EntryKind: {} bytes", mem::size_of::<EntryKind>());
     println!("Size of Entry: {} bytes", mem::size_of::<Entry>());
-    println!(
-        "Size of ReferenceData: {} bytes",
-        mem::size_of::<ReferenceData>()
-    );
 
     println!("\n=== Memory per Reference Entry ===");
     let entry_size = mem::size_of::<Entry>();
-    let ref_data_size = mem::size_of::<ReferenceData>();
     println!(
-        "Entry struct: {} bytes + ReferenceData heap alloc: {} bytes",
-        entry_size, ref_data_size
+        "Entry struct (with unit Reference variant): {} bytes",
+        entry_size
     );
-    println!("Total per reference: ~{} bytes", entry_size + ref_data_size);
+    println!("No additional heap allocation for Reference!");
 
     println!("\n=== With 1M references ===");
-    let total_mb = (1_000_000 * (entry_size + ref_data_size)) as f64 / 1_000_000.0;
+    let total_mb = (1_000_000 * entry_size) as f64 / 1_000_000.0;
     println!("Estimated memory: {:.1} MB", total_mb);
+    println!("(Previously was ~200 MB with ReferenceData duplication)");
 }

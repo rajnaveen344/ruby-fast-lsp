@@ -373,7 +373,7 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
         | EntryKind::InstanceVariable(_)
         | EntryKind::ClassVariable(_)
         | EntryKind::GlobalVariable(_) => SymbolKind::VARIABLE,
-        EntryKind::Reference(_) => SymbolKind::KEY, // References use KEY symbol
+        EntryKind::Reference => SymbolKind::KEY, // References use KEY symbol
     }
 }
 

@@ -142,12 +142,6 @@ pub struct GlobalVariableData {
     pub r#type: RubyType,
 }
 
-/// Data for Reference entries
-#[derive(Debug, Clone, PartialEq)]
-pub struct ReferenceData {
-    pub target_fqn: FullyQualifiedName,
-}
-
 /// Type-specific metadata for indexed Ruby entities
 /// Values are boxed to prevent enum size from growing with large data just on single variant
 #[derive(Debug, Clone, PartialEq)]
@@ -160,7 +154,7 @@ pub enum EntryKind {
     InstanceVariable(Box<InstanceVariableData>),
     ClassVariable(Box<ClassVariableData>),
     GlobalVariable(Box<GlobalVariableData>),
-    Reference(Box<ReferenceData>),
+    Reference,
 }
 
 impl EntryKind {
@@ -181,8 +175,8 @@ impl EntryKind {
         Self::Constant(Box::new(ConstantData { value, visibility }))
     }
 
-    pub fn new_reference(target_fqn: FullyQualifiedName) -> Self {
-        Self::Reference(Box::new(ReferenceData { target_fqn }))
+    pub fn new_reference() -> Self {
+        Self::Reference
     }
 
     pub fn new_module() -> Self {
@@ -314,8 +308,8 @@ impl Display for EntryKind {
             EntryKind::GlobalVariable(data) => {
                 write!(f, "Global Variable: {} ({})", data.name, data.r#type)
             }
-            EntryKind::Reference(data) => {
-                write!(f, "Reference: {}", data.target_fqn)
+            EntryKind::Reference => {
+                write!(f, "Reference")
             }
         }
     }

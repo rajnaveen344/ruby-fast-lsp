@@ -287,7 +287,7 @@ impl RubyIndex {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
                     // Only return definitions, not references
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference))
                     .collect()
             })
             .filter(|v: &Vec<&Entry>| !v.is_empty())
@@ -306,7 +306,7 @@ impl RubyIndex {
                 ids.iter().any(|id| {
                     self.entries
                         .get(*id)
-                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference(_)))
+                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference))
                 })
             })
             .unwrap_or(false)
@@ -322,7 +322,7 @@ impl RubyIndex {
             let entries: Vec<&Entry> = ids
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
-                .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
+                .filter(|e| !matches!(e.kind, EntryKind::Reference))
                 .collect();
             if entries.is_empty() {
                 None
@@ -407,7 +407,7 @@ impl RubyIndex {
             .map(|ids| {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference))
                     .collect()
             })
             .unwrap_or_default()
@@ -420,7 +420,7 @@ impl RubyIndex {
             .map(|ids| {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
+                    .filter(|e| matches!(e.kind, EntryKind::Reference))
                     .map(|e| e.location.clone())
                     .collect()
             })
@@ -438,7 +438,7 @@ impl RubyIndex {
             let locations: Vec<Location> = ids
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
-                .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
+                .filter(|e| matches!(e.kind, EntryKind::Reference))
                 .map(|e| e.location.clone())
                 .collect();
             if !locations.is_empty() {
@@ -461,7 +461,7 @@ impl RubyIndex {
                 EntryKind::InstanceVariable(_) => "InstanceVariable",
                 EntryKind::ClassVariable(_) => "ClassVariable",
                 EntryKind::GlobalVariable(_) => "GlobalVariable",
-                EntryKind::Reference(_) => "Reference",
+                EntryKind::Reference => "Reference",
             };
             *counts.entry(type_name).or_insert(0) += 1;
         }
@@ -476,9 +476,9 @@ impl RubyIndex {
     /// Add a reference to a FQN
     pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
         let entry = Entry {
-            fqn: fqn.clone(),
+            fqn,
             location,
-            kind: EntryKind::new_reference(fqn),
+            kind: EntryKind::new_reference(),
         };
         self.add_entry(entry);
     }
@@ -778,7 +778,7 @@ impl RubyIndex {
 
     fn add_to_prefix_tree(&mut self, entry: &Entry) {
         // Do not index references in the prefix tree (too many, and not useful for completion)
-        if matches!(entry.kind, EntryKind::Reference(_)) {
+        if matches!(entry.kind, EntryKind::Reference) {
             return;
         }
 
