@@ -11,26 +11,34 @@
 ## Key Dependencies
 
 ### Runtime
+
 - **Concurrency**: parking_lot 0.12.4 for efficient mutexes and locks
+- **Parallelization**: rayon-style custom parallelizer for indexing
 - **File Operations**: walkdir 2.4.0 for workspace traversal
 - **Logging**: log 0.4.20 + env_logger 0.10.0 for structured logging
 - **Error Handling**: anyhow 1.0.75 for error management
 - **CLI**: clap 4.4.0 with derive features for command-line parsing
-- **Data Structures**: trie-rs 0.4.2 for prefix tree lookups
+- **Data Structures**:
+  - slotmap 1.0 for high-performance ID-based storage (interning)
+  - ustr 1.0 for fast, static-lifetime string interning
+  - trie-rs 0.4.2 for prefix tree lookups
 - **Date/Time**: chrono 0.4.31 with serde support
-- **Compression**: flate2 1.0.28 for compressed data handling
+- **Monitoring**: dhat 0.3.2 for heap profiling and memory analysis
 - **Unicode**: unicode-ident 1.0.18 for identifier validation
 
 ### Platform-Specific
+
 - **Unix**: libc 0.2 for process monitoring
 - **Windows**: windows-sys 0.59 for process monitoring
 
 ### AST Visualizer (separate crate)
+
 - **Web Server**: actix-web 4.3.1 + actix-cors 0.6.4
 
 ## Development Tools
 
 - **Testing**:
+
   - insta 1.43.1 for snapshot testing (with json, redactions features)
   - pretty_assertions 1.4.0 for readable test diffs
   - tokio-test 0.4.3 for async testing
@@ -43,6 +51,7 @@
 ## Common Commands
 
 ### Development
+
 ```bash
 # Run the LSP server directly
 cargo run
@@ -70,6 +79,7 @@ cargo clippy
 ```
 
 ### Building
+
 ```bash
 # Debug build
 cargo build
@@ -85,6 +95,7 @@ cross build --release --target aarch64-apple-darwin
 ```
 
 ### AST Visualizer
+
 ```bash
 # Start AST visualizer (default port 8080)
 ./run_ast_visualizer.sh
@@ -94,6 +105,7 @@ cross build --release --target aarch64-apple-darwin
 ```
 
 ### VS Code Extension
+
 ```bash
 # Create VSIX package for current platform
 ./create_vsix.sh --current-platform-only
@@ -108,6 +120,7 @@ cross build --release --target aarch64-apple-darwin
 ## Critical Implementation Notes
 
 ### LSP Position Handling
+
 - **⚠️ CRITICAL**: LSP uses **0-indexed** line and character positions
 - **Common Bug**: Test definitions often use 1-indexed positions by mistake
 - **Position Structure**: `Position { line: 0, character: 0 }` = first line, first character
@@ -115,6 +128,7 @@ cross build --release --target aarch64-apple-darwin
 - **Prism Offsets**: ruby-prism uses byte offsets, must convert to LSP positions
 
 ### Byte Offset to Position Conversion
+
 ```rust
 // Example pattern for conversion
 fn offset_to_position(content: &str, offset: usize) -> Position {
@@ -140,11 +154,13 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 ```
 
 ### FQN (Fully Qualified Name) Convention
+
 - Top-level constants are stored without any artificial prefix (matches Ruby's internal representation)
 - Example: `String` → `String`, `MyModule::MyClass` → `MyModule::MyClass`
 - FQN parsing handles both absolute (`::Foo`) and relative (`Foo`) references
 
 ### Testing Best Practices
+
 - **Snapshot Testing**: Use `cargo insta review` to accept/reject test changes
 - **Position Verification**: Double-check line numbers in test files (0-indexed!)
 - **Fixture Files**: Keep fixtures in `src/test/fixtures/`
@@ -153,6 +169,7 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 ## Build Configuration
 
 ### Release Profile
+
 ```toml
 [profile.release]
 opt-level = "z"    # Optimize for size
@@ -160,10 +177,12 @@ strip = true       # Strip debug symbols
 ```
 
 ### Cross-compilation
+
 - Configured via `Cross.toml` for Linux and Windows targets
 - macOS builds require native macOS environment
 
 ### Workspace Structure
+
 - Multi-crate workspace with main LSP and ast-visualizer crate
 - Shared resolver version 2
 

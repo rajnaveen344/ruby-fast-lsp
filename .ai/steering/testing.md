@@ -37,6 +37,7 @@ Test fixtures are organized in <mcfolder name="fixtures" path="src/test/fixtures
 - **Feature-based grouping**: Organized by LSP capability (goto, references, etc.)
 
 Current fixture categories:
+
 - `goto/` - Go-to-definition test cases
 - Various Ruby language constructs (classes, modules, methods, constants)
 - Cross-file reference scenarios
@@ -50,6 +51,7 @@ The project uses the `insta` crate for snapshot testing, which provides:
 - **Automatic Diff Generation**: Clear visual diffs when test expectations change
 
 Snapshot files are stored in <mcfolder name="snapshots" path="src/test/snapshots"></mcfolder> with descriptive names like:
+
 - `ruby_fast_lsp__test__integration_test__foo_class_def.snap`
 - `ruby_fast_lsp__test__integration_test__value_const_ref.snap`
 
@@ -66,12 +68,13 @@ Tests the "Go to Definition" LSP capability across various Ruby constructs:
 - **Nested namespaces**: Complex constant path resolution (e.g., `Alpha::Beta::Gamma::Foo`)
 
 Example test structure:
+
 ```rust
 #[tokio::test]
 async fn goto_single_file_defs() {
     let harness = TestHarness::new().await;
     harness.open_fixture_dir("goto/const_single.rb").await;
-    
+
     snapshot_definitions(&harness, "goto/const_single.rb", 12, 14, "foo_class_def").await;
 }
 ```
@@ -94,6 +97,24 @@ Focused unit tests for specific AST node processing:
 - **Module node processing**: Ensures correct module handling
 - **Edge cases**: Invalid syntax, empty bodies, deep nesting
 
+#### 4. Simulation Testing (`test/simulation/`)
+
+Advanced testing strategy using property-based testing and deterministic simulation:
+
+- **Consistency Checks**: Ensures that indexing results match expected models after various file operations.
+- **Differential Testing**: Validates that changes to code result in correct incremental index updates.
+- **Concurrency Testing**: Uses `proptest` to find edge cases in multi-threaded indexing.
+
+Example simulation test:
+
+```rust
+#[tokio::test]
+async fn simulation_basic_consistency() {
+    let runner = SimulationRunner::new();
+    runner.run_steps(100).await;
+}
+```
+
 ### Testing Utilities
 
 #### Snapshot Helper Functions
@@ -104,6 +125,7 @@ Two primary snapshot functions provide consistent testing patterns:
 2. **`snapshot_references`**: Captures find-references responses
 
 Both functions:
+
 - Accept file path, line, and character coordinates
 - Execute the corresponding LSP request
 - Normalize file paths for cross-platform compatibility
@@ -112,6 +134,7 @@ Both functions:
 #### Path Normalization
 
 The `relativize_uris` function ensures test portability by:
+
 - Converting absolute file paths to relative `$PROJECT_ROOT` references
 - Handling cross-platform path separators
 - Maintaining consistent snapshot format across development environments
@@ -128,6 +151,7 @@ The test harness supports two fixture loading modes:
 #### Async Test Pattern
 
 All integration tests use the `#[tokio::test]` attribute to support:
+
 - Asynchronous LSP server operations
 - Proper document indexing completion
 - Realistic LSP request/response cycles
@@ -144,6 +168,7 @@ The integration test suite aims to cover:
 ### Current Test Coverage
 
 #### Implemented Features
+
 - ✅ Go-to-definition for classes, modules, constants, methods
 - ✅ Find references for all major Ruby constructs
 - ✅ Single-file and multi-file scenarios
@@ -151,7 +176,9 @@ The integration test suite aims to cover:
 - ✅ Cross-file reference tracking
 
 #### Planned Expansions
+
 Based on the integration test plan, future coverage will include:
+
 - Hover information
 - Code completion
 - Document symbols
@@ -164,16 +191,19 @@ Based on the integration test plan, future coverage will include:
 ### Best Practices
 
 #### Test Organization
+
 - Group tests by LSP capability in separate modules
 - Use descriptive test names that indicate the scenario being tested
 - Maintain clear separation between unit and integration tests
 
 #### Fixture Design
+
 - Keep fixtures minimal and focused on specific scenarios
 - Use realistic Ruby code patterns
 - Include both positive and negative test cases
 
 #### Snapshot Management
+
 - Use descriptive snapshot names that clearly indicate the test scenario
 - Review snapshot changes carefully during test updates
 - Ensure snapshots are platform-independent

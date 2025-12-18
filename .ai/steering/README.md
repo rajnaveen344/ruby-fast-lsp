@@ -29,24 +29,25 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 
 ### ✅ Fully Implemented
 
-- **Workspace Indexing**: Project files, stdlib stubs, gem dependencies
-- **Go-to-definition**: Classes, modules, constants, local variables, methods (basic)
-- **Find references**: Classes, modules, constants, local variables
-- **Semantic tokens**: Full syntax highlighting support
-- **Code completion**: Local variables, constants, classes, modules, snippets (with scope resolution)
-- **Document symbols**: Nested hierarchy with visibility info
-- **Workspace symbols**: Fuzzy search across all indexed symbols
-- **Inlay hints**: End keyword hints for blocks
-- **Code folding**: Classes, modules, methods, control flow, arrays, hashes
-- **Diagnostics**: Syntax errors and warnings from ruby-prism
-- **Code lens**: Module mixin usage (include/prepend/extend counts)
-- **On-type formatting**: Auto-insert `end` keyword
+- **Workspace Indexing**: Two-phase indexing (definitions then references) for project files, stdlib stubs, and gem dependencies. Parallelized for performance.
+- **Go-to-definition**: Classes, modules, constants, local variables, methods.
+- **Find references**: Classes, modules, constants, local variables, methods.
+- **Semantic tokens**: Full syntax highlighting support.
+- **Code completion**: Local variables, constants, classes, modules, snippets (with scope resolution).
+- **Document symbols**: Nested hierarchy with visibility info.
+- **Workspace symbols**: Fuzzy search across all indexed symbols using a prefix tree.
+- **Inlay hints**: End keyword hints for blocks and type hints for local variables.
+- **Code folding**: Classes, modules, methods, control flow, arrays, hashes.
+- **Diagnostics**: Syntax errors from prism and unresolved constant diagnostics.
+- **Code lens**: Module mixin usage (include/prepend/extend counts).
+- **On-type formatting**: Auto-insert `end` keyword.
+- **Simulation Testing**: Property-based testing for LSP consistency.
 
 ### 🚧 In Progress / Limited
 
-- Method definitions/references (limited to current file context)
+- Method references (performance optimizations ongoing)
 - Instance/class/global variables
-- Type inference (basic infrastructure exists)
+- Advanced Type inference (infrastructure is solid, expanding coverage)
 
 ### ❌ Not Yet Implemented
 

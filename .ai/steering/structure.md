@@ -28,9 +28,10 @@
 - `indexer/` - Symbol indexing and workspace tracking
 - `capabilities/` - LSP feature implementations
 - `handlers/` - Request and notification handlers
-- `types/` - Core data structures and types
+- `types/` - Core data structures and interning logic
 - `type_inference/` - Type inference infrastructure
-- `test/` - Integration and unit tests
+- `test/` - Integration, unit, and simulation tests
+- `utils/` - Shared utilities including `parallelizer.rs`
 
 ## Analyzer Module (`src/analyzer_prism/`)
 

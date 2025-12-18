@@ -8,67 +8,47 @@ Ruby Fast LSP is a high-performance Language Server Protocol (LSP) implementatio
 
 - **Workspace Indexing**
 
-  - Automatic indexing of Ruby project files
-  - Ruby stdlib stubs (Ruby 1.8 - 3.4)
-  - Gem dependency indexing
-  - Incremental re-indexing on file changes
+  - Two-phase indexing (definitions → references) to ensure accurate cross-file resolution.
+  - Automatic indexing of Ruby project files, stdlib stubs (1.8 - 3.4), and gem dependencies.
+  - Parallelized processing for high performance on large codebases.
+  - Incremental re-indexing on file changes with document version tracking.
 
 - **Code Navigation**
 
-  - Go-to-definition for classes, modules, constants, local variables
-  - Go-to-definition for methods (basic support)
-  - Find-all-references for classes, modules, constants, local variables
-  - Cross-file navigation support
+  - Fast Go-to-definition for classes, modules, constants, local variables, and methods.
+  - Find-all-references for constants, classes, modules, local variables, and methods.
+  - Cross-file navigation with support for transitive mixins and inheritance.
 
 - **Syntax Highlighting**
 
-  - Semantic token-based highlighting
-  - Full coverage of Ruby language constructs
+  - Semantic token-based highlighting with full coverage of Ruby constructs.
 
 - **Code Completion**
 
-  - Local variable completions
-  - Constant/class/module completions with fuzzy matching
-  - Scope resolution (`::`operator) completions
-  - Context-aware snippets (if, unless, while, def, class, module, each, map, etc.)
-  - Deduplication of completions
+  - Local variable, constant, class, and module completions with fuzzy matching.
+  - Scope resolution (`::`) and context-aware snippets.
+  - Prefix tree (Trie) based lookups for sub-millisecond completion latency.
 
-- **Document Symbols**
+- **Document symbols & Workspace symbols**
 
-  - Nested symbol hierarchy
-  - Classes, modules, methods, constants
-  - Method visibility (public/private/protected)
-  - Method kind (class/instance)
+  - Nested symbol hierarchy with visibility and kind info.
+  - Fuzzy search across the entire workspace with camelCase and subsequence matching.
 
-- **Workspace Symbols**
+- **Inlay Hints & Code Folding**
 
-  - Fuzzy search across all indexed symbols
-  - Camel case matching (e.g., "AppCtrl" → "ApplicationController")
-  - Subsequence matching
-
-- **Inlay Hints**
-
-  - End keyword hints for class/module/method blocks
-
-- **Code Folding**
-
-  - Classes, modules, methods
-  - Control flow (if, while, case, begin)
-  - Multi-line arrays and hashes
-  - Blocks
+  - End keyword hints and local variable type hints.
+  - Comprehensive code folding for all block-level constructs.
 
 - **Diagnostics**
 
-  - Syntax errors from ruby-prism parser
-  - Parser warnings
+  - Syntax errors from the Prism parser and unresolved constant diagnostics post-indexing.
 
 - **Code Lens**
 
-  - Module mixin usage counts (include/prepend/extend)
-  - Class inheritance tracking
+  - Module mixin usage counts and navigation (include/prepend/extend).
 
 - **On-Type Formatting**
-  - Automatic `end` keyword insertion
+  - Instant `end` keyword insertion.
 
 ### Planned Features
 
@@ -76,36 +56,32 @@ Ruby Fast LSP is a high-performance Language Server Protocol (LSP) implementatio
 - Code actions / Quick fixes
 - Rename support
 - Formatting integration (Rubocop)
-- Full method reference support
-- Instance/class/global variable support
-- Type inference
+- Instance/class/global variable enhancements
+- Expanded Type inference (RBS/YARD integration)
 - Meta-programming support
 - Run/Debug support
 
 ## Architecture Philosophy
 
-The project follows a modular architecture with clear separation of concerns:
+The project follows a modular architecture optimized for speed and low memory overhead:
 
-- **Indexer**: Tracks symbol locations across the workspace
+- **Indexer**: High-performance symbol storage.
 
-  - Supports project files, stdlib stubs, and gem dependencies
-  - Uses fully qualified names (FQN) without artificial prefixes
-  - Maintains method-by-name index for quick lookups
+  - **Memory Efficiency**: Interns FQNs and URIs using `SlotMap` and `Ustr` to minimize allocations.
+  - **Two-Phase Protocol**: Indexes definitions first, then references, avoiding race conditions during startup.
+  - **Parallelization**: Utilizes a custom parallelizer for multi-threaded indexing.
 
-- **Analyzer**: Understands Ruby code structure and semantics using Prism parser
+- **Analyzer**: Semantic engine powered by the Prism parser.
 
-  - Visitor-based AST traversal
-  - Scope tracking for namespace resolution
-  - Identifier resolution at cursor positions
+  - Visitor-based AST traversal for modular feature implementation.
+  - Robust scope tracking for complex Ruby namespace resolution.
 
-- **Capabilities**: Implements specific LSP features by combining indexer and analyzer
+- **Capabilities**: LSP features built on top of the Indexer and Analyzer.
 
-  - Each capability is self-contained
-  - Shares common infrastructure for position handling
+  - Decoupled implementations that share common position translation logic.
 
-- **Server**: Coordinates LSP protocol handling and delegates to capabilities
-  - Parent process monitoring for cleanup
-  - Document caching with change tracking
+- **Server**: Async protocol handler.
+  - Efficient document caching and incremental update handling.
 
 ## Target Users
 
