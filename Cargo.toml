@@ -68,7 +68,6 @@ actix-cors = "0.6.4"
 [dev-dependencies]
 tokio-test = "0.4.3"
 pretty_assertions = "1.4.0"
-insta = { version = "1.43.1", features = ["json", "redactions"] }
 tempfile = "3.8.0"
 async-trait = "0.1.73"
 # Property-based testing for deterministic simulation

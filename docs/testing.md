@@ -14,20 +14,43 @@ cargo test
 
 ### Integration Tests
 
-Tests that verify LSP protocol compliance and feature correctness:
+Tests that verify LSP protocol compliance and feature correctness.
+
+Located in `src/test/integration/`:
+
+- `classes/` - Goto and references for classes/modules
+- `methods/` - Goto and references for methods
+- `constants/` - Goto and references for constants
+- `code_lens/` - Module mixin code lenses
+- `inlay_hints/` - Type hints for literals, constructors, YARD
 
 ```bash
-cargo test integration
+cargo test integration --lib
 ```
 
-### Snapshot Tests
+## Inline Test Harness
 
-Uses [insta](https://insta.rs/) for snapshot testing of LSP responses:
+We use a marker-based inline harness similar to rust-analyzer:
 
-```bash
-cargo test snapshots
-cargo insta review  # Review snapshot changes
+```rust
+check_goto(r#"
+<def>class Foo
+end</def>
+
+Foo$0.new  // cursor at $0, expects definition at <def>
+"#).await;
 ```
+
+### Available Check Functions
+
+| Function            | Markers                              | Description     |
+| ------------------- | ------------------------------------ | --------------- |
+| `check_goto`        | `$0`, `<def>...</def>`               | Goto definition |
+| `check_references`  | `$0`, `<ref>...</ref>`               | Find references |
+| `check_type`        | `$0`, `<type:TYPE>`                  | Type inference  |
+| `check_inlay_hints` | `<hint:TYPE>`                        | Inlay hints     |
+| `check_code_lens`   | `<lens:LABEL>`                       | Code lenses     |
+| `check_diagnostics` | `<err>...</err>`, `<warn>...</warn>` | Diagnostics     |
 
 ## Simulation Testing
 

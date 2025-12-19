@@ -15,10 +15,19 @@ pub async fn find_definition_at_position(
     server: &RubyLanguageServer,
     uri: Url,
     position: Position,
-    content: &str,
 ) -> Option<Vec<Location>> {
+    // Get the document content from the server (like references does)
+    let doc = match server.get_doc(&uri) {
+        Some(doc) => doc,
+        None => {
+            info!("Document not found for URI: {}", uri);
+            return None;
+        }
+    };
+    let content = doc.content.clone();
+
     // First, check if we're in a YARD comment type reference
-    if let Some(yard_type) = YardParser::find_type_at_position(content, position) {
+    if let Some(yard_type) = YardParser::find_type_at_position(&content, position) {
         info!("Found YARD type at position: {}", yard_type.type_name);
         let index = server.index.lock();
         return yard_type::find_yard_type_definitions(&yard_type.type_name, &index);
@@ -62,7 +71,7 @@ pub async fn find_definition_at_position(
                 &server.type_narrowing,
                 &uri,
                 position,
-                content,
+                &content,
             )
         }
         Identifier::RubyLocalVariable { name, scope, .. } => {
