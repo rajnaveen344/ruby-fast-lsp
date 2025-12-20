@@ -4,8 +4,8 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::capabilities::{
-    code_lens, completion, definitions, document_symbols, folding_range, formatting, inlay_hints,
-    namespace_tree, references, semantic_tokens, workspace_symbols,
+    code_lens, completion, definitions, document_symbols, folding_range, formatting, hover,
+    inlay_hints, namespace_tree, references, semantic_tokens, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
@@ -156,4 +156,11 @@ pub async fn handle_code_lens(
     let result = code_lens::handle_code_lens(lang_server, params).await;
     info!("[PERF] CodeLens completed in {:?}", start_time.elapsed());
     Ok(result)
+}
+
+pub async fn handle_hover(
+    lang_server: &RubyLanguageServer,
+    params: HoverParams,
+) -> LspResult<Option<Hover>> {
+    Ok(hover::handle_hover(lang_server, params).await)
 }

@@ -66,12 +66,23 @@ pub async fn handle_inlay_hints(
             if let EntryKind::LocalVariable(data) = &entry.kind {
                 let r#type = &data.r#type;
                 let name = &data.name;
-                let final_type = if r#type != &RubyType::Unknown {
+                let from_lvar = if r#type != &RubyType::Unknown {
                     Some(r#type.clone())
                 } else {
+                    None
+                };
+
+                // Try type narrowing if not from lvar
+                let from_narrowing = from_lvar.clone().or_else(|| {
                     let offset = position_to_offset(&content, entry.location.range.start);
                     server.type_narrowing.get_narrowed_type(&uri, name, offset)
-                };
+                });
+
+                // Try method chain assignment inference if still unknown
+                let index = server.index.lock();
+                let final_type =
+                    from_narrowing.or_else(|| infer_type_from_assignment(&content, name, &index));
+                drop(index);
 
                 if let Some(ty) = final_type {
                     if ty != RubyType::Unknown {
@@ -279,4 +290,107 @@ b = a"#;
             "Should have type hint for 'b' (inherited from 'a' via CFG)"
         );
     }
+}
+
+/// Infer type from assignment patterns like `var = Class.new.method`.
+/// Handles constructor calls and method chains.
+fn infer_type_from_assignment(
+    content: &str,
+    var_name: &str,
+    index: &crate::indexer::index::RubyIndex,
+) -> Option<RubyType> {
+    use crate::type_inference::method_resolver::MethodResolver;
+    use crate::types::fully_qualified_name::FullyQualifiedName;
+    use crate::types::ruby_namespace::RubyConstant;
+
+    // Look for assignment pattern: `var_name = ...`
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Look for assignment pattern: `var = ...`
+        if let Some(rest) = trimmed.strip_prefix(var_name) {
+            // Make sure we matched the whole variable name (not just a prefix)
+            let next_char = rest.chars().next();
+            if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
+                continue;
+            }
+
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rhs = rest.trim();
+
+                // Look for .new somewhere in the chain
+                if let Some(new_pos) = rhs.find(".new") {
+                    // Extract the class name before .new
+                    let class_part = rhs[..new_pos].trim();
+
+                    // Validate it's a constant (starts with uppercase)
+                    if !class_part
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    // Parse the constant path
+                    let parts: Vec<_> = class_part
+                        .split("::")
+                        .filter_map(|s| RubyConstant::new(s.trim()).ok())
+                        .collect();
+
+                    if parts.is_empty() {
+                        continue;
+                    }
+
+                    let class_fqn = FullyQualifiedName::Constant(parts.into());
+                    let mut current_type = RubyType::Class(class_fqn);
+
+                    // Check for method chain after .new
+                    let after_new = &rhs[new_pos + 4..]; // Skip ".new"
+
+                    // Skip any arguments after .new
+                    let after_new = if after_new.starts_with('(') {
+                        if let Some(close_paren) = after_new.find(')') {
+                            &after_new[close_paren + 1..]
+                        } else {
+                            after_new
+                        }
+                    } else {
+                        after_new
+                    };
+
+                    // Parse method chain: .method1.method2.method3
+                    for method_call in after_new.split('.') {
+                        let method_name = method_call
+                            .split(|c: char| c == '(' || c.is_whitespace())
+                            .next()
+                            .unwrap_or("")
+                            .trim();
+
+                        if method_name.is_empty() {
+                            continue;
+                        }
+
+                        // Look up the method's return type
+                        if let Some(return_type) = MethodResolver::resolve_method_return_type(
+                            index,
+                            &current_type,
+                            method_name,
+                        ) {
+                            current_type = return_type;
+                        } else {
+                            // Can't resolve this method, stop the chain
+                            break;
+                        }
+                    }
+
+                    return Some(current_type);
+                }
+            }
+        }
+    }
+
+    None
 }

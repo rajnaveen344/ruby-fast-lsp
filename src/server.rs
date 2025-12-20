@@ -495,4 +495,25 @@ impl LanguageServer for RubyLanguageServer {
 
         result
     }
+
+    async fn hover(
+        &self,
+        params: tower_lsp::lsp_types::HoverParams,
+    ) -> LspResult<Option<tower_lsp::lsp_types::Hover>> {
+        info!(
+            "Hover request received for {:?}",
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .path()
+        );
+
+        let start_time = Instant::now();
+        let result = request::handle_hover(self, params).await;
+
+        info!("[PERF] Hover completed in {:?}", start_time.elapsed());
+
+        result
+    }
 }

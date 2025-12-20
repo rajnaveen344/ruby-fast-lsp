@@ -47,7 +47,7 @@ use crate::capabilities::inlay_hints::handle_inlay_hints;
 use crate::handlers::request;
 
 /// All supported tag names for extraction.
-const ALL_TAGS: &[&str] = &["def", "ref", "type", "hint", "lens", "err", "warn"];
+const ALL_TAGS: &[&str] = &["def", "ref", "type", "hint", "lens", "err", "warn", "hover"];
 
 /// Unified check function that runs checks based on tags present in the fixture.
 ///
@@ -75,6 +75,7 @@ pub async fn check(fixture_text: &str) {
     let lens_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "lens").collect();
     let err_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "err").collect();
     let warn_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "warn").collect();
+    let hover_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hover").collect();
 
     // Separate "none" tags (range-scoped negative assertions) from positive assertions
     let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
@@ -142,6 +143,12 @@ pub async fn check(fixture_text: &str) {
     if !lens_tags.is_empty() {
         run_code_lens_check(&server, &uri, &positive_lens_tags, &none_lens_tags).await;
         checks_run.push("lens");
+    }
+
+    // Run hover check if we have hover tags
+    if !hover_tags.is_empty() {
+        run_hover_check(&server, &uri, &hover_tags).await;
+        checks_run.push("hover");
     }
 
     // If no checks were run, that's okay - it means the fixture is valid with no expectations
@@ -568,6 +575,66 @@ async fn run_code_lens_check(
                 .iter()
                 .map(|l| (l.range.start.line, l.command.as_ref().map(|c| &c.title)))
                 .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Run hover check.
+async fn run_hover_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    expected_hovers: &[&Tag],
+) {
+    use crate::capabilities::hover::handle_hover;
+    use tower_lsp::lsp_types::HoverParams;
+
+    for expected in expected_hovers {
+        let expected_label = expected
+            .attributes
+            .get("label")
+            .expect("hover tag missing 'label' attribute");
+
+        let position = expected.range.start;
+
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let hover_result = handle_hover(server, params).await;
+
+        assert!(
+            hover_result.is_some(),
+            "Expected hover at {:?} but got None",
+            position
+        );
+
+        let hover = hover_result.unwrap();
+        let hover_content = match &hover.contents {
+            tower_lsp::lsp_types::HoverContents::Scalar(text) => match text {
+                tower_lsp::lsp_types::MarkedString::String(s) => s.clone(),
+                tower_lsp::lsp_types::MarkedString::LanguageString(ls) => ls.value.clone(),
+            },
+            tower_lsp::lsp_types::HoverContents::Array(arr) => arr
+                .iter()
+                .map(|m| match m {
+                    tower_lsp::lsp_types::MarkedString::String(s) => s.clone(),
+                    tower_lsp::lsp_types::MarkedString::LanguageString(ls) => ls.value.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            tower_lsp::lsp_types::HoverContents::Markup(markup) => markup.value.clone(),
+        };
+
+        assert!(
+            hover_content.contains(expected_label),
+            "Expected hover to contain '{}' at {:?}, got: '{}'",
+            expected_label,
+            position,
+            hover_content
         );
     }
 }

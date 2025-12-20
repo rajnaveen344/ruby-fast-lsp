@@ -106,3 +106,24 @@ user<hint label="User"> = User.new
 //     )
 //     .await;
 // }
+
+/// Inlay hint for variable assigned from method chain.
+#[tokio::test]
+async fn method_chain_result() {
+    check(
+        r#"
+class Builder
+  # @return [Product]
+  def build
+    Product.new
+  end
+end
+
+class Product
+end
+
+product<hint label=": Product"> = Builder.new.build
+"#,
+    )
+    .await;
+}
