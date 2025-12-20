@@ -1,10 +1,12 @@
-use ruby_prism::{CallNode, Node};
+use ruby_prism::CallNode;
 
 use crate::indexer::entry::MixinRef;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
 use crate::analyzer_prism::utils;
+
+mod attr_macros;
 
 impl IndexVisitor {
     /// To index meta-programming
@@ -16,10 +18,14 @@ impl IndexVisitor {
         }
 
         // Optimization: Fast fail for non-mixin methods without string allocation
-        // We only care about include, extend, prepend
+        // We only care about include, extend, prepend, and attr_* macros
         let name_slice = node.name().as_slice();
         match name_slice {
             b"include" | b"extend" | b"prepend" => {}
+            b"attr_reader" | b"attr_writer" | b"attr_accessor" => {
+                self.process_attr_macros(node);
+                return;
+            }
             _ => return,
         }
 
@@ -29,7 +35,7 @@ impl IndexVisitor {
             let mixin_refs: Vec<MixinRef> = arguments
                 .arguments()
                 .iter()
-                .filter_map(|arg| self.resolve_mixin_ref(&arg))
+                .filter_map(|arg| utils::mixin_ref_from_node(&arg))
                 .collect();
 
             if mixin_refs.is_empty() {
@@ -55,8 +61,4 @@ impl IndexVisitor {
     }
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {}
-
-    fn resolve_mixin_ref(&self, node: &Node) -> Option<MixinRef> {
-        utils::mixin_ref_from_node(node)
-    }
 }

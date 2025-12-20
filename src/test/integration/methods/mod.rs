@@ -1,5 +1,6 @@
 //! Integration tests for methods.
 
+mod attrs;
 mod goto;
 mod hover;
 mod inlay_hints;

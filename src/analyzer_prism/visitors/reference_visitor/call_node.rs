@@ -30,19 +30,7 @@ enum ReceiverInfo {
 
 impl ReferenceVisitor {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
-        // Skip if this is a mixin call (include, extend, prepend) as those are handled by index_visitor
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        if matches!(method_name.as_str(), "include" | "extend" | "prepend") {
-            return;
-        }
-
-        // Skip if this is an attribute accessor call
-        if matches!(
-            method_name.as_str(),
-            "attr_reader" | "attr_writer" | "attr_accessor"
-        ) {
-            return;
-        }
 
         // Skip method names that don't follow Ruby method naming conventions
         if !RubyMethod::is_valid_ruby_method_name(&method_name) {

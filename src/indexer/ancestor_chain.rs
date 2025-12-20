@@ -291,6 +291,14 @@ fn build_chain_recursive(
                         {
                             build_chain_recursive(index, &resolved_superclass, chain, visited);
                         }
+                    } else {
+                        // Implicit superclass allows accessing top-level methods (effectively Object methods)
+                        // If we don't have an explicit superclass, and we aren't at ROOT or BasicObject,
+                        // fallback to ROOT to find top-level definitions.
+                        if !fqn.namespace_parts().is_empty() && fqn.to_string() != "BasicObject" {
+                            let root = FullyQualifiedName::Constant(Vec::new());
+                            build_chain_recursive(index, &root, chain, visited);
+                        }
                     }
                 }
                 EntryKind::Module(data) => {
