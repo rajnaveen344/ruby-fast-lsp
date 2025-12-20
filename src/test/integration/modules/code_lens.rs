@@ -1,6 +1,6 @@
 //! Code lens tests for modules.
 
-use crate::test::harness::{check_code_lens, check_no_code_lens};
+use crate::test::harness::check;
 
 // ============================================================================
 // Mixin Tests
@@ -9,7 +9,7 @@ use crate::test::harness::{check_code_lens, check_no_code_lens};
 /// Basic include shows code lens.
 #[tokio::test]
 async fn include_shows_code_lens() {
-    check_code_lens(
+    check(
         r#"
 module MyModule <lens title="include">
 end
@@ -25,7 +25,7 @@ end
 /// Basic prepend shows code lens.
 #[tokio::test]
 async fn prepend_shows_code_lens() {
-    check_code_lens(
+    check(
         r#"
 module MyModule <lens title="prepend">
 end
@@ -41,7 +41,7 @@ end
 /// Basic extend shows code lens.
 #[tokio::test]
 async fn extend_shows_code_lens() {
-    check_code_lens(
+    check(
         r#"
 module MyModule <lens title="extend">
 end
@@ -57,13 +57,15 @@ end
 /// No usages means no code lens.
 #[tokio::test]
 async fn no_usage_no_code_lens() {
-    check_no_code_lens(
+    check(
         r#"
+<lens none>
 module MyModule
 end
 
 class MyClass
 end
+</lens>
 "#,
     )
     .await;
@@ -72,7 +74,7 @@ end
 /// Nested module with qualified include.
 #[tokio::test]
 async fn nested_module_include() {
-    check_code_lens(
+    check(
         r#"
 module Outer
   module Inner <lens title="include">
@@ -90,7 +92,7 @@ end
 /// Multiple mixin types on same module.
 #[tokio::test]
 async fn multiple_mixin_types() {
-    check_code_lens(
+    check(
         r#"
 module MyModule <lens title="include"> <lens title="extend"> <lens title="prepend"> <lens title="class">
 end
@@ -118,7 +120,7 @@ end
 /// Transitive module usage: A -> B -> Class.
 #[tokio::test]
 async fn transitive_module_usage() {
-    check_code_lens(
+    check(
         r#"
 module A <lens title="include"> <lens title="class">
 end
@@ -138,7 +140,7 @@ end
 /// Multiple transitive classes.
 #[tokio::test]
 async fn multiple_transitive_classes() {
-    check_code_lens(
+    check(
         r#"
 module A <lens title="2 include"> <lens title="3 classes">
 end

@@ -61,47 +61,80 @@ For future LSP-specific integration tests:
 
 ## Test Harness Helpers
 
-We provide several helpers in `src/test/harness` to simplify testing LSP features using inline markers in fixtures.
+We provide a unified `check()` function in `src/test/harness` that auto-detects what to verify based on inline markers.
 
-### Diagnostics
+### Unified Check Function (Recommended)
 
-Use `check_diagnostics` to verify both syntax errors and YARD/RBS diagnostics. You can verify the existence of a warning at a specific range, and optionally checks its message.
+Use `check()` for all LSP tests - it determines what to verify from the tags present:
 
 ```rust
-check_diagnostics(r#"
-class Foo
-  # @return <warn message="YARD ... conflicts with RBS ...">[String]</warn>
-  def bar
-    1
-  end
-end
+use crate::test::harness::check;
+
+// Goto definition: $0 cursor + <def> tags
+check(r#"
+<def>class Foo
+end</def>
+
+Foo$0.new
 "#).await;
-```
 
-### Inlay Hints
+// Inlay hints: <hint> tags
+check(r#"x<hint label="String"> = "hello""#).await;
 
-Use `check_inlay_hints` to verify inlay hints at specific positions.
+// Diagnostics: <err>/<warn> tags
+check(r#"class <err>end</err>"#).await;
 
-```rust
-check_inlay_hints(r#"
-x<hint label="Integer"> = 1
-"#).await;
-```
-
-### Code Lenses
-
-Use `check_code_lens` to verify "Code Lenses".
-
-```rust
-check_code_lens(r#"
+// Code lens: <lens> tags
+check(r#"
 module MyModule <lens title="include">
 end
+
+class MyClass
+  include MyModule
+end
+"#).await;
+
+// References: $0 cursor + <ref> tags
+check(r#"
+class <ref>Foo$0</ref>
+end
+
+<ref>Foo</ref>.new
 "#).await;
 ```
 
+### Supported Markers
+
+| Tag                  | Requires `$0` | Purpose                        |
+| -------------------- | ------------- | ------------------------------ |
+| `<def>...</def>`     | Yes           | Expected goto definition range |
+| `<ref>...</ref>`     | Yes           | Expected reference range       |
+| `<type>...</type>`   | Yes           | Expected type at cursor        |
+| `<hint label="...">` | No            | Expected inlay hint            |
+| `<lens title="...">` | No            | Expected code lens             |
+| `<err>...</err>`     | No            | Expected error diagnostic      |
+| `<warn>...</warn>`   | No            | Expected warning diagnostic    |
+
+### The `none` Attribute (Range-Scoped)
+
+Use `none` to assert zero occurrences **within the wrapped range**:
+
 ```rust
-check_goto(r#"
-class Foo; end
-<src>Foo</src>.new
-"#).await;
+// No errors expected in this block
+check(r#"<err none>class Foo; end</err>"#).await;
+
+// No warnings expected in this block
+check(r#"<warn none>def bar; end</warn>"#).await;
+
+// No inlay hints expected in this block
+check(r#"<hint none>FOO = 42</hint>"#).await;
+
+// No code lenses expected in this block
+check(r#"<lens none>module Unused; end</lens>"#).await;
 ```
+
+**Important**: The `none` attribute requires a closing tag (e.g., `</err>`). The assertion only applies to the wrapped range, allowing you to have both positive and negative assertions in the same fixture.
+
+### Internal Functions
+
+The harness has been simplified. Only `check.rs` and `fixture.rs` remain as core modules.

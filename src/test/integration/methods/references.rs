@@ -1,11 +1,11 @@
 //! Find references tests for methods.
 
-use crate::test::harness::check_references;
+use crate::test::harness::check;
 
 /// Find references for instance method.
 #[tokio::test]
 async fn references_instance_method() {
-    check_references(
+    check(
         r#"
 class Greeter
   def greet$0
@@ -23,7 +23,7 @@ end
 /// Find references for top-level method.
 #[tokio::test]
 async fn references_top_level_method() {
-    check_references(
+    check(
         r#"
 def helper$0
 end

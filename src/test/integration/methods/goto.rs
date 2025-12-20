@@ -1,6 +1,6 @@
 //! Goto definition tests for methods.
 
-use crate::test::harness::check_goto;
+use crate::test::harness::check;
 
 // ============================================================================
 // Instance Methods
@@ -9,7 +9,7 @@ use crate::test::harness::check_goto;
 /// Goto definition for instance method call.
 #[tokio::test]
 async fn goto_instance_method() {
-    check_goto(
+    check(
         r#"
 class Greeter
   def <def>greet</def>
@@ -28,7 +28,7 @@ end
 /// Goto definition for method call on instance.
 #[tokio::test]
 async fn goto_method_on_instance() {
-    check_goto(
+    check(
         r#"
 class Foo
   def <def>bar</def>
@@ -49,7 +49,7 @@ Foo.new.bar$0
 /// Goto definition for class method call.
 #[tokio::test]
 async fn goto_class_method() {
-    check_goto(
+    check(
         r#"
 class Utils
   def self.<def>process</def>
@@ -70,7 +70,7 @@ Utils.process$0
 /// Goto definition for method from included module.
 #[tokio::test]
 async fn goto_included_module_method() {
-    check_goto(
+    check(
         r#"
 module Loggable
   def <def>log</def>
@@ -93,7 +93,7 @@ end
 /// Goto definition for method from module included in another module.
 #[tokio::test]
 async fn goto_cross_module_method() {
-    check_goto(
+    check(
         r#"
 module ModuleA
   def <def>method_a</def>
@@ -124,7 +124,7 @@ end
 /// Goto definition for method from parent class.
 #[tokio::test]
 async fn goto_inherited_method() {
-    check_goto(
+    check(
         r#"
 class Parent
   def <def>parent_method</def>
@@ -145,7 +145,7 @@ end
 /// Goto definition for mixin method through inheritance.
 #[tokio::test]
 async fn goto_inherited_mixin_method() {
-    check_goto(
+    check(
         r#"
 module ApiHelpers
   def <def>api_call</def>
@@ -174,7 +174,7 @@ end
 /// Goto definition for top-level method.
 #[tokio::test]
 async fn goto_top_level_method() {
-    check_goto(
+    check(
         r#"
 def <def>helper</def>
   "help"
@@ -193,7 +193,7 @@ helper$0
 /// Goto definition for method inside singleton class.
 #[tokio::test]
 async fn goto_singleton_class_method() {
-    check_goto(
+    check(
         r#"
 class Foo
   class << self
@@ -216,7 +216,7 @@ Foo.singleton_method$0
 /// Goto definition for .new which maps to initialize.
 #[tokio::test]
 async fn goto_constructor_via_new() {
-    check_goto(
+    check(
         r#"
 class Foo
   def <def>initialize</def>

@@ -1,5 +1,6 @@
 //! Core fixture utilities - marker extraction and server setup.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -150,12 +151,17 @@ fn extract_type_tag(text: &str) -> (Option<String>, String) {
 pub struct Tag {
     pub kind: String,
     pub range: Range,
-    pub attributes: std::collections::HashMap<String, String>,
+    pub attributes: HashMap<String, String>,
 }
 
 impl Tag {
     pub fn message(&self) -> Option<String> {
         self.attributes.get("message").cloned()
+    }
+
+    /// Check if this tag asserts "none" (e.g., `<err none>` means expect 0 errors)
+    pub fn is_none(&self) -> bool {
+        self.attributes.contains_key("none")
     }
 }
 
@@ -248,9 +254,15 @@ pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>
 
             // Parse attributes
             let mut attributes = std::collections::HashMap::new();
+            // Match key="value" pairs
             let attr_regex = regex::Regex::new(r#"(\w+)="([^"]*)""#).unwrap();
             for cap in attr_regex.captures_iter(tag_content) {
                 attributes.insert(cap[1].to_string(), cap[2].to_string());
+            }
+            // Also match standalone keywords like "none"
+            let keyword_regex = regex::Regex::new(r#"\b(none)\b"#).unwrap();
+            for cap in keyword_regex.captures_iter(tag_content) {
+                attributes.insert(cap[1].to_string(), "true".to_string());
             }
 
             // Check if it's a known range tag (has matching close tag) or point tag
@@ -346,12 +358,4 @@ pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
     }
 
     (server, uri)
-}
-
-/// Compare ranges exactly.
-pub fn ranges_match(actual: &Range, expected: &Range) -> bool {
-    actual.start.line == expected.start.line
-        && actual.start.character == expected.start.character
-        && actual.end.line == expected.end.line
-        && actual.end.character == expected.end.character
 }

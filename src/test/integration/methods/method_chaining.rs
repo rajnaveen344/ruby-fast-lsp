@@ -2,7 +2,7 @@
 //!
 //! Tests type-aware method lookup for chained method calls like `a.b.c`.
 
-use crate::test::harness::check_goto;
+use crate::test::harness::check;
 
 // ============================================================================
 // Type-Aware Method Chaining
@@ -17,7 +17,7 @@ use crate::test::harness::check_goto;
 /// `Wrapper#unwrap` returns `Inner` (via YARD @return).
 #[tokio::test]
 async fn goto_method_chain_variable_receiver() {
-    check_goto(
+    check(
         r#"
 class Wrapper
   # @return [Inner]
@@ -50,7 +50,7 @@ result = obj.unwrap.process$0
 /// and `.baz` should resolve based on bar's return type.
 #[tokio::test]
 async fn goto_method_chain_from_constructor() {
-    check_goto(
+    check(
         r#"
 class Foo
   # @return [Bar]
@@ -76,7 +76,7 @@ result = obj.bar$0
 /// Tests three levels: `a.foo.bar.baz`
 #[tokio::test]
 async fn goto_method_chain_deep_nesting() {
-    check_goto(
+    check(
         r#"
 class First
   # @return [Second]
@@ -109,7 +109,7 @@ result = a.to_second.to_third.final_method$0
 /// Tests that intermediate variable type is tracked.
 #[tokio::test]
 async fn goto_method_chain_with_intermediate_variable() {
-    check_goto(
+    check(
         r#"
 class Producer
   # @return [Consumer]
@@ -137,7 +137,7 @@ result = consumer.consume$0
 /// incompatible methods (both top-level and other classes).
 #[tokio::test]
 async fn goto_method_chain_assigned_result() {
-    check_goto(
+    check(
         r#"
 class Builder
   # @return [Product]
@@ -170,7 +170,7 @@ product.use$0
 #[tokio::test]
 #[should_panic(expected = "Expected definition at")]
 async fn goto_method_chain_rejects_wrong_type() {
-    check_goto(
+    check(
         r#"
 class Wrapper
   # @return [Inner]

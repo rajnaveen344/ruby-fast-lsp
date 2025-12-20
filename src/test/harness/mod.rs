@@ -1,18 +1,16 @@
 //! Inline test harness for rust-analyzer style tests.
 //!
-//! This module provides:
-//! - Marker extraction utilities (`$0` cursor, `<def>`, `<ref>`, `<type>` tags)
-//! - Check functions for goto definition, references, type inference
-//! - Check functions for inlay hints, diagnostics, code lens
+//! This module provides a unified `check()` function that auto-detects
+//! what to verify based on markers in the fixture.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use crate::test::harness::check_goto;
+//! use crate::test::harness::check;
 //!
 //! #[tokio::test]
 //! async fn goto_class_definition() {
-//!     check_goto(r#"
+//!     check(r#"
 //! <def>class Foo
 //! end</def>
 //!
@@ -21,29 +19,19 @@
 //! }
 //! ```
 
-mod code_lens;
-mod diagnostics;
+mod check;
 mod fixture;
-mod goto;
 mod inlay_hints;
-mod references;
-mod types;
 
-// Re-export check functions
-pub use code_lens::{check_code_lens, check_no_code_lens};
-pub use diagnostics::check_diagnostics;
-pub use goto::check_goto;
-pub use inlay_hints::{
-    check_inlay_hints, check_no_inlay_hints, check_no_inlay_hints_containing, get_hint_label,
-};
-pub use references::check_references;
-pub use types::check_type;
+// Re-export unified check function (the only API)
+pub use check::check;
 
-// Re-export core utilities for tests
+// Re-export core utilities for tests (used internally by check)
 pub use fixture::{
     extract_tags, extract_tags_with_attributes, parse_fixture, setup_with_fixture, InlineFixture,
     Tag, CURSOR_MARKER,
 };
+pub use inlay_hints::get_hint_label;
 
 #[cfg(test)]
 mod tests {

@@ -1,11 +1,11 @@
 //! Goto definition tests for constants.
 
-use crate::test::harness::check_goto;
+use crate::test::harness::check;
 
 /// Goto definition for a simple constant.
 #[tokio::test]
 async fn goto_constant() {
-    check_goto(
+    check(
         r#"
 module MyMod
   <def>VALUE = 42</def>
@@ -22,7 +22,7 @@ end
 /// Goto definition for a qualified constant path.
 #[tokio::test]
 async fn goto_qualified_constant() {
-    check_goto(
+    check(
         r#"
 module Alpha
   module Beta
@@ -39,7 +39,7 @@ puts Alpha::Beta::GAMMA$0
 /// Goto definition for constant in hash value.
 #[tokio::test]
 async fn goto_constant_in_hash() {
-    check_goto(
+    check(
         r#"
 <def>MY_CONST = "value"</def>
 
@@ -52,7 +52,7 @@ hash = { key: MY_CONST$0 }
 /// Goto definition for constant in method default argument.
 #[tokio::test]
 async fn goto_constant_in_default_arg() {
-    check_goto(
+    check(
         r#"
 <def>DEFAULT = 42</def>
 
@@ -66,7 +66,7 @@ end
 /// Goto definition for top-level constant from nested context.
 #[tokio::test]
 async fn goto_toplevel_constant_from_nested() {
-    check_goto(
+    check(
         r#"
 <def>TOP_CONST = "top"</def>
 

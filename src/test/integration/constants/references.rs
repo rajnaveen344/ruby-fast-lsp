@@ -1,11 +1,11 @@
 //! Find references tests for constants.
 
-use crate::test::harness::check_references;
+use crate::test::harness::check;
 
 /// Find references for a constant.
 #[tokio::test]
 async fn references_constant() {
-    check_references(
+    check(
         r#"
 VALUE = 42
 
@@ -19,7 +19,7 @@ x = <ref>VALUE</ref>
 /// Find references for qualified constant.
 #[tokio::test]
 async fn references_qualified_constant() {
-    check_references(
+    check(
         r#"
 module Alpha
   BETA = 100
