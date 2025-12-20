@@ -4,6 +4,7 @@ use ruby_prism::{CallNode, Node};
 use crate::{
     analyzer_prism::utils,
     indexer::{entry::MethodKind, index::UnresolvedEntry},
+    type_inference::ruby_type::RubyType,
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
@@ -131,7 +132,7 @@ impl ReferenceVisitor {
                             self.document.uri.clone(),
                             UnresolvedEntry::method(
                                 method_name.clone(),
-                                Some(receiver_name.clone()),
+                                Some(RubyType::class(&receiver_name)),
                                 message_location,
                             ),
                         );

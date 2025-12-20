@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 
 /// Represents Ruby types in the type inference system
 /// Following Ruby's object model where everything is an object
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RubyType {
     // Built-in Ruby classes (everything is an object in Ruby)
     Class(FullyQualifiedName),

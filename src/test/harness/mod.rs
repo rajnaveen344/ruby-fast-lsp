@@ -26,7 +26,6 @@ mod diagnostics;
 mod fixture;
 mod goto;
 mod inlay_hints;
-pub mod legacy;
 mod references;
 mod types;
 

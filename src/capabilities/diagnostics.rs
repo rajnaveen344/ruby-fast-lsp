@@ -216,24 +216,41 @@ pub fn get_unresolved_diagnostics(
             },
             UnresolvedEntry::Method {
                 name,
-                receiver,
+                receiver_type,
                 location,
             } => {
-                let message = match receiver {
-                    Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
-                    None => format!("Unresolved method `{}`", name),
-                };
+                if let Some(crate::type_inference::ruby_type::RubyType::Unknown) = receiver_type {
+                    Diagnostic {
+                        range: location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unknown-receiver-type".to_string())),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message: format!(
+                            "Cannot determine receiver type for method call `{}`. Definition may be imprecise.",
+                            name
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    }
+                } else {
+                    let message = match receiver_type {
+                        Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
+                        None => format!("Unresolved method `{}`", name),
+                    };
 
-                Diagnostic {
-                    range: location.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("unresolved-method".to_string())),
-                    code_description: None,
-                    source: Some("ruby-fast-lsp".to_string()),
-                    message,
-                    related_information: None,
-                    tags: None,
-                    data: None,
+                    Diagnostic {
+                        range: location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unresolved-method".to_string())),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message,
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    }
                 }
             }
         })

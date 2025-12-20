@@ -72,7 +72,14 @@ pub fn find_method_definitions(
                 debug!("Found receiver type for '{}': {:?}", name, receiver_type);
                 return search_by_name_filtered(method, index, &receiver_type);
             }
-            // Fallback to unfiltered search
+            // Fallback: Check for constructor assignment pattern (var = Class.new)
+            if let Some(receiver_type) =
+                infer_type_from_constructor_assignment(content, name, index)
+            {
+                debug!("Found constructor type for '{}': {:?}", name, receiver_type);
+                return search_by_name_filtered(method, index, &receiver_type);
+            }
+            // Final fallback to unfiltered search
             search_by_name(method, index)
         }
         MethodReceiver::MethodCall {
@@ -136,7 +143,15 @@ fn resolve_method_call_type(
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
             let offset = position_to_offset(content, position);
-            type_narrowing.get_narrowed_type(uri, name, offset)?
+            // Try type narrowing first
+            if let Some(ty) = type_narrowing.get_narrowed_type(uri, name, offset) {
+                ty
+            } else if let Some(ty) = infer_type_from_constructor_assignment(content, name, index) {
+                // Fallback: constructor assignment pattern
+                ty
+            } else {
+                return None;
+            }
         }
         MethodReceiver::MethodCall {
             inner_receiver: nested_receiver,
@@ -186,6 +201,113 @@ fn inner_receiver_to_string(receiver: &MethodReceiver) -> String {
         ),
         MethodReceiver::Expression => "<expr>".to_string(),
     }
+}
+
+/// Look for a constructor or method chain assignment pattern in the source
+/// and return the inferred type if found.
+///
+/// Handles patterns like:
+/// - `var = ClassName.new` → returns ClassName
+/// - `var = ClassName.new.method` → looks up method's return type
+fn infer_type_from_constructor_assignment(
+    content: &str,
+    var_name: &str,
+    index: &RubyIndex,
+) -> Option<RubyType> {
+    use crate::type_inference::method_resolver::MethodResolver;
+
+    // Pattern: `var_name = SomeClass.new` or `var_name = Some::Class.new.method`
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Look for assignment pattern: `var = ...`
+        if let Some(rest) = trimmed.strip_prefix(var_name) {
+            // Make sure we matched the whole variable name (not just a prefix)
+            let next_char = rest.chars().next();
+            if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
+                continue;
+            }
+
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rhs = rest.trim();
+
+                // Look for .new somewhere in the chain
+                if let Some(new_pos) = rhs.find(".new") {
+                    // Extract the class name before .new
+                    let class_part = rhs[..new_pos].trim();
+
+                    // Validate it's a constant (starts with uppercase)
+                    if !class_part
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    // Parse the constant path
+                    let parts: Vec<_> = class_part
+                        .split("::")
+                        .filter_map(|s| RubyConstant::new(s.trim()).ok())
+                        .collect();
+
+                    if parts.is_empty() {
+                        continue;
+                    }
+
+                    let class_fqn = FullyQualifiedName::Constant(parts);
+                    let mut current_type = RubyType::Class(class_fqn);
+
+                    // Check for method chain after .new
+                    // e.g.: "Class.new.build" or "Class.new(args).build.finalize"
+                    let after_new = &rhs[new_pos + 4..]; // Skip ".new"
+
+                    // Skip any arguments after .new
+                    let after_new = if after_new.starts_with('(') {
+                        // Find matching closing paren
+                        if let Some(close_paren) = after_new.find(')') {
+                            &after_new[close_paren + 1..]
+                        } else {
+                            after_new
+                        }
+                    } else {
+                        after_new
+                    };
+
+                    // Parse method chain: .method1.method2.method3
+                    for method_call in after_new.split('.') {
+                        let method_name = method_call
+                            .split(|c: char| c == '(' || c.is_whitespace())
+                            .next()
+                            .unwrap_or("")
+                            .trim();
+
+                        if method_name.is_empty() {
+                            continue;
+                        }
+
+                        // Look up the method's return type
+                        if let Some(return_type) = MethodResolver::resolve_method_return_type(
+                            index,
+                            &current_type,
+                            method_name,
+                        ) {
+                            current_type = return_type;
+                        } else {
+                            // Can't resolve this method, stop the chain
+                            break;
+                        }
+                    }
+
+                    return Some(current_type);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Search for methods by name, filtered by receiver type

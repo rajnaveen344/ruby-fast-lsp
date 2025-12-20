@@ -1,12 +1,14 @@
-//! Integration tests organized by entity and capability.
+//! Integration tests organized by tested entity.
 //!
 //! Structure:
-//! - classes/, constants/, methods/ - goto and references tests
-//! - code_lens/ - module mixin code lenses
-//! - inlay_hints/ - type hints for literals, constructors, YARD
+//! - classes/ - Tests for classes (goto, references)
+//! - constants/ - Tests for constants
+//! - methods/ - Tests for methods (goto, references, inlay hints)
+//! - modules/ - Tests for modules (code lens for mixins)
+//! - variables/ - Tests for variables (inlay hints)
 
 mod classes;
-mod code_lens;
 mod constants;
-mod inlay_hints;
 mod methods;
+mod modules;
+mod variables;

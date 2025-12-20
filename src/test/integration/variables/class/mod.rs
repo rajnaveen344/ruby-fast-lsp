@@ -1,0 +1,1 @@
+//! Class variable tests.

@@ -10,6 +10,8 @@ use tower_lsp::lsp_types::{Location, Url};
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
+use crate::type_inference::ruby_type::RubyType;
+
 // ============================================================================
 // UnresolvedEntry
 // ============================================================================
@@ -34,9 +36,10 @@ pub enum UnresolvedEntry {
     Method {
         /// The method name as written in the source
         name: String,
-        /// The receiver type if known (e.g., "Foo::Bar" for `Foo::Bar.method`)
-        /// None for method calls without explicit receiver
-        receiver: Option<String>,
+        /// The receiver type if known
+        /// None for method calls without explicit receiver (implicit self)
+        /// Some(RubyType::Unknown) means explicit receiver with unknown type
+        receiver_type: Option<RubyType>,
         /// Location where the method was called
         location: Location,
     },
@@ -62,12 +65,12 @@ impl std::hash::Hash for UnresolvedEntry {
             }
             UnresolvedEntry::Method {
                 name,
-                receiver,
+                receiver_type,
                 location,
             } => {
                 1u8.hash(state); // discriminant
                 name.hash(state);
-                receiver.hash(state);
+                receiver_type.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -102,10 +105,10 @@ impl UnresolvedEntry {
     }
 
     /// Create an unresolved method entry
-    pub fn method(name: String, receiver: Option<String>, location: Location) -> Self {
+    pub fn method(name: String, receiver_type: Option<RubyType>, location: Location) -> Self {
         Self::Method {
             name,
-            receiver,
+            receiver_type,
             location,
         }
     }

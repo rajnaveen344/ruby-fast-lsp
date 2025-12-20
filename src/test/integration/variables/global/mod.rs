@@ -1,0 +1,1 @@
+//! Global variable tests.
