@@ -139,8 +139,8 @@ impl IndexVisitor {
             (None, Vec::new())
         };
 
-        // If no YARD return type, try to look up in RBS
-        let return_type = yard_return_type.or_else(|| {
+        // Try to look up in RBS
+        let rbs_return_type = {
             let class_name = namespace_parts
                 .iter()
                 .map(|c| c.to_string())
@@ -153,7 +153,10 @@ impl IndexVisitor {
                 &method_name_str,
                 is_singleton,
             )
-        });
+        };
+
+        // Prioritize RBS over YARD
+        let return_type = rbs_return_type.or(yard_return_type);
 
         let entry = {
             let mut index = self.index.lock();

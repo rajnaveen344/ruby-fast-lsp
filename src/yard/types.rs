@@ -98,12 +98,36 @@ pub struct YardReturn {
     pub types: Vec<String>,
     /// Description of the return value
     pub description: Option<String>,
+    /// The range of the @return tag in the source (for diagnostics)
+    pub range: Option<Range>,
+    /// The range of just the [Type] portion (for type-specific diagnostics)
+    pub types_range: Option<Range>,
 }
 
 impl YardReturn {
     /// Create a new YARD return type
     pub fn new(types: Vec<String>, description: Option<String>) -> Self {
-        Self { types, description }
+        Self {
+            types,
+            description,
+            range: None,
+            types_range: None,
+        }
+    }
+
+    /// Create a new YARD return type with ranges
+    pub fn with_ranges(
+        types: Vec<String>,
+        description: Option<String>,
+        range: Range,
+        types_range: Range,
+    ) -> Self {
+        Self {
+            types,
+            description,
+            range: Some(range),
+            types_range: Some(types_range),
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 //! Code lens check function using inline markers.
 //!
 //! Markers:
-//! - `<lens:LABEL>` - expected code lens containing LABEL on this line
+//! - `<lens title="LABEL">` - expected code lens containing LABEL on this line
 
 use std::sync::Arc;
 
@@ -12,45 +12,22 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 
+use super::fixture::extract_tags_with_attributes;
 use crate::capabilities::code_lens::handle_code_lens;
 use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 
-/// Extract lens markers from text.
-/// Returns (expected_lenses, clean_content) where expected_lenses is [(line, expected_label)]
-fn extract_lens_markers(text: &str) -> (Vec<(u32, String)>, String) {
-    let mut lenses = Vec::new();
-    let mut clean_lines = Vec::new();
-
-    for (line_num, line) in text.lines().enumerate() {
-        // Look for <lens:LABEL> marker
-        if let Some(start) = line.find("<lens:") {
-            if let Some(end) = line[start..].find('>') {
-                let lens_label = &line[start + 6..start + end];
-                lenses.push((line_num as u32, lens_label.to_string()));
-                // Remove the marker from the line
-                let clean_line = format!("{}{}", &line[..start], &line[start + end + 1..]);
-                clean_lines.push(clean_line);
-                continue;
-            }
-        }
-        clean_lines.push(line.to_string());
-    }
-
-    (lenses, clean_lines.join("\n"))
-}
-
 /// Check that code lenses match expected markers.
 ///
 /// # Markers
-/// - `<lens:LABEL>` - expected code lens containing LABEL on this line
+/// - `<lens title="LABEL">` - expected code lens containing LABEL on this line
 ///
 /// # Example
 ///
 /// ```ignore
 /// check_code_lens(r#"
-/// module MyModule <lens:1 include>
+/// module MyModule <lens title="1 include">
 /// end
 ///
 /// class MyClass
@@ -59,12 +36,18 @@ fn extract_lens_markers(text: &str) -> (Vec<(u32, String)>, String) {
 /// "#).await;
 /// ```
 pub async fn check_code_lens(fixture_text: &str) {
-    let (expected_lenses, content) = extract_lens_markers(fixture_text);
+    let (expected_lenses, content) = extract_tags_with_attributes(fixture_text, &["lens"]);
     let lenses = get_code_lenses(&content).await;
 
-    for (expected_line, expected_label) in &expected_lenses {
+    for expected in &expected_lenses {
+        let expected_label = expected
+            .attributes
+            .get("title")
+            .expect("lens tag missing 'title' attribute");
+        let expected_line = expected.range.start.line;
+
         let found = lenses.iter().any(|lens| {
-            if lens.range.start.line != *expected_line {
+            if lens.range.start.line != expected_line {
                 return false;
             }
             lens.command
@@ -87,7 +70,7 @@ pub async fn check_code_lens(fixture_text: &str) {
 }
 
 /// Get code lenses for content (no markers).
-pub async fn get_code_lenses(content: &str) -> Vec<CodeLens> {
+async fn get_code_lenses(content: &str) -> Vec<CodeLens> {
     let server = RubyLanguageServer::default();
     let _ = server.initialize(InitializeParams::default()).await;
 
@@ -142,7 +125,7 @@ mod tests {
     async fn test_code_lens_with_marker() {
         check_code_lens(
             r#"
-module MyModule <lens:include>
+module MyModule <lens title="include">
 end
 
 class MyClass

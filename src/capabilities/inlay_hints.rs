@@ -169,19 +169,17 @@ pub async fn handle_inlay_hints(
                 }
 
                 // Generate return type hint at the end of the method signature
-                // Priority: YARD documentation > inferred return type
-                let return_type_str = yard_doc
+                // Priority: Inferred/RBS return type > YARD documentation
+                let return_type_str = return_type
                     .as_ref()
-                    .and_then(|doc| doc.format_return_type())
-                    .or_else(|| {
-                        return_type.as_ref().and_then(|rt| {
-                            if *rt != RubyType::Unknown {
-                                Some(rt.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    });
+                    .and_then(|rt| {
+                        if *rt != RubyType::Unknown {
+                            Some(rt.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| yard_doc.as_ref().and_then(|doc| doc.format_return_type()));
 
                 if let (Some(type_str), Some(pos)) = (return_type_str, return_type_position) {
                     let hint = InlayHint {

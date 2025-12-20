@@ -183,6 +183,107 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
                 );
             }
         }
+
+        // Check for return type mismatch with RBS
+        if !yard_doc.returns.is_empty() {
+            if let EntryKind::Method(data) = &entry.kind {
+                // Get owner class/module name
+                if let crate::types::fully_qualified_name::FullyQualifiedName::Constant(parts) =
+                    &data.owner
+                {
+                    let class_name = parts
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+
+                    let method_name = data.name.get_name();
+                    let is_singleton = matches!(
+                        data.name.get_kind(),
+                        crate::indexer::entry::MethodKind::Class
+                    );
+
+                    if let Some(rbs_type) =
+                        crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type(
+                            &class_name,
+                            &method_name,
+                            is_singleton,
+                        )
+                    {
+                        // Check if any YARD type matches the RBS type
+                        // This is a simplified check. We verify if the RBS type is NOT represented in YARD.
+                        // Ideally we check compatibility (is_subtype_of), but here we check for blatant conflict.
+
+                        let yard_types_str: Vec<String> = yard_doc
+                            .returns
+                            .iter()
+                            .flat_map(|r| r.types.clone())
+                            .collect();
+
+                        // Heuristic: If RBS returns Integer, look for "Integer" in YARD types.
+                        // First, basic debug string check.
+
+                        // Better approach: convert YARD types to RubyType and check equality/subtype?
+                        // But YARD types might be "String", "nil", etc.
+                        let yard_ruby_types = YardTypeConverter::convert_multiple(&yard_types_str);
+
+                        // Simple conflict check:
+                        // If we have RBS type, and YARD says something completely different.
+                        // Example: RBS=Integer, YARD=String.
+
+                        // Let's use string based comparison of the top-level type for now as diagnostic MVP.
+                        // Actually, let's use the ruby_type comparison if possible.
+
+                        // If RBS type is known (not Unknown)
+                        if rbs_type != crate::type_inference::ruby_type::RubyType::Unknown {
+                            // Check if yard_ruby_types represents the same thing.
+                            // Example: RBS=Integer, YARD=Integer -> OK.
+
+                            // Since we don't have perfect equality check yet for Union vs Single,
+                            // let's do a strict check: if RBS type is NOT in the YARD types.
+
+                            // Warning: This might be flaky if YARD uses "Array<String>" and RBS uses "Array[String]" (generic syntax).
+                            // We should rely on `RubyType` comparison.
+
+                            // Construct a warning if they are definitely different.
+                            // For this task, specifically checking the "String" vs "Integer" mismatch from requirements.
+
+                            if yard_ruby_types != rbs_type {
+                                // Additional safety: allows generic mismatches if base type matches?
+                                // For now, strict inequality.
+
+                                // Only emit if we have a valid range for the return tag
+                                if let Some(first_return) = yard_doc.returns.first() {
+                                    // Use types_range or range
+                                    if let Some(range) =
+                                        first_return.types_range.or(first_return.range)
+                                    {
+                                        let diagnostic = Diagnostic {
+                                            range,
+                                            severity: Some(DiagnosticSeverity::WARNING),
+                                            code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                                                "yard-rbs-mismatch".to_string(),
+                                            )),
+                                            code_description: None,
+                                            source: Some("ruby-fast-lsp".to_string()),
+                                            message: format!(
+                                                "YARD return type '{}' conflicts with RBS type '{}'",
+                                                yard_ruby_types, // formatted debug representation
+                                                rbs_type
+                                            ),
+                                            related_information: None,
+                                            tags: None,
+                                            data: None,
+                                        };
+                                        diagnostics.push(diagnostic);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     diagnostics

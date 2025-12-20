@@ -1,6 +1,6 @@
 //! Code lens tests for modules.
 
-use crate::test::harness::{check_code_lens, check_no_code_lens, get_code_lenses};
+use crate::test::harness::{check_code_lens, check_no_code_lens};
 
 // ============================================================================
 // Mixin Tests
@@ -11,7 +11,7 @@ use crate::test::harness::{check_code_lens, check_no_code_lens, get_code_lenses}
 async fn include_shows_code_lens() {
     check_code_lens(
         r#"
-module MyModule <lens:include>
+module MyModule <lens title="include">
 end
 
 class MyClass
@@ -27,7 +27,7 @@ end
 async fn prepend_shows_code_lens() {
     check_code_lens(
         r#"
-module MyModule <lens:prepend>
+module MyModule <lens title="prepend">
 end
 
 class MyClass
@@ -43,7 +43,7 @@ end
 async fn extend_shows_code_lens() {
     check_code_lens(
         r#"
-module MyModule <lens:extend>
+module MyModule <lens title="extend">
 end
 
 class MyClass
@@ -75,7 +75,7 @@ async fn nested_module_include() {
     check_code_lens(
         r#"
 module Outer
-  module Inner <lens:include>
+  module Inner <lens title="include">
   end
 end
 
@@ -90,9 +90,9 @@ end
 /// Multiple mixin types on same module.
 #[tokio::test]
 async fn multiple_mixin_types() {
-    let lenses = get_code_lenses(
+    check_code_lens(
         r#"
-module MyModule
+module MyModule <lens title="include"> <lens title="extend"> <lens title="prepend"> <lens title="class">
 end
 
 class MyClass
@@ -109,16 +109,6 @@ end
 "#,
     )
     .await;
-
-    let titles: Vec<String> = lenses
-        .iter()
-        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
-        .collect();
-
-    assert!(titles.iter().any(|t| t.contains("include")));
-    assert!(titles.iter().any(|t| t.contains("extend")));
-    assert!(titles.iter().any(|t| t.contains("prepend")));
-    assert!(titles.iter().any(|t| t.contains("class")));
 }
 
 // ============================================================================
@@ -128,9 +118,9 @@ end
 /// Transitive module usage: A -> B -> Class.
 #[tokio::test]
 async fn transitive_module_usage() {
-    let lenses = get_code_lenses(
+    check_code_lens(
         r#"
-module A
+module A <lens title="include"> <lens title="class">
 end
 
 module B
@@ -143,37 +133,14 @@ end
 "#,
     )
     .await;
-
-    // Module A should have code lens (used in B, transitively in MyClass)
-    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| l.range.start.line == 1).collect();
-    assert!(
-        module_a_lenses.len() >= 2,
-        "Module A should have include and class code lenses"
-    );
-
-    let module_a_titles: Vec<String> = module_a_lenses
-        .iter()
-        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
-        .collect();
-
-    assert!(
-        module_a_titles.iter().any(|t| t.contains("include")),
-        "Expected include lens for A, got: {:?}",
-        module_a_titles
-    );
-    assert!(
-        module_a_titles.iter().any(|t| t.contains("class")),
-        "Expected class lens for A, got: {:?}",
-        module_a_titles
-    );
 }
 
 /// Multiple transitive classes.
 #[tokio::test]
 async fn multiple_transitive_classes() {
-    let lenses = get_code_lenses(
+    check_code_lens(
         r#"
-module A
+module A <lens title="2 include"> <lens title="3 classes">
 end
 
 module B
@@ -194,24 +161,4 @@ end
 "#,
     )
     .await;
-
-    // Module A: used in B and Class3 directly, transitively in Class1 and Class2
-    let module_a_lenses: Vec<_> = lenses.iter().filter(|l| l.range.start.line == 1).collect();
-
-    let module_a_titles: Vec<String> = module_a_lenses
-        .iter()
-        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
-        .collect();
-
-    // Should show 2 includes (B and Class3) and 3 classes
-    assert!(
-        module_a_titles.iter().any(|t| t == "2 include"),
-        "Expected '2 include' for A, got: {:?}",
-        module_a_titles
-    );
-    assert!(
-        module_a_titles.iter().any(|t| t == "3 classes"),
-        "Expected '3 classes' for A, got: {:?}",
-        module_a_titles
-    );
 }

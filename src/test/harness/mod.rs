@@ -30,15 +30,20 @@ mod references;
 mod types;
 
 // Re-export check functions
-pub use code_lens::{check_code_lens, check_no_code_lens, get_code_lenses};
-pub use diagnostics::{check_diagnostics, check_no_diagnostics, get_diagnostics};
+pub use code_lens::{check_code_lens, check_no_code_lens};
+pub use diagnostics::check_diagnostics;
 pub use goto::check_goto;
-pub use inlay_hints::{check_inlay_hints, get_hint_label, get_inlay_hints};
+pub use inlay_hints::{
+    check_inlay_hints, check_no_inlay_hints, check_no_inlay_hints_containing, get_hint_label,
+};
 pub use references::check_references;
 pub use types::check_type;
 
 // Re-export core utilities for tests
-pub use fixture::{parse_fixture, setup_with_fixture, InlineFixture, CURSOR_MARKER};
+pub use fixture::{
+    extract_tags, extract_tags_with_attributes, parse_fixture, setup_with_fixture, InlineFixture,
+    Tag, CURSOR_MARKER,
+};
 
 #[cfg(test)]
 mod tests {

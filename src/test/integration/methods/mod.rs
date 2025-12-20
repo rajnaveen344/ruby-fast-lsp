@@ -4,3 +4,4 @@ mod goto;
 mod inlay_hints;
 mod method_chaining;
 mod references;
+mod type_mismatch;

@@ -19,6 +19,7 @@ The `fixtures/` directory contains various Ruby files that test different aspect
 - Blocks and procs
 
 Additionally, there are LSP-specific fixtures for testing:
+
 - Definition/goto functionality
 - References
 - Symbols
@@ -57,3 +58,50 @@ For future LSP-specific integration tests:
 1. Focus on testing the integration between our Ruby indexing/parsing and the LSP protocol
 2. Avoid duplicating tests already covered by the `tower_lsp` crate
 3. Use the provided fixtures to test specific LSP features like definition, references, etc.
+
+## Test Harness Helpers
+
+We provide several helpers in `src/test/harness` to simplify testing LSP features using inline markers in fixtures.
+
+### Diagnostics
+
+Use `check_diagnostics` to verify both syntax errors and YARD/RBS diagnostics. You can verify the existence of a warning at a specific range, and optionally checks its message.
+
+```rust
+check_diagnostics(r#"
+class Foo
+  # @return <warn message="YARD ... conflicts with RBS ...">[String]</warn>
+  def bar
+    1
+  end
+end
+"#).await;
+```
+
+### Inlay Hints
+
+Use `check_inlay_hints` to verify inlay hints at specific positions.
+
+```rust
+check_inlay_hints(r#"
+x<hint label="Integer"> = 1
+"#).await;
+```
+
+### Code Lenses
+
+Use `check_code_lens` to verify "Code Lenses".
+
+```rust
+check_code_lens(r#"
+module MyModule <lens title="include">
+end
+"#).await;
+```
+
+```rust
+check_goto(r#"
+class Foo; end
+<src>Foo</src>.new
+"#).await;
+```

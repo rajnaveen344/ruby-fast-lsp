@@ -427,7 +427,32 @@ impl YardParser {
         } else if let Some(caps) = RETURN_REGEX.captures(line) {
             let types = parse_type_list(caps.get(1).map(|m| m.as_str()).unwrap_or(""));
             let desc = non_empty_string(caps.get(2).map(|m| m.as_str().trim()));
-            doc.returns.push(YardReturn::new(types, desc));
+
+            let types_range = if track_positions {
+                caps.get(1).map(|m| {
+                    let bracket_start = m.start().saturating_sub(1); // include '['
+                    let bracket_end = m.end() + 1; // include ']'
+                    Range {
+                        start: Position {
+                            line: line_info.line_number,
+                            character: line_info.content_start_char + bracket_start as u32,
+                        },
+                        end: Position {
+                            line: line_info.line_number,
+                            character: line_info.content_start_char + bracket_end as u32,
+                        },
+                    }
+                })
+            } else {
+                None
+            };
+
+            if let (Some(r), Some(tr)) = (line_range, types_range) {
+                doc.returns
+                    .push(YardReturn::with_ranges(types, desc, r, tr));
+            } else {
+                doc.returns.push(YardReturn::new(types, desc));
+            }
         } else if let Some(caps) = YIELD_PARAM_REGEX.captures(line) {
             let name = caps
                 .get(1)
