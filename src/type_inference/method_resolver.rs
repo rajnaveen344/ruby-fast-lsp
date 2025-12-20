@@ -310,6 +310,8 @@ impl MethodResolver {
             );
 
             // Search through the ancestor chain for the method
+            let mut found_return_types = Vec::new();
+
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     // Find method that belongs to any class in the ancestor chain
@@ -320,12 +322,19 @@ impl MethodResolver {
                             // Check if owner is in ancestor chain
                             if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
-                                    return Some(rt.clone());
+                                    found_return_types.push(rt.clone());
+                                } else {
+                                    // If method is found but has no return type, treat as Unknown
+                                    found_return_types.push(RubyType::Unknown);
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            if !found_return_types.is_empty() {
+                return Some(RubyType::union(found_return_types));
             }
 
             // Try instance method if class method not found (and vice versa)
@@ -346,12 +355,18 @@ impl MethodResolver {
                             // Check if owner is in ancestor chain
                             if *owner == owner_fqn || ancestors.contains(owner) {
                                 if let Some(rt) = return_type {
-                                    return Some(rt.clone());
+                                    found_return_types.push(rt.clone());
+                                } else {
+                                    found_return_types.push(RubyType::Unknown);
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            if !found_return_types.is_empty() {
+                return Some(RubyType::union(found_return_types));
             }
         }
 
@@ -647,10 +662,12 @@ mod tests {
         let user_instance = RubyType::Class(user_fqn);
         let result = resolver.lookup_method_return_type(&user_instance, "unknown_return");
 
-        assert!(
-            result.is_none(),
-            "Should return None for method without return type"
-        );
+        // With union support, we return Some(Unknown) instead of None
+        // effectively treating untyped methods as returning "Unknown"
+        match result {
+            Some(RubyType::Unknown) => {}
+            _ => panic!("Expected Some(Unknown), got {:?}", result),
+        }
     }
 
     #[test]

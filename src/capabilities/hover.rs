@@ -43,27 +43,9 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
     let hover_text = match &identifier {
         Identifier::RubyLocalVariable { name, .. } => {
             // Look up type from document lvars
-            let type_str = {
-                let docs = server.docs.lock();
-                if let Some(doc_arc) = docs.get(&uri) {
-                    let doc = doc_arc.read();
-                    if let Some(entries) = doc.get_local_var_entries(scope_id) {
-                        let found_type = entries.iter().find_map(|entry| {
-                            if let EntryKind::LocalVariable(data) = &entry.kind {
-                                if &data.name == name && data.r#type != RubyType::Unknown {
-                                    return Some(data.r#type.to_string());
-                                }
-                            }
-                            None
-                        });
-                        found_type
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
+            let offset = crate::utils::position_to_offset(&content, position);
+            let type_str = get_local_variable_type(server, &uri, name, scope_id, &content, offset)
+                .map(|t| t.to_string());
 
             // If not found in lvars, try type narrowing engine
             let type_from_narrowing = type_str.or_else(|| {
@@ -118,7 +100,11 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             }
         }
 
-        Identifier::RubyMethod { iden, receiver, .. } => {
+        Identifier::RubyMethod {
+            iden,
+            receiver,
+            namespace,
+        } => {
             let method_name = iden.to_string();
 
             // Special handling for .new - return the class instance type
@@ -141,14 +127,63 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
             let index = server.index.lock();
 
-            // Search file entries for method with return type
-            let return_type = index.file_entries(&uri).iter().find_map(|entry| {
-                if let EntryKind::Method(data) = &entry.kind {
-                    if data.name.to_string() == method_name {
-                        return data.return_type.as_ref().map(|t| t.to_string());
+            // Resolve receiver type
+            let receiver_type = match receiver {
+                crate::analyzer_prism::MethodReceiver::None
+                | crate::analyzer_prism::MethodReceiver::SelfReceiver => {
+                    // Implicit self or explicit self
+                    if namespace.is_empty() {
+                        RubyType::class("Object")
+                    } else {
+                        // Assume instance method context for now (TODO: Handle singleton methods)
+                        let fqn = FullyQualifiedName::from(namespace.clone());
+                        RubyType::Class(fqn)
                     }
                 }
-                None
+                crate::analyzer_prism::MethodReceiver::Constant(path) => {
+                    // Constant receiver (e.g. valid class/module)
+                    // Treat as ClassReference
+                    let fqn = FullyQualifiedName::Constant(path.clone().into());
+                    RubyType::ClassReference(fqn)
+                }
+                crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
+                    let offset = crate::utils::position_to_offset(&content, position);
+                    get_local_variable_type(server, &uri, name, scope_id, &content, offset)
+                        .unwrap_or(RubyType::Unknown)
+                }
+                // TODO: Handle other receiver types (InstanceVar, chains, etc)
+                _ => RubyType::Unknown,
+            };
+
+            // Use MethodResolver to find return type
+            let return_type =
+                crate::type_inference::method_resolver::MethodResolver::resolve_method_return_type(
+                    &index,
+                    &receiver_type,
+                    &method_name,
+                );
+
+            // Fallback: Naive search in file if resolution fails (legacy behavior)
+            // Now updated to collect ALL matches in the file and union them
+            let return_type = return_type.or_else(|| {
+                let local_types: Vec<RubyType> = index
+                    .file_entries(&uri)
+                    .iter()
+                    .filter_map(|entry| {
+                        if let EntryKind::Method(data) = &entry.kind {
+                            if data.name.to_string() == method_name {
+                                return data.return_type.clone();
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+
+                if !local_types.is_empty() {
+                    Some(RubyType::union(local_types))
+                } else {
+                    None
+                }
             });
 
             match return_type {
@@ -317,6 +352,51 @@ fn infer_type_from_assignment(
                 }
             }
         }
+    }
+
+    None
+}
+
+/// Helper to resolve local variable type
+fn get_local_variable_type(
+    server: &RubyLanguageServer,
+    uri: &tower_lsp::lsp_types::Url,
+    name: &str,
+    scope_id: crate::types::scope::LVScopeId,
+    content: &str,
+    offset: usize,
+) -> Option<RubyType> {
+    use crate::indexer::entry::entry_kind::EntryKind;
+
+    // 1. Check document lvars
+    {
+        let docs = server.docs.lock();
+        if let Some(doc_arc) = docs.get(uri) {
+            let doc = doc_arc.read();
+            if let Some(entries) = doc.get_local_var_entries(scope_id) {
+                let found_type = entries.iter().find_map(|entry| {
+                    if let EntryKind::LocalVariable(data) = &entry.kind {
+                        if &data.name == name && data.r#type != RubyType::Unknown {
+                            return Some(data.r#type.clone());
+                        }
+                    }
+                    None
+                });
+                if found_type.is_some() {
+                    return found_type;
+                }
+            }
+        }
+    }
+
+    // 2. Try type narrowing engine
+    if let Some(type_from_narrowing) = server.type_narrowing.get_narrowed_type(uri, name, offset) {
+        return Some(type_from_narrowing);
+    }
+
+    // 3. Try inferring from assignment
+    if let Some(inferred) = infer_type_from_assignment(content, name, &server.index.lock()) {
+        return Some(inferred);
     }
 
     None

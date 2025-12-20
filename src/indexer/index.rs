@@ -775,14 +775,95 @@ impl RubyIndex {
     }
 
     /// Get all classes/modules that include the given module
+    ///
+    /// This method first checks the localized reverse_mixins index.
+    /// If that is empty, it falls back to a full scan of all entries to find includers.
+    /// This fallback is necessary because reverse_mixins are computed at indexing time,
+    /// so if the module was indexed AFTER the including class, the link might be missing.
     pub fn get_including_classes(
         &self,
         module_fqn: &FullyQualifiedName,
     ) -> Vec<FullyQualifiedName> {
-        self.reverse_mixins
+        let mut includers = self
+            .reverse_mixins
             .get(module_fqn)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        // If we found nothing (or even if we did?), we might want to scan if we suspect missing links.
+        // For performance, let's only scan if we are in "desperate mode" or if we want high accuracy.
+        // Given this is for Goto Definition (user interactive), a few ms scan is acceptable.
+        // Let's ALWAYS scan if the result is empty? Or always merge?
+        // To be safe against the race condition, we should really scan or maintain consistency.
+        // Re-resolving 10k classes' mixins might be 50-100ms.
+        // Let's try scanning only if the reverse index is empty first.
+        // If the user has *some* includers but missing others, this optimization hurts.
+        // But usually it's "all or nothing" for a specific file pair.
+        // Let's merge both.
+
+        let scanned = self.scan_for_including_classes(module_fqn);
+        for fqn in scanned {
+            if !includers.contains(&fqn) {
+                includers.push(fqn);
+            }
+        }
+
+        includers
+    }
+
+    /// Fallback: Scan all entries to find classes that include/extend/prepend the target module.
+    /// This is slower (O(N)) but robust against indexing order.
+    pub fn scan_for_including_classes(
+        &self,
+        target_module_fqn: &FullyQualifiedName,
+    ) -> Vec<FullyQualifiedName> {
+        use crate::indexer::ancestor_chain::resolve_mixin_ref;
+        let mut found = Vec::new();
+
+        // Iterate all definitions
+        // We can optimize by using by_fqn and checking latest entry for each FQN
+        for (fqn, entries) in &self.by_fqn {
+            // Check all entries for this FQN, as some might be References or separate definitions
+            // We iterate in reverse to find the most recent definition first (optimistic),
+            // but we must skip References.
+            for entry_id in entries.iter().rev() {
+                let entry = match self.entries.get(*entry_id) {
+                    Some(e) => e,
+                    None => continue,
+                };
+
+                // Check if it's a class or module
+                let (includes, extends, prepends) = match &entry.kind {
+                    EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
+                    EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
+                    _ => continue,
+                };
+
+                let all_mixins = includes.iter().chain(extends.iter()).chain(prepends.iter());
+
+                for mixin_ref in all_mixins {
+                    // Try to resolve. Now that target_module_fqn is known (indexed), this should succeed.
+                    // We only care if it resolves to target_module_fqn.
+
+                    if let Some(resolved) = resolve_mixin_ref(self, mixin_ref, fqn) {
+                        if resolved == *target_module_fqn {
+                            found.push(fqn.clone());
+                            break; // Found one usage, no need to check other mixins of this class
+                        }
+                    }
+                }
+
+                // If we processed a valid definition (Class/Module), should we stop for this FQN?
+                // A class can be reopened. Only one of the definitions might have the include.
+                // So we should probably continue to check other definitions of the same Class.
+                // e.g.
+                // class A; end
+                // class A; include M; end
+                // Both are Class entries.
+            }
+        }
+
+        found
     }
 
     /// Get all mixin usages for a given module (for CodeLens)
