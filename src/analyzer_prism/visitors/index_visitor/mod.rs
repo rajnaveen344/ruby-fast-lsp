@@ -32,6 +32,7 @@ pub struct IndexVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
+    pub diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
 }
 
 impl IndexVisitor {
@@ -42,7 +43,12 @@ impl IndexVisitor {
             document,
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
+            diagnostics: Vec::new(),
         }
+    }
+
+    pub fn push_diagnostic(&mut self, diagnostic: tower_lsp::lsp_types::Diagnostic) {
+        self.diagnostics.push(diagnostic);
     }
 
     /// Add an entry to the index immediately

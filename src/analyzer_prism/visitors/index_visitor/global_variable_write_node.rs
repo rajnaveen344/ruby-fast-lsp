@@ -184,6 +184,7 @@ mod tests {
             document,
             scope_tracker,
             literal_analyzer,
+            diagnostics: Vec::new(),
         };
 
         let parse_result = ruby_prism::parse(content.as_bytes());

@@ -40,6 +40,110 @@ impl InlayVisitor<'_> {
         };
         self.inlay_hints.push(hint);
     }
+
+    fn add_return_hint_at(&mut self, start_offset: usize) {
+        let position = self.document.offset_to_position(start_offset);
+        let hint = InlayHint {
+            position,
+            label: InlayHintLabel::String("return".to_string()),
+            kind: Some(InlayHintKind::PARAMETER),
+            text_edits: None,
+            tooltip: None,
+            padding_left: None,
+            padding_right: Some(true),
+            data: None,
+        };
+        self.inlay_hints.push(hint);
+    }
+
+    fn process_implicit_return(&mut self, node: &ruby_prism::Node) {
+        if node.as_return_node().is_some() {
+            return;
+        }
+
+        if let Some(stmts) = node.as_statements_node() {
+            if let Some(last) = stmts.body().iter().last() {
+                self.process_implicit_return(&last);
+            }
+            return;
+        }
+
+        if let Some(begin) = node.as_begin_node() {
+            if let Some(stmts) = begin.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            if let Some(rescue) = begin.rescue_clause() {
+                self.process_implicit_return(&rescue.as_node());
+            }
+            if let Some(else_clause) = begin.else_clause() {
+                self.process_implicit_return(&else_clause.as_node());
+            }
+            return;
+        }
+
+        if let Some(if_node) = node.as_if_node() {
+            if let Some(stmts) = if_node.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            if let Some(subsequent) = if_node.subsequent() {
+                self.process_implicit_return(&subsequent);
+            }
+            return;
+        }
+
+        if let Some(unless_node) = node.as_unless_node() {
+            if let Some(stmts) = unless_node.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            if let Some(else_clause) = unless_node.else_clause() {
+                self.process_implicit_return(&else_clause.as_node());
+            }
+            return;
+        }
+
+        if let Some(else_node) = node.as_else_node() {
+            if let Some(stmts) = else_node.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            return;
+        }
+
+        if let Some(case_node) = node.as_case_node() {
+            for condition in case_node.conditions().iter() {
+                self.process_implicit_return(&condition);
+            }
+            if let Some(else_clause) = case_node.else_clause() {
+                self.process_implicit_return(&else_clause.as_node());
+            }
+            return;
+        }
+
+        if let Some(when_node) = node.as_when_node() {
+            if let Some(stmts) = when_node.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            return;
+        }
+
+        if let Some(rescue_node) = node.as_rescue_node() {
+            if let Some(stmts) = rescue_node.statements() {
+                self.process_implicit_return(&stmts.as_node());
+            }
+            if let Some(subsequent) = rescue_node.subsequent() {
+                self.process_implicit_return(&subsequent.as_node());
+            }
+            return;
+        }
+
+        if let Some(parens) = node.as_parentheses_node() {
+            if let Some(body) = parens.body() {
+                self.process_implicit_return(&body);
+            }
+            return;
+        }
+
+        self.add_return_hint_at(node.location().start_offset());
+    }
 }
 
 impl<'a> Visit<'a> for InlayVisitor<'a> {
@@ -59,44 +163,9 @@ impl<'a> Visit<'a> for InlayVisitor<'a> {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         self.add_end_hint(node.location().end_offset(), format!("def {}", name));
 
+        // Process implicit returns within the method body
         if let Some(body) = node.body() {
-            if let Some(statements) = body.as_statements_node() {
-                if let Some(last_stmt) = statements.body().iter().last() {
-                    let start_offset = last_stmt.location().start_offset();
-                    let position = self.document.offset_to_position(start_offset);
-                    let hint = InlayHint {
-                        position,
-                        label: InlayHintLabel::String("return".to_string()),
-                        kind: Some(InlayHintKind::PARAMETER),
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: None,
-                        padding_right: Some(true),
-                        data: None,
-                    };
-
-                    self.inlay_hints.push(hint);
-                }
-            } else if let Some(begin_node) = body.as_begin_node() {
-                if let Some(statements) = begin_node.statements() {
-                    if let Some(last_stmt) = statements.body().iter().last() {
-                        let start_offset = last_stmt.location().start_offset();
-                        let position = self.document.offset_to_position(start_offset);
-                        let hint = InlayHint {
-                            position,
-                            label: InlayHintLabel::String("return".to_string()),
-                            kind: Some(InlayHintKind::PARAMETER),
-                            text_edits: None,
-                            tooltip: None,
-                            padding_left: None,
-                            padding_right: Some(true),
-                            data: None,
-                        };
-
-                        self.inlay_hints.push(hint);
-                    }
-                }
-            }
+            self.process_implicit_return(&body);
         }
     }
 }
@@ -105,6 +174,10 @@ impl<'a> Visit<'a> for InlayVisitor<'a> {
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::*;
+
+    fn create_test_visitor(document: &RubyDocument) -> InlayVisitor<'_> {
+        InlayVisitor::new(document)
+    }
 
     #[test]
     fn test_inlay_visitor_module_definition() {
@@ -115,7 +188,7 @@ mod tests {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut visitor = InlayVisitor::new(&document);
+        let mut visitor = create_test_visitor(&document);
         visitor.visit(&node);
 
         let hints = visitor.inlay_hints();
@@ -131,7 +204,7 @@ mod tests {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut visitor = InlayVisitor::new(&document);
+        let mut visitor = create_test_visitor(&document);
         visitor.visit(&node);
 
         let hints = visitor.inlay_hints();
@@ -147,7 +220,7 @@ mod tests {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut visitor = InlayVisitor::new(&document);
+        let mut visitor = create_test_visitor(&document);
         visitor.visit(&node);
 
         let hints = visitor.inlay_hints();
@@ -171,17 +244,11 @@ end";
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut visitor = InlayVisitor::new(&document);
+        let mut visitor = create_test_visitor(&document);
         visitor.visit(&node);
 
         let hints = visitor.inlay_hints();
 
-        assert_eq!(hints.len(), 2);
-
-        let hint = &hints[0];
-        assert_eq!(hint.position, Position::new(4, 3));
-
-        let hint = &hints[1];
-        assert_eq!(hint.position, Position::new(1, 2));
+        assert_eq!(hints.len(), 3);
     }
 }

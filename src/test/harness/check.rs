@@ -436,8 +436,31 @@ async fn run_diagnostics_check(
     let parse_result = ruby_prism::parse(content.as_bytes());
 
     let mut diagnostics = generate_diagnostics(&parse_result, &document);
-    let index = server.index.lock();
-    diagnostics.extend(generate_yard_diagnostics(&index, uri));
+    {
+        let index = server.index.lock();
+        diagnostics.extend(generate_yard_diagnostics(&index, uri));
+    }
+
+    // Force re-indexing to run IndexVisitor again (since setup_with_fixture already indexed it)
+    {
+        let docs = server.docs.lock();
+        if let Some(doc_arc) = docs.get(uri) {
+            let mut doc = doc_arc.write();
+            doc.indexed_version = None;
+        }
+    }
+
+    // Run FileProcessor to get indexing diagnostics (including return type checks)
+    let processor = crate::indexer::file_processor::FileProcessor::new(server.index.clone());
+    let options = crate::indexer::file_processor::ProcessingOptions {
+        index_definitions: true,
+        index_references: false,
+        resolve_mixins: false,
+        include_local_vars: true,
+    };
+    if let Ok(process_result) = processor.process_file(uri, content, server, options) {
+        diagnostics.extend(process_result.diagnostics);
+    }
 
     let errors: Vec<_> = diagnostics
         .iter()

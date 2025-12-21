@@ -5,6 +5,7 @@ use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
     MethodKind, MethodOrigin, MethodVisibility,
 };
+use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
 use crate::type_inference::ruby_type::RubyType;
 
 use crate::types::scope::{LVScope, LVScopeKind};
@@ -156,6 +157,8 @@ impl IndexVisitor {
         };
 
         // Prioritize RBS over YARD
+        // NOTE: Inferred return types are computed in a post-processing step after all methods
+        // are indexed, to handle forward references (e.g., method A calling method B that comes later in the file).
         let return_type = rbs_return_type.or(yard_return_type);
 
         let entry = {
@@ -172,7 +175,7 @@ impl IndexVisitor {
                     None,
                     yard_doc,
                     return_type_position,
-                    return_type,
+                    return_type.clone(),
                     param_types,
                 ))
                 .build(&mut index)
@@ -180,6 +183,39 @@ impl IndexVisitor {
         };
 
         self.add_entry(entry);
+
+        // Validate return type if declared
+        if let Some(expected_type) = &return_type {
+            let inferrer = ReturnTypeInferrer::new(self.index.clone());
+            let return_values =
+                inferrer.infer_return_values(self.document.content.as_bytes(), node);
+
+            for (inferred_ty, start, end) in return_values {
+                // If inferred type is Unknown, we skip partial validation to avoid false positives
+                if inferred_ty == RubyType::Unknown {
+                    continue;
+                }
+
+                // If inferred type is subtype of expected, it's fine.
+                if !inferred_ty.is_subtype_of(expected_type) {
+                    let range = tower_lsp::lsp_types::Range::new(
+                        self.document.offset_to_position(start),
+                        self.document.offset_to_position(end),
+                    );
+
+                    self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
+                        range,
+                        severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
+                        message: format!(
+                            "Expected return type {}, but found {}",
+                            expected_type, inferred_ty
+                        ),
+                        source: Some("ruby-fast-lsp".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
 
         let body_loc = if let Some(body) = node.body() {
             self.document

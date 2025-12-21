@@ -5,13 +5,14 @@
 //! 2. Running dataflow analysis to propagate type narrowing
 //! 3. Collecting return types from all exit paths with proper narrowed types
 
-use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
 use crate::indexer::index::RubyIndex;
 use crate::type_inference::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 use crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_method::RubyMethod;
 use parking_lot::Mutex;
 use ruby_prism::*;
 use std::sync::Arc;
@@ -21,6 +22,10 @@ use std::sync::Arc;
 pub struct ReturnTypeInferrer {
     index: Arc<Mutex<RubyIndex>>,
     literal_analyzer: LiteralAnalyzer,
+    /// Optional file content for on-demand inference of called methods
+    content: Option<Vec<u8>>,
+    /// Track methods currently being inferred to prevent infinite recursion
+    inference_in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 impl ReturnTypeInferrer {
@@ -29,12 +34,28 @@ impl ReturnTypeInferrer {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
+            content: None,
+            inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
         }
     }
 
-    /// Infer the return type from a method definition using CFG analysis.
-    /// This properly handles type narrowing in control flow structures.
-    pub fn infer_return_type(&self, source: &[u8], method: &DefNode) -> Option<RubyType> {
+    /// Create a new return type inferrer with file content for on-demand inference
+    /// When looking up a method that has no return type, it will infer it automatically
+    pub fn new_with_content(index: Arc<Mutex<RubyIndex>>, content: &[u8]) -> Self {
+        Self {
+            index,
+            literal_analyzer: LiteralAnalyzer::new(),
+            content: Some(content.to_vec()),
+            inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
+        }
+    }
+
+    /// Infer return types and their locations from valid return points.
+    pub fn infer_return_values(
+        &self,
+        source: &[u8],
+        method: &DefNode,
+    ) -> Vec<(RubyType, usize, usize)> {
         // Build CFG from the method
         let builder = CfgBuilder::new(source);
         let cfg = builder.build_from_method(method);
@@ -46,42 +67,44 @@ impl ReturnTypeInferrer {
         let results = analyzer.into_results();
 
         // Collect all possible return types from exit blocks
-        let mut return_types = Vec::new();
+        let mut return_values = Vec::new();
+
+        // Collect ReturnNodes from the method body for re-inference
+        let return_nodes = self.collect_return_nodes(method);
 
         for exit_id in &cfg.exits {
             if let Some(block) = cfg.blocks.get(exit_id) {
-                // Get the type state at this exit point for narrowed variable types
-                let exit_state = results.get_exit_state(*exit_id);
-
                 for stmt in &block.statements {
                     match &stmt.kind {
                         StatementKind::Return { value_type } => {
-                            if let Some(ty) = value_type {
-                                return_types.push(ty.clone());
-                            } else {
-                                return_types.push(RubyType::nil_class());
-                            }
-                        }
-                        StatementKind::Expression => {
-                            // This might be an implicit return - we need to analyze the
-                            // actual expression. For now, we'll try to infer from the
-                            // method body's last expression.
-                        }
-                        StatementKind::MethodCall { receiver, method } => {
-                            // Method call might be an implicit return
-                            if let Some(recv_type) = self.get_receiver_type(receiver, exit_state) {
-                                if let Some(return_type) =
-                                    self.lookup_method_return_type(&recv_type, method)
-                                {
-                                    return_types.push(return_type);
+                            let mut ty = value_type.clone();
+
+                            // If CFG builder didn't infer type (e.g. method calls), try to re-infer from AST
+                            if ty.is_none() {
+                                // Find the corresponding ReturnNode by matching offset
+                                for ret_node in &return_nodes {
+                                    let loc = ret_node.location();
+                                    if loc.start_offset() == stmt.start_offset
+                                        && loc.end_offset() == stmt.end_offset
+                                    {
+                                        if let Some(args) = ret_node.arguments() {
+                                            let args_list: Vec<_> =
+                                                args.arguments().iter().collect();
+                                            if let Some(first_arg) = args_list.first() {
+                                                let exit_state = results.get_exit_state(*exit_id);
+                                                ty = self
+                                                    .infer_expression_type(first_arg, exit_state);
+                                            }
+                                        }
+                                        break;
+                                    }
                                 }
                             }
+
+                            let final_ty = ty.unwrap_or(RubyType::nil_class());
+                            return_values.push((final_ty, stmt.start_offset, stmt.end_offset));
                         }
-                        StatementKind::Assignment { .. }
-                        | StatementKind::OrAssignment { .. }
-                        | StatementKind::AndAssignment { .. } => {
-                            // Assignments are not return values
-                        }
+                        _ => {}
                     }
                 }
             }
@@ -90,48 +113,76 @@ impl ReturnTypeInferrer {
         // Always analyze the method body for implicit return
         // (the last expression in the method is an implicit return if control flow reaches it)
         if let Some(body) = method.body() {
-            if let Some(implicit_type) = self.infer_implicit_return(&body, &cfg, &results) {
-                return_types.push(implicit_type);
+            if let Some((implicit_type, start, end)) =
+                self.infer_implicit_return_with_loc(&body, &cfg, &results)
+            {
+                return_values.push((implicit_type, start, end));
             }
         }
 
-        if return_types.is_empty() {
-            // Method with no body returns nil
-            Some(RubyType::nil_class())
+        // If no returns found and method has empty body or just doesn't return anything explicit/implicit detected
+        if return_values.is_empty() {
+            // If body is empty, it returns nil.
+            // We use method name location or end location as a fallback?
+            // Or maybe we don't return anything if we can't find a location.
+            // Actually empty method returns nil.
+            let loc = method.name_loc();
+            return_values.push((RubyType::nil_class(), loc.start_offset(), loc.end_offset()));
+        }
+
+        return_values
+    }
+
+    /// Infer the return type from a method definition using CFG analysis.
+    /// This properly handles type narrowing in control flow structures.
+    pub fn infer_return_type(&self, source: &[u8], method: &DefNode) -> Option<RubyType> {
+        let values = self.infer_return_values(source, method);
+        if values.is_empty() {
+            None
         } else {
-            Some(RubyType::union(return_types))
+            let types: Vec<RubyType> = values.into_iter().map(|(t, _, _)| t).collect();
+            Some(RubyType::union(types))
         }
     }
 
-    /// Infer the implicit return type from the last expression in the method body
-    fn infer_implicit_return(
+    fn infer_implicit_return_with_loc(
         &self,
         body: &Node,
         cfg: &crate::type_inference::cfg::ControlFlowGraph,
         results: &crate::type_inference::cfg::DataflowResults,
-    ) -> Option<RubyType> {
+    ) -> Option<(RubyType, usize, usize)> {
         // Get the last statement's type
         if let Some(statements) = body.as_statements_node() {
             let stmts: Vec<_> = statements.body().iter().collect();
             if let Some(last_stmt) = stmts.last() {
+                let start = last_stmt.location().start_offset();
+                let end = last_stmt.location().end_offset();
+
                 // For non-control-flow statements, find the block and use its state
-                let stmt_offset = last_stmt.location().start_offset();
+                let stmt_offset = start;
                 for (block_id, block) in &cfg.blocks {
                     if block.location.start_offset <= stmt_offset
                         && stmt_offset <= block.location.end_offset
                     {
                         let exit_state = results.get_exit_state(*block_id);
-                        return self.infer_expression_type(last_stmt, exit_state);
+                        if let Some(ty) = self.infer_expression_type(last_stmt, exit_state) {
+                            return Some((ty, start, end));
+                        }
                     }
                 }
 
                 // Fallback: try to infer without narrowed state
-                return self.infer_expression_type(last_stmt, None);
+                if let Some(ty) = self.infer_expression_type(last_stmt, None) {
+                    return Some((ty, start, end));
+                }
             }
         }
 
         // Try direct expression type inference
+        let start = body.location().start_offset();
+        let end = body.location().end_offset();
         self.infer_expression_type(body, None)
+            .map(|ty| (ty, start, end))
     }
 
     /// Infer the type of an expression using narrowed type state from dataflow analysis
@@ -301,9 +352,11 @@ impl ReturnTypeInferrer {
 
         if let Some(recv_type) = receiver_type {
             return self.lookup_method_return_type(&recv_type, &method_name);
+        } else {
+            // Implicit self call - look up in index for any method with this name
+            // TODO: scoping is tricky here without context. We just look for any method with this name.
+            return self.lookup_method_in_index(&method_name, None);
         }
-
-        None
     }
 
     /// Get the type of a receiver expression, using narrowed types from state
@@ -334,23 +387,6 @@ impl ReturnTypeInferrer {
     }
 
     /// Get receiver type from a string name (for CFG statements)
-    fn get_receiver_type(
-        &self,
-        receiver: &Option<String>,
-        state: Option<&TypeState>,
-    ) -> Option<RubyType> {
-        let var_name = receiver.as_ref()?;
-
-        // Check narrowed state first
-        if let Some(type_state) = state {
-            if let Some(ty) = type_state.get_type(var_name) {
-                return Some(ty.clone());
-            }
-        }
-
-        // Fall back to index lookup
-        self.lookup_local_variable_type(var_name)
-    }
 
     /// Look up method return type using RBS
     fn lookup_method_return_type(
@@ -358,8 +394,169 @@ impl ReturnTypeInferrer {
         recv_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
-        let class_name = self.get_class_name_for_rbs(recv_type)?;
-        get_rbs_method_return_type_as_ruby_type(&class_name, method_name, false)
+        let class_name = self.get_class_name_for_rbs(recv_type);
+        // Try RBS first if class name is known
+        if let Some(ref name) = class_name {
+            if let Some(ty) = get_rbs_method_return_type_as_ruby_type(name, method_name, false) {
+                return Some(ty);
+            }
+        }
+
+        // Try Index
+        self.lookup_method_in_index(method_name, class_name.as_deref())
+    }
+
+    /// Look up method in the index by name and return its return type.
+    /// If the method has no return type and we have file content, infer it on-demand.
+    fn lookup_method_in_index(
+        &self,
+        method_name: &str,
+        _owner_class: Option<&str>,
+    ) -> Option<RubyType> {
+        // Check if we're already inferring this method (cycle detection)
+        {
+            let in_progress = self.inference_in_progress.borrow();
+            if in_progress.contains(method_name) {
+                // Cycle detected - return None to break the recursion
+                return None;
+            }
+        }
+
+        let index = self.index.lock();
+        let mut return_types = Vec::new();
+        let mut methods_needing_inference: Vec<(u32, crate::indexer::index::EntryId)> = Vec::new();
+
+        let kinds = [MethodKind::Instance, MethodKind::Class];
+
+        for kind in kinds {
+            if let Ok(method_key) = RubyMethod::new(method_name, kind) {
+                if let Some(entry_ids) = index.get_method_ids(&method_key) {
+                    for entry_id in entry_ids {
+                        if let Some(entry) = index.get_entry(*entry_id) {
+                            if let EntryKind::Method(data) = &entry.kind {
+                                if let Some(rt) = &data.return_type {
+                                    if *rt != RubyType::Unknown {
+                                        return_types.push(rt.clone());
+                                    }
+                                } else if self.content.is_some() {
+                                    // Method has no return type - collect for on-demand inference
+                                    if let Some(pos) = data.return_type_position {
+                                        methods_needing_inference.push((pos.line, *entry_id));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quick return if we found types
+        if !return_types.is_empty() {
+            return Some(RubyType::union(return_types));
+        }
+
+        // Drop the index lock before inference
+        drop(index);
+
+        // If we have content and methods need inference, infer them on-demand
+        if let Some(content) = &self.content {
+            // Mark this method as being inferred (cycle detection)
+            self.inference_in_progress
+                .borrow_mut()
+                .insert(method_name.to_string());
+
+            // Parse content and find the method
+            let parse_result = ruby_prism::parse(content);
+            let node = parse_result.node();
+
+            for (line, entry_id) in methods_needing_inference {
+                if let Some(def_node) = self.find_def_node_at_line(&node, line, content) {
+                    // Create a new inferrer WITHOUT content to prevent deep recursion
+                    let simple_inferrer = ReturnTypeInferrer::new(self.index.clone());
+                    if let Some(inferred_ty) = simple_inferrer.infer_return_type(content, &def_node)
+                    {
+                        if inferred_ty != RubyType::Unknown {
+                            // Cache the result in the index
+                            self.index
+                                .lock()
+                                .update_method_return_type(entry_id, inferred_ty.clone());
+                            return_types.push(inferred_ty);
+                        }
+                    }
+                }
+            }
+
+            // Remove from in-progress set
+            self.inference_in_progress.borrow_mut().remove(method_name);
+
+            if !return_types.is_empty() {
+                return Some(RubyType::union(return_types));
+            }
+        }
+
+        None
+    }
+
+    /// Find a DefNode at the given line in the AST (helper for on-demand inference)
+    fn find_def_node_at_line<'a>(
+        &self,
+        node: &ruby_prism::Node<'a>,
+        target_line: u32,
+        content: &[u8],
+    ) -> Option<ruby_prism::DefNode<'a>> {
+        if let Some(def_node) = node.as_def_node() {
+            let offset = def_node.location().start_offset();
+            let line = content[..offset].iter().filter(|&&b| b == b'\n').count() as u32;
+            if line == target_line {
+                return Some(def_node);
+            }
+        }
+
+        // Recurse into child nodes
+        if let Some(program) = node.as_program_node() {
+            for stmt in program.statements().body().iter() {
+                if let Some(found) = self.find_def_node_at_line(&stmt, target_line, content) {
+                    return Some(found);
+                }
+            }
+        }
+
+        if let Some(class_node) = node.as_class_node() {
+            if let Some(body) = class_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        if let Some(found) = self.find_def_node_at_line(&stmt, target_line, content)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(module_node) = node.as_module_node() {
+            if let Some(body) = module_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        if let Some(found) = self.find_def_node_at_line(&stmt, target_line, content)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(stmts) = node.as_statements_node() {
+            for stmt in stmts.body().iter() {
+                if let Some(found) = self.find_def_node_at_line(&stmt, target_line, content) {
+                    return Some(found);
+                }
+            }
+        }
+
+        None
     }
 
     /// Look up a local variable's type from the index.
@@ -385,18 +582,118 @@ impl ReturnTypeInferrer {
         None
     }
 
+    /// Collect all ReturnNodes from a method body for re-inference
+    fn collect_return_nodes<'a>(&self, method: &'a DefNode<'a>) -> Vec<ReturnNode<'a>> {
+        let mut return_nodes = Vec::new();
+        if let Some(body) = method.body() {
+            self.collect_return_nodes_from_node(&body, &mut return_nodes);
+        }
+        return_nodes
+    }
+
+    /// Recursively collect ReturnNodes from an AST node
+    fn collect_return_nodes_from_node<'a>(
+        &self,
+        node: &Node<'a>,
+        results: &mut Vec<ReturnNode<'a>>,
+    ) {
+        if let Some(ret_node) = node.as_return_node() {
+            results.push(ret_node);
+            return;
+        }
+
+        // Recurse into statements nodes
+        if let Some(stmts) = node.as_statements_node() {
+            for stmt in stmts.body().iter() {
+                self.collect_return_nodes_from_node(&stmt, results);
+            }
+            return;
+        }
+
+        // Recurse into if nodes
+        if let Some(if_node) = node.as_if_node() {
+            if let Some(stmts) = if_node.statements() {
+                self.collect_return_nodes_from_node(&stmts.as_node(), results);
+            }
+            if let Some(subsequent) = if_node.subsequent() {
+                self.collect_return_nodes_from_node(&subsequent, results);
+            }
+            return;
+        }
+
+        // Recurse into else nodes
+        if let Some(else_node) = node.as_else_node() {
+            if let Some(stmts) = else_node.statements() {
+                self.collect_return_nodes_from_node(&stmts.as_node(), results);
+            }
+            return;
+        }
+
+        // Recurse into case nodes
+        if let Some(case_node) = node.as_case_node() {
+            for condition in case_node.conditions().iter() {
+                if let Some(when_node) = condition.as_when_node() {
+                    if let Some(stmts) = when_node.statements() {
+                        self.collect_return_nodes_from_node(&stmts.as_node(), results);
+                    }
+                }
+            }
+            if let Some(else_clause) = case_node.else_clause() {
+                self.collect_return_nodes_from_node(&else_clause.as_node(), results);
+            }
+            return;
+        }
+
+        // Recurse into begin nodes
+        if let Some(begin_node) = node.as_begin_node() {
+            if let Some(stmts) = begin_node.statements() {
+                self.collect_return_nodes_from_node(&stmts.as_node(), results);
+            }
+            if let Some(rescue) = begin_node.rescue_clause() {
+                self.collect_return_nodes_from_rescue(&rescue, results);
+            }
+            if let Some(else_clause) = begin_node.else_clause() {
+                self.collect_return_nodes_from_node(&else_clause.as_node(), results);
+            }
+            if let Some(ensure) = begin_node.ensure_clause() {
+                if let Some(stmts) = ensure.statements() {
+                    self.collect_return_nodes_from_node(&stmts.as_node(), results);
+                }
+            }
+            return;
+        }
+    }
+
+    /// Recursively collect ReturnNodes from rescue chains
+    fn collect_return_nodes_from_rescue<'a>(
+        &self,
+        rescue: &RescueNode<'a>,
+        results: &mut Vec<ReturnNode<'a>>,
+    ) {
+        if let Some(stmts) = rescue.statements() {
+            self.collect_return_nodes_from_node(&stmts.as_node(), results);
+        }
+        if let Some(subsequent) = rescue.subsequent() {
+            self.collect_return_nodes_from_rescue(&subsequent, results);
+        }
+    }
+
     /// Get class name for RBS lookup from a RubyType
     fn get_class_name_for_rbs(&self, ruby_type: &RubyType) -> Option<String> {
         match ruby_type {
             RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
                 if let FullyQualifiedName::Constant(parts) = fqn {
-                    parts.last().map(|c| c.to_string())
+                    Some(
+                        parts
+                            .iter()
+                            .map(|c| c.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::"),
+                    )
                 } else {
                     None
                 }
             }
-            RubyType::Array(_) => Some("Array".to_string()),
-            RubyType::Hash(_, _) => Some("Hash".to_string()),
             _ => None,
         }
     }

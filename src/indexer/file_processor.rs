@@ -144,7 +144,7 @@ impl FileProcessor {
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
 
         // 2. Generate Syntax Diagnostics
-        let diagnostics = generate_diagnostics(&parse_result, &document);
+        let mut diagnostics = generate_diagnostics(&parse_result, &document);
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
@@ -166,6 +166,7 @@ impl FileProcessor {
             // Clone document because parse_result borrows from the original
             let mut visitor = IndexVisitor::new(self.index.clone(), document.clone());
             visitor.visit(&node);
+            diagnostics.extend(visitor.diagnostics);
 
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
             {
@@ -179,6 +180,9 @@ impl FileProcessor {
             if options.resolve_mixins {
                 self.index.lock().resolve_mixins_for_uri(uri);
             }
+
+            // NOTE: Return type inference is now done lazily when inlay hints are requested
+            // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
 
             // Calculate diff for cross-file diagnostics
             let added_fqns: Vec<_> = {
@@ -312,6 +316,8 @@ impl FileProcessor {
         // Clone document because parse_result borrows from the original
         let mut index_visitor = IndexVisitor::new(index, document.clone());
         index_visitor.visit(&node);
+
+        // NOTE: Return type inference is now done lazily when inlay hints are requested
 
         debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
         Ok(())

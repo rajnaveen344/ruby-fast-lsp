@@ -149,6 +149,14 @@ impl RubyIndex {
         self.fqns.get(id).cloned()
     }
 
+    /// Get entry IDs for a given RubyMethod key
+    pub fn get_method_ids(
+        &self,
+        method: &crate::types::ruby_method::RubyMethod,
+    ) -> Option<&Vec<EntryId>> {
+        self.by_method_name.get(method)
+    }
+
     // ========================================================================
     // Entry Management
     // ========================================================================
@@ -475,10 +483,30 @@ impl RubyIndex {
             .unwrap_or_default()
     }
 
+    /// Get entry IDs for a URI
+    pub fn get_entry_ids_for_uri(&self, uri: &Url) -> Vec<EntryId> {
+        self.by_uri.get(uri).cloned().unwrap_or_default()
+    }
+
     /// Get mutable reference to the last definition entry (for updating mixins)
     pub fn get_last_definition_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Entry> {
         let id = *self.by_fqn.get(fqn)?.last()?;
         self.entries.get_mut(id)
+    }
+
+    /// Update the return type of a method entry
+    pub fn update_method_return_type(
+        &mut self,
+        entry_id: EntryId,
+        return_type: crate::type_inference::ruby_type::RubyType,
+    ) -> bool {
+        if let Some(entry) = self.entries.get_mut(entry_id) {
+            if let EntryKind::Method(data) = &mut entry.kind {
+                data.return_type = Some(return_type);
+                return true;
+            }
+        }
+        false
     }
 
     /// Get definitions by FQN (using new SlotMap, filters out Reference entries)
