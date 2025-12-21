@@ -283,6 +283,27 @@ impl TypeNarrowingEngine {
         params
     }
 
+    /// Get the narrowed type of a variable at a specific position, with content for on-demand registration.
+    /// This is the preferred method when content is available, as it ensures the file is registered.
+    pub fn get_narrowed_type_with_content(
+        &self,
+        uri: &Url,
+        var_name: &str,
+        offset: usize,
+        content: &str,
+    ) -> Option<RubyType> {
+        // Ensure file is registered
+        {
+            let mut states = self.file_states.lock();
+            if !states.contains_key(uri) {
+                states.insert(uri.clone(), FileCfgState::new(content.to_string()));
+            }
+        }
+
+        // Now delegate to the regular method
+        self.get_narrowed_type(uri, var_name, offset)
+    }
+
     /// Get the narrowed type of a variable at a specific position
     /// Uses lazy analysis - only analyzes the method containing the offset
     pub fn get_narrowed_type(&self, uri: &Url, var_name: &str, offset: usize) -> Option<RubyType> {

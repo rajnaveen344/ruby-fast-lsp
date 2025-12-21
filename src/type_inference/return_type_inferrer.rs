@@ -158,17 +158,24 @@ impl ReturnTypeInferrer {
                 let start = last_stmt.location().start_offset();
                 let end = last_stmt.location().end_offset();
 
-                // For non-control-flow statements, find the block and use its state
-                let stmt_offset = start;
-                for (block_id, block) in &cfg.blocks {
-                    if block.location.start_offset <= stmt_offset
-                        && stmt_offset <= block.location.end_offset
-                    {
-                        let exit_state = results.get_exit_state(*block_id);
-                        if let Some(ty) = self.infer_expression_type(last_stmt, exit_state) {
-                            return Some((ty, start, end));
+                // For implicit returns, we need to collect types from ALL exit blocks.
+                // This is important for variables that are modified in different branches
+                // (e.g., `flag = false; if cond; flag = true; end; flag` should return
+                // TrueClass | FalseClass).
+                //
+                // Each exit block's exit_state contains the merged types from all paths
+                // leading to that block, so we union the types from all exit blocks.
+                let mut types_from_exits = Vec::new();
+                for exit_id in &cfg.exits {
+                    if let Some(exit_state) = results.get_exit_state(*exit_id) {
+                        if let Some(ty) = self.infer_expression_type(last_stmt, Some(exit_state)) {
+                            types_from_exits.push(ty);
                         }
                     }
+                }
+
+                if !types_from_exits.is_empty() {
+                    return Some((RubyType::union(types_from_exits), start, end));
                 }
 
                 // Fallback: try to infer without narrowed state

@@ -1,6 +1,7 @@
 //! Integration tests for methods.
 
 mod attrs;
+mod branch_variable_return;
 mod goto;
 mod hover;
 mod inferred_union_return;

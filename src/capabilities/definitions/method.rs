@@ -67,8 +67,11 @@ pub fn find_method_definitions(
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
             // Try to get the receiver's type using type narrowing
+            // Use the variant with content to ensure the file is registered on-demand
             let offset = position_to_offset(content, position);
-            if let Some(receiver_type) = type_narrowing.get_narrowed_type(uri, name, offset) {
+            if let Some(receiver_type) =
+                type_narrowing.get_narrowed_type_with_content(uri, name, offset, content)
+            {
                 debug!("Found receiver type for '{}': {:?}", name, receiver_type);
                 return search_by_name_filtered(method, index, &receiver_type);
             }
@@ -143,8 +146,10 @@ fn resolve_method_call_type(
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
             let offset = position_to_offset(content, position);
-            // Try type narrowing first
-            if let Some(ty) = type_narrowing.get_narrowed_type(uri, name, offset) {
+            // Try type narrowing first (with on-demand registration)
+            if let Some(ty) =
+                type_narrowing.get_narrowed_type_with_content(uri, name, offset, content)
+            {
                 ty
             } else if let Some(ty) = infer_type_from_constructor_assignment(content, name, index) {
                 // Fallback: constructor assignment pattern
@@ -357,12 +362,17 @@ fn search_by_name_filtered(
     }
 }
 
-/// Extract type names from a RubyType (handles unions)
+/// Extract type names from a RubyType (handles unions, arrays, hashes, etc.)
 fn get_type_names(ty: &RubyType) -> Vec<String> {
     match ty {
         RubyType::Class(fqn) => vec![fqn.to_string()],
+        RubyType::ClassReference(fqn) => vec![fqn.to_string()],
+        RubyType::Module(fqn) => vec![fqn.to_string()],
+        RubyType::ModuleReference(fqn) => vec![fqn.to_string()],
+        RubyType::Array(_) => vec!["Array".to_string()],
+        RubyType::Hash(_, _) => vec!["Hash".to_string()],
         RubyType::Union(types) => types.iter().flat_map(get_type_names).collect(),
-        _ => vec![],
+        RubyType::Unknown => vec![],
     }
 }
 
