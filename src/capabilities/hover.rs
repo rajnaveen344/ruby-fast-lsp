@@ -127,7 +127,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
             let index = server.index.lock();
 
-            // Resolve receiver type
+            // Resolve receiver type - distinguish between Class and Module for proper method resolution
             let receiver_type = match receiver {
                 crate::analyzer_prism::MethodReceiver::None
                 | crate::analyzer_prism::MethodReceiver::SelfReceiver => {
@@ -135,9 +135,18 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                     if namespace.is_empty() {
                         RubyType::class("Object")
                     } else {
-                        // Assume instance method context for now (TODO: Handle singleton methods)
                         let fqn = FullyQualifiedName::from(namespace.clone());
-                        RubyType::Class(fqn)
+                        // Check if this is a module (not a class) for proper method resolution
+                        let is_module = index.get(&fqn).map_or(false, |entries| {
+                            entries
+                                .iter()
+                                .any(|e| matches!(e.kind, EntryKind::Module(_)))
+                        });
+                        if is_module {
+                            RubyType::Module(fqn)
+                        } else {
+                            RubyType::Class(fqn)
+                        }
                     }
                 }
                 crate::analyzer_prism::MethodReceiver::Constant(path) => {
@@ -156,6 +165,8 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             };
 
             // Use MethodResolver to find return type
+            // This now handles both class and module contexts, including ancestor chain traversal
+            // and searching through classes that include a module
             let return_type =
                 crate::type_inference::method_resolver::MethodResolver::resolve_method_return_type(
                     &index,
@@ -163,7 +174,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                     &method_name,
                 );
 
-            // Fallback: Naive search in file if resolution fails (legacy behavior)
+            // Fallback: Search in file if resolution fails (legacy behavior)
             // Now updated to collect ALL matches in the file and union them
             let return_type = return_type.or_else(|| {
                 let local_types: Vec<RubyType> = index

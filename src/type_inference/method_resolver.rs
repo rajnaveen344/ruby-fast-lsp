@@ -52,11 +52,16 @@ impl MethodResolver {
 
     /// Static method to resolve return type given an index, receiver type, and method name.
     /// Useful when you don't have a MethodResolver instance.
+    ///
+    /// This method searches through the ancestor chain of the receiver type, and for modules,
+    /// also searches through all classes that include the module to find method implementations.
     pub fn resolve_method_return_type(
         index: &RubyIndex,
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
+        use crate::indexer::ancestor_chain::get_ancestor_chain;
+
         // Handle class reference calling .new
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
@@ -75,12 +80,12 @@ impl MethodResolver {
         );
 
         // Get the class/module FQN from the receiver type
-        let owner_fqn = match receiver_type {
-            RubyType::Class(fqn) => Some(fqn.clone()),
-            RubyType::ClassReference(fqn) => Some(fqn.clone()),
-            RubyType::Module(fqn) => Some(fqn.clone()),
-            RubyType::ModuleReference(fqn) => Some(fqn.clone()),
-            _ => None,
+        let (owner_fqn, is_module) = match receiver_type {
+            RubyType::Class(fqn) => (Some(fqn.clone()), false),
+            RubyType::ClassReference(fqn) => (Some(fqn.clone()), false),
+            RubyType::Module(fqn) => (Some(fqn.clone()), true),
+            RubyType::ModuleReference(fqn) => (Some(fqn.clone()), true),
+            _ => (None, false),
         };
 
         // Try to look up in Ruby index first (for user-defined methods)
@@ -91,20 +96,56 @@ impl MethodResolver {
                 MethodKind::Instance
             };
 
+            // Build the list of all FQNs to search (owner + ancestors)
+            let mut all_fqns_to_search: Vec<FullyQualifiedName> = Vec::new();
+            all_fqns_to_search.push(owner_fqn.clone());
+
+            // Add ancestor chain
+            let ancestors = get_ancestor_chain(index, &owner_fqn, is_singleton);
+            for ancestor in ancestors {
+                if !all_fqns_to_search.contains(&ancestor) {
+                    all_fqns_to_search.push(ancestor);
+                }
+            }
+
+            // For modules, also search through classes that include this module
+            if is_module {
+                let including_classes = index.get_including_classes(&owner_fqn);
+                for class_fqn in including_classes {
+                    if !all_fqns_to_search.contains(&class_fqn) {
+                        all_fqns_to_search.push(class_fqn.clone());
+                    }
+                    // Also add ancestors of including classes
+                    let class_ancestors = get_ancestor_chain(index, &class_fqn, false);
+                    for ancestor in class_ancestors {
+                        if !all_fqns_to_search.contains(&ancestor) {
+                            all_fqns_to_search.push(ancestor);
+                        }
+                    }
+                }
+            }
+
+            // Search for method in all FQNs and collect return types
+            let mut found_return_types = Vec::new();
+
             if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
                         if let EntryKind::Method(data) = &entry.kind {
-                            let owner = &data.owner;
-                            let return_type = &data.return_type;
-                            if *owner == owner_fqn {
-                                if let Some(rt) = return_type {
-                                    return Some(rt.clone());
+                            if all_fqns_to_search.contains(&data.owner) {
+                                if let Some(rt) = &data.return_type {
+                                    if !found_return_types.contains(rt) {
+                                        found_return_types.push(rt.clone());
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            if !found_return_types.is_empty() {
+                return Some(RubyType::union(found_return_types));
             }
         }
 
