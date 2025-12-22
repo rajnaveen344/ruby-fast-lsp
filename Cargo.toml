@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ast-visualizer", "crates/rbs-parser"]
+members = [".", "crates/ast-visualizer", "crates/rbs-parser", "crates/lsp-repl"]
 resolver = "2"
 
 [package]

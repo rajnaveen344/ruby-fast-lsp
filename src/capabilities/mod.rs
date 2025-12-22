@@ -1,5 +1,6 @@
 pub mod code_lens;
 pub mod completion;
+pub mod debug;
 pub mod definitions;
 pub mod diagnostics;
 pub mod document_symbols;
@@ -11,5 +12,4 @@ pub mod inlay_hints;
 pub mod namespace_tree;
 pub mod references;
 pub mod semantic_tokens;
-
 pub mod workspace_symbols;

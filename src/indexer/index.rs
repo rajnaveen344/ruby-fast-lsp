@@ -540,6 +540,16 @@ impl RubyIndex {
         self.entries.len()
     }
 
+    /// Iterate over all entries in the index.
+    pub fn all_entries(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.values()
+    }
+
+    /// Get the number of files indexed.
+    pub fn files_count(&self) -> usize {
+        self.files.len()
+    }
+
     /// Iterate over all references grouped by FQN
     pub fn all_references(&self) -> HashMap<&FullyQualifiedName, Vec<Location>> {
         let mut refs: HashMap<&FullyQualifiedName, Vec<Location>> = HashMap::new();

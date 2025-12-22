@@ -4,7 +4,7 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::capabilities::{
-    code_lens, completion, definitions, document_symbols, folding_range, formatting, hover,
+    code_lens, completion, debug, definitions, document_symbols, folding_range, formatting, hover,
     inlay_hints, namespace_tree, references, semantic_tokens, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
@@ -163,4 +163,47 @@ pub async fn handle_hover(
     params: HoverParams,
 ) -> LspResult<Option<Hover>> {
     Ok(hover::handle_hover(lang_server, params).await)
+}
+
+// ============================================================================
+// Debug Handlers
+// ============================================================================
+
+pub async fn handle_list_commands(
+    _lang_server: &RubyLanguageServer,
+) -> LspResult<debug::ListCommandsResponse> {
+    info!("List commands request received");
+    Ok(debug::handle_list_commands())
+}
+
+pub async fn handle_debug_lookup(
+    lang_server: &RubyLanguageServer,
+    params: debug::LookupParams,
+) -> LspResult<debug::LookupResponse> {
+    info!("Debug lookup request received for: {}", params.fqn);
+    Ok(debug::handle_lookup(lang_server, params))
+}
+
+pub async fn handle_debug_stats(
+    lang_server: &RubyLanguageServer,
+    _params: debug::StatsParams,
+) -> LspResult<debug::StatsResponse> {
+    info!("Debug stats request received");
+    Ok(debug::handle_stats(lang_server))
+}
+
+pub async fn handle_debug_ancestors(
+    lang_server: &RubyLanguageServer,
+    params: debug::AncestorsParams,
+) -> LspResult<debug::AncestorsResponse> {
+    info!("Debug ancestors request received for: {}", params.class);
+    Ok(debug::handle_ancestors(lang_server, params))
+}
+
+pub async fn handle_debug_methods(
+    lang_server: &RubyLanguageServer,
+    params: debug::MethodsParams,
+) -> LspResult<debug::MethodsResponse> {
+    info!("Debug methods request received for: {}", params.class);
+    Ok(debug::handle_methods(lang_server, params))
 }

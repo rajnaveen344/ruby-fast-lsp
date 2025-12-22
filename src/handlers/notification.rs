@@ -152,6 +152,7 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
                 match result {
                     Ok(_) => {
                         info!("Background workspace indexing completed successfully");
+                        server_clone.set_indexing_complete();
                         let _ = client
                             .send_notification::<notification::Progress>(ProgressParams {
                                 token: NumberOrString::String("indexing".to_string()),

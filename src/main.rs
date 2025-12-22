@@ -25,6 +25,24 @@ async fn main() -> Result<()> {
         "ruby/namespaceTree",
         RubyLanguageServer::handle_namespace_tree_request,
     )
+    // Debug commands for lsp-repl
+    .custom_method("$/listCommands", RubyLanguageServer::handle_list_commands)
+    .custom_method(
+        "ruby-fast-lsp/debug/lookup",
+        RubyLanguageServer::handle_debug_lookup,
+    )
+    .custom_method(
+        "ruby-fast-lsp/debug/stats",
+        RubyLanguageServer::handle_debug_stats,
+    )
+    .custom_method(
+        "ruby-fast-lsp/debug/ancestors",
+        RubyLanguageServer::handle_debug_ancestors,
+    )
+    .custom_method(
+        "ruby-fast-lsp/debug/methods",
+        RubyLanguageServer::handle_debug_methods,
+    )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");

@@ -127,6 +127,10 @@ impl IndexingCoordinator {
 
         info!("Phase 2 completed in {:?}", phase2_start.elapsed());
 
+        // Mark indexing as complete after Phase 2 (index is now queryable)
+        // Phase 3 (diagnostics) can take a long time and isn't needed for queries
+        server.set_indexing_complete();
+
         // PHASE 3: Publish diagnostics for unresolved constants
         info!("Phase 3: Publishing diagnostics for unresolved constants");
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
@@ -676,7 +680,7 @@ class UserTest
     service = UserService.new
     user = User.new(name: 'Jane', email: 'jane@example.com')
     service.save(user)
-    
+
     found_user = service.find_by_email('jane@example.com')
     assert found_user.name == 'Jane'
   end

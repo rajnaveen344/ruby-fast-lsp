@@ -1,3 +1,7 @@
+use crate::capabilities::debug::{
+    AncestorsParams, AncestorsResponse, ListCommandsResponse, LookupParams, LookupResponse,
+    MethodsParams, MethodsResponse, StatsParams, StatsResponse,
+};
 use crate::capabilities::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
@@ -80,6 +84,8 @@ pub struct RubyLanguageServer {
     pub parent_process_id: Arc<Mutex<Option<u32>>>,
     /// Type narrowing engine for CFG-based type analysis
     pub type_narrowing: Arc<TypeNarrowingEngine>,
+    /// Whether initial indexing is complete
+    pub indexing_complete: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RubyLanguageServer {
@@ -97,7 +103,20 @@ impl RubyLanguageServer {
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
             type_narrowing: Arc::new(TypeNarrowingEngine::new()),
+            indexing_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+
+    /// Check if initial indexing is complete.
+    pub fn is_indexing_complete(&self) -> bool {
+        self.indexing_complete
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Mark initial indexing as complete.
+    pub fn set_indexing_complete(&self) {
+        self.indexing_complete
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Set the parent process ID and start monitoring it.
@@ -176,6 +195,38 @@ impl RubyLanguageServer {
         request::handle_namespace_tree(self, params).await
     }
 
+    // ========================================================================
+    // Debug Request Handlers
+    // ========================================================================
+
+    /// Handle `$/listCommands` - return available custom debug commands.
+    pub async fn handle_list_commands(&self) -> LspResult<ListCommandsResponse> {
+        request::handle_list_commands(self).await
+    }
+
+    /// Handle `ruby-fast-lsp/debug/lookup` - query index for an FQN.
+    pub async fn handle_debug_lookup(&self, params: LookupParams) -> LspResult<LookupResponse> {
+        request::handle_debug_lookup(self, params).await
+    }
+
+    /// Handle `ruby-fast-lsp/debug/stats` - return index statistics.
+    pub async fn handle_debug_stats(&self, params: StatsParams) -> LspResult<StatsResponse> {
+        request::handle_debug_stats(self, params).await
+    }
+
+    /// Handle `ruby-fast-lsp/debug/ancestors` - return inheritance chain.
+    pub async fn handle_debug_ancestors(
+        &self,
+        params: AncestorsParams,
+    ) -> LspResult<AncestorsResponse> {
+        request::handle_debug_ancestors(self, params).await
+    }
+
+    /// Handle `ruby-fast-lsp/debug/methods` - list methods for a class.
+    pub async fn handle_debug_methods(&self, params: MethodsParams) -> LspResult<MethodsResponse> {
+        request::handle_debug_methods(self, params).await
+    }
+
     /// Invalidate namespace tree cache with debouncing (300ms delay)
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         let server = self.clone();
@@ -223,6 +274,7 @@ impl Default for RubyLanguageServer {
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
             type_narrowing: Arc::new(TypeNarrowingEngine::new()),
+            indexing_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
