@@ -14,6 +14,7 @@ use crate::analyzer_prism::utils;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{Entry, MixinRef, MixinType};
 use crate::indexer::graph::Graph;
+use crate::indexer::interner::Interner;
 use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -52,13 +53,9 @@ pub struct RubyIndex {
     by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
     by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
 
-    // File storage with reverse lookup
-    files: SlotMap<FileId, Url>,
-    url_to_file_id: HashMap<Url, FileId>,
-
-    // FQN storage with reverse lookup
-    fqns: SlotMap<FqnId, FullyQualifiedName>,
-    fqn_to_id: HashMap<FullyQualifiedName, FqnId>,
+    // Interned storage for compact IDs
+    files: Interner<FileId, Url>,
+    fqns: Interner<FqnId, FullyQualifiedName>,
 
     // Inheritance graph for method resolution order
     pub graph: Graph,
@@ -81,13 +78,9 @@ impl RubyIndex {
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
 
-            // File storage
-            files: SlotMap::with_key(),
-            url_to_file_id: HashMap::new(),
-
-            // FQN storage
-            fqns: SlotMap::with_key(),
-            fqn_to_id: HashMap::new(),
+            // Interned storage
+            files: Interner::new(),
+            fqns: Interner::new(),
 
             // Inheritance graph
             graph: Graph::new(),
@@ -99,17 +92,12 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // File ID Management
+    // File ID Management (delegates to Interner)
     // ========================================================================
 
     /// Get or insert a URL, returning its FileId
     pub fn get_or_insert_file(&mut self, url: &Url) -> FileId {
-        if let Some(&file_id) = self.url_to_file_id.get(url) {
-            return file_id;
-        }
-        let file_id = self.files.insert(url.clone());
-        self.url_to_file_id.insert(url.clone(), file_id);
-        file_id
+        self.files.get_or_insert(url)
     }
 
     /// Get URL for a FileId
@@ -127,17 +115,12 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // FQN Interning
+    // FQN Interning (delegates to Interner)
     // ========================================================================
 
     /// Get or intern a FullyQualifiedName
     pub fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
-        if let Some(&id) = self.fqn_to_id.get(&fqn) {
-            return id;
-        }
-        let id = self.fqns.insert(fqn.clone());
-        self.fqn_to_id.insert(fqn, id);
-        id
+        self.fqns.get_or_insert(&fqn)
     }
 
     /// Get FQN for an ID
@@ -146,8 +129,8 @@ impl RubyIndex {
     }
 
     /// Get FqnId for a FullyQualifiedName
-    pub fn get_fqn_id(&self, fqn: &FullyQualifiedName) -> Option<&FqnId> {
-        self.fqn_to_id.get(fqn)
+    pub fn get_fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {
+        self.fqns.get_id(fqn).copied()
     }
 
     /// Resolve FQN ID to owned FullyQualifiedName
@@ -172,7 +155,7 @@ impl RubyIndex {
         is_class_method: bool,
     ) -> Vec<FullyQualifiedName> {
         // Get the FqnId for this FQN
-        let Some(&fqn_id) = self.get_fqn_id(fqn) else {
+        let Some(fqn_id) = self.get_fqn_id(fqn) else {
             // If FQN not in index, return just itself
             return vec![fqn.clone()];
         };
@@ -313,13 +296,13 @@ impl RubyIndex {
             .collect();
 
         // Remove edges from the inheritance graph for this file
-        if let Some(&file_id) = self.url_to_file_id.get(uri) {
+        if let Some(file_id) = self.files.get_id(uri).copied() {
             self.graph.remove_edges_from_file(file_id);
         }
 
         // Remove nodes from inheritance graph for completely removed FQNs
         for fqn in &removed_fqns {
-            if let Some(&fqn_id) = self.fqn_to_id.get(fqn) {
+            if let Some(fqn_id) = self.fqns.get_id(fqn).copied() {
                 self.graph.remove_node(fqn_id);
             }
         }
@@ -347,7 +330,7 @@ impl RubyIndex {
     ) -> HashSet<Url> {
         let mut references_map: HashMap<FullyQualifiedName, Vec<Location>> = HashMap::new();
         for fqn in removed_fqns {
-            let refs = self.get_references_iter(fqn);
+            let refs = self.references(fqn);
             if !refs.is_empty() {
                 references_map.insert(fqn.clone(), refs);
             }
@@ -431,7 +414,16 @@ impl RubyIndex {
 
     /// Get all references for a given FQN
     pub fn references(&self, fqn: &FullyQualifiedName) -> Vec<Location> {
-        self.get_references_iter(fqn)
+        self.by_fqn
+            .get(fqn)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.entries.get(*id))
+                    .filter(|e| matches!(e.kind, EntryKind::Reference))
+                    .filter_map(|e| self.to_lsp_location(&e.location))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Check if FQN has any definitions
@@ -449,7 +441,7 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // COMPATIBILITY METHODS (for callers that used old field access)
+    // Query Methods - Definitions & Methods
     // ========================================================================
 
     /// Iterate over all definitions grouped by FQN
@@ -468,9 +460,12 @@ impl RubyIndex {
         })
     }
 
-    /// Get entries for a file (compatibility method)
+    /// Get all entries for a file
     pub fn file_entries(&self, uri: &Url) -> Vec<&Entry> {
-        self.get_entries_for_uri(uri)
+        self.by_uri
+            .get(uri)
+            .map(|ids| ids.iter().filter_map(|id| self.entries.get(*id)).collect())
+            .unwrap_or_default()
     }
 
     /// Iterate over all methods grouped by name
@@ -485,7 +480,7 @@ impl RubyIndex {
         })
     }
 
-    /// Get methods by name (compatibility method)
+    /// Get methods by name
     pub fn get_methods_by_name(&self, method: &RubyMethod) -> Option<Vec<&Entry>> {
         let entries: Vec<&Entry> = self
             .by_method_name
@@ -514,20 +509,12 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // NEW: SlotMap-based access methods
+    // Entry Access by ID
     // ========================================================================
 
     /// Get an entry by ID
     pub fn get_entry(&self, id: EntryId) -> Option<&Entry> {
         self.entries.get(id)
-    }
-
-    /// Get entries for a URI (using new SlotMap)
-    pub fn get_entries_for_uri(&self, uri: &Url) -> Vec<&Entry> {
-        self.by_uri
-            .get(uri)
-            .map(|ids| ids.iter().filter_map(|id| self.entries.get(*id)).collect())
-            .unwrap_or_default()
     }
 
     /// Get entry IDs for a URI
@@ -554,33 +541,6 @@ impl RubyIndex {
             }
         }
         false
-    }
-
-    /// Get definitions by FQN (using new SlotMap, filters out Reference entries)
-    pub fn get_definitions_iter(&self, fqn: &FullyQualifiedName) -> Vec<&Entry> {
-        self.by_fqn
-            .get(fqn)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Get reference locations for FQN (using new SlotMap)
-    pub fn get_references_iter(&self, fqn: &FullyQualifiedName) -> Vec<Location> {
-        self.by_fqn
-            .get(fqn)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| matches!(e.kind, EntryKind::Reference))
-                    .filter_map(|e| self.to_lsp_location(&e.location))
-                    .collect()
-            })
-            .unwrap_or_default()
     }
 
     pub fn entries_len(&self) -> usize {
@@ -713,7 +673,7 @@ impl RubyIndex {
             .definitions()
             .filter_map(|(fqn, entries)| {
                 let entry = (*entries.first()?).clone();
-                let fqn_id = *self.fqn_to_id.get(fqn)?;
+                let fqn_id = self.fqns.get_id(fqn).copied()?;
                 let file_id = entry.location.file_id;
                 Some((fqn_id, file_id, entry))
             })
@@ -776,7 +736,7 @@ impl RubyIndex {
                 superclass_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(&parent_id) = self.fqn_to_id.get(&resolved_fqn) {
+                if let Some(parent_id) = self.fqns.get_id(&resolved_fqn).copied() {
                     self.graph.set_superclass(fqn_id, parent_id, file_id);
                 }
             }
@@ -790,7 +750,7 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
                     self.graph.add_include(fqn_id, module_id, file_id);
                 }
             }
@@ -804,7 +764,7 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
                     self.graph.add_prepend(fqn_id, module_id, file_id);
                 }
             }
@@ -818,7 +778,7 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
                     self.graph.add_extend(fqn_id, module_id, file_id);
                 }
             }
@@ -830,7 +790,7 @@ impl RubyIndex {
     pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
         use crate::indexer::graph::NodeKind;
 
-        let Some(&file_id) = self.url_to_file_id.get(uri) else {
+        let Some(file_id) = self.files.get_id(uri).copied() else {
             return;
         };
 
@@ -839,9 +799,8 @@ impl RubyIndex {
             .file_entries(uri)
             .into_iter()
             .filter_map(|entry| {
-                let fqn = self.get_fqn(entry.fqn_id)?;
-                let fqn_id = *self.fqn_to_id.get(fqn)?;
-                Some((fqn_id, (*entry).clone()))
+                // entry.fqn_id is already the correct FqnId
+                Some((entry.fqn_id, (*entry).clone()))
             })
             .collect();
 
@@ -894,7 +853,7 @@ impl RubyIndex {
     ) -> Vec<FullyQualifiedName> {
         // First try the graph
         let mut includers: Vec<FullyQualifiedName> =
-            if let Some(&fqn_id) = self.fqn_to_id.get(module_fqn) {
+            if let Some(fqn_id) = self.fqns.get_id(module_fqn).copied() {
                 self.graph
                     .mixers(fqn_id)
                     .iter()

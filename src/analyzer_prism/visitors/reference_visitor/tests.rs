@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::capabilities::references;
+use crate::indexer::entry::EntryKind;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use parking_lot::RwLock;
@@ -121,11 +122,11 @@ async fn test_local_variable_references() {
 def my_method
   local_var = 42
   puts local_var  # Reference to local_var
-  
+
   local_var.times do |i|
     puts "Count: #{i}"
   end
-  
+
   local_var  # Another reference
 end
 
@@ -169,10 +170,10 @@ my_method
     // Verify LocalVariables are NOT in global index
     let index = server.index();
     let index_guard = index.lock();
-    let entries = index_guard.get_entries_for_uri(&uri);
+    let entries = index_guard.file_entries(&uri);
     let local_var_entries: Vec<_> = entries
         .iter()
-        .filter(|e| matches!(e.kind, crate::indexer::entry::EntryKind::LocalVariable(_)))
+        .filter(|e| matches!(e.kind, EntryKind::LocalVariable(_)))
         .collect();
 
     assert!(

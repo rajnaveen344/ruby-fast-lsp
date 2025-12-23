@@ -22,11 +22,12 @@
 pub mod coordinator;
 pub mod entry;
 pub mod file_processor;
+pub mod graph;
 pub mod index;
 pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;
-pub mod graph;
+pub mod interner;
 pub mod prefix_tree;
 
 pub mod version;
