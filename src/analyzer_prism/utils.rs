@@ -1,5 +1,6 @@
 use crate::indexer::entry::MixinRef;
 use crate::indexer::index::RubyIndex;
+use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::{ConstantPathNode, ConstantReadNode, Node};
@@ -36,13 +37,17 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
 /// Create a MixinRef from a ConstantReadNode or ConstantPathNode.
 /// This captures the textual representation of the constant without trying to resolve it,
 /// which is deferred until a capability requests the ancestor chain.
-pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
+///
+/// The `location` parameter should be the CompactLocation of where the include/extend/prepend
+/// call was made (for CodeLens and other features that need to show the call site).
+pub fn mixin_ref_from_node(node: &Node, location: CompactLocation) -> Option<MixinRef> {
     if let Some(n) = node.as_constant_read_node() {
         let name = String::from_utf8_lossy(n.name().as_slice()).to_string();
         if let Ok(constant) = RubyConstant::new(&name) {
             Some(MixinRef {
                 parts: vec![constant],
                 absolute: false,
+                location,
             })
         } else {
             None
@@ -53,7 +58,11 @@ pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
         // A ConstantPathNode is absolute if its `parent` is `None`,
         // which corresponds to a `::` at the beginning.
         let absolute = n.parent().is_none();
-        Some(MixinRef { parts, absolute })
+        Some(MixinRef {
+            parts,
+            absolute,
+            location,
+        })
     } else {
         None
     }

@@ -1,7 +1,7 @@
 //! Ruby Index
 //!
 //! The central data structure for storing all indexed Ruby code information.
-//! This includes definitions, references, method lookups, mixin relationships,
+//! This includes definitions, references, method lookups, inheritance relationships,
 //! and prefix-based search capabilities.
 
 use std::collections::{HashMap, HashSet};
@@ -10,11 +10,25 @@ use log::debug;
 use slotmap::{new_key_type, SlotMap};
 use tower_lsp::lsp_types::{Location, Url};
 
-use crate::indexer::entry::{entry_kind::EntryKind, Entry, MixinType};
+use crate::analyzer_prism::utils;
+use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::{Entry, MixinRef, MixinType};
+use crate::indexer::graph::Graph;
 use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
+
+/// Represents a single mixin usage with its type and location
+#[derive(Debug, Clone, PartialEq)]
+pub struct MixinUsage {
+    /// The class/module that uses the mixin
+    pub user_fqn: FullyQualifiedName,
+    /// The type of mixin (include, prepend, extend)
+    pub mixin_type: MixinType,
+    /// Location of the mixin call
+    pub location: Location,
+}
 
 // Re-export for backward compatibility
 pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
@@ -27,17 +41,6 @@ pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
 new_key_type! { pub struct EntryId; }
 new_key_type! { pub struct FileId; }
 new_key_type! { pub struct FqnId; }
-
-/// Represents a single mixin usage with its type and location
-#[derive(Debug, Clone, PartialEq)]
-pub struct MixinUsage {
-    /// The class/module that uses the mixin
-    pub user_fqn: FullyQualifiedName,
-    /// The type of mixin (include, prepend, extend)
-    pub mixin_type: MixinType,
-    /// Location of the mixin call
-    pub location: Location,
-}
 
 #[derive(Debug)]
 pub struct RubyIndex {
@@ -57,10 +60,8 @@ pub struct RubyIndex {
     fqns: SlotMap<FqnId, FullyQualifiedName>,
     fqn_to_id: HashMap<FullyQualifiedName, FqnId>,
 
-    // Mixin & Other Tracking
-    pub reverse_mixins: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
-    pub mixin_usages: HashMap<FullyQualifiedName, Vec<MixinUsage>>,
-    mixin_usages_by_uri: HashMap<Url, HashSet<FullyQualifiedName>>,
+    // Inheritance graph for method resolution order
+    pub graph: Graph,
 
     // Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
@@ -88,10 +89,10 @@ impl RubyIndex {
             fqns: SlotMap::with_key(),
             fqn_to_id: HashMap::new(),
 
-            // Mixin tracking
-            reverse_mixins: HashMap::new(),
-            mixin_usages: HashMap::new(),
-            mixin_usages_by_uri: HashMap::new(),
+            // Inheritance graph
+            graph: Graph::new(),
+
+            // Other indexes
             prefix_tree: PrefixTree::new(),
             unresolved: UnresolvedIndex::new(),
         }
@@ -144,9 +145,64 @@ impl RubyIndex {
         self.fqns.get(id)
     }
 
+    /// Get FqnId for a FullyQualifiedName
+    pub fn get_fqn_id(&self, fqn: &FullyQualifiedName) -> Option<&FqnId> {
+        self.fqn_to_id.get(fqn)
+    }
+
     /// Resolve FQN ID to owned FullyQualifiedName
     pub fn resolve_fqn(&self, id: FqnId) -> Option<FullyQualifiedName> {
         self.fqns.get(id).cloned()
+    }
+
+    // ========================================================================
+    // Ancestor Chain / Method Resolution Order
+    // ========================================================================
+
+    /// Builds the complete ancestor chain for a given class or module
+    ///
+    /// For class methods: includes singleton class + normal ancestor chain
+    /// For instance methods: includes normal ancestor chain (current class -> mixins -> superclass)
+    ///
+    /// The chain represents the method lookup order in Ruby's method resolution.
+    /// This delegates to the InheritanceGraph for efficient traversal.
+    pub fn get_ancestor_chain(
+        &self,
+        fqn: &FullyQualifiedName,
+        is_class_method: bool,
+    ) -> Vec<FullyQualifiedName> {
+        // Get the FqnId for this FQN
+        let Some(&fqn_id) = self.get_fqn_id(fqn) else {
+            // If FQN not in index, return just itself
+            return vec![fqn.clone()];
+        };
+
+        // Use the inheritance graph for traversal
+        let fqn_ids = if is_class_method {
+            self.graph.singleton_lookup_chain(fqn_id)
+        } else {
+            self.graph.method_lookup_chain(fqn_id)
+        };
+
+        // Convert FqnIds back to FullyQualifiedNames
+        let mut chain: Vec<FullyQualifiedName> = fqn_ids
+            .into_iter()
+            .filter_map(|id| self.get_fqn(id).cloned())
+            .collect();
+
+        // Add root namespace as fallback for implicit superclass
+        // This allows classes without explicit superclass to access top-level methods
+        // (Ruby implicitly inherits from Object which can access top-level methods)
+        // We add root even if it's not in the index, as methods may be defined at top-level
+        let root = FullyQualifiedName::Constant(Vec::new());
+        if !chain.contains(&root) && fqn.to_string() != "BasicObject" {
+            // Only add root if we have a non-empty namespace (i.e., we're inside a class/module)
+            if !fqn.namespace_parts().is_empty() {
+                chain.push(root);
+            }
+        }
+
+        chain
     }
 
     /// Get entry IDs for a given RubyMethod key
@@ -186,9 +242,6 @@ impl RubyIndex {
         if let EntryKind::Method(data) = &entry.kind {
             self.by_method_name.entry(data.name).or_default().push(id);
         }
-
-        // Update mixin tracking
-        self.update_reverse_mixins(&entry);
 
         // Add to prefix tree
         self.add_to_prefix_tree(&entry);
@@ -259,21 +312,15 @@ impl RubyIndex {
             .cloned()
             .collect();
 
-        // Clean up mixin tracking for completely removed FQNs
-        for fqn in &removed_fqns {
-            self.reverse_mixins.remove(fqn);
-            self.mixin_usages.remove(fqn);
+        // Remove edges from the inheritance graph for this file
+        if let Some(&file_id) = self.url_to_file_id.get(uri) {
+            self.graph.remove_edges_from_file(file_id);
         }
 
-        // Remove mixin usages
-        if let Some(module_fqns) = self.mixin_usages_by_uri.remove(uri) {
-            for module_fqn in module_fqns {
-                if let Some(usages) = self.mixin_usages.get_mut(&module_fqn) {
-                    usages.retain(|usage| usage.location.uri != *uri);
-                    if usages.is_empty() {
-                        self.mixin_usages.remove(&module_fqn);
-                    }
-                }
+        // Remove nodes from inheritance graph for completely removed FQNs
+        for fqn in &removed_fqns {
+            if let Some(&fqn_id) = self.fqn_to_id.get(fqn) {
+                self.graph.remove_node(fqn_id);
             }
         }
 
@@ -651,271 +698,257 @@ impl RubyIndex {
     }
 
     // ========================================================================
-    // Mixin Tracking
+    // Inheritance Graph
     // ========================================================================
 
-    /// Update reverse mixin tracking when an entry with mixins is added
-    pub fn update_reverse_mixins(&mut self, entry: &Entry) {
-        use crate::indexer::ancestor_chain::resolve_mixin_ref;
-
-        let (includes, extends, prepends) = match &entry.kind {
-            EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
-            EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
-            _ => return,
-        };
-
-        let fqn = match self.get_fqn(entry.fqn_id).cloned() {
-            Some(f) => f,
-            None => return,
-        };
-
-        debug!("Updating reverse mixins for entry: {:?}", fqn);
-
-        let mixin_groups = [
-            (includes, MixinType::Include),
-            (extends, MixinType::Extend),
-            (prepends, MixinType::Prepend),
-        ];
-
-        for (mixin_refs, mixin_type) in mixin_groups {
-            for mixin_ref in mixin_refs {
-                let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &fqn) else {
-                    debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
-                    continue;
-                };
-
-                debug!("Resolved mixin ref {:?} to {:?}", mixin_ref, resolved_fqn);
-
-                // Update reverse_mixins
-                let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
-                if !including.contains(&fqn) {
-                    including.push(fqn.clone());
-                }
-
-                // Update mixin_usages - need to convert CompactLocation to Location
-                if let Some(lsp_location) = self.to_lsp_location(&entry.location) {
-                    let usage = MixinUsage {
-                        user_fqn: fqn.clone(),
-                        mixin_type,
-                        location: lsp_location.clone(),
-                    };
-
-                    // Track which modules have usages from this URI (for fast removal)
-                    self.mixin_usages_by_uri
-                        .entry(lsp_location.uri.clone())
-                        .or_default()
-                        .insert(resolved_fqn.clone());
-
-                    let usages = self.mixin_usages.entry(resolved_fqn).or_default();
-                    if !usages.contains(&usage) {
-                        usages.push(usage);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Update reverse mixin tracking with specific call location
-    pub fn update_reverse_mixins_with_location(
-        &mut self,
-        entry: &Entry,
-        mixin_refs: &[crate::indexer::entry::MixinRef],
-        mixin_type: MixinType,
-        call_location: Location,
-    ) {
-        use crate::indexer::ancestor_chain::resolve_mixin_ref;
-
-        let fqn = match self.get_fqn(entry.fqn_id).cloned() {
-            Some(f) => f,
-            None => return,
-        };
-
-        for mixin_ref in mixin_refs {
-            let Some(resolved_fqn) = resolve_mixin_ref(self, mixin_ref, &fqn) else {
-                debug!("Failed to resolve mixin ref: {:?}", mixin_ref);
-                continue;
-            };
-
-            // Update reverse_mixins
-            let including = self.reverse_mixins.entry(resolved_fqn.clone()).or_default();
-            if !including.contains(&fqn) {
-                including.push(fqn.clone());
-            }
-
-            // Update mixin_usages with actual call location
-            let usage = MixinUsage {
-                user_fqn: fqn.clone(),
-                mixin_type,
-                location: call_location.clone(),
-            };
-
-            // Track which modules have usages from this URI (for fast removal)
-            self.mixin_usages_by_uri
-                .entry(call_location.uri.clone())
-                .or_default()
-                .insert(resolved_fqn.clone());
-
-            let usages = self.mixin_usages.entry(resolved_fqn).or_default();
-            if !usages.contains(&usage) {
-                usages.push(usage);
-            }
-        }
-    }
-
-    /// Resolve all mixin references (call after all definitions are indexed)
+    /// Resolve all mixin references and build the inheritance graph
+    /// (call after all definitions are indexed)
     pub fn resolve_all_mixins(&mut self) {
-        debug!("Resolving all mixin references");
+        use crate::indexer::graph::NodeKind;
 
-        // Collect entries first to avoid borrow conflicts
-        let entries: Vec<Entry> = self
+        debug!("Building inheritance graph from indexed entries");
+
+        // Collect entries with their FQNs and file IDs first to avoid borrow conflicts
+        let entries_data: Vec<(FqnId, FileId, Entry)> = self
             .definitions()
-            .flat_map(|(_, entries)| entries.into_iter().cloned())
+            .filter_map(|(fqn, entries)| {
+                let entry = (*entries.first()?).clone();
+                let fqn_id = *self.fqn_to_id.get(fqn)?;
+                let file_id = entry.location.file_id;
+                Some((fqn_id, file_id, entry))
+            })
             .collect();
 
-        for entry in entries {
-            self.update_reverse_mixins(&entry);
+        for (fqn_id, file_id, entry) in entries_data {
+            let fqn = match self.get_fqn(fqn_id).cloned() {
+                Some(f) => f,
+                None => continue,
+            };
+
+            match &entry.kind {
+                EntryKind::Class(data) => {
+                    self.graph.ensure_node(fqn_id, NodeKind::Class);
+                    self.resolve_and_add_edges(
+                        fqn_id,
+                        file_id,
+                        &fqn,
+                        &data.superclass,
+                        &data.includes,
+                        &data.prepends,
+                        &data.extends,
+                    );
+                }
+                EntryKind::Module(data) => {
+                    self.graph.ensure_node(fqn_id, NodeKind::Module);
+                    self.resolve_and_add_edges(
+                        fqn_id,
+                        file_id,
+                        &fqn,
+                        &None,
+                        &data.includes,
+                        &data.prepends,
+                        &data.extends,
+                    );
+                }
+                _ => {}
+            }
         }
 
-        debug!(
-            "Resolved mixins: {} modules have usages tracked",
-            self.mixin_usages.len()
-        );
+        debug!("Inheritance graph built successfully");
+    }
+
+    /// Helper to resolve mixin refs and add edges to the inheritance graph
+    fn resolve_and_add_edges(
+        &mut self,
+        fqn_id: FqnId,
+        file_id: FileId,
+        context_fqn: &FullyQualifiedName,
+        superclass: &Option<MixinRef>,
+        includes: &[MixinRef],
+        prepends: &[MixinRef],
+        extends: &[MixinRef],
+    ) {
+        // Process superclass
+        if let Some(superclass_ref) = superclass {
+            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+                self,
+                &superclass_ref.parts,
+                superclass_ref.absolute,
+                context_fqn,
+            ) {
+                if let Some(&parent_id) = self.fqn_to_id.get(&resolved_fqn) {
+                    self.graph.set_superclass(fqn_id, parent_id, file_id);
+                }
+            }
+        }
+
+        // Process includes
+        for mixin_ref in includes {
+            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+                self,
+                &mixin_ref.parts,
+                mixin_ref.absolute,
+                context_fqn,
+            ) {
+                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                    self.graph.add_include(fqn_id, module_id, file_id);
+                }
+            }
+        }
+
+        // Process prepends
+        for mixin_ref in prepends {
+            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+                self,
+                &mixin_ref.parts,
+                mixin_ref.absolute,
+                context_fqn,
+            ) {
+                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                    self.graph.add_prepend(fqn_id, module_id, file_id);
+                }
+            }
+        }
+
+        // Process extends
+        for mixin_ref in extends {
+            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+                self,
+                &mixin_ref.parts,
+                mixin_ref.absolute,
+                context_fqn,
+            ) {
+                if let Some(&module_id) = self.fqn_to_id.get(&resolved_fqn) {
+                    self.graph.add_extend(fqn_id, module_id, file_id);
+                }
+            }
+        }
     }
 
     /// Resolve mixin references only for entries in a specific file
     /// This is more efficient than resolve_all_mixins for incremental updates
     pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
-        // Get FQNs from file_entries (O(1) lookup), then fetch from definitions
-        let fqns_to_resolve: Vec<_> = self
+        use crate::indexer::graph::NodeKind;
+
+        let Some(&file_id) = self.url_to_file_id.get(uri) else {
+            return;
+        };
+
+        // Collect entries from this file
+        let entries_data: Vec<(FqnId, Entry)> = self
             .file_entries(uri)
-            .iter()
-            .filter_map(|e| self.get_fqn(e.fqn_id).cloned())
-            .collect();
-
-        self.resolve_mixins_for_fqns(&fqns_to_resolve);
-    }
-
-    /// Resolve mixin references for specific FQNs
-    /// More efficient than iterating all definitions
-    pub fn resolve_mixins_for_fqns(&mut self, fqns: &[FullyQualifiedName]) {
-        // Collect entries first to avoid borrow conflicts
-        let entries_to_update: Vec<Entry> = fqns
-            .iter()
-            .filter_map(|fqn| {
-                self.get(fqn)
-                    .and_then(|entries| entries.last().copied().cloned())
+            .into_iter()
+            .filter_map(|entry| {
+                let fqn = self.get_fqn(entry.fqn_id)?;
+                let fqn_id = *self.fqn_to_id.get(fqn)?;
+                Some((fqn_id, (*entry).clone()))
             })
             .collect();
 
-        for entry in entries_to_update {
-            self.update_reverse_mixins(&entry);
+        for (fqn_id, entry) in entries_data {
+            let fqn = match self.get_fqn(fqn_id).cloned() {
+                Some(f) => f,
+                None => continue,
+            };
+
+            match &entry.kind {
+                EntryKind::Class(data) => {
+                    self.graph.ensure_node(fqn_id, NodeKind::Class);
+                    self.resolve_and_add_edges(
+                        fqn_id,
+                        file_id,
+                        &fqn,
+                        &data.superclass,
+                        &data.includes,
+                        &data.prepends,
+                        &data.extends,
+                    );
+                }
+                EntryKind::Module(data) => {
+                    self.graph.ensure_node(fqn_id, NodeKind::Module);
+                    self.resolve_and_add_edges(
+                        fqn_id,
+                        file_id,
+                        &fqn,
+                        &None,
+                        &data.includes,
+                        &data.prepends,
+                        &data.extends,
+                    );
+                }
+                _ => {}
+            }
         }
     }
 
     /// Get all classes/modules that include the given module
     ///
-    /// This method first checks the localized reverse_mixins index.
-    /// If that is empty, it falls back to a full scan of all entries to find includers.
-    /// This fallback is necessary because reverse_mixins are computed at indexing time,
-    /// so if the module was indexed AFTER the including class, the link might be missing.
+    /// Uses the inheritance graph for efficient lookup, but falls back to scanning
+    /// all entries if the graph doesn't have the information. This fallback is needed
+    /// because edges are only added when `resolve_all_mixins` or `resolve_mixins_for_uri`
+    /// is called, and during incremental indexing the module might be defined after
+    /// the class that includes it.
     pub fn get_including_classes(
         &self,
         module_fqn: &FullyQualifiedName,
     ) -> Vec<FullyQualifiedName> {
-        let mut includers = self
-            .reverse_mixins
-            .get(module_fqn)
-            .cloned()
-            .unwrap_or_default();
+        // First try the graph
+        let mut includers: Vec<FullyQualifiedName> =
+            if let Some(&fqn_id) = self.fqn_to_id.get(module_fqn) {
+                self.graph
+                    .mixers(fqn_id)
+                    .iter()
+                    .filter_map(|&id| self.get_fqn(id).cloned())
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
-        // If we found nothing (or even if we did?), we might want to scan if we suspect missing links.
-        // For performance, let's only scan if we are in "desperate mode" or if we want high accuracy.
-        // Given this is for Goto Definition (user interactive), a few ms scan is acceptable.
-        // Let's ALWAYS scan if the result is empty? Or always merge?
-        // To be safe against the race condition, we should really scan or maintain consistency.
-        // Re-resolving 10k classes' mixins might be 50-100ms.
-        // Let's try scanning only if the reverse index is empty first.
-        // If the user has *some* includers but missing others, this optimization hurts.
-        // But usually it's "all or nothing" for a specific file pair.
-        // Let's merge both.
+        // Fall back to scanning if graph is empty
+        // This handles the case where the module was indexed after the class
+        if includers.is_empty() {
+            for (fqn, entries) in &self.by_fqn {
+                for entry_id in entries.iter().rev() {
+                    let Some(entry) = self.entries.get(*entry_id) else {
+                        continue;
+                    };
 
-        let scanned = self.scan_for_including_classes(module_fqn);
-        for fqn in scanned {
-            if !includers.contains(&fqn) {
-                includers.push(fqn);
+                    let (includes, extends, prepends) = match &entry.kind {
+                        EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
+                        EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
+                        _ => continue,
+                    };
+
+                    let all_mixins = includes.iter().chain(extends.iter()).chain(prepends.iter());
+
+                    for mixin_ref in all_mixins {
+                        if let Some(resolved) = utils::resolve_constant_fqn_from_parts(
+                            self,
+                            &mixin_ref.parts,
+                            mixin_ref.absolute,
+                            fqn,
+                        ) {
+                            if resolved == *module_fqn && !includers.contains(fqn) {
+                                includers.push(fqn.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 
         includers
     }
 
-    /// Fallback: Scan all entries to find classes that include/extend/prepend the target module.
-    /// This is slower (O(N)) but robust against indexing order.
-    pub fn scan_for_including_classes(
-        &self,
-        target_module_fqn: &FullyQualifiedName,
-    ) -> Vec<FullyQualifiedName> {
-        use crate::indexer::ancestor_chain::resolve_mixin_ref;
-        let mut found = Vec::new();
-
-        // Iterate all definitions
-        // We can optimize by using by_fqn and checking latest entry for each FQN
-        for (fqn, entries) in &self.by_fqn {
-            // Check all entries for this FQN, as some might be References or separate definitions
-            // We iterate in reverse to find the most recent definition first (optimistic),
-            // but we must skip References.
-            for entry_id in entries.iter().rev() {
-                let entry = match self.entries.get(*entry_id) {
-                    Some(e) => e,
-                    None => continue,
-                };
-
-                // Check if it's a class or module
-                let (includes, extends, prepends) = match &entry.kind {
-                    EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
-                    EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
-                    _ => continue,
-                };
-
-                let all_mixins = includes.iter().chain(extends.iter()).chain(prepends.iter());
-
-                for mixin_ref in all_mixins {
-                    // Try to resolve. Now that target_module_fqn is known (indexed), this should succeed.
-                    // We only care if it resolves to target_module_fqn.
-
-                    if let Some(resolved) = resolve_mixin_ref(self, mixin_ref, fqn) {
-                        if resolved == *target_module_fqn {
-                            found.push(fqn.clone());
-                            break; // Found one usage, no need to check other mixins of this class
-                        }
-                    }
-                }
-
-                // If we processed a valid definition (Class/Module), should we stop for this FQN?
-                // A class can be reopened. Only one of the definitions might have the include.
-                // So we should probably continue to check other definitions of the same Class.
-                // e.g.
-                // class A; end
-                // class A; include M; end
-                // Both are Class entries.
-            }
-        }
-
-        found
-    }
-
-    /// Get all mixin usages for a given module (for CodeLens)
-    pub fn get_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
-        self.mixin_usages
-            .get(module_fqn)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// Get class definition locations for classes that use a module
+    /// Get class definition locations for classes that use a module (transitively)
+    /// This includes:
+    /// - Classes that directly include/prepend/extend the module
+    /// - Classes that include/prepend/extend a module that includes this module (transitively)
     pub fn get_class_definition_locations(&self, module_fqn: &FullyQualifiedName) -> Vec<Location> {
-        self.get_transitive_mixin_classes(module_fqn)
-            .keys()
+        let transitive_classes = self.get_transitive_mixin_classes(module_fqn);
+        transitive_classes
+            .iter()
             .filter_map(|class_fqn| {
                 self.get(class_fqn).and_then(|entries| {
                     entries.first().and_then(|entry| {
@@ -931,57 +964,115 @@ impl RubyIndex {
     }
 
     /// Get all classes that transitively include/extend/prepend a module
+    /// This follows the chain: if A includes B and B includes C,
+    /// and class D includes A, then D is a transitive user of C
     pub fn get_transitive_mixin_classes(
         &self,
         module_fqn: &FullyQualifiedName,
-    ) -> HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>> {
-        let mut result = HashMap::new();
+    ) -> Vec<FullyQualifiedName> {
+        let mut result = Vec::new();
         let mut visited = std::collections::HashSet::new();
-        self.collect_transitive_users(module_fqn, &mut result, &mut visited, vec![]);
+        self.collect_transitive_classes(module_fqn, &mut result, &mut visited);
         result
     }
 
-    fn collect_transitive_users(
+    fn collect_transitive_classes(
         &self,
         module_fqn: &FullyQualifiedName,
-        result: &mut HashMap<FullyQualifiedName, Vec<Vec<FullyQualifiedName>>>,
+        result: &mut Vec<FullyQualifiedName>,
         visited: &mut std::collections::HashSet<FullyQualifiedName>,
-        path: Vec<FullyQualifiedName>,
     ) {
         if !visited.insert(module_fqn.clone()) {
             return;
         }
 
-        if let Some(usages) = self.mixin_usages.get(module_fqn) {
-            for usage in usages {
-                if let Some(entries) = self.get(&usage.user_fqn) {
-                    if let Some(entry) = entries.first() {
-                        let mut current_path = path.clone();
-                        current_path.push(module_fqn.clone());
+        // Get direct mixers (classes and modules that include/prepend/extend this module)
+        let mixers = self.get_including_classes(module_fqn);
 
-                        match &entry.kind {
-                            EntryKind::Class(_) => {
-                                result
-                                    .entry(usage.user_fqn.clone())
-                                    .or_default()
-                                    .push(current_path);
+        for mixer_fqn in mixers {
+            if let Some(entries) = self.get(&mixer_fqn) {
+                if let Some(entry) = entries.first() {
+                    match &entry.kind {
+                        EntryKind::Class(_) => {
+                            // It's a class - add to result
+                            if !result.contains(&mixer_fqn) {
+                                result.push(mixer_fqn.clone());
                             }
-                            EntryKind::Module(_) => {
-                                self.collect_transitive_users(
-                                    &usage.user_fqn,
-                                    result,
-                                    visited,
-                                    current_path,
-                                );
-                            }
-                            _ => {}
                         }
+                        EntryKind::Module(_) => {
+                            // It's a module - recursively find classes that use this module
+                            self.collect_transitive_classes(&mixer_fqn, result, visited);
+                        }
+                        _ => {}
                     }
                 }
             }
         }
 
         visited.remove(module_fqn);
+    }
+
+    /// Get all mixin usages for a given module (for CodeLens)
+    ///
+    /// This retrieves usage information by:
+    /// 1. Finding all classes/modules that use this module via the inheritance graph
+    /// 2. Looking up the MixinRef locations stored in ClassData/ModuleData
+    pub fn get_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
+        let mut usages = Vec::new();
+
+        // Get all classes/modules that include/prepend/extend this module
+        let mixer_fqns = self.get_including_classes(module_fqn);
+
+        for mixer_fqn in mixer_fqns {
+            // Find entries for this mixer
+            let Some(entries) = self.get(&mixer_fqn) else {
+                continue;
+            };
+
+            for entry in entries {
+                let mixin_refs_with_types: Vec<(&crate::indexer::entry::MixinRef, MixinType)> =
+                    match &entry.kind {
+                        EntryKind::Class(data) => {
+                            let mut refs = Vec::new();
+                            refs.extend(data.includes.iter().map(|r| (r, MixinType::Include)));
+                            refs.extend(data.prepends.iter().map(|r| (r, MixinType::Prepend)));
+                            refs.extend(data.extends.iter().map(|r| (r, MixinType::Extend)));
+                            refs
+                        }
+                        EntryKind::Module(data) => {
+                            let mut refs = Vec::new();
+                            refs.extend(data.includes.iter().map(|r| (r, MixinType::Include)));
+                            refs.extend(data.prepends.iter().map(|r| (r, MixinType::Prepend)));
+                            refs.extend(data.extends.iter().map(|r| (r, MixinType::Extend)));
+                            refs
+                        }
+                        _ => continue,
+                    };
+
+                for (mixin_ref, mixin_type) in mixin_refs_with_types {
+                    // Check if this mixin_ref resolves to the target module
+                    if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+                        self,
+                        &mixin_ref.parts,
+                        mixin_ref.absolute,
+                        &mixer_fqn,
+                    ) {
+                        if resolved_fqn == *module_fqn {
+                            // Convert CompactLocation to Location
+                            if let Some(location) = self.to_lsp_location(&mixin_ref.location) {
+                                usages.push(MixinUsage {
+                                    user_fqn: mixer_fqn.clone(),
+                                    mixin_type,
+                                    location,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        usages
     }
 
     // ========================================================================

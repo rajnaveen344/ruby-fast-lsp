@@ -60,8 +60,6 @@ impl MethodResolver {
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
-        use crate::indexer::ancestor_chain::get_ancestor_chain;
-
         // Handle class reference calling .new
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
@@ -101,7 +99,7 @@ impl MethodResolver {
             all_fqns_to_search.push(owner_fqn.clone());
 
             // Add ancestor chain
-            let ancestors = get_ancestor_chain(index, &owner_fqn, is_singleton);
+            let ancestors = index.get_ancestor_chain(&owner_fqn, is_singleton);
             for ancestor in ancestors {
                 if !all_fqns_to_search.contains(&ancestor) {
                     all_fqns_to_search.push(ancestor);
@@ -116,7 +114,7 @@ impl MethodResolver {
                         all_fqns_to_search.push(class_fqn.clone());
                     }
                     // Also add ancestors of including classes
-                    let class_ancestors = get_ancestor_chain(index, &class_fqn, false);
+                    let class_ancestors = index.get_ancestor_chain(&class_fqn, false);
                     for ancestor in class_ancestors {
                         if !all_fqns_to_search.contains(&ancestor) {
                             all_fqns_to_search.push(ancestor);
@@ -344,11 +342,7 @@ impl MethodResolver {
             let index = self.index.lock();
 
             // Get the ancestor chain for this class/module
-            let ancestors = crate::indexer::ancestor_chain::get_ancestor_chain(
-                &index,
-                &owner_fqn,
-                is_singleton,
-            );
+            let ancestors = index.get_ancestor_chain(&owner_fqn, is_singleton);
 
             // Search through the ancestor chain for the method
             let mut found_return_types = Vec::new();

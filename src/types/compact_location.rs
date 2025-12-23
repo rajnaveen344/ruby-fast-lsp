@@ -15,7 +15,7 @@ use crate::indexer::index::FileId;
 ///
 /// Instead of storing the full URL, we store a FileId (SlotMap key).
 /// We keep the standard LSP Range for compatibility with existing code.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CompactLocation {
     /// SlotMap key to look up the URL in RubyIndex.files
     pub file_id: FileId,

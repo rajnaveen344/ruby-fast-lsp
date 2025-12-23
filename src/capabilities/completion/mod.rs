@@ -514,7 +514,10 @@ mod tests {
     use crate::{
         indexer::entry::{entry_kind::EntryKind, Entry, MixinRef},
         server::RubyLanguageServer,
-        types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
+        types::{
+            compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
+            ruby_namespace::RubyConstant,
+        },
     };
     use tower_lsp::{
         lsp_types::{
@@ -637,6 +640,7 @@ end"#;
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(string_entry);
@@ -648,6 +652,7 @@ end"#;
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(stringio_entry);
@@ -741,6 +746,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(string_entry);
@@ -903,6 +909,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(string_entry);
@@ -913,6 +920,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(array_entry);
@@ -1031,6 +1039,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(inner_class_entry);
@@ -1042,6 +1051,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(string_entry);
@@ -1052,6 +1062,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(hash_entry);
@@ -1194,6 +1205,7 @@ end
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
+                        location: CompactLocation::default(),
                     })),
                 );
                 index_guard.add_entry(string_entry);
@@ -1204,6 +1216,7 @@ end
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
+                        location: CompactLocation::default(),
                     })),
                 );
                 index_guard.add_entry(test_class_entry);
@@ -1376,6 +1389,7 @@ end
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
+                        location: CompactLocation::default(),
                     })),
                 );
                 index_guard.add_entry(entry);
@@ -1388,6 +1402,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(builtin_entry);
@@ -1478,6 +1493,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(my_class_entry);
@@ -1488,6 +1504,7 @@ end
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             );
             index_guard.add_entry(my_top_class_entry);
@@ -1571,6 +1588,7 @@ A::B::"#;
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
+                        location: CompactLocation::default(),
                     })),
                 );
                 index_guard.add_entry(entry);
@@ -1698,6 +1716,7 @@ A::"#;
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
                         absolute: false,
+                        location: CompactLocation::default(),
                     })),
                 );
                 index_guard.add_entry(entry);

@@ -371,7 +371,10 @@ mod tests {
             entry::{Entry, MixinRef},
             index::RubyIndex,
         },
-        types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant},
+        types::{
+            compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
+            ruby_namespace::RubyConstant,
+        },
     };
 
     fn create_test_entry(index: &mut RubyIndex, name: &str, kind: EntryKind) -> Entry {
@@ -400,6 +403,7 @@ mod tests {
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             ),
             (
@@ -407,6 +411,7 @@ mod tests {
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
                     absolute: false,
+                    location: CompactLocation::default(),
                 })),
             ),
         ];

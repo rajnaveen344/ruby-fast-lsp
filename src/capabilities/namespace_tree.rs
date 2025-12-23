@@ -1,8 +1,7 @@
-use crate::indexer::ancestor_chain::resolve_mixin_ref;
+use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{Entry, MixinRef};
 use crate::indexer::index::RubyIndex;
-// use crate::indexer::utils; // Removed
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use log::debug;
@@ -256,7 +255,9 @@ fn resolve_mixin_cached(
         return cached.clone();
     }
 
-    let result = if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, current_fqn) {
+    let result = if let Some(resolved_fqn) =
+        resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
+    {
         resolved_fqn.to_string()
     } else {
         format!("{} (not found)", mixin_str)

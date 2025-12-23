@@ -1,6 +1,8 @@
 use ruby_prism::CallNode;
 
+use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MixinRef;
+use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
@@ -32,10 +34,17 @@ impl IndexVisitor {
         let method_name = String::from_utf8_lossy(name_slice);
 
         if let Some(arguments) = node.arguments() {
+            // Get the location of the include/extend/prepend call for provenance tracking
+            let call_lsp_location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            let file_id = self.index.lock().get_or_insert_file(&call_lsp_location.uri);
+            let call_location = CompactLocation::new(file_id, call_lsp_location.range);
+
             let mixin_refs: Vec<MixinRef> = arguments
                 .arguments()
                 .iter()
-                .filter_map(|arg| utils::mixin_ref_from_node(&arg))
+                .filter_map(|arg| utils::mixin_ref_from_node(&arg, call_location.clone()))
                 .collect();
 
             if mixin_refs.is_empty() {
@@ -50,6 +59,10 @@ impl IndexVisitor {
 
             let mut index = self.index.lock();
             if let Some(entry) = index.get_last_definition_mut(&current_fqn) {
+                // Only add mixins to class/module entries, not constants or other entries
+                if !matches!(entry.kind, EntryKind::Class(_) | EntryKind::Module(_)) {
+                    return;
+                }
                 match method_name.as_ref() {
                     "include" => entry.add_includes(mixin_refs),
                     "extend" => entry.add_extends(mixin_refs),

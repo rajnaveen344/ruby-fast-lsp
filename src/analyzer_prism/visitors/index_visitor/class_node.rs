@@ -3,6 +3,7 @@ use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind, MixinRef};
+use crate::types::compact_location::CompactLocation;
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
@@ -87,6 +88,13 @@ impl IndexVisitor {
     /// Create a MixinRef for the superclass constant path
     fn create_superclass_mixin_ref(&self, node: &ClassNode) -> Option<MixinRef> {
         if let Some(superclass_node) = node.superclass() {
+            // Get location of the superclass declaration
+            let lsp_location = self
+                .document
+                .prism_location_to_lsp_location(&superclass_node.location());
+            let file_id = self.index.lock().get_or_insert_file(&lsp_location.uri);
+            let location = CompactLocation::new(file_id, lsp_location.range);
+
             if let Some(const_read_node) = superclass_node.as_constant_read_node() {
                 let superclass_name =
                     String::from_utf8_lossy(const_read_node.name().as_slice()).to_string();
@@ -94,6 +102,7 @@ impl IndexVisitor {
                     return Some(MixinRef {
                         parts: vec![constant],
                         absolute: false, // relative lookup
+                        location,
                     });
                 }
             } else if let Some(const_path_node) = superclass_node.as_constant_path_node() {
@@ -101,7 +110,11 @@ impl IndexVisitor {
                 utils::collect_namespaces(&const_path_node, &mut parts);
                 if !parts.is_empty() {
                     let absolute = const_path_node.parent().is_none();
-                    return Some(MixinRef { parts, absolute });
+                    return Some(MixinRef {
+                        parts,
+                        absolute,
+                        location,
+                    });
                 }
             }
         }

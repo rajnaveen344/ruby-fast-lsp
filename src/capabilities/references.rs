@@ -3,7 +3,6 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::analyzer_prism::{Identifier, MethodReceiver};
-use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::{EntryKind, MethodKind};
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
@@ -297,7 +296,7 @@ fn find_method_references_in_ancestor_chain(
 ) -> Option<Vec<Location>> {
     let mut all_references = Vec::new();
     let is_class_method = kind == MethodKind::Class;
-    let ancestor_chain = get_ancestor_chain(index, context_fqn, is_class_method);
+    let ancestor_chain = index.get_ancestor_chain(context_fqn, is_class_method);
 
     for ancestor_fqn in ancestor_chain {
         let method_fqn = FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());

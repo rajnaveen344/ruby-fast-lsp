@@ -6,8 +6,8 @@ use crate::{
     indexer::{entry::MethodKind, index::UnresolvedEntry},
     type_inference::ruby_type::RubyType,
     types::{
-        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
-        ruby_namespace::RubyConstant,
+        compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
     },
 };
 
@@ -341,7 +341,10 @@ impl ReferenceVisitor {
         }
 
         // Fallback to mixin_ref approach if resolution fails
-        if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
+        // Use default location since we're just extracting namespace info, not tracking mixin call sites
+        if let Some(mixin_ref) =
+            utils::mixin_ref_from_node(receiver_node, CompactLocation::default())
+        {
             let final_namespace = if mixin_ref.absolute {
                 mixin_ref.parts
             } else {

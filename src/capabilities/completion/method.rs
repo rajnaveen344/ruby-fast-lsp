@@ -9,7 +9,6 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
-use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
@@ -143,7 +142,7 @@ fn get_index_methods_with_ancestors(
 
     // Get the ancestor chain for the class
     let ancestors = if let Ok(fqn) = &class_fqn {
-        get_ancestor_chain(&index, fqn, is_class_method)
+        index.get_ancestor_chain(fqn, is_class_method)
     } else {
         vec![]
     };

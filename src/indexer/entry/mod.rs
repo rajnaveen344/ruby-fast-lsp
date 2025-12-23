@@ -115,6 +115,8 @@ pub struct MixinRef {
     pub parts: Vec<RubyConstant>,
     /// True if the path began with `::` (absolute path)
     pub absolute: bool,
+    /// Location where the include/extend/prepend call was written
+    pub location: CompactLocation,
 }
 
 /// Type of mixin operation

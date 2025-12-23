@@ -15,11 +15,10 @@
 //! ## Supporting Modules
 //!
 //! - **`entry`**: Entry types and builders for storing indexed items
-//! - **`ancestor_chain`**: Method resolution order and mixin handling
+//! - **`inheritance_graph`**: Method resolution order, inheritance, and mixin handling
 //! - **`prefix_tree`**: Fast prefix-based search for auto-completion
 //! - **`version`**: Ruby version detection and management
 
-pub mod ancestor_chain;
 pub mod coordinator;
 pub mod entry;
 pub mod file_processor;
@@ -27,6 +26,7 @@ pub mod index;
 pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;
+pub mod graph;
 pub mod prefix_tree;
 
 pub mod version;

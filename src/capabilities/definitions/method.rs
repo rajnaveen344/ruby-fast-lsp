@@ -20,7 +20,7 @@
 //! - `find_method_definitions`: Main entry point for method definition search (type-aware)
 //! - `search_method_in_class_hierarchy`: Handles class context search
 //! - `search_method_in_including_classes`: Handles module context search
-//! - `get_ancestor_chain`: Gets the complete ancestor chain from ancestor_chain.rs
+//! - `RubyIndex::get_ancestor_chain`: Gets the complete ancestor chain for method resolution
 
 use log::debug;
 use std::collections::HashSet;
@@ -28,7 +28,6 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;
-use crate::indexer::ancestor_chain::get_ancestor_chain;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
@@ -505,7 +504,7 @@ fn get_included_modules(
     let mut included_modules = Vec::new();
     let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-    let ancestor_chain = get_ancestor_chain(index, class_fqn, false);
+    let ancestor_chain = index.get_ancestor_chain(class_fqn, false);
 
     for ancestor_fqn in &ancestor_chain {
         if let Some(entries) = index.get(ancestor_fqn) {
@@ -573,8 +572,6 @@ fn process_mixins(
     seen_modules: &mut HashSet<FullyQualifiedName>,
     reverse_order: bool,
 ) {
-    use crate::indexer::ancestor_chain::resolve_mixin_ref;
-
     let iter: Box<dyn Iterator<Item = _>> = if reverse_order {
         Box::new(mixins.iter().rev())
     } else {
@@ -582,7 +579,12 @@ fn process_mixins(
     };
 
     for mixin_ref in iter {
-        if let Some(resolved_fqn) = resolve_mixin_ref(index, mixin_ref, ancestor_fqn) {
+        if let Some(resolved_fqn) = resolve_constant_fqn_from_parts(
+            index,
+            &mixin_ref.parts,
+            mixin_ref.absolute,
+            ancestor_fqn,
+        ) {
             if seen_modules.insert(resolved_fqn.clone()) {
                 included_modules.push(resolved_fqn);
             }
@@ -673,7 +675,7 @@ fn search_method_in_class_hierarchy(
     let mut modules_to_search = HashSet::new();
     modules_to_search.insert(receiver_fqn.clone());
 
-    let ancestor_chain = get_ancestor_chain(index, receiver_fqn, is_class_method);
+    let ancestor_chain = index.get_ancestor_chain(receiver_fqn, is_class_method);
 
     for ancestor_fqn in &ancestor_chain {
         modules_to_search.insert(ancestor_fqn.clone());
@@ -766,7 +768,7 @@ fn collect_all_searchable_modules(
 
     modules_to_search.insert(fqn.clone());
 
-    let ancestor_chain = get_ancestor_chain(index, fqn, false);
+    let ancestor_chain = index.get_ancestor_chain(fqn, false);
     for ancestor_fqn in &ancestor_chain {
         if !modules_to_search.contains(ancestor_fqn) {
             modules_to_search.insert(ancestor_fqn.clone());
