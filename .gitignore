@@ -8,4 +8,6 @@ Cargo.lock
 # Simulation test outputs (keep regressions.txt tracked for reproducibility)
 src/test/simulation/soak_failures.log
 # DHAT heap profiling output
-*heap.json 
+*heap.json
+# Pre-zipped stubs (generated from vsix/stubs, not tracked in git)
+vsix/stubs-zipped/

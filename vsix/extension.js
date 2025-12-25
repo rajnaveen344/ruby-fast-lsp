@@ -1,11 +1,82 @@
 const vscode = require('vscode');
 const path = require('path');
+const fs = require('fs');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 
 // Create output channel for logging
 let outputChannel;
 
 let client;
+
+/**
+ * Extract zipped stubs to the extension's stubs directory on first run.
+ * This ensures go-to-definition shows proper file paths instead of virtual URIs.
+ * 
+ * Only extracts if:
+ * - stubs-zipped/*.zip files exist
+ * - corresponding stubs/rubystubsXY directory doesn't exist or is outdated
+ */
+function extractZippedStubs(extensionPath) {
+    const zippedDir = path.join(extensionPath, 'stubs-zipped');
+    const stubsDir = path.join(extensionPath, 'stubs');
+
+    if (!fs.existsSync(zippedDir)) {
+        return; // No zipped stubs, nothing to do
+    }
+
+    const AdmZip = require('adm-zip');
+    const zipFiles = fs.readdirSync(zippedDir).filter(f => f.endsWith('.zip'));
+
+    for (const zipFile of zipFiles) {
+        const version = zipFile.replace('.zip', ''); // e.g., "rubystubs30"
+        const zipPath = path.join(zippedDir, zipFile);
+        const extractPath = path.join(stubsDir, version);
+        const markerFile = path.join(extractPath, '.extracted');
+
+        // Check if we need to extract
+        let needsExtract = false;
+        if (!fs.existsSync(extractPath)) {
+            needsExtract = true;
+        } else if (!fs.existsSync(markerFile)) {
+            needsExtract = true;
+        } else {
+            // Check if zip is newer than extraction
+            const zipStat = fs.statSync(zipPath);
+            const markerStat = fs.statSync(markerFile);
+            if (zipStat.mtime > markerStat.mtime) {
+                needsExtract = true;
+            }
+        }
+
+        if (needsExtract) {
+            try {
+                if (outputChannel) {
+                    outputChannel.appendLine(`[Ruby Fast LSP] Extracting ${zipFile}...`);
+                }
+
+                // Clean up old extraction if exists
+                if (fs.existsSync(extractPath)) {
+                    fs.rmSync(extractPath, { recursive: true });
+                }
+
+                // Extract
+                const zip = new AdmZip(zipPath);
+                zip.extractAllTo(extractPath, true);
+
+                // Write marker file
+                fs.writeFileSync(markerFile, new Date().toISOString());
+
+                if (outputChannel) {
+                    outputChannel.appendLine(`[Ruby Fast LSP] Extracted ${zipFile} to ${extractPath}`);
+                }
+            } catch (error) {
+                if (outputChannel) {
+                    outputChannel.appendLine(`[Ruby Fast LSP] Failed to extract ${zipFile}: ${error.message}`);
+                }
+            }
+        }
+    }
+}
 
 // Ruby Namespace Tree Data Provider
 class RubyNamespaceTreeProvider {
@@ -151,6 +222,10 @@ function activate(context) {
     // Create single output channel for both extension and LSP server logs
     outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP');
     context.subscriptions.push(outputChannel);
+
+    // Extract zipped stubs to the extension folder on first run
+    // This ensures go-to-definition shows proper file paths
+    extractZippedStubs(context.extensionPath);
 
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
 

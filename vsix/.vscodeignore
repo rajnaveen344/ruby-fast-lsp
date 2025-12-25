@@ -2,3 +2,9 @@
 .vscode-test/**
 .gitignore
 vsc-extension-quickstart.md
+
+# Exclude uncompressed stubs - they are extracted from zips on first run
+stubs/**
+
+# Keep stubs-zipped - these are extracted by the extension on first activation
+# !stubs-zipped/** (included by default)

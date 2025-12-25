@@ -257,6 +257,11 @@ impl IndexingCoordinator {
         let mut stdlib_indexer =
             IndexerStdlib::new(self.file_processor.as_ref().unwrap().clone(), *ruby_version);
 
+        // Pass extension path for loading zipped stubs
+        if let Some(ref ext_path) = self.config.extension_path {
+            stdlib_indexer.set_extension_path(PathBuf::from(ext_path));
+        }
+
         stdlib_indexer.set_required_modules(required_stdlib);
         stdlib_indexer.index_stdlib(server).await?;
         self.stdlib_indexer = Some(stdlib_indexer);

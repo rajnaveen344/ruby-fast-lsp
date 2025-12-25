@@ -233,16 +233,32 @@ if [ "$SKIP_BUILDS" = false ]; then
     echo "Successfully built for: ${built_platforms[*]}"
 fi
 
-# Verify stubs are available in extension directory
-echo "Verifying Ruby stubs in extension directory..."
-STUBS_TARGET_DIR="$EXTENSION_DIR/stubs"
+# Pre-zip stubs for faster VSIX packaging
+echo "Pre-zipping Ruby stubs..."
+STUBS_ZIP_DIR="$EXTENSION_DIR/stubs-zipped"
 
-if [ -d "$STUBS_TARGET_DIR" ]; then
-    # Count stub directories for verification
-    stub_count=$(find "$STUBS_TARGET_DIR" -maxdepth 1 -type d -name "rubystubs*" | wc -l)
-    echo "Found $stub_count Ruby version stub directories in $STUBS_TARGET_DIR"
+if [ -d "$EXTENSION_DIR/stubs" ]; then
+    # Run the zip script to create pre-zipped stubs
+    if [ -f "./scripts/zip_stubs.sh" ]; then
+        ./scripts/zip_stubs.sh
+    else
+        echo "Warning: zip_stubs.sh not found, creating stubs-zipped manually..."
+        mkdir -p "$STUBS_ZIP_DIR"
+        for version_dir in "$EXTENSION_DIR/stubs"/rubystubs*; do
+            if [ -d "$version_dir" ]; then
+                version_name=$(basename "$version_dir")
+                (cd "$version_dir" && zip -9 -q "../../stubs-zipped/${version_name}.zip" *.rb)
+            fi
+        done
+    fi
+    
+    # Verify zipped stubs
+    if [ -d "$STUBS_ZIP_DIR" ]; then
+        zip_count=$(find "$STUBS_ZIP_DIR" -maxdepth 1 -name "*.zip" | wc -l)
+        echo "Created $zip_count pre-zipped stub archives in $STUBS_ZIP_DIR"
+    fi
 else
-    echo "Warning: Stubs directory not found at $STUBS_TARGET_DIR"
+    echo "Warning: Stubs directory not found at $EXTENSION_DIR/stubs"
     echo "Stubs will not be included in the VSIX package"
 fi
 

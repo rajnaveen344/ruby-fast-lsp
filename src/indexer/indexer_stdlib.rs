@@ -2,6 +2,10 @@
 //!
 //! This module handles indexing of Ruby's standard library based on the detected
 //! Ruby version and required modules from project dependencies.
+//!
+//! In production (VSIX), stubs are shipped as zip files and extracted by the
+//! VS Code extension on first activation. The LSP server reads from the
+//! extracted directories with proper file:// URIs.
 
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
@@ -9,6 +13,7 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
 use crate::utils;
 use crate::utils::parallelizer::process_in_parallel;
+use crate::utils::stub_loader::find_stubs_directory;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::collections::HashSet;
@@ -25,6 +30,8 @@ pub struct IndexerStdlib {
     ruby_version: Option<RubyVersion>,
     stdlib_paths: Vec<PathBuf>,
     required_modules: HashSet<String>,
+    /// Optional path to the VS Code extension directory (for loading zipped stubs)
+    extension_path: Option<PathBuf>,
 }
 
 impl IndexerStdlib {
@@ -34,7 +41,13 @@ impl IndexerStdlib {
             ruby_version,
             stdlib_paths: Vec::new(),
             required_modules: HashSet::new(),
+            extension_path: None,
         }
+    }
+
+    /// Set the extension path for loading zipped stubs
+    pub fn set_extension_path(&mut self, path: PathBuf) {
+        self.extension_path = Some(path);
     }
 
     // ========================================================================
@@ -86,16 +99,47 @@ impl IndexerStdlib {
     }
 
     /// Index core stubs if available
+    ///
+    /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
+    /// In production, these are extracted from zip files by the VS Code extension
+    /// on first activation.
     async fn index_core_stubs(&self, server: &RubyLanguageServer) -> Result<()> {
         let Some(version) = &self.ruby_version else {
             return Ok(());
         };
 
+        // Try to load from extension path first
+        if let Some(ref ext_path) = self.extension_path {
+            if let Some(stubs_dir) = find_stubs_directory(ext_path, version.to_tuple()) {
+                let stub_files = utils::collect_ruby_files(&stubs_dir);
+                if stub_files.is_empty() {
+                    warn!("No stub files found in: {:?}", stubs_dir);
+                    return Ok(());
+                }
+
+                info!("Indexing {} core stubs from: {:?}", stub_files.len(), stubs_dir);
+
+                let processor = self.file_processor.clone();
+                let server_ref = server.clone();
+
+                process_in_parallel(&stub_files, 50, move |path| {
+                    let processor = processor.clone();
+                    let server_ref = server_ref.clone();
+                    async move { processor.index_file_definitions(&path, &server_ref).await }
+                })
+                .await?;
+
+                info!("Indexed {} core stub files", stub_files.len());
+                return Ok(());
+            }
+        }
+
+        // Fall back to finding stubs relative to executable (development path)
         let Some(stubs_path) = self.find_core_stubs_path(version.to_tuple()) else {
             return Ok(());
         };
 
-        info!("Indexing core stubs from: {:?}", stubs_path);
+        info!("Indexing core stubs from directory: {:?}", stubs_path);
 
         let stub_files = utils::collect_ruby_files(&stubs_path);
         if stub_files.is_empty() {

@@ -96,7 +96,6 @@
           "default": "",
           "description": "Custom path to Ruby stubs directory. Leave empty to use bundled stubs."
         }
-
       }
     },
     "views": {
@@ -111,10 +110,10 @@
     },
     "commands": [
       {
-          "command": "rubyNamespaceTree.refresh",
-          "title": "Refresh",
-          "icon": "$(refresh)"
-        }
+        "command": "rubyNamespaceTree.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      }
     ],
     "menus": {
       "view/title": [
@@ -130,6 +129,7 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "vscode-languageclient": "^9.0.1"
   }
 }
