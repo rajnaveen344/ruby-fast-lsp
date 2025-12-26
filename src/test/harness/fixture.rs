@@ -331,6 +331,11 @@ fn virtual_uri() -> Url {
     Url::parse("file:///inline_test.rb").expect("Invalid virtual URI")
 }
 
+/// Virtual URI with custom filename
+fn virtual_uri_with_name(name: &str) -> Url {
+    Url::parse(&format!("file:///{}", name)).expect("Invalid virtual URI")
+}
+
 /// Sets up a server with an inline fixture loaded.
 pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
     let server = RubyLanguageServer::default();
@@ -358,4 +363,52 @@ pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
     }
 
     (server, uri)
+}
+
+/// Sets up a server with multiple files loaded.
+///
+/// Each tuple contains (filename, content). The first file in the list
+/// is considered the "primary" file and its URI is returned.
+///
+/// This is useful for testing cross-file scenarios like:
+/// - Class reopenings with mixins in different files
+/// - Module definitions across files
+/// - Cross-file references
+pub async fn setup_with_multi_file_fixture(
+    files: &[(&str, &str)],
+) -> (RubyLanguageServer, Vec<Url>) {
+    let server = RubyLanguageServer::default();
+    let _ = server.initialize(InitializeParams::default()).await;
+
+    let mut uris = Vec::new();
+
+    // First pass: create documents and add them to server
+    for (filename, content) in files {
+        let uri = virtual_uri_with_name(filename);
+        uris.push(uri.clone());
+
+        let document = RubyDocument::new(uri.clone(), content.to_string(), 1);
+        server
+            .docs
+            .lock()
+            .insert(uri, Arc::new(RwLock::new(document)));
+    }
+
+    // Second pass: index all files (order matters for testing cross-file)
+    {
+        use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
+        let indexer = FileProcessor::new(server.index.clone());
+        let options = ProcessingOptions {
+            index_definitions: true,
+            index_references: true,
+            resolve_mixins: true,
+            include_local_vars: true,
+        };
+
+        for (i, (_, content)) in files.iter().enumerate() {
+            let _ = indexer.process_file(&uris[i], content, &server, options.clone());
+        }
+    }
+
+    (server, uris)
 }

@@ -14,6 +14,7 @@
 //! | `<lens title="...">` | No | Expected code lens |
 //! | `<err>...</err>` | No | Expected error diagnostic |
 //! | `<warn>...</warn>` | No | Expected warning diagnostic |
+//! | `<th supertypes="A,B" subtypes="C,D">` | Yes | Type hierarchy check at cursor |
 //!
 //! # Examples
 //!
@@ -29,12 +30,19 @@
 //!
 //! // Combined: hints + diagnostics
 //! check(r#"x<hint label="String"><warn>;</warn> = "hello""#).await;
+//!
+//! // Type hierarchy
+//! check(r#"
+//! class Animal; end
+//! class <th supertypes="Animal">Dog$0</th> < Animal; end
+//! "#).await;
 //! ```
 
 use tower_lsp::lsp_types::{
     CodeLensParams, DiagnosticSeverity, GotoDefinitionParams, InlayHintParams, PartialResultParams,
     Position, Range, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
-    TextDocumentPositionParams, Url, WorkDoneProgressParams,
+    TextDocumentPositionParams, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Url, WorkDoneProgressParams,
 };
 
 use super::fixture::{
@@ -44,10 +52,13 @@ use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
 use crate::capabilities::diagnostics::{generate_diagnostics, generate_yard_diagnostics};
 use crate::capabilities::inlay_hints::handle_inlay_hints;
+use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
 
 /// All supported tag names for extraction.
-const ALL_TAGS: &[&str] = &["def", "ref", "type", "hint", "lens", "err", "warn", "hover"];
+const ALL_TAGS: &[&str] = &[
+    "def", "ref", "type", "hint", "lens", "err", "warn", "hover", "th",
+];
 
 /// Unified check function that runs checks based on tags present in the fixture.
 ///
@@ -76,6 +87,7 @@ pub async fn check(fixture_text: &str) {
     let err_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "err").collect();
     let warn_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "warn").collect();
     let hover_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hover").collect();
+    let th_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "th").collect();
 
     // Separate "none" tags (range-scoped negative assertions) from positive assertions
     let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
@@ -149,6 +161,12 @@ pub async fn check(fixture_text: &str) {
     if !hover_tags.is_empty() {
         run_hover_check(&server, &uri, &hover_tags).await;
         checks_run.push("hover");
+    }
+
+    // Run type hierarchy check if we have th tags
+    if cursor.is_some() && !th_tags.is_empty() {
+        run_type_hierarchy_check(&server, &uri, cursor.unwrap(), &th_tags).await;
+        checks_run.push("type_hierarchy");
     }
 
     // If no checks were run, that's okay - it means the fixture is valid with no expectations
@@ -662,6 +680,108 @@ async fn run_hover_check(
     }
 }
 
+/// Run type hierarchy check.
+///
+/// The `<th>` tag supports the following attributes:
+/// - `supertypes="A,B,C"` - comma-separated list of expected supertype names
+/// - `subtypes="X,Y,Z"` - comma-separated list of expected subtype names
+///
+/// Example: `<th supertypes="Animal,Walkable" subtypes="Poodle">Dog$0</th>`
+async fn run_type_hierarchy_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    cursor: Position,
+    th_tags: &[&Tag],
+) {
+    // There should typically be one th tag, but we support multiple
+    for tag in th_tags {
+        // Prepare type hierarchy at cursor
+        let prepare_params = TypeHierarchyPrepareParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: cursor,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let prepare_result =
+            type_hierarchy::handle_prepare_type_hierarchy(server, prepare_params).await;
+
+        let items = prepare_result.expect("Type hierarchy prepare should return items");
+        assert!(
+            !items.is_empty(),
+            "Expected type hierarchy item at cursor {:?}",
+            cursor
+        );
+
+        let item = &items[0];
+
+        // Check supertypes if specified
+        if let Some(expected_supertypes_str) = tag.attributes.get("supertypes") {
+            let expected_supertypes: Vec<&str> = expected_supertypes_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            let supertypes_params = TypeHierarchySupertypesParams {
+                item: item.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            };
+
+            let supertypes = type_hierarchy::handle_supertypes(server, supertypes_params)
+                .await
+                .unwrap_or_default();
+
+            let supertype_names: Vec<&str> = supertypes.iter().map(|s| s.name.as_str()).collect();
+
+            for expected in &expected_supertypes {
+                assert!(
+                    supertype_names.contains(expected),
+                    "Expected supertype '{}' not found for '{}'.\nExpected: {:?}\nActual: {:?}",
+                    expected,
+                    item.name,
+                    expected_supertypes,
+                    supertype_names
+                );
+            }
+        }
+
+        // Check subtypes if specified
+        if let Some(expected_subtypes_str) = tag.attributes.get("subtypes") {
+            let expected_subtypes: Vec<&str> = expected_subtypes_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            let subtypes_params = TypeHierarchySubtypesParams {
+                item: item.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            };
+
+            let subtypes = type_hierarchy::handle_subtypes(server, subtypes_params)
+                .await
+                .unwrap_or_default();
+
+            let subtype_names: Vec<&str> = subtypes.iter().map(|s| s.name.as_str()).collect();
+
+            for expected in &expected_subtypes {
+                assert!(
+                    subtype_names.contains(expected),
+                    "Expected subtype '{}' not found for '{}'.\nExpected: {:?}\nActual: {:?}",
+                    expected,
+                    item.name,
+                    expected_subtypes,
+                    subtype_names
+                );
+            }
+        }
+    }
+}
+
 /// Compare ranges exactly.
 fn ranges_match(actual: &Range, expected: &Range) -> bool {
     actual.start.line == expected.start.line
@@ -771,6 +891,26 @@ end
 <hint none>
 FOO = 42
 </hint>
+"#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_check_type_hierarchy() {
+        // <th supertypes="..." subtypes="..."> checks type hierarchy at cursor
+        check(
+            r#"
+class Animal
+end
+
+<th supertypes="Animal" subtypes="Poodle">
+class Dog$0 < Animal
+end
+</th>
+
+class Poodle < Dog
+end
 "#,
         )
         .await;

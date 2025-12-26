@@ -64,6 +64,9 @@ pub async fn handle_initialize(
         warn!("No workspace folder or root URI provided. A workspace folder is required to function properly");
     }
 
+    // Build static capabilities
+    // Note: Type hierarchy is dynamically registered in handle_initialized
+    // because lsp-types 0.94.1 doesn't have typeHierarchyProvider field
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         definition_provider: Some(OneOf::Left(true)),
@@ -100,12 +103,35 @@ pub async fn handle_initialize(
 
     Ok(InitializeResult {
         capabilities,
-        ..InitializeResult::default()
+        server_info: Some(ServerInfo {
+            name: "Ruby Fast LSP".to_string(),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        }),
     })
 }
 
 pub async fn handle_initialized(server: &RubyLanguageServer, _params: InitializedParams) {
     info!("Language server initialized");
+
+    // Dynamically register type hierarchy capability (LSP 3.17.0)
+    // lsp-types 0.94.1 doesn't have typeHierarchyProvider in ServerCapabilities,
+    // so we use dynamic registration to enable the "Show Type Hierarchy" menu option.
+    if let Some(client) = &server.client {
+        let registration = Registration {
+            id: "type-hierarchy".to_string(),
+            method: "textDocument/prepareTypeHierarchy".to_string(),
+            register_options: Some(serde_json::json!({
+                "documentSelector": [
+                    { "language": "ruby" }
+                ]
+            })),
+        };
+
+        match client.register_capability(vec![registration]).await {
+            Ok(_) => info!("Successfully registered type hierarchy capability"),
+            Err(e) => warn!("Failed to register type hierarchy capability: {:?}", e),
+        }
+    }
 
     let config = server.config.lock().clone();
 

@@ -5,7 +5,7 @@
 
 use crate::capabilities::{
     code_lens, completion, debug, definitions, document_symbols, folding_range, formatting, hover,
-    inlay_hints, namespace_tree, references, semantic_tokens, workspace_symbols,
+    inlay_hints, namespace_tree, references, semantic_tokens, type_hierarchy, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info};
@@ -206,4 +206,61 @@ pub async fn handle_debug_methods(
 ) -> LspResult<debug::MethodsResponse> {
     info!("Debug methods request received for: {}", params.class);
     Ok(debug::handle_methods(lang_server, params))
+}
+
+// ============================================================================
+// Type Hierarchy Handlers
+// ============================================================================
+
+pub async fn handle_prepare_type_hierarchy(
+    lang_server: &RubyLanguageServer,
+    params: TypeHierarchyPrepareParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    info!(
+        "Prepare type hierarchy request received for {:?}",
+        params
+            .text_document_position_params
+            .text_document
+            .uri
+            .path()
+    );
+    let start_time = std::time::Instant::now();
+    let result = type_hierarchy::handle_prepare_type_hierarchy(lang_server, params).await;
+    info!(
+        "[PERF] Prepare type hierarchy completed in {:?}",
+        start_time.elapsed()
+    );
+    Ok(result)
+}
+
+pub async fn handle_supertypes(
+    lang_server: &RubyLanguageServer,
+    params: TypeHierarchySupertypesParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    info!("Supertypes request received for: {}", params.item.name);
+    let start_time = std::time::Instant::now();
+    let result = type_hierarchy::handle_supertypes(lang_server, params).await;
+    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
+    info!(
+        "[PERF] Supertypes completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        count
+    );
+    Ok(result)
+}
+
+pub async fn handle_subtypes(
+    lang_server: &RubyLanguageServer,
+    params: TypeHierarchySubtypesParams,
+) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+    info!("Subtypes request received for: {}", params.item.name);
+    let start_time = std::time::Instant::now();
+    let result = type_hierarchy::handle_subtypes(lang_server, params).await;
+    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
+    info!(
+        "[PERF] Subtypes completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        count
+    );
+    Ok(result)
 }

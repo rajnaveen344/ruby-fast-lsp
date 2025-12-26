@@ -28,8 +28,8 @@ pub use check::check;
 
 // Re-export core utilities for tests (used internally by check)
 pub use fixture::{
-    extract_tags, extract_tags_with_attributes, parse_fixture, setup_with_fixture, InlineFixture,
-    Tag, CURSOR_MARKER,
+    extract_tags, extract_tags_with_attributes, parse_fixture, setup_with_fixture,
+    setup_with_multi_file_fixture, InlineFixture, Tag, CURSOR_MARKER,
 };
 pub use inlay_hints::get_hint_label;
 

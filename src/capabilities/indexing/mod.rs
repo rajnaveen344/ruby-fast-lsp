@@ -116,7 +116,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
-        resolve_mixins: false, // Skip mixin resolution for performance
+        resolve_mixins: true, // Must resolve mixins to keep inheritance graph up-to-date
         include_local_vars: true,
     };
 

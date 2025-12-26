@@ -24,7 +24,8 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
     FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
     InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
-    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, Url,
+    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, TypeHierarchyItem,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
     WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
@@ -567,5 +568,26 @@ impl LanguageServer for RubyLanguageServer {
         info!("[PERF] Hover completed in {:?}", start_time.elapsed());
 
         result
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+        request::handle_prepare_type_hierarchy(self, params).await
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+        request::handle_supertypes(self, params).await
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
+        request::handle_subtypes(self, params).await
     }
 }
