@@ -91,9 +91,11 @@ impl ReturnTypeInferrer {
                                             let args_list: Vec<_> =
                                                 args.arguments().iter().collect();
                                             if let Some(first_arg) = args_list.first() {
-                                                let exit_state = results.get_exit_state(*exit_id);
+                                                // Use entry state of the block containing the return,
+                                                // as it has the merged types from all predecessors
+                                                let entry_state = results.get_entry_state(*exit_id);
                                                 ty = self
-                                                    .infer_expression_type(first_arg, exit_state);
+                                                    .infer_expression_type(first_arg, entry_state);
                                             }
                                         }
                                         break;
@@ -101,7 +103,7 @@ impl ReturnTypeInferrer {
                                 }
                             }
 
-                            let final_ty = ty.unwrap_or(RubyType::nil_class());
+                            let final_ty = ty.unwrap_or(RubyType::Unknown);
                             return_values.push((final_ty, stmt.start_offset, stmt.end_offset));
                         }
                         _ => {}
@@ -110,22 +112,36 @@ impl ReturnTypeInferrer {
             }
         }
 
-        // Always analyze the method body for implicit return
-        // (the last expression in the method is an implicit return if control flow reaches it)
+        // Analyze the method body for implicit return, but only if control flow reaches the end
+        // (i.e., the last statement is not an explicit return)
         if let Some(body) = method.body() {
-            if let Some((implicit_type, start, end)) =
-                self.infer_implicit_return_with_loc(&body, &cfg, &results)
-            {
-                return_values.push((implicit_type, start, end));
-            }
-        }
+            // Check if the last statement is an explicit return
+            let ends_with_explicit_return = if let Some(stmts) = body.as_statements_node() {
+                stmts
+                    .body()
+                    .iter()
+                    .last()
+                    .map(|s| s.as_return_node().is_some())
+                    .unwrap_or(false)
+            } else {
+                body.as_return_node().is_some()
+            };
 
-        // If no returns found and method has empty body or just doesn't return anything explicit/implicit detected
-        if return_values.is_empty() {
-            // If body is empty, it returns nil.
-            // We use method name location or end location as a fallback?
-            // Or maybe we don't return anything if we can't find a location.
-            // Actually empty method returns nil.
+            if !ends_with_explicit_return {
+                if let Some((implicit_type, start, end)) =
+                    self.infer_implicit_return_with_loc(&body, &cfg, &results)
+                {
+                    return_values.push((implicit_type, start, end));
+                } else if return_values.is_empty() {
+                    // Method has a body but we couldn't infer ANY return type
+                    // Use Unknown to be honest about what we don't know
+                    let loc = body.location();
+                    return_values.push((RubyType::Unknown, loc.start_offset(), loc.end_offset()));
+                }
+            }
+            // If ends_with_explicit_return, we already collected the return type above
+        } else {
+            // Method has no body (empty method) - Ruby returns nil
             let loc = method.name_loc();
             return_values.push((RubyType::nil_class(), loc.start_offset(), loc.end_offset()));
         }
@@ -350,6 +366,9 @@ impl ReturnTypeInferrer {
     fn infer_call_type(&self, call_node: &CallNode, state: Option<&TypeState>) -> Option<RubyType> {
         let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();
 
+        // Check if there's an explicit receiver
+        let has_receiver = call_node.receiver().is_some();
+
         // Get receiver type (possibly narrowed)
         let receiver_type = if let Some(receiver) = call_node.receiver() {
             self.get_node_receiver_type(&receiver, state)
@@ -358,7 +377,16 @@ impl ReturnTypeInferrer {
         };
 
         if let Some(recv_type) = receiver_type {
+            // If receiver type is Unknown, we can't determine the method's return type
+            if recv_type == RubyType::Unknown {
+                return Some(RubyType::Unknown);
+            }
             return self.lookup_method_return_type(&recv_type, &method_name);
+        } else if has_receiver {
+            // There's a receiver but we couldn't determine its type
+            // Return Unknown to indicate we can't infer the type
+            // (Don't do a global lookup - that would be incorrect)
+            return Some(RubyType::Unknown);
         } else {
             // Implicit self call - look up in index for any method with this name
             // TODO: scoping is tricky here without context. We just look for any method with this name.
@@ -993,6 +1021,7 @@ def empty
 end
 "#;
         let result = infer_return_type(source);
+        // Empty methods return nil in Ruby - this is deterministic behavior
         assert_eq!(result, Some(RubyType::nil_class()));
     }
 

@@ -229,11 +229,7 @@ pub async fn handle_inlay_hints(
 
         // Get return type - either from index or infer lazily
         let return_type_value: Option<RubyType> = if let Some(rt) = &data.return_type {
-            if *rt != RubyType::Unknown {
-                Some(rt.clone())
-            } else {
-                None
-            }
+            Some(rt.clone())
         } else {
             // Lazy inference (now safe - no lock held)
             if let Some(pos) = data.return_type_position {
@@ -283,13 +279,7 @@ fn infer_return_type_for_method(
 
     // Create inferrer and infer return type
     let inferrer = ReturnTypeInferrer::new(server.index.clone());
-    let inferred_ty = inferrer.infer_return_type(content.as_bytes(), &def_node)?;
-
-    if inferred_ty != RubyType::Unknown {
-        Some(inferred_ty)
-    } else {
-        None
-    }
+    inferrer.infer_return_type(content.as_bytes(), &def_node)
 }
 
 /// Infer return types for methods in the VISIBLE RANGE only.
@@ -344,11 +334,7 @@ fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str,
         .filter_map(|(line, entry_id)| {
             let def_node = find_def_node_at_line(&node, *line, content)?;
             let inferred_ty = inferrer.infer_return_type(content.as_bytes(), &def_node)?;
-            if inferred_ty != RubyType::Unknown {
-                Some((*entry_id, inferred_ty))
-            } else {
-                None
-            }
+            Some((*entry_id, inferred_ty))
         })
         .collect();
 
