@@ -176,14 +176,19 @@ impl IndexVisitor {
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
+    use crate::indexer::index_ref::{Index, Unlocked};
     use parking_lot::Mutex;
     use ruby_prism::Visit;
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
 
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+    }
+
     fn create_test_visitor(content: &str) -> (IndexVisitor, ruby_prism::ParseResult<'_>) {
         let uri = Url::parse("file:///test.rb").unwrap();
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = create_test_index();
         let document =
             crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
         let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new(&document);

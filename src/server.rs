@@ -6,6 +6,7 @@ use crate::capabilities::namespace_tree::{NamespaceTreeParams, NamespaceTreeResp
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::TypeNarrowingEngine;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -72,7 +73,7 @@ fn is_process_alive(pid: u32) -> bool {
 #[derive(Clone)]
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
-    pub index: Arc<Mutex<RubyIndex>>,
+    pub index: Index<Unlocked>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
@@ -95,7 +96,7 @@ impl RubyLanguageServer {
         let config = RubyFastLspConfig::default();
         Ok(Self {
             client: Some(client),
-            index: Arc::new(Mutex::new(index)),
+            index: Index::new(Arc::new(Mutex::new(index))),
             docs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
@@ -159,10 +160,6 @@ impl RubyLanguageServer {
 
     pub fn get_workspace_uri(&self) -> Option<Url> {
         self.workspace_uri.lock().clone()
-    }
-
-    pub fn index(&self) -> Arc<Mutex<RubyIndex>> {
-        self.index.clone()
     }
 
     pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
@@ -266,7 +263,7 @@ impl Default for RubyLanguageServer {
     fn default() -> Self {
         Self {
             client: None,
-            index: Arc::new(Mutex::new(RubyIndex::new())),
+            index: Index::new(Arc::new(Mutex::new(RubyIndex::new()))),
             docs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),

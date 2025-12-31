@@ -6,13 +6,12 @@
 //! 3. Falling back to RBS type definitions for built-in classes
 //! 4. Returning the method's return type
 
-use parking_lot::Mutex;
 use ruby_prism::*;
-use std::sync::Arc;
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 use crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type;
 use crate::type_inference::ruby_type::RubyType;
@@ -22,14 +21,14 @@ use crate::types::ruby_namespace::RubyConstant;
 
 /// Resolves method calls to their return types
 pub struct MethodResolver {
-    index: Arc<Mutex<RubyIndex>>,
+    index: Index<Unlocked>,
     literal_analyzer: LiteralAnalyzer,
     /// Current namespace context (for resolving 'self')
     current_namespace: Vec<RubyConstant>,
 }
 
 impl MethodResolver {
-    pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
+    pub fn new(index: Index<Unlocked>) -> Self {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
@@ -38,7 +37,7 @@ impl MethodResolver {
     }
 
     /// Create a MethodResolver with namespace context for resolving 'self'
-    pub fn with_namespace(index: Arc<Mutex<RubyIndex>>, namespace: Vec<RubyConstant>) -> Self {
+    pub fn with_namespace(index: Index<Unlocked>, namespace: Vec<RubyConstant>) -> Self {
         log::debug!(
             "MethodResolver::with_namespace called with: {:?}",
             namespace
@@ -508,10 +507,12 @@ mod tests {
     use super::*;
     use crate::indexer::entry::entry_builder::EntryBuilder;
     use crate::indexer::entry::{MethodKind, MethodOrigin, MethodVisibility};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
     use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-    fn create_test_index() -> Arc<Mutex<RubyIndex>> {
-        Arc::new(Mutex::new(RubyIndex::new()))
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
     }
 
     fn create_test_location() -> Location {

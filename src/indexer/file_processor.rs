@@ -20,13 +20,12 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
-use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
-use parking_lot::Mutex;
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::Path;
@@ -90,16 +89,16 @@ pub struct ProcessResult {
 /// File processor for handling parsing, indexing, and diagnostic generation
 #[derive(Debug, Clone)]
 pub struct FileProcessor {
-    index: Arc<Mutex<RubyIndex>>,
+    index: Index<Unlocked>,
 }
 
 impl FileProcessor {
-    pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
+    pub fn new(index: Index<Unlocked>) -> Self {
         Self { index }
     }
 
-    /// Get a reference to the underlying index
-    pub fn index(&self) -> &Arc<Mutex<RubyIndex>> {
+    /// Get the index handle for creating visitors
+    pub fn index(&self) -> &Index<Unlocked> {
         &self.index
     }
 
@@ -173,7 +172,7 @@ impl FileProcessor {
                 let mut docs = server.docs.lock();
                 docs.insert(
                     uri.clone(),
-                    std::sync::Arc::new(parking_lot::RwLock::new(visitor.document.clone())),
+                    Arc::new(parking_lot::RwLock::new(visitor.document.clone())),
                 );
             }
 
@@ -297,7 +296,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<()> {
         let start = Instant::now();
         debug!("Indexing definitions for: {:?}", uri);
@@ -312,9 +311,8 @@ impl FileProcessor {
         let parse_result = document.parse();
         let node = parse_result.node();
 
-        let index = server.index();
         // Clone document because parse_result borrows from the original
-        let mut index_visitor = IndexVisitor::new(index, document.clone());
+        let mut index_visitor = IndexVisitor::new(self.index.clone(), document.clone());
         index_visitor.visit(&node);
 
         // NOTE: Return type inference is now done lazily when inlay hints are requested
@@ -328,7 +326,7 @@ impl FileProcessor {
         &self,
         uri: &Url,
         content: &str,
-        server: &RubyLanguageServer,
+        _server: &RubyLanguageServer,
     ) -> Result<()> {
         let start = Instant::now();
         debug!(
@@ -346,7 +344,7 @@ impl FileProcessor {
         // Always track unresolved references now
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
         let mut visitor =
-            ReferenceVisitor::with_unresolved_tracking(server.index(), document, true);
+            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
         visitor.visit(&node);
 
         debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());

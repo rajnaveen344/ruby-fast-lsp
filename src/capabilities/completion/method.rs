@@ -3,22 +3,20 @@
 //! Provides method completions based on the receiver's inferred type.
 //! Uses both the Ruby index (for user-defined methods) and RBS (for built-in methods).
 
-use parking_lot::Mutex;
-use std::sync::Arc;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
-use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::rbs_index::{get_rbs_class_methods, RbsMethodInfo};
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 /// Find method completions for a receiver type
 pub fn find_method_completions(
-    index: &Arc<Mutex<RubyIndex>>,
+    index: &Index<Unlocked>,
     receiver_type: &RubyType,
     partial_method: &str,
     is_class_method: bool,
@@ -128,7 +126,7 @@ fn get_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
 
 /// Get methods from the Ruby index for a class, including methods from ancestor chain
 fn get_index_methods_with_ancestors(
-    index: &Arc<Mutex<RubyIndex>>,
+    index: &Index<Unlocked>,
     class_name: &str,
     partial_method: &str,
     is_class_method: bool,
@@ -275,6 +273,13 @@ fn create_method_completion_item(method_info: &RbsMethodInfo) -> CompletionItem 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::indexer::index::RubyIndex;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+    }
 
     #[test]
     fn test_get_class_names_for_string_type() {
@@ -299,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_find_string_methods() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = create_test_index();
         let string_type = RubyType::string();
 
         let completions = find_method_completions(&index, &string_type, "", false);
@@ -321,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_find_methods_with_partial() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = create_test_index();
         let string_type = RubyType::string();
 
         let completions = find_method_completions(&index, &string_type, "up", false);
@@ -338,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_method_completion_item_has_return_type() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = create_test_index();
         let string_type = RubyType::string();
 
         let completions = find_method_completions(&index, &string_type, "length", false);
@@ -359,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_union_type_completion_includes_all_types() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = create_test_index();
         // Create a union type: String | Integer
         let union_type = RubyType::union(vec![RubyType::string(), RubyType::integer()]);
 

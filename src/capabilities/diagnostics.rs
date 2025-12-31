@@ -297,8 +297,7 @@ pub fn get_unresolved_diagnostics(
     use crate::indexer::index::UnresolvedEntry;
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
-    let index_arc = server.index();
-    let index = index_arc.lock();
+    let index = server.index.lock();
     let unresolved_list = index.get_unresolved_entries(uri);
 
     unresolved_list

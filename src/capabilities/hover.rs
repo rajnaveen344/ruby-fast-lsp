@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -44,8 +45,10 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
         Identifier::RubyLocalVariable { name, .. } => {
             // Look up type from document lvars
             let offset = crate::utils::position_to_offset(&content, position);
-            let type_str = get_local_variable_type(server, &uri, name, scope_id, &content, offset)
-                .map(|t| t.to_string());
+            let index = server.index.lock();
+            let type_str =
+                get_local_variable_type(server, &uri, name, scope_id, &content, offset, &index)
+                    .map(|t| t.to_string());
 
             // If not found in lvars, try type narrowing engine
             let type_from_narrowing = type_str.or_else(|| {
@@ -58,8 +61,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
             // If still not found, try inferring from constructor/method chain assignment
             let final_type = type_from_narrowing.or_else(|| {
-                infer_type_from_assignment(&content, name, &server.index.lock())
-                    .map(|t| t.to_string())
+                infer_type_from_assignment(&content, name, &index).map(|t| t.to_string())
             });
 
             match final_type {
@@ -157,7 +159,8 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 }
                 crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
                     let offset = crate::utils::position_to_offset(&content, position);
-                    get_local_variable_type(server, &uri, name, scope_id, &content, offset)
+                    // Pass &index (already locked) - no double-lock possible
+                    get_local_variable_type(server, &uri, name, scope_id, &content, offset, &index)
                         .unwrap_or(RubyType::Unknown)
                 }
                 // TODO: Handle other receiver types (InstanceVar, chains, etc)
@@ -368,7 +371,10 @@ fn infer_type_from_assignment(
     None
 }
 
-/// Helper to resolve local variable type
+/// Helper to resolve local variable type.
+///
+/// Takes `&RubyIndex` directly - caller must have already locked.
+/// This prevents double-locking at compile time.
 fn get_local_variable_type(
     server: &RubyLanguageServer,
     uri: &tower_lsp::lsp_types::Url,
@@ -376,6 +382,7 @@ fn get_local_variable_type(
     scope_id: crate::types::scope::LVScopeId,
     content: &str,
     offset: usize,
+    index: &RubyIndex,
 ) -> Option<RubyType> {
     use crate::indexer::entry::entry_kind::EntryKind;
 
@@ -405,10 +412,6 @@ fn get_local_variable_type(
         return Some(type_from_narrowing);
     }
 
-    // 3. Try inferring from assignment
-    if let Some(inferred) = infer_type_from_assignment(content, name, &server.index.lock()) {
-        return Some(inferred);
-    }
-
-    None
+    // 3. Try inferring from assignment (index already locked - no double-lock risk)
+    infer_type_from_assignment(content, name, index)
 }

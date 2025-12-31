@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
-use parking_lot::Mutex;
 use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::types::ruby_document::RubyDocument;
 
 mod block_node;
@@ -20,7 +17,7 @@ mod module_node;
 mod tests;
 
 pub struct ReferenceVisitor {
-    pub index: Arc<Mutex<RubyIndex>>,
+    pub index: Index<Unlocked>,
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub include_local_vars: bool,
@@ -29,12 +26,12 @@ pub struct ReferenceVisitor {
 }
 
 impl ReferenceVisitor {
-    pub fn new(index: Arc<Mutex<RubyIndex>>, document: RubyDocument) -> Self {
+    pub fn new(index: Index<Unlocked>, document: RubyDocument) -> Self {
         Self::with_options(index, document, true)
     }
 
     pub fn with_options(
-        index: Arc<Mutex<RubyIndex>>,
+        index: Index<Unlocked>,
         document: RubyDocument,
         include_local_vars: bool,
     ) -> Self {
@@ -50,7 +47,7 @@ impl ReferenceVisitor {
 
     /// Create a visitor that tracks unresolved constants
     pub fn with_unresolved_tracking(
-        index: Arc<Mutex<RubyIndex>>,
+        index: Index<Unlocked>,
         document: RubyDocument,
         include_local_vars: bool,
     ) -> Self {

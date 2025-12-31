@@ -52,7 +52,7 @@ fn main() -> anyhow::Result<()> {
         info!("Taking snapshot of heap before indexing...");
 
         // Use the indexing module directly if possible, or via server
-        // server.index() returns the index, but we want to trigger the process.
+        // server.index.clone() returns the index, but we want to trigger the process.
         // `indexing::init_workspace` is what we want.
 
         info!("Starting workspace initialization...");

@@ -225,14 +225,12 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let index_arc = server.index();
-        let index_guard = index_arc.lock();
+        let index = server.index.lock();
         let constant_completions =
-            constant::find_constant_completions(&index_guard, &analyzer, position, partial_string);
+            constant::find_constant_completions(&index, &analyzer, position, partial_string);
         completions.extend(constant_completions);
     } else if is_method_call_context {
         // Method call context: provide type-aware method completions using CFG
-        let index_arc = server.index();
 
         // Get receiver type using CFG-based type inference
         let receiver_type =
@@ -249,7 +247,7 @@ pub async fn find_completion_at_position(
             );
 
             let method_completions = method::find_method_completions(
-                &index_arc,
+                &server.index,
                 &receiver_type,
                 &partial_string,
                 is_class_method,
@@ -264,10 +262,9 @@ pub async fn find_completion_at_position(
         completions.extend(variable_completions);
 
         // Add constant completions
-        let index_arc = server.index();
-        let index_guard = index_arc.lock();
+        let index = server.index.lock();
         let constant_completions = constant::find_constant_completions(
-            &index_guard,
+            &index,
             &analyzer,
             position,
             partial_string.clone(),
@@ -630,12 +627,11 @@ end"#;
 
         // Add some test entries to the index after opening the document
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Add String class - use a simple name that should match
             let string_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -643,11 +639,11 @@ end"#;
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(string_entry);
+            index.add_entry(string_entry);
 
             // Add StringIO class for additional testing
             let stringio_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "StringIO",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -655,7 +651,7 @@ end"#;
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(stringio_entry);
+            index.add_entry(stringio_entry);
         }
 
         // Test completion at position where "MY" is typed (should match "MY_CONSTANT")
@@ -737,11 +733,10 @@ end
 
         // Add String class to index
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             let string_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -749,7 +744,7 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(string_entry);
+            index.add_entry(string_entry);
         }
 
         // Open the document in the server
@@ -814,27 +809,26 @@ end
 
         // Manually add multiple entries for the same constant to simulate the duplicate issue
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Use the same FQN structure as the indexed constant (TestClass::MY_CONSTANT)
 
             // Add the same constant multiple times (simulating multiple definitions)
             let entry1 = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "TestClass::MY_CONSTANT",
                 EntryKind::new_constant(Some("42".to_string()), None),
             );
 
             let entry2 = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "TestClass::MY_CONSTANT",
                 EntryKind::new_constant(Some("42".to_string()), None),
             );
 
             // Add both entries to create duplicates
-            index_guard.add_entry(entry1);
-            index_guard.add_entry(entry2);
+            index.add_entry(entry1);
+            index.add_entry(entry2);
         }
 
         // At this point, the index should contain multiple entries for MY_CONSTANT:
@@ -899,12 +893,11 @@ end
 
         // Add some top-level constants to the index after opening the document
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Create top-level entries
             let string_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -912,10 +905,10 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(string_entry);
+            index.add_entry(string_entry);
 
             let array_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "Array",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -923,7 +916,7 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(array_entry);
+            index.add_entry(array_entry);
         }
 
         // Test completion triggered by ":" character (for "::")
@@ -1013,28 +1006,27 @@ end
 
         // Add complex nested module structure to the index
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Top-level modules and classes
             let outer_module_entry =
-                create_test_entry(&mut *index_guard, "OuterModule", EntryKind::new_module());
-            index_guard.add_entry(outer_module_entry);
+                create_test_entry(&mut *index, "OuterModule", EntryKind::new_module());
+            index.add_entry(outer_module_entry);
 
             let another_module_entry =
-                create_test_entry(&mut *index_guard, "AnotherModule", EntryKind::new_module());
-            index_guard.add_entry(another_module_entry);
+                create_test_entry(&mut *index, "AnotherModule", EntryKind::new_module());
+            index.add_entry(another_module_entry);
 
             // Nested modules and classes
             let middle_module_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "OuterModule::MiddleModule",
                 EntryKind::new_module(),
             );
-            index_guard.add_entry(middle_module_entry);
+            index.add_entry(middle_module_entry);
 
             let inner_class_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "OuterModule::MiddleModule::InnerClass",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1042,11 +1034,11 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(inner_class_entry);
+            index.add_entry(inner_class_entry);
 
             // Add some built-in Ruby classes
             let string_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "String",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1054,10 +1046,10 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(string_entry);
+            index.add_entry(string_entry);
 
             let hash_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "Hash",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1065,7 +1057,7 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(hash_entry);
+            index.add_entry(hash_entry);
         }
 
         // Test scope resolution from within a deeply nested class
@@ -1196,11 +1188,10 @@ end
 
             // Add some test entries to the index
             {
-                let index_arc = server.index();
-                let mut index_guard = index_arc.lock();
+                let mut index = server.index.lock();
 
                 let string_entry = create_test_entry(
-                    &mut *index_guard,
+                    &mut *index,
                     "String",
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1208,10 +1199,10 @@ end
                         location: CompactLocation::default(),
                     })),
                 );
-                index_guard.add_entry(string_entry);
+                index.add_entry(string_entry);
 
                 let test_class_entry = create_test_entry(
-                    &mut *index_guard,
+                    &mut *index,
                     "TestClass",
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1219,7 +1210,7 @@ end
                         location: CompactLocation::default(),
                     })),
                 );
-                index_guard.add_entry(test_class_entry);
+                index.add_entry(test_class_entry);
             }
 
             let context = Some(tower_lsp::lsp_types::CompletionContext {
@@ -1274,14 +1265,13 @@ A::
 
         // Add the modules to the index manually to ensure they're available
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
-            let a_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
-            index_guard.add_entry(a_entry);
+            let a_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
+            index.add_entry(a_entry);
 
-            let b_entry = create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
-            index_guard.add_entry(b_entry);
+            let b_entry = create_test_entry(&mut *index, "A::B", EntryKind::new_module());
+            index.add_entry(b_entry);
         }
 
         // Test completion at position after "A::" (line 6, character 3)
@@ -1359,8 +1349,7 @@ end
 
         // Add deeply nested structure to the index
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Create the full nested hierarchy
             let modules = vec![
@@ -1375,8 +1364,8 @@ end
 
             for module_fqn in modules {
                 let entry =
-                    create_test_entry(&mut *index_guard, module_fqn, EntryKind::new_module());
-                index_guard.add_entry(entry);
+                    create_test_entry(&mut *index, module_fqn, EntryKind::new_module());
+                index.add_entry(entry);
             }
 
             // Add classes
@@ -1384,7 +1373,7 @@ end
 
             for class_fqn in classes {
                 let entry = create_test_entry(
-                    &mut *index_guard,
+                    &mut *index,
                     class_fqn,
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1392,12 +1381,12 @@ end
                         location: CompactLocation::default(),
                     })),
                 );
-                index_guard.add_entry(entry);
+                index.add_entry(entry);
             }
 
             // Add some built-in classes for comparison
             let builtin_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "Array",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1405,7 +1394,7 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(builtin_entry);
+            index.add_entry(builtin_entry);
         }
 
         // Test scope resolution from within the deeply nested class
@@ -1480,15 +1469,14 @@ end
 
         // Add entries to the index
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             let my_module_entry =
-                create_test_entry(&mut *index_guard, "MyModule", EntryKind::new_module());
-            index_guard.add_entry(my_module_entry);
+                create_test_entry(&mut *index, "MyModule", EntryKind::new_module());
+            index.add_entry(my_module_entry);
 
             let my_class_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "MyModule::MyClass",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1496,10 +1484,10 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(my_class_entry);
+            index.add_entry(my_class_entry);
 
             let my_top_class_entry = create_test_entry(
-                &mut *index_guard,
+                &mut *index,
                 "MyTopClass",
                 EntryKind::new_class(Some(MixinRef {
                     parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1507,7 +1495,7 @@ end
                     location: CompactLocation::default(),
                 })),
             );
-            index_guard.add_entry(my_top_class_entry);
+            index.add_entry(my_top_class_entry);
         }
 
         // Test scope resolution with partial typing "::My"
@@ -1563,27 +1551,26 @@ A::B::"#;
 
         // Add entries to the index
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Add the A module and its nested modules
-            let a_module_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
-            index_guard.add_entry(a_module_entry);
+            let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
+            index.add_entry(a_module_entry);
 
             let a_b_module_entry =
-                create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
-            index_guard.add_entry(a_b_module_entry);
+                create_test_entry(&mut *index, "A::B", EntryKind::new_module());
+            index.add_entry(a_b_module_entry);
 
             let a_b_c_module_entry =
-                create_test_entry(&mut *index_guard, "A::B::C", EntryKind::new_module());
-            index_guard.add_entry(a_b_c_module_entry);
+                create_test_entry(&mut *index, "A::B::C", EntryKind::new_module());
+            index.add_entry(a_b_c_module_entry);
 
             // Add some other modules for comparison
             let other_modules = vec!["Array", "ActionController"];
 
             for module_fqn in other_modules {
                 let entry = create_test_entry(
-                    &mut *index_guard,
+                    &mut *index,
                     module_fqn,
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1591,7 +1578,7 @@ A::B::"#;
                         location: CompactLocation::default(),
                     })),
                 );
-                index_guard.add_entry(entry);
+                index.add_entry(entry);
             }
         }
 
@@ -1675,20 +1662,19 @@ A::"#;
 
         // Add entries to the index that match what would be available in a real Rails app
         {
-            let index_arc = server.index();
-            let mut index_guard = index_arc.lock();
+            let mut index = server.index.lock();
 
             // Add the A module and its nested modules
-            let a_module_entry = create_test_entry(&mut *index_guard, "A", EntryKind::new_module());
-            index_guard.add_entry(a_module_entry);
+            let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
+            index.add_entry(a_module_entry);
 
             let a_b_module_entry =
-                create_test_entry(&mut *index_guard, "A::B", EntryKind::new_module());
-            index_guard.add_entry(a_b_module_entry);
+                create_test_entry(&mut *index, "A::B", EntryKind::new_module());
+            index.add_entry(a_b_module_entry);
 
             let a_a_module_entry =
-                create_test_entry(&mut *index_guard, "A::A", EntryKind::new_module());
-            index_guard.add_entry(a_a_module_entry);
+                create_test_entry(&mut *index, "A::A", EntryKind::new_module());
+            index.add_entry(a_a_module_entry);
 
             // Add some common Rails/Ruby classes that start with A
             let rails_classes = vec![
@@ -1711,7 +1697,7 @@ A::"#;
 
             for class_fqn in rails_classes {
                 let entry = create_test_entry(
-                    &mut *index_guard,
+                    &mut *index,
                     class_fqn,
                     EntryKind::new_class(Some(MixinRef {
                         parts: vec![RubyConstant::new("Object").unwrap()],
@@ -1719,7 +1705,7 @@ A::"#;
                         location: CompactLocation::default(),
                     })),
                 );
-                index_guard.add_entry(entry);
+                index.add_entry(entry);
             }
         }
 

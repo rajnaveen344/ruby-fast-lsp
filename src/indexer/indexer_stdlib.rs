@@ -92,7 +92,7 @@ impl IndexerStdlib {
 
         // Resolve all mixin references
         info!("Resolving stdlib mixin references");
-        server.index().lock().resolve_all_mixins();
+        server.index.lock().resolve_all_mixins();
 
         info!("Stdlib indexing completed in {:?}", start.elapsed());
         Ok(())

@@ -51,7 +51,7 @@ impl IndexerProject {
 
         // Resolve all mixin references now that all definitions are indexed
         info!("Resolving mixin references");
-        server.index().lock().resolve_all_mixins();
+        server.index.lock().resolve_all_mixins();
 
         info!(
             "Project definitions indexing completed in {:?}. Found {} stdlib deps, {} gem deps",

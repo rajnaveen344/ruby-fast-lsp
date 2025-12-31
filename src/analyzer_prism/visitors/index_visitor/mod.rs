@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
-use parking_lot::Mutex;
 use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::index::{FileId, RubyIndex};
+use crate::indexer::index::FileId;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 
 use crate::type_inference::ruby_type::RubyType;
@@ -28,7 +26,7 @@ mod singleton_class_node;
 use crate::indexer::entry::Entry;
 
 pub struct IndexVisitor {
-    pub index: Arc<Mutex<RubyIndex>>,
+    pub index: Index<Unlocked>,
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
@@ -36,7 +34,7 @@ pub struct IndexVisitor {
 }
 
 impl IndexVisitor {
-    pub fn new(index: Arc<Mutex<RubyIndex>>, document: RubyDocument) -> Self {
+    pub fn new(index: Index<Unlocked>, document: RubyDocument) -> Self {
         let scope_tracker = ScopeTracker::new(&document);
         Self {
             index,

@@ -6,21 +6,19 @@
 //! 3. Collecting return types from all exit paths with proper narrowed types
 
 use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
-use crate::indexer::index::RubyIndex;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
 use crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type;
 use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
-use parking_lot::Mutex;
 use ruby_prism::*;
-use std::sync::Arc;
 
 /// Infers return types from method bodies using CFG-based dataflow analysis.
 /// This properly handles type narrowing in control flow structures like case/when.
 pub struct ReturnTypeInferrer {
-    index: Arc<Mutex<RubyIndex>>,
+    index: Index<Unlocked>,
     literal_analyzer: LiteralAnalyzer,
     /// Optional file content for on-demand inference of called methods
     content: Option<Vec<u8>>,
@@ -30,7 +28,7 @@ pub struct ReturnTypeInferrer {
 
 impl ReturnTypeInferrer {
     /// Create a new return type inferrer with access to the Ruby index
-    pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
+    pub fn new(index: Index<Unlocked>) -> Self {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
@@ -41,7 +39,7 @@ impl ReturnTypeInferrer {
 
     /// Create a new return type inferrer with file content for on-demand inference
     /// When looking up a method that has no return type, it will infer it automatically
-    pub fn new_with_content(index: Arc<Mutex<RubyIndex>>, content: &[u8]) -> Self {
+    pub fn new_with_content(index: Index<Unlocked>, content: &[u8]) -> Self {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
@@ -789,10 +787,17 @@ impl ReturnTypeInferrer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(
+            Mutex::new(crate::indexer::index::RubyIndex::new()),
+        ))
+    }
 
     fn create_test_inferrer() -> ReturnTypeInferrer {
-        let index = Arc::new(Mutex::new(crate::indexer::index::RubyIndex::new()));
-        ReturnTypeInferrer::new(index)
+        ReturnTypeInferrer::new(create_test_index())
     }
 
     fn infer_return_type(source: &str) -> Option<RubyType> {

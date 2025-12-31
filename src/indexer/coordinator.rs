@@ -114,7 +114,7 @@ impl IndexingCoordinator {
         // Step 7: Resolve all mixin references across all indexed files
         Self::send_progress_report(server, "Resolving mixins...".to_string(), 0, 0).await;
         info!("Resolving all mixin references across project, stdlib, and gems");
-        server.index().lock().resolve_all_mixins();
+        server.index.lock().resolve_all_mixins();
 
         info!("Phase 1 completed in {:?}", phase1_start.elapsed());
 
@@ -191,7 +191,7 @@ impl IndexingCoordinator {
 
     /// Step 3: Set up the main indexing engine
     fn setup_file_processor(&mut self, server: &RubyLanguageServer) {
-        self.file_processor = Some(FileProcessor::new(server.index()));
+        self.file_processor = Some(FileProcessor::new(server.index.clone()));
     }
 
     /// Phase 1 Step 4: Index definitions from project files and track what libraries they need
@@ -222,8 +222,7 @@ impl IndexingCoordinator {
 
         // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
-            let index_arc = server.index();
-            let index = index_arc.lock();
+            let index = server.index.lock();
             let count = index.unresolved.len();
             info!(
                 "Publishing diagnostics for {} files with unresolved entries",

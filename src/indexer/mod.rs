@@ -24,6 +24,7 @@ pub mod entry;
 pub mod file_processor;
 pub mod graph;
 pub mod index;
+pub mod index_ref;
 pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;
