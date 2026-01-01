@@ -1,5 +1,4 @@
 pub mod file_ops;
-pub mod parallelizer;
 pub mod parser;
 pub mod ruby_environment;
 pub mod stub_loader;

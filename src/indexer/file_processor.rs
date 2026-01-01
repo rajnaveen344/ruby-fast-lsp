@@ -292,12 +292,7 @@ impl FileProcessor {
     /// lvars or compute inlay hints. Those are computed on-demand when a file
     /// is opened via did_open. The document is kept temporarily for the
     /// reference indexing phase and cleared by the coordinator after indexing.
-    pub async fn index_definitions(
-        &self,
-        uri: &Url,
-        content: &str,
-        _server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub fn index_definitions(&self, uri: &Url, content: &str) -> Result<()> {
         let start = Instant::now();
         debug!("Indexing definitions for: {:?}", uri);
 
@@ -322,12 +317,7 @@ impl FileProcessor {
     }
 
     /// Index references from Ruby content
-    pub async fn index_references(
-        &self,
-        uri: &Url,
-        content: &str,
-        _server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub fn index_references(&self, uri: &Url, content: &str) -> Result<()> {
         let start = Instant::now();
         debug!(
             "Indexing references for: {:?} (track_unresolved: true)",
@@ -356,24 +346,16 @@ impl FileProcessor {
     // ========================================================================
 
     /// Index definitions from a single Ruby file
-    pub async fn index_file_definitions(
-        &self,
-        file_path: &Path,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub fn index_file_definitions(&self, file_path: &Path) -> Result<()> {
         let uri = file_ops::path_to_uri(file_path)?;
-        let content = file_ops::read_file_async(file_path).await?;
-        self.index_definitions(&uri, &content, server).await
+        let content = std::fs::read_to_string(file_path)?;
+        self.index_definitions(&uri, &content)
     }
 
     /// Index references from a single Ruby file
-    pub async fn index_file_references(
-        &self,
-        file_path: &Path,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
+    pub fn index_file_references(&self, file_path: &Path) -> Result<()> {
         let uri = file_ops::path_to_uri(file_path)?;
-        let content = file_ops::read_file_async(file_path).await?;
-        self.index_references(&uri, &content, server).await
+        let content = std::fs::read_to_string(file_path)?;
+        self.index_references(&uri, &content)
     }
 }

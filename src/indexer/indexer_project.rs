@@ -1,10 +1,10 @@
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::utils;
-use crate::utils::parallelizer::process_in_parallel;
 use anyhow::Result;
 use log::{info, warn};
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ impl IndexerProject {
         utils::collect_ruby_files(&self.workspace_root)
     }
 
-    /// Index definitions from files and track their dependencies (Parallelized)
+    /// Index definitions from files and track their dependencies (Parallelized with rayon)
     async fn index_definitions_and_track_dependencies(
         &self,
         files: &[PathBuf],
@@ -106,79 +106,63 @@ impl IndexerProject {
         total_files: usize,
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
-        use tokio::fs;
 
-        const BATCH_SIZE: usize = 50;
+        const BATCH_SIZE: usize = 10;
         info!("Indexing definitions in parallel batches of {}", BATCH_SIZE);
-
-        // Prepare items with indices for progress reporting
-        let items: Vec<(usize, PathBuf)> = files
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (i, p.clone()))
-            .collect();
 
         let file_processor = self.file_processor.clone();
         let required_stdlib = self.required_stdlib.clone();
         let required_gems = self.required_gems.clone();
-        let server_ref = server.clone();
 
-        process_in_parallel(&items, BATCH_SIZE, move |(global_index, file_path)| {
-            let file_processor = file_processor.clone();
-            let required_stdlib = required_stdlib.clone();
-            let required_gems = required_gems.clone();
-            let server_ref = server_ref.clone();
+        // Process in batches for progress reporting
+        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
+            // Report progress before each batch
+            let processed = batch_idx * BATCH_SIZE;
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Indexing definitions".to_string(),
+                processed,
+                total_files,
+            )
+            .await;
 
-            async move {
-                // 1. Report progress (best effort)
-                if global_index % 10 == 0 {
-                    IndexingCoordinator::send_progress_report(
-                        &server_ref,
-                        "Indexing".to_string(),
-                        global_index + 1,
-                        total_files,
-                    )
-                    .await;
-                }
+            // Process batch in parallel with rayon
+            let file_processor_ref = &file_processor;
+            let required_stdlib_ref = &required_stdlib;
+            let required_gems_ref = &required_gems;
 
-                // 2. Read file content ONCE
-                let content = match fs::read_to_string(&file_path).await {
+            batch.par_iter().for_each(|file_path| {
+                // Read file content
+                let content = match std::fs::read_to_string(file_path) {
                     Ok(c) => c,
                     Err(e) => {
                         warn!("Failed to read file {:?}: {}", file_path, e);
-                        return Ok(());
+                        return;
                     }
                 };
 
-                // 3. Index Definitions
-                // In-line URL conversion to avoid visibility issues
-                match Url::from_file_path(&file_path) {
-                    Ok(uri) => {
-                        // file_processor.index_definitions parses content, cpu intensive
-                        if let Err(e) = file_processor
-                            .index_definitions(&uri, &content, &server_ref)
-                            .await
-                        {
-                            warn!("Failed to index definitions {:?}: {}", file_path, e);
-                        }
+                // Index Definitions
+                if let Ok(uri) = Url::from_file_path(file_path) {
+                    if let Err(e) = file_processor_ref.index_definitions(&uri, &content) {
+                        warn!("Failed to index definitions {:?}: {}", file_path, e);
                     }
-                    Err(_) => {
-                        warn!("Failed to convert path to URI: {:?}", file_path);
-                    }
+                } else {
+                    warn!("Failed to convert path to URI: {:?}", file_path);
                 }
 
-                // 4. Track dependencies
-                Self::extract_and_track_dependencies(&content, &required_stdlib, &required_gems);
-
-                Ok(())
-            }
-        })
-        .await?;
+                // Track dependencies
+                Self::extract_and_track_dependencies(
+                    &content,
+                    required_stdlib_ref,
+                    required_gems_ref,
+                );
+            });
+        }
 
         // Final progress report
         IndexingCoordinator::send_progress_report(
             server,
-            "Indexing".to_string(),
+            "Indexing definitions".to_string(),
             total_files,
             total_files,
         )
@@ -213,7 +197,7 @@ impl IndexerProject {
         }
     }
 
-    /// Index only references from files with unresolved constant tracking
+    /// Index only references from files with unresolved constant tracking (Parallelized with rayon)
     async fn index_references_only(
         &self,
         files: &[PathBuf],
@@ -222,49 +206,55 @@ impl IndexerProject {
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
 
-        const BATCH_SIZE: usize = 50;
+        const BATCH_SIZE: usize = 10;
         info!("Indexing references in parallel batches of {}", BATCH_SIZE);
 
-        // Prepare items with indices for progress reporting
-        let items: Vec<(usize, PathBuf)> = files
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (i, p.clone()))
-            .collect();
-
         let file_processor = self.file_processor.clone();
-        let server_ref = server.clone();
 
-        process_in_parallel(&items, BATCH_SIZE, move |(global_index, file_path)| {
-            let file_processor = file_processor.clone();
-            let server_ref = server_ref.clone();
+        // Process in batches for progress reporting
+        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
+            // Report progress before each batch
+            let processed = batch_idx * BATCH_SIZE;
+            IndexingCoordinator::send_progress_report(
+                server,
+                "Collecting references".to_string(),
+                processed,
+                total_files,
+            )
+            .await;
 
-            async move {
-                // Report progress
-                if global_index % 10 == 0 {
-                    IndexingCoordinator::send_progress_report(
-                        &server_ref,
-                        "Collecting References".to_string(),
-                        global_index + 1,
-                        total_files,
-                    )
-                    .await;
+            // Process batch in parallel with rayon
+            let file_processor_ref = &file_processor;
+
+            batch.par_iter().for_each(|file_path| {
+                // Read file content
+                let content = match std::fs::read_to_string(file_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("Failed to read file {:?}: {}", file_path, e);
+                        return;
+                    }
+                };
+
+                // Index references
+                if let Ok(uri) = Url::from_file_path(file_path) {
+                    if let Err(e) = file_processor_ref.index_references(&uri, &content) {
+                        warn!("Failed to index references {:?}: {}", file_path, e);
+                    }
+                } else {
+                    warn!("Failed to convert path to URI: {:?}", file_path);
                 }
+            });
+        }
 
-                // Index only references from the file with unresolved constant tracking enabled
-                if let Err(e) = file_processor
-                    .index_file_references(&file_path, &server_ref)
-                    .await
-                {
-                    warn!(
-                        "Failed to index references from file {:?}: {}",
-                        file_path, e
-                    );
-                }
-                Ok(())
-            }
-        })
-        .await?;
+        // Final progress report
+        IndexingCoordinator::send_progress_report(
+            server,
+            "Collecting references".to_string(),
+            total_files,
+            total_files,
+        )
+        .await;
 
         Ok(())
     }

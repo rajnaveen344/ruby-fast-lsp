@@ -12,13 +12,14 @@ use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_version::RubyVersion;
 use crate::utils;
-use crate::utils::parallelizer::process_in_parallel;
 use crate::utils::stub_loader::find_stubs_directory;
 use anyhow::Result;
 use log::{debug, info, warn};
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
+use tower_lsp::lsp_types::Url;
 
 // ============================================================================
 // IndexerStdlib
@@ -85,7 +86,7 @@ impl IndexerStdlib {
         }
 
         // Index core stubs first (if available)
-        self.index_core_stubs(server).await?;
+        self.index_core_stubs().await?;
 
         // Index required stdlib modules
         self.index_required_modules(server).await?;
@@ -103,7 +104,7 @@ impl IndexerStdlib {
     /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
     /// In production, these are extracted from zip files by the VS Code extension
     /// on first activation.
-    async fn index_core_stubs(&self, server: &RubyLanguageServer) -> Result<()> {
+    async fn index_core_stubs(&self) -> Result<()> {
         let Some(version) = &self.ruby_version else {
             return Ok(());
         };
@@ -117,17 +118,22 @@ impl IndexerStdlib {
                     return Ok(());
                 }
 
-                info!("Indexing {} core stubs from: {:?}", stub_files.len(), stubs_dir);
+                info!(
+                    "Indexing {} core stubs from: {:?}",
+                    stub_files.len(),
+                    stubs_dir
+                );
 
-                let processor = self.file_processor.clone();
-                let server_ref = server.clone();
-
-                process_in_parallel(&stub_files, 50, move |path| {
-                    let processor = processor.clone();
-                    let server_ref = server_ref.clone();
-                    async move { processor.index_file_definitions(&path, &server_ref).await }
-                })
-                .await?;
+                let processor = &self.file_processor;
+                stub_files.par_iter().for_each(|path| {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            if let Err(e) = processor.index_definitions(&uri, &content) {
+                                warn!("Failed to index stub {:?}: {}", path, e);
+                            }
+                        }
+                    }
+                });
 
                 info!("Indexed {} core stub files", stub_files.len());
                 return Ok(());
@@ -147,15 +153,16 @@ impl IndexerStdlib {
             return Ok(());
         }
 
-        let processor = self.file_processor.clone();
-        let server_ref = server.clone();
-
-        process_in_parallel(&stub_files, 50, move |path| {
-            let processor = processor.clone();
-            let server_ref = server_ref.clone();
-            async move { processor.index_file_definitions(&path, &server_ref).await }
-        })
-        .await?;
+        let processor = &self.file_processor;
+        stub_files.par_iter().for_each(|path| {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(uri) = Url::from_file_path(path) {
+                    if let Err(e) = processor.index_definitions(&uri, &content) {
+                        warn!("Failed to index stub {:?}: {}", path, e);
+                    }
+                }
+            }
+        });
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
@@ -193,27 +200,18 @@ impl IndexerStdlib {
                 files.len()
             );
 
-            let processor = self.file_processor.clone();
-            let server_ref = server.clone();
-
-            let result = process_in_parallel(&files, 50, move |path| {
-                let processor = processor.clone();
-                let server_ref = server_ref.clone();
-                async move {
-                    processor
-                        .index_file_definitions(&path, &server_ref)
-                        .await
-                        .map_err(|e| {
+            let processor = &self.file_processor;
+            files.par_iter().for_each(|path| {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(uri) = Url::from_file_path(path) {
+                        if let Err(e) = processor.index_definitions(&uri, &content) {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);
-                            e
-                        })
+                        }
+                    }
                 }
-            })
-            .await;
+            });
 
-            if result.is_ok() {
-                indexed_count += files.len();
-            }
+            indexed_count += files.len();
         }
 
         info!(
