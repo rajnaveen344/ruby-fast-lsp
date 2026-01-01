@@ -189,6 +189,19 @@ impl BlockLocation {
         }
     }
 
+    /// Create a BlockLocation from offsets only (line/col set to 0)
+    /// Use this when line/col are not needed for performance
+    pub fn from_offsets(start_offset: usize, end_offset: usize) -> Self {
+        Self {
+            start_line: 0,
+            start_col: 0,
+            end_line: 0,
+            end_col: 0,
+            start_offset,
+            end_offset,
+        }
+    }
+
     /// Check if a position is within this location
     pub fn contains(&self, line: u32, col: u32) -> bool {
         if line < self.start_line || line > self.end_line {
@@ -343,6 +356,41 @@ impl ControlFlowGraph {
         if !self.exits.contains(&block) {
             self.exits.push(block);
         }
+    }
+
+    /// Check if CFG has back edges (loops)
+    pub fn has_back_edges(&self) -> bool {
+        // A CFG has loops if any successor points to an already-visited node during DFS
+        let mut visited = HashSet::new();
+        let mut in_stack = HashSet::new();
+        self.detect_back_edge(self.entry, &mut visited, &mut in_stack)
+    }
+
+    fn detect_back_edge(
+        &self,
+        block: BlockId,
+        visited: &mut HashSet<BlockId>,
+        in_stack: &mut HashSet<BlockId>,
+    ) -> bool {
+        if in_stack.contains(&block) {
+            return true; // Back edge found
+        }
+        if visited.contains(&block) {
+            return false;
+        }
+        visited.insert(block);
+        in_stack.insert(block);
+
+        if let Some(successors) = self.successors.get(&block) {
+            for edge in successors {
+                if self.detect_back_edge(edge.to, visited, in_stack) {
+                    return true;
+                }
+            }
+        }
+
+        in_stack.remove(&block);
+        false
     }
 
     /// Get all blocks in reverse post-order (for dataflow analysis)

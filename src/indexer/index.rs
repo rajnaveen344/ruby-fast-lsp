@@ -557,6 +557,25 @@ impl RubyIndex {
         self.entries.values()
     }
 
+    /// Get all methods that need return type inference.
+    /// Returns a list of (entry_id, file_id, line) for methods without return types.
+    pub fn get_methods_needing_inference(&self) -> Vec<(EntryId, FileId, u32)> {
+        self.entries
+            .iter()
+            .filter_map(|(entry_id, entry)| {
+                if let EntryKind::Method(data) = &entry.kind {
+                    // Only include methods without return types that have position info
+                    if data.return_type.is_none() {
+                        if let Some(pos) = data.return_type_position {
+                            return Some((entry_id, entry.location.file_id, pos.line));
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
     /// Get the number of files indexed.
     pub fn files_count(&self) -> usize {
         self.files.len()

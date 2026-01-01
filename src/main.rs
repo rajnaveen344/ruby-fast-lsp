@@ -43,6 +43,10 @@ async fn main() -> Result<()> {
         "ruby-fast-lsp/debug/methods",
         RubyLanguageServer::handle_debug_methods,
     )
+    .custom_method(
+        "ruby-fast-lsp/debug/inference-stats",
+        RubyLanguageServer::handle_debug_inference_stats,
+    )
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");

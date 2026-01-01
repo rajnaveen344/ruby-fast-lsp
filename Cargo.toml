@@ -18,6 +18,10 @@ path = "src/bin/profile_indexer.rs"
 name = "check_size"
 path = "src/bin/check_size.rs"
 
+[[bin]]
+name = "profiler"
+path = "src/bin/profiler/main.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"
@@ -49,6 +53,7 @@ regex = "1.10"
 slotmap = "1.0"
 ustr = "1.0"
 dhat = "0.3.2"
+rayon = "1.10"
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]
@@ -78,6 +83,10 @@ ctrlc = "3.4"
 
 [build-dependencies]
 cc = "1.0.83"
+
+[features]
+default = []
+memory-profiling = []
 
 [profile.release]
 opt-level = "z"

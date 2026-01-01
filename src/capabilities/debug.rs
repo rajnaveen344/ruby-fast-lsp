@@ -172,6 +172,12 @@ pub fn handle_list_commands() -> ListCommandsResponse {
                 description: Some("The class name".to_string()),
             }],
         },
+        CommandDefinition {
+            name: "inference-stats".to_string(),
+            method: "ruby-fast-lsp/debug/inference-stats".to_string(),
+            description: "Show type inference statistics and coverage".to_string(),
+            params: vec![],
+        },
     ];
 
     ListCommandsResponse { commands }
@@ -575,5 +581,80 @@ fn format_mixin_ref(mixin: &crate::indexer::entry::MixinRef) -> String {
     let prefix = if mixin.absolute { "::" } else { "" };
     let parts: Vec<String> = mixin.parts.iter().map(|p| p.to_string()).collect();
     format!("{}{}", prefix, parts.join("::"))
+}
+
+// ============================================================================
+// Inference Stats Types
+// ============================================================================
+
+/// Parameters for `ruby-fast-lsp/debug/inference-stats`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InferenceStatsParams {}
+
+/// Response from `ruby-fast-lsp/debug/inference-stats`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceStatsResponse {
+    pub total_methods: usize,
+    pub methods_with_return_type: usize,
+    pub methods_without_return_type: usize,
+    pub inference_coverage_percent: f64,
+    pub top_files_by_method_count: Vec<FileMethodCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMethodCount {
+    pub file: String,
+    pub method_count: usize,
+}
+
+/// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
+pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResponse {
+    debug!("[DEBUG] Getting inference stats");
+
+    let index = server.index.lock();
+
+    let mut total_methods = 0;
+    let mut methods_with_return_type = 0;
+    let mut file_method_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for entry in index.all_entries() {
+        if let EntryKind::Method(data) = &entry.kind {
+            total_methods += 1;
+            
+            if data.return_type.is_some() && data.return_type.as_ref() != Some(&crate::type_inference::ruby_type::RubyType::Unknown) {
+                methods_with_return_type += 1;
+            }
+
+            // Count methods per file
+            if let Some(url) = index.get_file_url(entry.location.file_id) {
+                let file_name = url.path().split('/').last().unwrap_or("unknown").to_string();
+                *file_method_counts.entry(file_name).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let methods_without_return_type = total_methods - methods_with_return_type;
+    let inference_coverage_percent = if total_methods > 0 {
+        (methods_with_return_type as f64 / total_methods as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // Get top 10 files by method count
+    let mut file_counts: Vec<_> = file_method_counts.into_iter().collect();
+    file_counts.sort_by(|a, b| b.1.cmp(&a.1));
+    let top_files_by_method_count: Vec<FileMethodCount> = file_counts
+        .into_iter()
+        .take(10)
+        .map(|(file, count)| FileMethodCount { file, method_count: count })
+        .collect();
+
+    InferenceStatsResponse {
+        total_methods,
+        methods_with_return_type,
+        methods_without_return_type,
+        inference_coverage_percent,
+        top_files_by_method_count,
+    }
 }
 

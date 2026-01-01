@@ -302,12 +302,16 @@ impl<'a> DataflowAnalyzer<'a> {
         let entry_exit = self.compute_exit_state(self.cfg.entry, initial_state);
         self.block_exit_states.insert(self.cfg.entry, entry_exit);
 
-        // Iterate until fixed point
+        // For simple CFGs (no loops), a single pass in topological order suffices
+        // Only iterate for CFGs with back edges (loops)
+        let has_loops = self.cfg.has_back_edges();
+        
+        // Limit iterations - most Ruby methods converge in 1-3 iterations
+        let max_iterations = if has_loops { 10 } else { 2 };
         let mut changed = true;
         let mut iterations = 0;
-        const MAX_ITERATIONS: usize = 100;
 
-        while changed && iterations < MAX_ITERATIONS {
+        while changed && iterations < max_iterations {
             changed = false;
             iterations += 1;
 
@@ -318,15 +322,6 @@ impl<'a> DataflowAnalyzer<'a> {
                 }
             }
         }
-
-        if iterations >= MAX_ITERATIONS {
-            log::warn!(
-                "Dataflow analysis did not converge after {} iterations",
-                MAX_ITERATIONS
-            );
-        }
-
-        log::debug!("Dataflow analysis converged in {} iterations", iterations);
     }
 
     /// Convert to results (consumes the analyzer)

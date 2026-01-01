@@ -81,19 +81,10 @@ impl<'a> CfgBuilder<'a> {
         self.cfg.entry = entry;
         self.current_block = Some(entry);
 
-        // Set entry block location from statements
+        // Set entry block location from statements (offset-only for performance)
         let loc = statements.location();
-        let (start_line, start_col) = self.offset_to_line_col(loc.start_offset());
-        let (end_line, end_col) = self.offset_to_line_col(loc.end_offset());
         if let Some(block) = self.cfg.get_block_mut(entry) {
-            block.location = BlockLocation::new(
-                start_line,
-                start_col,
-                end_line,
-                end_col,
-                loc.start_offset(),
-                loc.end_offset(),
-            );
+            block.location = BlockLocation::from_offsets(loc.start_offset(), loc.end_offset());
         }
 
         // Process each statement
@@ -108,39 +99,10 @@ impl<'a> CfgBuilder<'a> {
         self.cfg
     }
 
-    /// Get node location as BlockLocation
+    /// Get node location as BlockLocation (offset-only, no line/col computation)
     fn node_location(&self, node: &DefNode) -> BlockLocation {
         let loc = node.location();
-        // ruby_prism Location uses start_offset/end_offset
-        // We need to calculate line/column from offsets
-        let (start_line, start_col) = self.offset_to_line_col(loc.start_offset());
-        let (end_line, end_col) = self.offset_to_line_col(loc.end_offset());
-        BlockLocation::new(
-            start_line,
-            start_col,
-            end_line,
-            end_col,
-            loc.start_offset(),
-            loc.end_offset(),
-        )
-    }
-
-    /// Convert byte offset to line and column
-    fn offset_to_line_col(&self, offset: usize) -> (u32, u32) {
-        let mut line = 1u32;
-        let mut col = 0u32;
-        for (i, &byte) in self.source.iter().enumerate() {
-            if i >= offset {
-                break;
-            }
-            if byte == b'\n' {
-                line += 1;
-                col = 0;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
+        BlockLocation::from_offsets(loc.start_offset(), loc.end_offset())
     }
 
     /// Process method parameters

@@ -208,6 +208,14 @@ pub async fn handle_debug_methods(
     Ok(debug::handle_methods(lang_server, params))
 }
 
+pub async fn handle_debug_inference_stats(
+    lang_server: &RubyLanguageServer,
+    _params: debug::InferenceStatsParams,
+) -> LspResult<debug::InferenceStatsResponse> {
+    info!("Debug inference-stats request received");
+    Ok(debug::handle_inference_stats(lang_server))
+}
+
 // ============================================================================
 // Type Hierarchy Handlers
 // ============================================================================

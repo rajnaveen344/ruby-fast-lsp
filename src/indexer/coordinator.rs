@@ -127,12 +127,17 @@ impl IndexingCoordinator {
 
         info!("Phase 2 completed in {:?}", phase2_start.elapsed());
 
-        // Mark indexing as complete after Phase 2 (index is now queryable)
-        // Phase 3 (diagnostics) can take a long time and isn't needed for queries
+        // PHASE 3: Infer return types for all methods
+        info!("Phase 3: Inferring return types");
+        let phase3_start = Instant::now();
+        self.infer_all_return_types(server).await;
+        info!("Phase 3 completed in {:?}", phase3_start.elapsed());
+
+        // Mark indexing as complete after Phase 3 (index is now fully queryable with types)
         server.set_indexing_complete();
 
-        // PHASE 3: Publish diagnostics for unresolved constants
-        info!("Phase 3: Publishing diagnostics for unresolved constants");
+        // PHASE 4: Publish diagnostics for unresolved constants
+        info!("Phase 4: Publishing diagnostics for unresolved constants");
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
         self.publish_unresolved_diagnostics(server).await;
 
@@ -216,7 +221,179 @@ impl IndexingCoordinator {
         Ok(())
     }
 
-    /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
+    /// Phase 3: Infer return types for all methods in the index (parallelized)
+    async fn infer_all_return_types(&self, server: &RubyLanguageServer) {
+        use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
+        use rayon::prelude::*;
+        use std::collections::HashMap;
+
+        Self::send_progress_report(server, "Inferring types...".to_string(), 0, 0).await;
+
+        // Get all methods needing inference, grouped by file
+        let methods_by_file: Vec<(tower_lsp::lsp_types::Url, Vec<(crate::indexer::index::EntryId, u32)>)> = {
+            let index = server.index.lock();
+            let methods = index.get_methods_needing_inference();
+            let total = methods.len();
+            info!("Found {} methods needing return type inference", total);
+
+            let mut by_file: HashMap<tower_lsp::lsp_types::Url, Vec<(crate::indexer::index::EntryId, u32)>> = HashMap::new();
+            for (entry_id, file_id, line) in methods {
+                if let Some(url) = index.get_file_url(file_id) {
+                    by_file.entry(url.clone()).or_default().push((entry_id, line));
+                }
+            }
+            by_file.into_iter().collect()
+        };
+
+        let total_files = methods_by_file.len();
+        info!("Inferring types across {} files (parallel)", total_files);
+
+        // Process files in batches to allow progress reporting between batches
+        let batch_size = 10;
+        let mut all_results: Vec<(crate::indexer::index::EntryId, crate::type_inference::ruby_type::RubyType)> = Vec::new();
+        let index_clone = server.index.clone();
+        
+        for (batch_idx, batch) in methods_by_file.chunks(batch_size).enumerate() {
+            // Report progress before each batch
+            let processed = batch_idx * batch_size;
+            let percentage = if total_files > 0 { (processed * 100) / total_files } else { 0 };
+            Self::send_progress_report(
+                server,
+                format!("Inferring types... {}%", percentage),
+                processed,
+                total_files,
+            ).await;
+            
+            // Process this batch in parallel
+            let batch_results: Vec<Vec<(crate::indexer::index::EntryId, crate::type_inference::ruby_type::RubyType)>> = 
+                batch
+                    .par_iter()
+                    .filter_map(|(file_url, methods)| {
+                        // Load file content
+                        let file_content = file_url.to_file_path().ok()
+                            .and_then(|path| std::fs::read(&path).ok())?;
+
+                        // Parse file once
+                        let parse_result = ruby_prism::parse(&file_content);
+                        let node = parse_result.node();
+
+                        // Build line -> DefNode map once for this file (O(n) once, then O(1) lookups)
+                        let def_nodes = Self::collect_all_def_nodes(&node, &file_content);
+
+                        // Create inferrer for this file
+                        let inferrer = ReturnTypeInferrer::new(index_clone.clone());
+
+                        // Infer each method in this file using O(1) lookup
+                        let mut file_results = Vec::new();
+                        for (entry_id, line) in methods {
+                            if let Some(def_node) = def_nodes.get(line) {
+                                if let Some(inferred_ty) = inferrer.infer_return_type(&file_content, def_node) {
+                                    if inferred_ty != crate::type_inference::ruby_type::RubyType::Unknown {
+                                        file_results.push((*entry_id, inferred_ty));
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Some(file_results)
+                    })
+                    .collect();
+            
+            // Flatten batch results
+            for file_results in batch_results {
+                all_results.extend(file_results);
+            }
+        }
+
+        // Apply all results to the index (single-threaded to avoid lock contention)
+        let mut inferred_count = 0;
+        {
+            let mut index = server.index.lock();
+            for (entry_id, inferred_ty) in all_results {
+                index.update_method_return_type(entry_id, inferred_ty);
+                inferred_count += 1;
+            }
+        }
+
+        info!("Inferred {} method return types", inferred_count);
+        Self::send_progress_report(server, "Inferring types".to_string(), total_files, total_files)
+            .await;
+    }
+
+    /// Collect all DefNodes in the AST with their line numbers (O(n) once per file)
+    fn collect_all_def_nodes<'a>(
+        node: &ruby_prism::Node<'a>,
+        content: &[u8],
+    ) -> std::collections::HashMap<u32, ruby_prism::DefNode<'a>> {
+        let mut result = std::collections::HashMap::new();
+        Self::collect_def_nodes_recursive(node, content, &mut result);
+        result
+    }
+
+    fn collect_def_nodes_recursive<'a>(
+        node: &ruby_prism::Node<'a>,
+        content: &[u8],
+        result: &mut std::collections::HashMap<u32, ruby_prism::DefNode<'a>>,
+    ) {
+        if let Some(def_node) = node.as_def_node() {
+            let offset = def_node.location().start_offset();
+            let line = content[..offset].iter().filter(|&&b| b == b'\n').count() as u32;
+            result.insert(line, def_node);
+        }
+
+        // Recurse into child nodes
+        if let Some(program) = node.as_program_node() {
+            for stmt in program.statements().body().iter() {
+                Self::collect_def_nodes_recursive(&stmt, content, result);
+            }
+        }
+
+        if let Some(class_node) = node.as_class_node() {
+            if let Some(body) = class_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        Self::collect_def_nodes_recursive(&stmt, content, result);
+                    }
+                }
+            }
+        }
+
+        if let Some(module_node) = node.as_module_node() {
+            if let Some(body) = module_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        Self::collect_def_nodes_recursive(&stmt, content, result);
+                    }
+                }
+            }
+        }
+
+        if let Some(stmts) = node.as_statements_node() {
+            for stmt in stmts.body().iter() {
+                Self::collect_def_nodes_recursive(&stmt, content, result);
+            }
+        }
+
+        if let Some(sclass) = node.as_singleton_class_node() {
+            if let Some(body) = sclass.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        Self::collect_def_nodes_recursive(&stmt, content, result);
+                    }
+                }
+            }
+        }
+
+        if let Some(begin_node) = node.as_begin_node() {
+            if let Some(stmts) = begin_node.statements() {
+                for stmt in stmts.body().iter() {
+                    Self::collect_def_nodes_recursive(&stmt, content, result);
+                }
+            }
+        }
+    }
+
+    /// Phase 4: Publish diagnostics for unresolved entries across all indexed files
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
         use crate::capabilities::diagnostics::get_unresolved_diagnostics;
 

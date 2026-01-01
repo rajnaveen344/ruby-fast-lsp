@@ -6,6 +6,7 @@
 //! 3. Collecting return types from all exit paths with proper narrowed types
 
 use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
+use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::type_inference::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::type_inference::literal_analyzer::LiteralAnalyzer;
@@ -14,6 +15,7 @@ use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use ruby_prism::*;
+use std::collections::HashMap;
 
 /// Infers return types from method bodies using CFG-based dataflow analysis.
 /// This properly handles type narrowing in control flow structures like case/when.
@@ -26,10 +28,13 @@ pub struct ReturnTypeInferrer {
     file_uri: Option<tower_lsp::lsp_types::Url>,
     /// Track methods currently being inferred to prevent infinite recursion
     inference_in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// If true, skip cross-file inference (for bulk indexing performance)
+    skip_cross_file_inference: bool,
 }
 
 impl ReturnTypeInferrer {
-    /// Create a new return type inferrer with access to the Ruby index
+    /// Create a new return type inferrer with access to the Ruby index.
+    /// By default, skips cross-file inference for performance during bulk indexing.
     pub fn new(index: Index<Unlocked>) -> Self {
         Self {
             index,
@@ -37,6 +42,7 @@ impl ReturnTypeInferrer {
             content: None,
             file_uri: None,
             inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
+            skip_cross_file_inference: true, // Skip by default for bulk indexing
         }
     }
 
@@ -54,6 +60,7 @@ impl ReturnTypeInferrer {
             content: Some(content.to_vec()),
             file_uri: Some(uri.clone()),
             inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
+            skip_cross_file_inference: false, // Enable cross-file for on-demand inference
         }
     }
 
@@ -159,6 +166,12 @@ impl ReturnTypeInferrer {
     /// Infer the return type from a method definition using CFG analysis.
     /// This properly handles type narrowing in control flow structures.
     pub fn infer_return_type(&self, source: &[u8], method: &DefNode) -> Option<RubyType> {
+        // Fast path: try simple inference first (no CFG needed)
+        if let Some(ty) = self.try_simple_inference(method) {
+            return Some(ty);
+        }
+
+        // Full CFG-based inference for complex methods
         let values = self.infer_return_values(source, method);
         if values.is_empty() {
             None
@@ -166,6 +179,91 @@ impl ReturnTypeInferrer {
             let types: Vec<RubyType> = values.into_iter().map(|(t, _, _)| t).collect();
             Some(RubyType::union(types))
         }
+    }
+
+    /// Fast inference only (no CFG) - for bulk indexing.
+    /// Returns None for complex methods that need CFG analysis.
+    pub fn infer_return_type_fast(&self, method: &DefNode) -> Option<RubyType> {
+        self.try_simple_inference(method)
+    }
+
+    /// Fast path inference for simple methods without building CFG.
+    /// Handles methods that return literals, simple expressions, or have predictable patterns.
+    fn try_simple_inference(&self, method: &DefNode) -> Option<RubyType> {
+        let body = method.body()?;
+
+        if let Some(stmts) = body.as_statements_node() {
+            let stmt_list: Vec<_> = stmts.body().iter().collect();
+            
+            // Empty body - returns nil
+            if stmt_list.is_empty() {
+                return Some(RubyType::nil_class());
+            }
+
+            // Check last statement for implicit return
+            let last = stmt_list.last()?;
+
+            // Explicit return statement
+            if let Some(ret) = last.as_return_node() {
+                if let Some(args) = ret.arguments() {
+                    let args_list: Vec<_> = args.arguments().iter().collect();
+                    if args_list.len() == 1 {
+                        return self.infer_simple_expression(&args_list[0]);
+                    }
+                }
+                return Some(RubyType::nil_class());
+            }
+
+            // Implicit return - try to infer from last expression
+            return self.infer_simple_expression(last);
+        }
+
+        // Direct expression body (not wrapped in statements)
+        self.infer_simple_expression(&body)
+    }
+
+    /// Infer type from a simple expression without CFG.
+    /// Returns None if the expression is too complex.
+    fn infer_simple_expression(&self, node: &Node) -> Option<RubyType> {
+        // Literals
+        if let Some(ty) = self.literal_analyzer.analyze_literal(node) {
+            return Some(ty);
+        }
+
+        // Constant read (e.g., `SomeClass`) - returns the class reference
+        if let Some(const_read) = node.as_constant_read_node() {
+            let name = std::str::from_utf8(const_read.name().as_slice()).unwrap_or("");
+            if let Ok(fqn) = FullyQualifiedName::try_from(name) {
+                return Some(RubyType::ClassReference(fqn));
+            }
+        }
+
+        // Self - we don't know the type without context
+        if node.as_self_node().is_some() {
+            return None; // Need context to know self's type
+        }
+
+        // Instance variable (we don't know the type without context)
+        if node.as_instance_variable_read_node().is_some() {
+            return None; // Need CFG for this
+        }
+
+        // Local variable (we don't know the type without CFG)
+        if node.as_local_variable_read_node().is_some() {
+            return None; // Need CFG for this
+        }
+
+        // Method call - too complex, need CFG
+        if node.as_call_node().is_some() {
+            return None;
+        }
+
+        // If/case expressions - too complex, need CFG
+        if node.as_if_node().is_some() || node.as_case_node().is_some() {
+            return None;
+        }
+
+        None
     }
 
     fn infer_implicit_return_with_loc(
@@ -449,7 +547,7 @@ impl ReturnTypeInferrer {
     }
 
     /// Look up method in the index by name and return its return type.
-    /// If the method has no return type and we have file content, infer it on-demand.
+    /// If the method has no return type, infer it on-demand (including cross-file).
     fn lookup_method_in_index(
         &self,
         method_name: &str,
@@ -466,9 +564,14 @@ impl ReturnTypeInferrer {
 
         let index = self.index.lock();
         let mut return_types = Vec::new();
-        let mut methods_needing_inference: Vec<(u32, crate::indexer::index::EntryId)> = Vec::new();
 
-        // Get file_id for the current file if we have a URI (for filtering)
+        // Methods needing inference, grouped by file for efficient batch processing
+        // Same-file methods use current content, other files need to be loaded
+        let mut same_file_methods: Vec<(u32, crate::indexer::index::EntryId)> = Vec::new();
+        let mut other_file_methods: HashMap<FileId, Vec<(u32, crate::indexer::index::EntryId)>> =
+            HashMap::new();
+
+        // Get file_id for the current file if we have a URI
         let current_file_id = self
             .file_uri
             .as_ref()
@@ -486,19 +589,21 @@ impl ReturnTypeInferrer {
                                     if *rt != RubyType::Unknown {
                                         return_types.push(rt.clone());
                                     }
-                                } else if self.content.is_some() {
+                                } else if let Some(pos) = data.return_type_position {
                                     // Method has no return type - collect for on-demand inference
-                                    // IMPORTANT: Only collect methods from the SAME FILE
-                                    // Otherwise we waste time searching for methods from other files
-                                    // in the current file's AST (which will never be found)
                                     let is_same_file = current_file_id
                                         .map(|fid| entry.location.file_id == fid)
                                         .unwrap_or(false);
 
-                                    if is_same_file {
-                                        if let Some(pos) = data.return_type_position {
-                                            methods_needing_inference.push((pos.line, *entry_id));
-                                        }
+                                    if is_same_file && self.content.is_some() {
+                                        // Same file - use current content
+                                        same_file_methods.push((pos.line, *entry_id));
+                                    } else {
+                                        // Different file - group by file_id for batch loading
+                                        other_file_methods
+                                            .entry(entry.location.file_id)
+                                            .or_default()
+                                            .push((pos.line, *entry_id));
                                     }
                                 }
                             }
@@ -508,49 +613,97 @@ impl ReturnTypeInferrer {
             }
         }
 
-        // Quick return if we found types
+        // Quick return if we found types already
         if !return_types.is_empty() {
             return Some(RubyType::union(return_types));
         }
 
+        // Skip cross-file inference if disabled (for bulk indexing performance)
+        if self.skip_cross_file_inference {
+            drop(index);
+            return None;
+        }
+
+        // Collect file URLs for cross-file inference before dropping the lock
+        let other_file_urls: Vec<(tower_lsp::lsp_types::Url, Vec<(u32, crate::indexer::index::EntryId)>)> =
+            other_file_methods
+                .into_iter()
+                .filter_map(|(file_id, methods)| {
+                    index.get_file_url(file_id).cloned().map(|url| (url, methods))
+                })
+                .collect();
+
         // Drop the index lock before inference
         drop(index);
 
-        // If we have content and methods need inference, infer them on-demand
+        // Mark this method as being inferred (cycle detection)
+        self.inference_in_progress
+            .borrow_mut()
+            .insert(method_name.to_string());
+
+        // 1. Infer same-file methods using current content
         if let Some(content) = &self.content {
-            // Fast path: skip parsing if there are no methods to infer
-            if methods_needing_inference.is_empty() {
-                return None;
+            if !same_file_methods.is_empty() {
+                let parse_result = ruby_prism::parse(content);
+                let node = parse_result.node();
+
+                for (line, entry_id) in same_file_methods.iter() {
+                    if let Some(def_node) = self.find_def_node_at_line(&node, *line, content) {
+                        let recursive_inferrer = ReturnTypeInferrer {
+                            index: self.index.clone(),
+                            literal_analyzer: LiteralAnalyzer::new(),
+                            content: self.content.clone(),
+                            file_uri: self.file_uri.clone(),
+                            inference_in_progress: std::cell::RefCell::new(
+                                self.inference_in_progress.borrow().clone(),
+                            ),
+                            skip_cross_file_inference: self.skip_cross_file_inference,
+                        };
+                        if let Some(inferred_ty) =
+                            recursive_inferrer.infer_return_type(content, &def_node)
+                        {
+                            if inferred_ty != RubyType::Unknown {
+                                self.index
+                                    .lock()
+                                    .update_method_return_type(*entry_id, inferred_ty.clone());
+                                return_types.push(inferred_ty);
+                            }
+                        }
+                    }
+                }
             }
+        }
 
-            // Mark this method as being inferred (cycle detection)
-            self.inference_in_progress
-                .borrow_mut()
-                .insert(method_name.to_string());
+        // 2. Infer cross-file methods by loading their files
+        for (file_url, methods) in other_file_urls {
+            // Load file content from disk
+            let file_content = match Self::load_file_content(&file_url) {
+                Some(content) => content,
+                None => continue, // Skip if file can't be read
+            };
 
-            // Parse content and find the method
-            let parse_result = ruby_prism::parse(content);
+            let parse_result = ruby_prism::parse(&file_content);
             let node = parse_result.node();
 
-            for (line, entry_id) in methods_needing_inference.iter() {
-                if let Some(def_node) = self.find_def_node_at_line(&node, *line, content) {
-                    // Create a recursive inferrer WITH content/URI to enable recursive inference
-                    // Cycle detection via inference_in_progress prevents infinite loops
-                    // We share the same inference_in_progress set by cloning self's fields
-                    let recursive_inferrer = ReturnTypeInferrer {
+            for (line, entry_id) in methods.iter() {
+                if let Some(def_node) =
+                    Self::find_def_node_at_line_static(&node, *line, &file_content)
+                {
+                    // Create inferrer for this file - enables recursive cross-file inference
+                    let cross_file_inferrer = ReturnTypeInferrer {
                         index: self.index.clone(),
                         literal_analyzer: LiteralAnalyzer::new(),
-                        content: self.content.clone(),
-                        file_uri: self.file_uri.clone(),
+                        content: Some(file_content.clone()),
+                        file_uri: Some(file_url.clone()),
                         inference_in_progress: std::cell::RefCell::new(
                             self.inference_in_progress.borrow().clone(),
                         ),
+                        skip_cross_file_inference: self.skip_cross_file_inference,
                     };
                     if let Some(inferred_ty) =
-                        recursive_inferrer.infer_return_type(content, &def_node)
+                        cross_file_inferrer.infer_return_type(&file_content, &def_node)
                     {
                         if inferred_ty != RubyType::Unknown {
-                            // Cache the result in the index
                             self.index
                                 .lock()
                                 .update_method_return_type(*entry_id, inferred_ty.clone());
@@ -559,12 +712,96 @@ impl ReturnTypeInferrer {
                     }
                 }
             }
+        }
 
-            // Remove from in-progress set
-            self.inference_in_progress.borrow_mut().remove(method_name);
+        // Remove from in-progress set
+        self.inference_in_progress.borrow_mut().remove(method_name);
 
-            if !return_types.is_empty() {
-                return Some(RubyType::union(return_types));
+        if !return_types.is_empty() {
+            Some(RubyType::union(return_types))
+        } else {
+            None
+        }
+    }
+
+    /// Load file content from a URL (synchronous disk read)
+    fn load_file_content(url: &tower_lsp::lsp_types::Url) -> Option<Vec<u8>> {
+        let path = url.to_file_path().ok()?;
+        std::fs::read(&path).ok()
+    }
+
+    /// Static version of find_def_node_at_line (doesn't need &self)
+    fn find_def_node_at_line_static<'a>(
+        node: &ruby_prism::Node<'a>,
+        target_line: u32,
+        content: &[u8],
+    ) -> Option<ruby_prism::DefNode<'a>> {
+        if let Some(def_node) = node.as_def_node() {
+            let offset = def_node.location().start_offset();
+            let line = content[..offset].iter().filter(|&&b| b == b'\n').count() as u32;
+            if line == target_line {
+                return Some(def_node);
+            }
+        }
+
+        // Recurse into child nodes
+        if let Some(program) = node.as_program_node() {
+            for stmt in program.statements().body().iter() {
+                if let Some(found) = Self::find_def_node_at_line_static(&stmt, target_line, content)
+                {
+                    return Some(found);
+                }
+            }
+        }
+
+        if let Some(class_node) = node.as_class_node() {
+            if let Some(body) = class_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        if let Some(found) =
+                            Self::find_def_node_at_line_static(&stmt, target_line, content)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(module_node) = node.as_module_node() {
+            if let Some(body) = module_node.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        if let Some(found) =
+                            Self::find_def_node_at_line_static(&stmt, target_line, content)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(stmts) = node.as_statements_node() {
+            for stmt in stmts.body().iter() {
+                if let Some(found) = Self::find_def_node_at_line_static(&stmt, target_line, content)
+                {
+                    return Some(found);
+                }
+            }
+        }
+
+        if let Some(sclass) = node.as_singleton_class_node() {
+            if let Some(body) = sclass.body() {
+                if let Some(stmts) = body.as_statements_node() {
+                    for stmt in stmts.body().iter() {
+                        if let Some(found) =
+                            Self::find_def_node_at_line_static(&stmt, target_line, content)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
             }
         }
 

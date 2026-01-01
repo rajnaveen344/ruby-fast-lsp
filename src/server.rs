@@ -225,6 +225,14 @@ impl RubyLanguageServer {
         request::handle_debug_methods(self, params).await
     }
 
+    /// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
+    pub async fn handle_debug_inference_stats(
+        &self,
+        params: crate::capabilities::debug::InferenceStatsParams,
+    ) -> LspResult<crate::capabilities::debug::InferenceStatsResponse> {
+        request::handle_debug_inference_stats(self, params).await
+    }
+
     /// Invalidate namespace tree cache with debouncing (300ms delay)
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         let server = self.clone();
