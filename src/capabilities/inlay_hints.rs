@@ -222,25 +222,15 @@ pub async fn handle_inlay_hints(
     }
     // Index lock is dropped here
 
-    // Now process method hints with lazy inference (no lock held)
+    // Now process method hints - return types were already inferred by infer_methods_in_range
     for data in method_data {
         // Add parameter hints
         all_hints.extend(data.param_hints);
 
-        // Get return type - either from index or infer lazily
-        let return_type_value: Option<RubyType> = if let Some(rt) = &data.return_type {
-            Some(rt.clone())
-        } else {
-            // Lazy inference (now safe - no lock held)
-            if let Some(pos) = data.return_type_position {
-                infer_return_type_for_method(server, &uri, &content, pos.line)
-            } else {
-                None
-            }
-        };
-
         // Priority: Inferred/RBS return type > YARD documentation
-        let return_type_str = return_type_value
+        let return_type_str = data
+            .return_type
+            .as_ref()
             .map(|rt| rt.to_string())
             .or_else(|| data.yard_return_str.clone());
 
@@ -260,26 +250,6 @@ pub async fn handle_inlay_hints(
     }
 
     all_hints
-}
-
-/// Lazily infer return type for a method at the given line.
-/// This is called when inlay hints are requested and the method doesn't have an explicit return type.
-fn infer_return_type_for_method(
-    server: &RubyLanguageServer,
-    _uri: &Url,
-    content: &str,
-    line: u32,
-) -> Option<RubyType> {
-    // Parse the content to get the AST
-    let parse_result = ruby_prism::parse(content.as_bytes());
-    let node = parse_result.node();
-
-    // Find the DefNode at the given line
-    let def_node = find_def_node_at_line(&node, line, content)?;
-
-    // Create inferrer and infer return type
-    let inferrer = ReturnTypeInferrer::new(server.index.clone());
-    inferrer.infer_return_type(content.as_bytes(), &def_node)
 }
 
 /// Infer return types for methods in the VISIBLE RANGE only.
@@ -322,11 +292,16 @@ fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str,
         return;
     }
 
-    // Parse the file and infer only the visible methods
-    // Using new_with_content enables on-demand inference of called methods
+    // Parse the file ONCE and infer only the visible methods
+    // Using new_with_content with URI enables on-demand inference of called methods
+    // The URI is used to filter methods to only those in the SAME FILE, avoiding
+    // the O(n) AST traversal problem where we used to search for methods from
+    // other files in the current file's AST
     let parse_result = ruby_prism::parse(content.as_bytes());
     let node = parse_result.node();
-    let inferrer = ReturnTypeInferrer::new_with_content(server.index.clone(), content.as_bytes());
+
+    let inferrer =
+        ReturnTypeInferrer::new_with_content(server.index.clone(), content.as_bytes(), uri);
 
     // Infer and cache (no lock held during inference)
     let inferred_types: Vec<(EntryId, RubyType)> = methods_needing_inference

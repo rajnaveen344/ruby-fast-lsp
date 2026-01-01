@@ -304,7 +304,7 @@ async fn run_type_check(
         text_with_type_tag.replace(&format!("{}{}{}", open_tag, expected_type, close_tag), "");
 
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), clean_content.clone());
-    let (identifier_opt, _ancestors, _scope_stack) = analyzer.get_identifier(cursor);
+    let (identifier_opt, _, _ancestors, _scope_stack) = analyzer.get_identifier(cursor);
 
     let inferred_type: Option<RubyType> = if let Some(identifier) = identifier_opt {
         match &identifier {

@@ -22,6 +22,8 @@ pub struct ReturnTypeInferrer {
     literal_analyzer: LiteralAnalyzer,
     /// Optional file content for on-demand inference of called methods
     content: Option<Vec<u8>>,
+    /// Optional file URI to filter methods to only those in the same file
+    file_uri: Option<tower_lsp::lsp_types::Url>,
     /// Track methods currently being inferred to prevent infinite recursion
     inference_in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
 }
@@ -33,17 +35,24 @@ impl ReturnTypeInferrer {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
             content: None,
+            file_uri: None,
             inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
         }
     }
 
     /// Create a new return type inferrer with file content for on-demand inference
-    /// When looking up a method that has no return type, it will infer it automatically
-    pub fn new_with_content(index: Index<Unlocked>, content: &[u8]) -> Self {
+    /// When looking up a method that has no return type, it will infer it automatically.
+    /// The URI is used to filter methods to only those in the same file.
+    pub fn new_with_content(
+        index: Index<Unlocked>,
+        content: &[u8],
+        uri: &tower_lsp::lsp_types::Url,
+    ) -> Self {
         Self {
             index,
             literal_analyzer: LiteralAnalyzer::new(),
             content: Some(content.to_vec()),
+            file_uri: Some(uri.clone()),
             inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
         }
     }
@@ -459,6 +468,12 @@ impl ReturnTypeInferrer {
         let mut return_types = Vec::new();
         let mut methods_needing_inference: Vec<(u32, crate::indexer::index::EntryId)> = Vec::new();
 
+        // Get file_id for the current file if we have a URI (for filtering)
+        let current_file_id = self
+            .file_uri
+            .as_ref()
+            .and_then(|uri| index.get_file_id(uri));
+
         let kinds = [MethodKind::Instance, MethodKind::Class];
 
         for kind in kinds {
@@ -473,8 +488,17 @@ impl ReturnTypeInferrer {
                                     }
                                 } else if self.content.is_some() {
                                     // Method has no return type - collect for on-demand inference
-                                    if let Some(pos) = data.return_type_position {
-                                        methods_needing_inference.push((pos.line, *entry_id));
+                                    // IMPORTANT: Only collect methods from the SAME FILE
+                                    // Otherwise we waste time searching for methods from other files
+                                    // in the current file's AST (which will never be found)
+                                    let is_same_file = current_file_id
+                                        .map(|fid| entry.location.file_id == fid)
+                                        .unwrap_or(false);
+
+                                    if is_same_file {
+                                        if let Some(pos) = data.return_type_position {
+                                            methods_needing_inference.push((pos.line, *entry_id));
+                                        }
                                     }
                                 }
                             }
@@ -494,6 +518,11 @@ impl ReturnTypeInferrer {
 
         // If we have content and methods need inference, infer them on-demand
         if let Some(content) = &self.content {
+            // Fast path: skip parsing if there are no methods to infer
+            if methods_needing_inference.is_empty() {
+                return None;
+            }
+
             // Mark this method as being inferred (cycle detection)
             self.inference_in_progress
                 .borrow_mut()
@@ -503,17 +532,28 @@ impl ReturnTypeInferrer {
             let parse_result = ruby_prism::parse(content);
             let node = parse_result.node();
 
-            for (line, entry_id) in methods_needing_inference {
-                if let Some(def_node) = self.find_def_node_at_line(&node, line, content) {
-                    // Create a new inferrer WITHOUT content to prevent deep recursion
-                    let simple_inferrer = ReturnTypeInferrer::new(self.index.clone());
-                    if let Some(inferred_ty) = simple_inferrer.infer_return_type(content, &def_node)
+            for (line, entry_id) in methods_needing_inference.iter() {
+                if let Some(def_node) = self.find_def_node_at_line(&node, *line, content) {
+                    // Create a recursive inferrer WITH content/URI to enable recursive inference
+                    // Cycle detection via inference_in_progress prevents infinite loops
+                    // We share the same inference_in_progress set by cloning self's fields
+                    let recursive_inferrer = ReturnTypeInferrer {
+                        index: self.index.clone(),
+                        literal_analyzer: LiteralAnalyzer::new(),
+                        content: self.content.clone(),
+                        file_uri: self.file_uri.clone(),
+                        inference_in_progress: std::cell::RefCell::new(
+                            self.inference_in_progress.borrow().clone(),
+                        ),
+                    };
+                    if let Some(inferred_ty) =
+                        recursive_inferrer.infer_return_type(content, &def_node)
                     {
                         if inferred_ty != RubyType::Unknown {
                             // Cache the result in the index
                             self.index
                                 .lock()
-                                .update_method_return_type(entry_id, inferred_ty.clone());
+                                .update_method_return_type(*entry_id, inferred_ty.clone());
                             return_types.push(inferred_ty);
                         }
                     }

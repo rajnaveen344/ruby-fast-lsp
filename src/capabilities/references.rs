@@ -26,7 +26,7 @@ pub async fn find_references_at_position(
 
     // Use the analyzer to find the identifier at the position and get its fully qualified name
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-    let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+    let (identifier_opt, _, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
     identifier_opt.as_ref()?;
 

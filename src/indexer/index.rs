@@ -105,6 +105,11 @@ impl RubyIndex {
         self.files.get(file_id)
     }
 
+    /// Get FileId for a URL (if it exists)
+    pub fn get_file_id(&self, url: &Url) -> Option<FileId> {
+        self.files.get_id(url).copied()
+    }
+
     /// Convert CompactLocation to LSP Location
     pub fn to_lsp_location(&self, compact: &CompactLocation) -> Option<Location> {
         let url = self.get_file_url(compact.file_id)?;

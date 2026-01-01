@@ -34,7 +34,7 @@ pub async fn find_definition_at_position(
     }
 
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-    let (identifier, ancestors, _scope_stack) = analyzer.get_identifier(position);
+    let (identifier, _, ancestors, _scope_stack) = analyzer.get_identifier(position);
 
     let identifier = match identifier {
         Some(id) => id,

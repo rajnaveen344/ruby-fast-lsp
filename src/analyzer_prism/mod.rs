@@ -8,6 +8,9 @@ use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Position, Url};
 use visitors::identifier_visitor::IdentifierVisitor;
 
+// Re-export IdentifierType for callers
+pub use visitors::identifier_visitor::IdentifierType;
+
 // Export the visitors module
 pub mod scope_tracker;
 pub mod utils;
@@ -183,11 +186,16 @@ impl RubyPrismAnalyzer {
         Self { uri, code }
     }
 
-    /// Returns the identifier and the ancestors stack at the time of the lookup.
+    /// Returns the identifier, identifier type, and the ancestors stack at the time of the lookup.
     pub fn get_identifier(
         &self,
         position: Position,
-    ) -> (Option<Identifier>, Vec<RubyConstant>, LVScopeId) {
+    ) -> (
+        Option<Identifier>,
+        Option<IdentifierType>,
+        Vec<RubyConstant>,
+        LVScopeId,
+    ) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
         let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
@@ -196,9 +204,7 @@ impl RubyPrismAnalyzer {
         let mut iden_visitor = IdentifierVisitor::new(document.clone(), position);
         iden_visitor.visit(&root_node);
 
-        let (identifier, _, ns_stack_at_pos, lv_scope_id_at_pos) = iden_visitor.get_result();
-
-        (identifier, ns_stack_at_pos, lv_scope_id_at_pos)
+        iden_visitor.get_result()
     }
 }
 
@@ -209,6 +215,16 @@ mod tests {
     // Helper function to parse content and create an analyzer
     fn create_analyzer(content: &str) -> RubyPrismAnalyzer {
         RubyPrismAnalyzer::new(Url::parse("file:///dummy.rb").unwrap(), content.to_string())
+    }
+
+    // Test helper - wraps get_identifier to return 3-tuple for backward compatibility
+    fn get_identifier_for_test(
+        analyzer: &RubyPrismAnalyzer,
+        position: Position,
+    ) -> (Option<Identifier>, Vec<RubyConstant>, LVScopeId) {
+        let (identifier, _identifier_type, ns_stack, lv_scope_id) =
+            analyzer.get_identifier(position);
+        (identifier, ns_stack, lv_scope_id)
     }
 
     // Helper functions for test assertions with the new Identifier enum structure
@@ -342,7 +358,8 @@ mod tests {
 
         // Position cursor at "CONST_A"
         let position = Position::new(0, 2);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -363,7 +380,8 @@ end
 
         // Position cursor at "CONST_B"
         let position = Position::new(2, 5);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -388,7 +406,8 @@ end
 
         // Test position at "CONST_A" in the "Inner::CONST_A" reference (relative reference)
         let position = Position::new(6, 19);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -425,7 +444,8 @@ end
 
         // Position cursor at "CONST_C"
         let position = Position::new(3, 9);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -459,7 +479,8 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "CONST_A" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 25);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -483,7 +504,8 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "Inner" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 18);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -505,7 +527,8 @@ val = ::Outer::Inner::CONST_A
 
         // Test position at "Outer" in the "::Outer::Inner::CONST_A" reference
         let position = Position::new(7, 12);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -537,7 +560,8 @@ end
 
         // Test position at "TopLevelConst" in the "val = TopLevelConst" reference
         let position = Position::new(3, 10);
-        let (identifier_opt, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         // Ensure we found an identifier
         let identifier = identifier_opt.expect("Expected to find an identifier at this position");
@@ -565,7 +589,7 @@ end
         let content = "Foo::Bar::BAZ";
         let analyzer = create_analyzer(content);
         let position = Position::new(0, 10); // Position at "BAZ"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected identifier");
 
         // Demonstrate constant helper usage
@@ -583,7 +607,7 @@ end
         let method_analyzer = create_analyzer(method_content);
         let method_position = Position::new(3, 6); // Position at "some_method"
         let (method_identifier_opt, method_ancestors, _) =
-            method_analyzer.get_identifier(method_position);
+            get_identifier_for_test(&method_analyzer, method_position);
 
         if let Some(method_identifier) = method_identifier_opt {
             // Demonstrate method helper usage
@@ -602,7 +626,8 @@ end
 "#;
         let variable_analyzer = create_analyzer(variable_content);
         let variable_position = Position::new(4, 6); // Position at "local_var" usage
-        let (variable_identifier_opt, _, _) = variable_analyzer.get_identifier(variable_position);
+        let (variable_identifier_opt, _, _) =
+            get_identifier_for_test(&variable_analyzer, variable_position);
 
         if let Some(variable_identifier) = variable_identifier_opt {
             // Demonstrate variable helper usage
@@ -623,7 +648,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 8); // Position at "simple_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "simple_method", MethodReceiver::None);
@@ -641,7 +666,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 8); // Position at "method_with_args"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "method_with_args", MethodReceiver::None);
@@ -659,7 +684,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 8); // Position at "method_with_block"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "method_with_block", MethodReceiver::None);
@@ -677,7 +702,7 @@ global_method
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(5, 5); // Position at "global_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "global_method", MethodReceiver::None);
@@ -695,7 +720,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 12); // Position at "helper_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "helper_method", MethodReceiver::SelfReceiver);
@@ -713,7 +738,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 12); // Position at "helper_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "helper_method", MethodReceiver::SelfReceiver);
@@ -731,7 +756,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 25); // Position at "second_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         // Now correctly identifies as MethodCall with inner receiver being self.first_method
@@ -759,7 +784,7 @@ MyClass.class_method
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(7, 12); // Position at "class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -785,7 +810,7 @@ MyModule::MyClass.nested_method
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(9, 22); // Position at "nested_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -809,7 +834,7 @@ MyModule.module_method
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(7, 15); // Position at "module_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -839,7 +864,7 @@ A::B::C::D.deep_method
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(13, 17); // Position at "deep_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "deep_method", MethodReceiver::Constant(vec![]));
@@ -858,7 +883,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(4, 12); // Position at "instance_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -880,7 +905,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 25); // Position at "second_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         // Now correctly identifies as MethodCall with nested structure
@@ -906,7 +931,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 16); // Position at "result_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(&identifier, "result_method", MethodReceiver::Expression);
@@ -924,7 +949,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 19); // Position at "array_element_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         // arr[0] is a method call ([] method) on arr
@@ -950,7 +975,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 20); // Position at "hash_value_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         // hash[:key] is a method call ([] method) on hash
@@ -976,7 +1001,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 25); // Position at "instance_var_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -998,7 +1023,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 22); // Position at "class_var_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -1020,7 +1045,7 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(3, 22); // Position at "global_var_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find method identifier");
         assert_method_identifier(
@@ -1045,7 +1070,8 @@ end
 "#;
         let analyzer = create_analyzer(content);
         let position = Position::new(4, 10); // Position at "local_var" usage
-        let (identifier_opt, namespace, _lv_scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _lv_scope_stack) =
+            get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "local_var");
@@ -1084,7 +1110,7 @@ end
 
         // Test access to outer_var from within block
         let position = Position::new(7, 12); // Position at "outer_var" in block
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "outer_var");
@@ -1092,7 +1118,7 @@ end
 
         // Test access to inner_var within block
         let position = Position::new(8, 12); // Position at "inner_var" in block
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "inner_var");
@@ -1129,7 +1155,7 @@ end
 
         // Test access to explicitly declared block-local variable
         let position = Position::new(7, 12); // Position at "block_local" usage
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "block_local");
@@ -1165,7 +1191,7 @@ end
 
         // Test access to rescue variable
         let position = Position::new(6, 12); // Position at "error_var" usage
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "error_var");
@@ -1203,7 +1229,7 @@ end
 
         // Test access to class body local variable
         let position = Position::new(10, 8); // Position at "class_local" usage in class body
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "class_local");
@@ -1238,7 +1264,7 @@ end
 
         // Test access to module body local variable
         let position = Position::new(9, 8); // Position at "module_local" usage in module body
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "module_local");
@@ -1272,7 +1298,7 @@ end
 
         // Test access to instance variable
         let position = Position::new(7, 10); // Position at "@instance_var" usage
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@instance_var");
@@ -1312,7 +1338,7 @@ end
 
         // Test access to inner class instance variable
         let position = Position::new(12, 12); // Position at "@inner_instance" usage
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@inner_instance");
@@ -1346,7 +1372,7 @@ end
 
         // Test access to class variable from class method
         let position = Position::new(5, 10); // Position at "@@class_var" in class method
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@class_var");
@@ -1354,7 +1380,7 @@ end
 
         // Test access to class variable from instance method
         let position = Position::new(9, 10); // Position at "@@class_var" in instance method
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@class_var");
@@ -1390,7 +1416,7 @@ end
 
         // Test access to inherited class variable
         let position = Position::new(7, 10); // Position at "@@shared_var" in child class
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "@@shared_var");
@@ -1428,7 +1454,7 @@ puts $global_var
 
         // Test access to global variable from class method
         let position = Position::new(5, 10); // Position at "$global_var" in class
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
@@ -1436,7 +1462,7 @@ puts $global_var
 
         // Test access to global variable from module method
         let position = Position::new(11, 10); // Position at "$global_var" in module
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
@@ -1444,7 +1470,7 @@ puts $global_var
 
         // Test access to global variable from top level
         let position = Position::new(15, 5); // Position at "$global_var" at top level
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find variable identifier");
         assert_variable_identifier(&identifier, "$global_var");
@@ -1482,7 +1508,7 @@ end
 
         for (line, col, expected_name) in test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+            let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
             let identifier = identifier_opt.unwrap_or_else(|| {
                 panic!("Expected to find variable identifier for {}", expected_name)
@@ -1527,7 +1553,7 @@ end
 
         for (line, col, expected_name) in test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, _, _) = analyzer.get_identifier(position);
+            let (identifier_opt, _, _) = get_identifier_for_test(&analyzer, position);
             println!(
                 "Position ({}, {}): Expected {}, Found: {:?}",
                 line, col, expected_name, identifier_opt
@@ -1569,7 +1595,7 @@ end
 
         for (line, col, expected_name) in test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+            let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
             let identifier = identifier_opt.unwrap_or_else(|| {
                 panic!("Expected to find variable identifier for {}", expected_name)
@@ -1605,7 +1631,7 @@ end
 
         // Test regular global variable
         let position = Position::new(5, 8); // Position at "$global_var"
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         if let Some(identifier) = identifier_opt {
             assert_variable_identifier(&identifier, "$global_var");
@@ -1622,7 +1648,7 @@ end
 
         // Test special global variable
         let position = Position::new(6, 8); // Position at "$LOAD_PATH"
-        let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+        let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
         if let Some(identifier) = identifier_opt {
             assert_variable_identifier(&identifier, "$LOAD_PATH");
@@ -1703,7 +1729,7 @@ end
 
         for (line, col, expected_name, expected_namespace) in class_context_test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+            let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
             if let Some(identifier) = identifier_opt {
                 assert_variable_identifier(&identifier, expected_name);
@@ -1771,7 +1797,7 @@ end
 
         for (line, col, expected_name, expected_namespace) in top_level_test_cases {
             let position = Position::new(line, col);
-            let (identifier_opt, namespace, _) = analyzer.get_identifier(position);
+            let (identifier_opt, namespace, _) = get_identifier_for_test(&analyzer, position);
 
             if let Some(identifier) = identifier_opt {
                 assert_variable_identifier(&identifier, expected_name);
@@ -1815,7 +1841,7 @@ end
 
         // Test 1: DEEP_CONST accessed within Level3 (same namespace)
         let position = Position::new(7, 10);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
@@ -1824,7 +1850,7 @@ end
 
         // Test 2: Level3::DEEP_CONST accessed within Level2
         let position = Position::new(12, 20);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
@@ -1833,7 +1859,7 @@ end
 
         // Test 3: Level2::Level3::DEEP_CONST accessed within Level1
         let position = Position::new(17, 25); // Adjusted position for DEEP_CONST
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
 
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
@@ -1861,7 +1887,7 @@ TopLevelConst = "top level"
 
         // Test 1: Absolute reference ::Outer::Inner::CONST_VALUE
         let position = Position::new(7, 35);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer", "Inner", "CONST_VALUE"]);
@@ -1869,7 +1895,7 @@ TopLevelConst = "top level"
 
         // Test 2: Absolute reference ::Outer::Inner
         let position = Position::new(7, 20);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer", "Inner"]);
@@ -1877,7 +1903,7 @@ TopLevelConst = "top level"
 
         // Test 3: Absolute reference ::Outer
         let position = Position::new(7, 14);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Outer"]);
@@ -1885,7 +1911,7 @@ TopLevelConst = "top level"
 
         // Test 4: Absolute reference to top-level constant ::TopLevelConst
         let position = Position::new(8, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["TopLevelConst"]);
@@ -1909,7 +1935,7 @@ result = Alpha::Beta::Gamma::DELTA
 
         // Test 1: Cursor on Alpha
         let position = Position::new(9, 11);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha"]);
@@ -1917,7 +1943,7 @@ result = Alpha::Beta::Gamma::DELTA
 
         // Test 2: Cursor on Beta
         let position = Position::new(9, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta"]);
@@ -1925,7 +1951,7 @@ result = Alpha::Beta::Gamma::DELTA
 
         // Test 3: Cursor on Gamma
         let position = Position::new(9, 25);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta", "Gamma"]);
@@ -1933,7 +1959,7 @@ result = Alpha::Beta::Gamma::DELTA
 
         // Test 4: Cursor on DELTA
         let position = Position::new(9, 32);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["Alpha", "Beta", "Gamma", "DELTA"]);
@@ -1976,7 +2002,7 @@ end
 
         // Test 1: GLOBAL_CONST accessed from instance method in OuterClass
         let position = Position::new(10, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["GLOBAL_CONST"]);
@@ -1984,7 +2010,7 @@ end
 
         // Test 2: OUTER_CONST accessed from instance method in OuterClass
         let position = Position::new(11, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OUTER_CONST"]);
@@ -1992,7 +2018,7 @@ end
 
         // Test 3: CLASS_CONST accessed from instance method in OuterClass
         let position = Position::new(12, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["CLASS_CONST"]);
@@ -2000,7 +2026,7 @@ end
 
         // Test 4: Qualified access OuterModule::OUTER_CONST
         let position = Position::new(13, 35);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OuterModule", "OUTER_CONST"]);
@@ -2008,7 +2034,7 @@ end
 
         // Test 5: GLOBAL_CONST accessed from InnerModule
         let position = Position::new(20, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["GLOBAL_CONST"]);
@@ -2016,7 +2042,7 @@ end
 
         // Test 6: INNER_CONST accessed from InnerModule
         let position = Position::new(23, 18);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["INNER_CONST"]);
@@ -2024,7 +2050,7 @@ end
 
         // Test 7: Fully qualified access OuterModule::OuterClass::CLASS_CONST
         let position = Position::new(24, 50);
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find constant identifier");
 
         assert_constant_identifier(&identifier, &["OuterModule", "OuterClass", "CLASS_CONST"]);
@@ -2091,7 +2117,7 @@ end
 
         // Test 1: No receiver method call within OuterClass
         let position = Position::new(5, 8); // Position at "helper_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "helper_method", MethodReceiver::None);
@@ -2099,7 +2125,7 @@ end
 
         // Test 2: Self receiver method call within OuterClass
         let position = Position::new(8, 17); // Position at "instance_helper"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "instance_helper", MethodReceiver::SelfReceiver);
@@ -2107,7 +2133,7 @@ end
 
         // Test 3: Constant receiver method call within OuterClass
         let position = Position::new(11, 22); // Position at "class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2119,7 +2145,7 @@ end
 
         // Test 4: Method call receiver (obj is parsed as method call since it's not defined)
         let position = Position::new(14, 12); // Position at "expression_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2134,7 +2160,7 @@ end
 
         // Test 5: No receiver method call within InnerModule
         let position = Position::new(28, 10); // Position at "nested_helper"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "nested_helper", MethodReceiver::None);
@@ -2142,7 +2168,7 @@ end
 
         // Test 6: Self receiver method call within InnerModule
         let position = Position::new(31, 17); // Position at "module_helper"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "module_helper", MethodReceiver::SelfReceiver);
@@ -2150,7 +2176,7 @@ end
 
         // Test 7: Complex constant receiver method call within InnerModule
         let position = Position::new(34, 42); // Position at "class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2162,7 +2188,7 @@ end
 
         // Test 8: Method call receiver (var is parsed as method call since it's not defined)
         let position = Position::new(37, 12); // Position at "nested_expression_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2230,7 +2256,7 @@ end
 
         // Test 1: Method call within Level2Class instance method
         let position = Position::new(19, 12); // Position at "level1_instance_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "level1_instance_method", MethodReceiver::None);
@@ -2241,7 +2267,7 @@ end
 
         // Test 2: Self method call within Level2Class
         let position = Position::new(20, 22); // Position at "level2_instance_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2256,7 +2282,7 @@ end
 
         // Test 3: Constant receiver method call to parent class
         let position = Position::new(21, 30); // Position at "level1_class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2271,7 +2297,7 @@ end
 
         // Test 4: Constant receiver method call to same level class
         let position = Position::new(22, 30); // Position at "level2_class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2286,7 +2312,7 @@ end
 
         // Test 5: Fully qualified constant receiver method call
         let position = Position::new(23, 40); // Position at "level1_class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2301,7 +2327,7 @@ end
 
         // Test 6: Method call within Level3 module (deeply nested)
         let position = Position::new(29, 14); // Position at "nested_call"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "nested_call", MethodReceiver::None);
@@ -2312,7 +2338,7 @@ end
 
         // Test 7: Self method call within Level3 module
         let position = Position::new(30, 19); // Position at "level3_helper"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "level3_helper", MethodReceiver::SelfReceiver);
@@ -2323,7 +2349,7 @@ end
 
         // Test 8: Fully qualified method call from deeply nested context
         let position = Position::new(31, 40); // Position at "level1_class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2338,7 +2364,7 @@ end
 
         // Test 9: Relative constant receiver from deeply nested context
         let position = Position::new(32, 30); // Position at "level2_class_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(
@@ -2377,7 +2403,7 @@ end
 
         // Test 1: No receiver method call
         let position = Position::new(4, 8); // Position at "helper_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "helper_method", MethodReceiver::None);
@@ -2385,7 +2411,7 @@ end
 
         // Test 2: Self receiver method call
         let position = Position::new(5, 17); // Position at "other_method"
-        let (identifier_opt, ancestors, _) = analyzer.get_identifier(position);
+        let (identifier_opt, ancestors, _) = get_identifier_for_test(&analyzer, position);
         let identifier = identifier_opt.expect("Expected to find method identifier");
 
         assert_method_identifier(&identifier, "other_method", MethodReceiver::SelfReceiver);
