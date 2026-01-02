@@ -5,8 +5,8 @@ use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
     MethodKind, MethodOrigin, MethodVisibility,
 };
-use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::return_type::ReturnTypeInferrer;
 
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
@@ -71,7 +71,9 @@ impl IndexVisitor {
         }
 
         let name_location = node.name_loc();
-        let lsp_location = self.document.prism_location_to_lsp_location(&name_location);
+        // Use full method body range (def to end) for entry.location, consistent with class/module
+        let full_location = node.location();
+        let lsp_location = self.document.prism_location_to_lsp_location(&full_location);
         // Convert to CompactLocation
         let file_id = self.index.lock().get_or_insert_file(&self.document.uri);
         let location =

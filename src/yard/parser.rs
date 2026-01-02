@@ -31,10 +31,16 @@ use tower_lsp::lsp_types::{Position, Range};
 // Regex Patterns
 // =============================================================================
 
-/// @param name [Type] description
+/// @param name [Type] description (standard YARD format)
 /// Groups: 1=name, 2=type, 3=description
 static PARAM_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"@param\s+(\w+)\s+\[([^\]]+)\]\s*(.*)").expect("Invalid param regex")
+});
+
+/// @param[Type] name description (alternative format - type before name)
+/// Groups: 1=type, 2=name, 3=description
+static PARAM_ALT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@param\s*\[([^\]]+)\]\s*(\w+)\s*(.*)").expect("Invalid param alt regex")
 });
 
 /// @return [Type] description
@@ -365,21 +371,39 @@ impl YardParser {
             None
         };
 
-        if let Some(caps) = PARAM_REGEX.captures(line) {
-            let name = caps
-                .get(1)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_default();
-            let types = parse_type_list(caps.get(2).map(|m| m.as_str()).unwrap_or(""));
-            let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
+        // Try standard format: @param name [Type] description
+        // Then try alternative format: @param[Type] name description
+        let param_match = PARAM_REGEX
+            .captures(line)
+            .map(|caps| {
+                let name = caps
+                    .get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let type_match = caps.get(2);
+                let types = parse_type_list(type_match.map(|m| m.as_str()).unwrap_or(""));
+                let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
+                (name, types, desc, type_match)
+            })
+            .or_else(|| {
+                PARAM_ALT_REGEX.captures(line).map(|caps| {
+                    let type_match = caps.get(1);
+                    let types = parse_type_list(type_match.map(|m| m.as_str()).unwrap_or(""));
+                    let name = caps
+                        .get(2)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default();
+                    let desc = non_empty_string(caps.get(3).map(|m| m.as_str().trim()));
+                    (name, types, desc, type_match)
+                })
+            });
 
+        if let Some((name, types, desc, type_match)) = param_match {
             // Calculate types range (just the [Type] portion)
             let types_range = if track_positions {
-                caps.get(2).map(|m| {
-                    // m.start() and m.end() are byte offsets within `line`
-                    // We need to account for the opening [ and include the closing ]
-                    let bracket_start = m.start().saturating_sub(1); // include '['
-                    let bracket_end = m.end() + 1; // include ']'
+                type_match.map(|m| {
+                    let bracket_start = m.start().saturating_sub(1);
+                    let bracket_end = m.end() + 1;
                     Range {
                         start: Position {
                             line: line_info.line_number,

@@ -27,9 +27,9 @@ class Wrapper
 end
 
 class Inner
-  def <def>process</def>
+  <def>def process
     "inner result"
-  end
+  end</def>
 end
 
 class Other
@@ -54,9 +54,9 @@ async fn goto_method_chain_from_constructor() {
         r#"
 class Foo
   # @return [Bar]
-  def <def>bar</def>
+  <def>def bar
     Bar.new
-  end
+  end</def>
 end
 
 class Bar
@@ -93,9 +93,9 @@ class Second
 end
 
 class Third
-  def <def>final_method</def>
+  <def>def final_method
     42
-  end
+  end</def>
 end
 
 a = First.new
@@ -119,9 +119,9 @@ class Producer
 end
 
 class Consumer
-  def <def>consume</def>
+  <def>def consume
     "done"
-  end
+  end</def>
 end
 
 producer = Producer.new
@@ -152,9 +152,9 @@ def use
 end
 
 class Product
-  def <def>use</def>
+  <def>def use
     "using"
-  end
+  end</def>
 end
 
 product = Builder.new.build
@@ -186,9 +186,9 @@ class Inner
 end
 
 class Other
-  def <def>process</def>
+  <def>def process
     "other result"
-  end
+  end</def>
 end
 
 obj = Wrapper.new

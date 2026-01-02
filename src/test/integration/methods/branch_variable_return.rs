@@ -130,9 +130,9 @@ async fn test_goto_array_shovel_operator() {
     check(
         r#"
 class Array
-  def <def><<</def>(item)
+  <def>def <<(item)
     # stub
-  end
+  end</def>
 end
 
 def collect_items
@@ -154,9 +154,9 @@ async fn test_goto_array_shovel_with_multiple_definitions() {
     check(
         r#"
 class Array
-  def <def><<</def>(item)
+  <def>def <<(item)
     # Array's shovel operator
-  end
+  end</def>
 end
 
 class CSV
@@ -198,9 +198,9 @@ async fn test_goto_array_push_method() {
     check(
         r#"
 class Array
-  def <def>push</def>(item)
+  <def>def push(item)
     # stub
-  end
+  end</def>
 end
 
 def collect_items
@@ -224,9 +224,9 @@ async fn test_goto_integer_plus_operator() {
     check(
         r#"
 class Integer
-  def <def>+</def>(other)
+  <def>def +(other)
     # stub
-  end
+  end</def>
 end
 
 def add_numbers

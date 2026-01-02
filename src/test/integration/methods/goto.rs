@@ -12,9 +12,9 @@ async fn goto_instance_method() {
     check(
         r#"
 class Greeter
-  def <def>greet</def>
+  <def>def greet
     puts "Hello"
-  end
+  end</def>
 
   def run
     greet$0
@@ -31,9 +31,9 @@ async fn goto_method_on_instance() {
     check(
         r#"
 class Foo
-  def <def>bar</def>
+  <def>def bar
     42
-  end
+  end</def>
 end
 
 Foo.new.bar$0
@@ -52,9 +52,9 @@ async fn goto_class_method() {
     check(
         r#"
 class Utils
-  def self.<def>process</def>
+  <def>def self.process
     "processing"
-  end
+  end</def>
 end
 
 Utils.process$0
@@ -73,9 +73,9 @@ async fn goto_included_module_method() {
     check(
         r#"
 module Loggable
-  def <def>log</def>
+  <def>def log
     puts "logging"
-  end
+  end</def>
 end
 
 class App
@@ -96,9 +96,9 @@ async fn goto_cross_module_method() {
     check(
         r#"
 module ModuleA
-  def <def>method_a</def>
+  <def>def method_a
     "from A"
-  end
+  end</def>
 end
 
 module ModuleB
@@ -127,9 +127,9 @@ async fn goto_inherited_method() {
     check(
         r#"
 class Parent
-  def <def>parent_method</def>
+  <def>def parent_method
     "from parent"
-  end
+  end</def>
 end
 
 class Child < Parent
@@ -148,9 +148,9 @@ async fn goto_inherited_mixin_method() {
     check(
         r#"
 module ApiHelpers
-  def <def>api_call</def>
+  <def>def api_call
     "api"
-  end
+  end</def>
 end
 
 class BaseController
@@ -176,9 +176,9 @@ end
 async fn goto_top_level_method() {
     check(
         r#"
-def <def>helper</def>
+<def>def helper
   "help"
-end
+end</def>
 
 helper$0
 "#,
@@ -197,9 +197,9 @@ async fn goto_singleton_class_method() {
         r#"
 class Foo
   class << self
-    def <def>singleton_method</def>
+    <def>def singleton_method
       "singleton"
-    end
+    end</def>
   end
 end
 
@@ -219,8 +219,8 @@ async fn goto_constructor_via_new() {
     check(
         r#"
 class Foo
-  def <def>initialize</def>
-  end
+  <def>def initialize
+  end</def>
 end
 
 Foo.new$0

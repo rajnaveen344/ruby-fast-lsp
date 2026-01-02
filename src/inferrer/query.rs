@@ -301,6 +301,73 @@ impl<'a> TypeQuery<'a> {
         inferrer.infer_return_type(self.content, &def_node)
     }
 
+    /// Get type for a local variable by name at a position.
+    /// Checks method parameters first, then falls back to assignment inference.
+    pub fn get_local_variable_type(&self, name: &str, position: Position) -> Option<RubyType> {
+        // 1. Check if this is a method parameter
+        if let Some(param_type) = self.get_method_parameter_type(name, position) {
+            return Some(param_type);
+        }
+
+        // 2. Try inferring from assignment pattern (e.g., var = Class.new)
+        let content_str = std::str::from_utf8(self.content).ok()?;
+        let index = self.index.lock();
+        infer_type_from_assignment(content_str, name, &index)
+    }
+
+    /// Get type for a method parameter if the variable is a parameter of the enclosing method.
+    fn get_method_parameter_type(&self, param_name: &str, position: Position) -> Option<RubyType> {
+        let index = self.index.lock();
+
+        // Find the method that contains this position using entry.location (full method body)
+        for entry in index.file_entries(self.uri) {
+            if let EntryKind::Method(data) = &entry.kind {
+                // Check if position is within the method's location range (def to end)
+                let range = &entry.location.range;
+                let is_in_method =
+                    position.line >= range.start.line && position.line <= range.end.line;
+
+                if is_in_method {
+                    // Check if this method has a parameter with the given name
+                    let has_param = data.params.iter().any(|p| p.name == param_name);
+
+                    if has_param {
+                        // Check param_types first (from YARD conversion)
+                        for (name, param_type) in &data.param_types {
+                            if name == param_name && *param_type != RubyType::Unknown {
+                                return Some(param_type.clone());
+                            }
+                        }
+                        // Also check YARD docs for parameter types
+                        if let Some(yard_doc) = &data.yard_doc {
+                            if let Some(type_str) = yard_doc.get_param_type_str(param_name) {
+                                return Some(RubyType::class(&type_str));
+                            }
+                        }
+                        // Parameter exists but has no type info - return Unknown
+                        return Some(RubyType::Unknown);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Get return type for a method call given the receiver type and method name.
+    pub fn get_method_call_type(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        let index = self.index.lock();
+        MethodResolver::resolve_method_return_type(&index, receiver_type, method_name)
+    }
+
+    /// Get return type for a method definition at a position (with on-demand inference).
+    pub fn get_method_definition_type(&mut self, position: Position) -> Option<RubyType> {
+        self.get_method_type_at(position)
+    }
+
     /// Check if a position is within a range.
     #[inline]
     pub fn is_in_range(pos: &Position, range: &Range) -> bool {

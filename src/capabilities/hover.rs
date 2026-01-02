@@ -12,8 +12,7 @@ use tower_lsp::lsp_types::{
 
 use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index::RubyIndex;
-use crate::inferrer::query::infer_type_from_assignment;
+use crate::inferrer::query::TypeQuery;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::server::RubyLanguageServer;
@@ -45,29 +44,43 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
     let hover_text = match &identifier {
         Identifier::RubyLocalVariable { name, .. } => {
-            // Look up type from document lvars
-            let offset = crate::utils::position_to_offset(&content, position);
-            let index = server.index.lock();
-            let type_str =
-                get_local_variable_type(server, &uri, name, scope_id, &content, offset, &index)
-                    .map(|t| t.to_string());
+            // Use TypeQuery for unified type lookup
+            let type_query = TypeQuery::new(server.index.clone(), &uri, content.as_bytes());
 
-            // If not found in lvars, try type narrowing engine
-            let type_from_narrowing = type_str.or_else(|| {
+            // 1. Check document lvars first
+            let from_lvar = {
+                let docs = server.docs.lock();
+                if let Some(doc_arc) = docs.get(&uri) {
+                    let doc = doc_arc.read();
+                    doc.get_local_var_entries(scope_id).and_then(|entries| {
+                        entries.iter().find_map(|entry| {
+                            if let EntryKind::LocalVariable(data) = &entry.kind {
+                                if &data.name == name && data.r#type != RubyType::Unknown {
+                                    return Some(data.r#type.clone());
+                                }
+                            }
+                            None
+                        })
+                    })
+                } else {
+                    None
+                }
+            };
+
+            // 2. Try TypeQuery (method params, assignment inference)
+            let from_query =
+                from_lvar.or_else(|| type_query.get_local_variable_type(name, position));
+
+            // 3. Try type narrowing engine
+            let from_narrowing = from_query.or_else(|| {
                 let offset = position_to_offset(&content, position);
                 server
                     .type_narrowing
                     .get_narrowed_type(&uri, offset, Some(&content))
-                    .map(|t| t.to_string())
             });
 
-            // If still not found, try inferring from constructor/method chain assignment
-            let final_type = type_from_narrowing.or_else(|| {
-                infer_type_from_assignment(&content, name, &index).map(|t| t.to_string())
-            });
-
-            match final_type {
-                Some(t) => format!("{}", t),
+            match from_narrowing {
+                Some(t) => t.to_string(),
                 None => name.clone(),
             }
         }
@@ -141,8 +154,6 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 );
             }
 
-            let index = server.index.lock();
-
             // Resolve receiver type - distinguish between Class and Module for proper method resolution
             let receiver_type = match receiver {
                 crate::analyzer_prism::MethodReceiver::None
@@ -153,6 +164,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                     } else {
                         let fqn = FullyQualifiedName::from(namespace.clone());
                         // Check if this is a module (not a class) for proper method resolution
+                        let index = server.index.lock();
                         let is_module = index.get(&fqn).map_or(false, |entries| {
                             entries
                                 .iter()
@@ -172,14 +184,17 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                     RubyType::ClassReference(fqn)
                 }
                 crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
-                    let offset = crate::utils::position_to_offset(&content, position);
-                    // Pass &index (already locked) - no double-lock possible
-                    get_local_variable_type(server, &uri, name, scope_id, &content, offset, &index)
+                    // Use TypeQuery to get receiver's type
+                    let type_query = TypeQuery::new(server.index.clone(), &uri, content.as_bytes());
+                    type_query
+                        .get_local_variable_type(name, position)
                         .unwrap_or(RubyType::Unknown)
                 }
                 // TODO: Handle other receiver types (InstanceVar, chains, etc)
                 _ => RubyType::Unknown,
             };
+
+            let index = server.index.lock();
 
             // Use MethodResolver to find return type
             // This now handles both class and module contexts, including ancestor chain traversal
@@ -440,55 +455,6 @@ fn handle_method_definition_hover(
         }),
         range: None,
     })
-}
-
-/// Helper to resolve local variable type.
-///
-/// Takes `&RubyIndex` directly - caller must have already locked.
-/// This prevents double-locking at compile time.
-fn get_local_variable_type(
-    server: &RubyLanguageServer,
-    uri: &tower_lsp::lsp_types::Url,
-    name: &str,
-    scope_id: crate::types::scope::LVScopeId,
-    content: &str,
-    offset: usize,
-    index: &RubyIndex,
-) -> Option<RubyType> {
-    use crate::indexer::entry::entry_kind::EntryKind;
-
-    // 1. Check document lvars
-    {
-        let docs = server.docs.lock();
-        if let Some(doc_arc) = docs.get(uri) {
-            let doc = doc_arc.read();
-            if let Some(entries) = doc.get_local_var_entries(scope_id) {
-                let found_type = entries.iter().find_map(|entry| {
-                    if let EntryKind::LocalVariable(data) = &entry.kind {
-                        if &data.name == name && data.r#type != RubyType::Unknown {
-                            return Some(data.r#type.clone());
-                        }
-                    }
-                    None
-                });
-                if found_type.is_some() {
-                    return found_type;
-                }
-            }
-        }
-    }
-
-    // 2. Try type narrowing engine
-    if let Some(type_from_narrowing) =
-        server
-            .type_narrowing
-            .get_narrowed_type(uri, offset, Some(content))
-    {
-        return Some(type_from_narrowing);
-    }
-
-    // 3. Try inferring from assignment (index already locked - no double-lock risk)
-    infer_type_from_assignment(content, name, index)
 }
 
 /// Find a DefNode at the given line in the AST.

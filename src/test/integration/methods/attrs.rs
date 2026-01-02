@@ -213,9 +213,9 @@ Foo.new.sec$0ret
 async fn test_attr_dynamic_argument_goto() {
     check(
         r#"
-def <def>get_bar</def>
+<def>def get_bar
   :bar
-end
+end</def>
 
 class Foo
   attr_accessor get_b$0ar
