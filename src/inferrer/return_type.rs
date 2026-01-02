@@ -10,8 +10,8 @@ use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
-use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use ruby_prism::*;
@@ -30,13 +30,13 @@ pub struct ReturnTypeInferrer {
     file_uri: Option<Url>,
     /// Track methods currently being inferred to prevent infinite recursion
     inference_in_progress: RefCell<HashSet<String>>,
-    /// If true, skip cross-file inference (for bulk indexing performance)
+    /// If true, skip cross-file inference (used when inferring during indexing for validation)
     skip_cross_file_inference: bool,
 }
 
 impl ReturnTypeInferrer {
     /// Create a new return type inferrer with access to the Ruby index.
-    /// By default, skips cross-file inference for performance during bulk indexing.
+    /// Skips cross-file inference (used for validation during indexing).
     pub fn new(index: Index<Unlocked>) -> Self {
         Self {
             index,
@@ -44,7 +44,7 @@ impl ReturnTypeInferrer {
             content: None,
             file_uri: None,
             inference_in_progress: RefCell::new(HashSet::new()),
-            skip_cross_file_inference: true, // Skip by default for bulk indexing
+            skip_cross_file_inference: true,
         }
     }
 
@@ -62,7 +62,7 @@ impl ReturnTypeInferrer {
             content: Some(content.to_vec()),
             file_uri: Some(uri.clone()),
             inference_in_progress: RefCell::new(HashSet::new()),
-            skip_cross_file_inference: false, // Enable cross-file for on-demand inference
+            skip_cross_file_inference: false,
         }
     }
 
@@ -202,12 +202,6 @@ impl ReturnTypeInferrer {
             let types: Vec<RubyType> = values.into_iter().map(|(t, _, _)| t).collect();
             Some(RubyType::union(types))
         }
-    }
-
-    /// Fast inference only (no CFG) - for bulk indexing.
-    /// Returns None for complex methods that need CFG analysis.
-    pub fn infer_return_type_fast(&self, method: &DefNode) -> Option<RubyType> {
-        self.try_simple_inference(method)
     }
 
     /// Fast path inference for simple methods without building CFG.
