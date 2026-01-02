@@ -13,9 +13,9 @@ use tower_lsp::lsp_types::{
 use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::RubyIndex;
+use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::server::RubyLanguageServer;
-use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
-use crate::type_inference::ruby_type::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::utils::position_to_offset;
 
@@ -56,7 +56,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 let offset = position_to_offset(&content, position);
                 server
                     .type_narrowing
-                    .get_narrowed_type(&uri, name, offset)
+                    .get_narrowed_type(&uri, offset, Some(&content))
                     .map(|t| t.to_string())
             });
 
@@ -184,7 +184,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             // This now handles both class and module contexts, including ancestor chain traversal
             // and searching through classes that include a module
             let return_type =
-                crate::type_inference::method_resolver::MethodResolver::resolve_method_return_type(
+                crate::inferrer::method::resolver::MethodResolver::resolve_method_return_type(
                     &index,
                     &receiver_type,
                     &method_name,
@@ -448,7 +448,7 @@ fn infer_type_from_assignment(
     var_name: &str,
     index: &crate::indexer::index::RubyIndex,
 ) -> Option<RubyType> {
-    use crate::type_inference::method_resolver::MethodResolver;
+    use crate::inferrer::method::resolver::MethodResolver;
     use crate::types::ruby_namespace::RubyConstant;
 
     // Look for assignment pattern: `var_name = ...`
@@ -580,7 +580,11 @@ fn get_local_variable_type(
     }
 
     // 2. Try type narrowing engine
-    if let Some(type_from_narrowing) = server.type_narrowing.get_narrowed_type(uri, name, offset) {
+    if let Some(type_from_narrowing) =
+        server
+            .type_narrowing
+            .get_narrowed_type(uri, offset, Some(content))
+    {
         return Some(type_from_narrowing);
     }
 

@@ -7,7 +7,7 @@ use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::type_inference::TypeNarrowingEngine;
+use crate::inferrer::TypeNarrowingEngine;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};

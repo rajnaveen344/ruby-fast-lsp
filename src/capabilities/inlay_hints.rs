@@ -13,9 +13,9 @@ fn is_position_in_range(pos: &Position, range: &Range) -> bool {
 }
 
 use crate::indexer::entry::entry_kind::EntryKind;
+use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::server::RubyLanguageServer;
-use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
-use crate::type_inference::ruby_type::RubyType;
 use tower_lsp::lsp_types::Url;
 
 pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
@@ -85,7 +85,9 @@ pub async fn handle_inlay_hints(
                 // Try type narrowing if not from lvar
                 let from_narrowing = from_lvar.clone().or_else(|| {
                     let offset = position_to_offset(&content, entry.location.range.start);
-                    server.type_narrowing.get_narrowed_type(&uri, name, offset)
+                    server
+                        .type_narrowing
+                        .get_narrowed_type(&uri, offset, Some(&content))
                 });
 
                 // Try method chain assignment inference if still unknown
@@ -468,7 +470,7 @@ fn infer_type_from_assignment(
     var_name: &str,
     index: &crate::indexer::index::RubyIndex,
 ) -> Option<RubyType> {
-    use crate::type_inference::method_resolver::MethodResolver;
+    use crate::inferrer::method::resolver::MethodResolver;
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
 

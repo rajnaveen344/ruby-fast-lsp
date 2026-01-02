@@ -31,8 +31,8 @@ use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
-use crate::type_inference::ruby_type::RubyType;
-use crate::type_inference::TypeNarrowingEngine;
+use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -66,10 +66,24 @@ pub fn find_method_definitions(
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
             // Try to get the receiver's type using type narrowing
-            // Use the variant with content to ensure the file is registered on-demand
-            let offset = position_to_offset(content, position);
+            // Calculate the offset of the receiver variable (before the method call)
+            // The receiver is on the same line, before the cursor position
+            let line = content.lines().nth(position.line as usize).unwrap_or("");
+            let before_cursor = &line[..std::cmp::min(position.character as usize, line.len())];
+            // Find the receiver variable in the line before cursor
+            let receiver_offset = if let Some(var_pos) = before_cursor.rfind(name) {
+                position_to_offset(
+                    content,
+                    Position {
+                        line: position.line,
+                        character: var_pos as u32,
+                    },
+                )
+            } else {
+                position_to_offset(content, position)
+            };
             if let Some(receiver_type) =
-                type_narrowing.get_narrowed_type_with_content(uri, name, offset, content)
+                type_narrowing.get_narrowed_type(uri, receiver_offset, Some(content))
             {
                 debug!("Found receiver type for '{}': {:?}", name, receiver_type);
                 return search_by_name_filtered(method, index, &receiver_type);
@@ -128,7 +142,7 @@ fn resolve_method_call_type(
     position: Position,
     content: &str,
 ) -> Option<RubyType> {
-    use crate::type_inference::method_resolver::MethodResolver;
+    use crate::inferrer::method::resolver::MethodResolver;
 
     // First, resolve the inner receiver's type
     let inner_type = match inner_receiver {
@@ -146,9 +160,7 @@ fn resolve_method_call_type(
         | MethodReceiver::GlobalVariable(name) => {
             let offset = position_to_offset(content, position);
             // Try type narrowing first (with on-demand registration)
-            if let Some(ty) =
-                type_narrowing.get_narrowed_type_with_content(uri, name, offset, content)
-            {
+            if let Some(ty) = type_narrowing.get_narrowed_type(uri, offset, Some(content)) {
                 ty
             } else if let Some(ty) = infer_type_from_constructor_assignment(content, name, index) {
                 // Fallback: constructor assignment pattern
@@ -218,7 +230,7 @@ fn infer_type_from_constructor_assignment(
     var_name: &str,
     index: &RubyIndex,
 ) -> Option<RubyType> {
-    use crate::type_inference::method_resolver::MethodResolver;
+    use crate::inferrer::method::resolver::MethodResolver;
 
     // Pattern: `var_name = SomeClass.new` or `var_name = Some::Class.new.method`
     for line in content.lines() {

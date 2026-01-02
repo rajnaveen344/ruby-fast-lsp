@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{Location, Url};
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 
 // ============================================================================
 // UnresolvedEntry

@@ -2,7 +2,7 @@ use log::error;
 use ruby_prism::ParametersNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;

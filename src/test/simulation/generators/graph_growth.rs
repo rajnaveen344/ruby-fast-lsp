@@ -88,7 +88,7 @@ pub fn graph_mixin_relationships() -> impl Strategy<Value = TrackedCodeV2> {
 }
 
 /// Generate a TrackedCodeV2 with type-inferred variables
-pub fn graph_type_inference() -> impl Strategy<Value = TrackedCodeV2> {
+pub fn graph_inferrer() -> impl Strategy<Value = TrackedCodeV2> {
     prop_oneof![Just("String"), Just("Integer"), Just("Array"), Just("Hash"),].prop_map(
         |var_type| {
             let mut state = GeneratorState::new();
@@ -171,7 +171,7 @@ pub fn graph_tracked_code() -> impl Strategy<Value = TrackedCodeV2> {
     prop_oneof![
         3 => graph_class_hierarchy(),
         3 => graph_mixin_relationships(),
-        2 => graph_type_inference(),
+        2 => graph_inferrer(),
         2 => graph_class_references(),
         2 => graph_completion_test(),
     ]

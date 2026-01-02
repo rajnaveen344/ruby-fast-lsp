@@ -204,7 +204,7 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
                     );
 
                     if let Some(rbs_type) =
-                        crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type(
+                        crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
                             &class_name,
                             &method_name,
                             is_singleton,
@@ -235,7 +235,7 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
                         // Actually, let's use the ruby_type comparison if possible.
 
                         // If RBS type is known (not Unknown)
-                        if rbs_type != crate::type_inference::ruby_type::RubyType::Unknown {
+                        if rbs_type != crate::inferrer::r#type::ruby::RubyType::Unknown {
                             // Check if yard_ruby_types represents the same thing.
                             // Example: RBS=Integer, YARD=Integer -> OK.
 
@@ -319,7 +319,7 @@ pub fn get_unresolved_diagnostics(
                 receiver_type,
                 location,
             } => {
-                if let Some(crate::type_inference::ruby_type::RubyType::Unknown) = receiver_type {
+                if let Some(crate::inferrer::r#type::ruby::RubyType::Unknown) = receiver_type {
                     Diagnostic {
                         range: location.range,
                         severity: Some(DiagnosticSeverity::WARNING),

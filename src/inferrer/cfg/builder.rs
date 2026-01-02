@@ -5,15 +5,15 @@
 
 use ruby_prism::*;
 
-use crate::type_inference::literal_analyzer::LiteralAnalyzer;
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::literal::LiteralAnalyzer;
+use crate::inferrer::r#type::ruby::RubyType;
 
 use super::graph::{BlockId, BlockLocation, CfgEdge, ControlFlowGraph, Statement, StatementKind};
 use super::guards::TypeGuard;
 
 /// Builds a Control Flow Graph from Ruby AST
 pub struct CfgBuilder<'a> {
-    source: &'a [u8],
+    _source: &'a [u8],
     cfg: ControlFlowGraph,
     current_block: Option<BlockId>,
     literal_analyzer: LiteralAnalyzer,
@@ -22,7 +22,7 @@ pub struct CfgBuilder<'a> {
 impl<'a> CfgBuilder<'a> {
     pub fn new(source: &'a [u8]) -> Self {
         Self {
-            source,
+            _source: source,
             cfg: ControlFlowGraph::new(),
             current_block: None,
             literal_analyzer: LiteralAnalyzer::new(),

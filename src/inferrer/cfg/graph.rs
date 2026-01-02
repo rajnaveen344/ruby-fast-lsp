@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 
 use super::guards::TypeGuard;
 

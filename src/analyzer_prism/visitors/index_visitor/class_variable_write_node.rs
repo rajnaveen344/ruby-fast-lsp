@@ -5,7 +5,7 @@ use ruby_prism::{
 };
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::IndexVisitor;
@@ -147,7 +147,7 @@ mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::{Index, Unlocked};
-    use crate::type_inference::ruby_type::RubyType;
+    use crate::inferrer::r#type::ruby::RubyType;
     use parking_lot::Mutex;
     use ruby_prism::Visit;
     use std::sync::Arc;
@@ -163,7 +163,7 @@ mod tests {
         let document =
             crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
         let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new(&document);
-        let literal_analyzer = crate::type_inference::literal_analyzer::LiteralAnalyzer::new();
+        let literal_analyzer = crate::inferrer::r#type::literal::LiteralAnalyzer::new();
 
         let visitor = IndexVisitor {
             index,

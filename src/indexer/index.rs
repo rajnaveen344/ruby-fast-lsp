@@ -537,7 +537,7 @@ impl RubyIndex {
     pub fn update_method_return_type(
         &mut self,
         entry_id: EntryId,
-        return_type: crate::type_inference::ruby_type::RubyType,
+        return_type: crate::inferrer::r#type::ruby::RubyType,
     ) -> bool {
         if let Some(entry) = self.entries.get_mut(entry_id) {
             if let EntryKind::Method(data) = &mut entry.kind {

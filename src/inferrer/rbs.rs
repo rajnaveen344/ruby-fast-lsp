@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use rbs_parser::{Loader, RbsType};
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 

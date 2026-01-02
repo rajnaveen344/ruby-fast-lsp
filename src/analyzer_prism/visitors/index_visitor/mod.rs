@@ -3,9 +3,9 @@ use ruby_prism::*;
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::type_inference::literal_analyzer::LiteralAnalyzer;
+use crate::inferrer::r#type::literal::LiteralAnalyzer;
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 

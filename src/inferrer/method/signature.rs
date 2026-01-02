@@ -1,4 +1,4 @@
-use crate::type_inference::RubyType;
+use crate::inferrer::RubyType;
 use std::collections::HashMap;
 
 /// Represents a method parameter with its type information

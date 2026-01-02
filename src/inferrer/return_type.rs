@@ -8,14 +8,16 @@
 use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::type_inference::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
-use crate::type_inference::literal_analyzer::LiteralAnalyzer;
-use crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type;
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
+use crate::inferrer::r#type::literal::LiteralAnalyzer;
+use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use ruby_prism::*;
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use tower_lsp::lsp_types::Url;
 
 /// Infers return types from method bodies using CFG-based dataflow analysis.
 /// This properly handles type narrowing in control flow structures like case/when.
@@ -25,9 +27,9 @@ pub struct ReturnTypeInferrer {
     /// Optional file content for on-demand inference of called methods
     content: Option<Vec<u8>>,
     /// Optional file URI to filter methods to only those in the same file
-    file_uri: Option<tower_lsp::lsp_types::Url>,
+    file_uri: Option<Url>,
     /// Track methods currently being inferred to prevent infinite recursion
-    inference_in_progress: std::cell::RefCell<std::collections::HashSet<String>>,
+    inference_in_progress: RefCell<HashSet<String>>,
     /// If true, skip cross-file inference (for bulk indexing performance)
     skip_cross_file_inference: bool,
 }
@@ -41,7 +43,7 @@ impl ReturnTypeInferrer {
             literal_analyzer: LiteralAnalyzer::new(),
             content: None,
             file_uri: None,
-            inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
+            inference_in_progress: RefCell::new(HashSet::new()),
             skip_cross_file_inference: true, // Skip by default for bulk indexing
         }
     }
@@ -59,7 +61,7 @@ impl ReturnTypeInferrer {
             literal_analyzer: LiteralAnalyzer::new(),
             content: Some(content.to_vec()),
             file_uri: Some(uri.clone()),
-            inference_in_progress: std::cell::RefCell::new(std::collections::HashSet::new()),
+            inference_in_progress: RefCell::new(HashSet::new()),
             skip_cross_file_inference: false, // Enable cross-file for on-demand inference
         }
     }
@@ -166,12 +168,33 @@ impl ReturnTypeInferrer {
     /// Infer the return type from a method definition using CFG analysis.
     /// This properly handles type narrowing in control flow structures.
     pub fn infer_return_type(&self, source: &[u8], method: &DefNode) -> Option<RubyType> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static FAST_PATH_HITS: AtomicU64 = AtomicU64::new(0);
+        static CFG_PATH_HITS: AtomicU64 = AtomicU64::new(0);
+
         // Fast path: try simple inference first (no CFG needed)
         if let Some(ty) = self.try_simple_inference(method) {
+            let hits = FAST_PATH_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+            if hits % 5000 == 0 {
+                log::info!(
+                    "Inference: fast_path={}, cfg_path={}",
+                    hits,
+                    CFG_PATH_HITS.load(Ordering::Relaxed)
+                );
+            }
             return Some(ty);
         }
 
         // Full CFG-based inference for complex methods
+        let cfg_hits = CFG_PATH_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+        if cfg_hits % 5000 == 0 {
+            log::info!(
+                "Inference: fast_path={}, cfg_path={}",
+                FAST_PATH_HITS.load(Ordering::Relaxed),
+                cfg_hits
+            );
+        }
+
         let values = self.infer_return_values(source, method);
         if values.is_empty() {
             None
@@ -194,7 +217,7 @@ impl ReturnTypeInferrer {
 
         if let Some(stmts) = body.as_statements_node() {
             let stmt_list: Vec<_> = stmts.body().iter().collect();
-            
+
             // Empty body - returns nil
             if stmt_list.is_empty() {
                 return Some(RubyType::nil_class());
@@ -238,6 +261,23 @@ impl ReturnTypeInferrer {
             }
         }
 
+        // Constant path (e.g., `Foo::Bar`) - returns the class reference
+        if node.as_constant_path_node().is_some() {
+            // For now, just return Unknown for constant paths - they need proper resolution
+            // The full CFG path handles this better
+            return None;
+        }
+
+        // Interpolated string always returns String
+        if node.as_interpolated_string_node().is_some() {
+            return Some(RubyType::string());
+        }
+
+        // Interpolated symbol always returns Symbol
+        if node.as_interpolated_symbol_node().is_some() {
+            return Some(RubyType::symbol());
+        }
+
         // Self - we don't know the type without context
         if node.as_self_node().is_some() {
             return None; // Need context to know self's type
@@ -269,8 +309,8 @@ impl ReturnTypeInferrer {
     fn infer_implicit_return_with_loc(
         &self,
         body: &Node,
-        cfg: &crate::type_inference::cfg::ControlFlowGraph,
-        results: &crate::type_inference::cfg::DataflowResults,
+        cfg: &crate::inferrer::cfg::ControlFlowGraph,
+        results: &crate::inferrer::cfg::DataflowResults,
     ) -> Option<(RubyType, usize, usize)> {
         // Get the last statement's type
         if let Some(statements) = body.as_statements_node() {
@@ -553,6 +593,13 @@ impl ReturnTypeInferrer {
         method_name: &str,
         _owner_class: Option<&str>,
     ) -> Option<RubyType> {
+        // During bulk indexing, skip expensive index lookups entirely.
+        // Return types are being populated in parallel, so lookups would mostly miss anyway.
+        // Cross-file inference will happen on-demand when user interacts.
+        if self.skip_cross_file_inference {
+            return None;
+        }
+
         // Check if we're already inferring this method (cycle detection)
         {
             let in_progress = self.inference_in_progress.borrow();
@@ -618,20 +665,19 @@ impl ReturnTypeInferrer {
             return Some(RubyType::union(return_types));
         }
 
-        // Skip cross-file inference if disabled (for bulk indexing performance)
-        if self.skip_cross_file_inference {
-            drop(index);
-            return None;
-        }
-
         // Collect file URLs for cross-file inference before dropping the lock
-        let other_file_urls: Vec<(tower_lsp::lsp_types::Url, Vec<(u32, crate::indexer::index::EntryId)>)> =
-            other_file_methods
-                .into_iter()
-                .filter_map(|(file_id, methods)| {
-                    index.get_file_url(file_id).cloned().map(|url| (url, methods))
-                })
-                .collect();
+        let other_file_urls: Vec<(
+            tower_lsp::lsp_types::Url,
+            Vec<(u32, crate::indexer::index::EntryId)>,
+        )> = other_file_methods
+            .into_iter()
+            .filter_map(|(file_id, methods)| {
+                index
+                    .get_file_url(file_id)
+                    .cloned()
+                    .map(|url| (url, methods))
+            })
+            .collect();
 
         // Drop the index lock before inference
         drop(index);

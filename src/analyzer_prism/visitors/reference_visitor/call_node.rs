@@ -4,7 +4,7 @@ use ruby_prism::{CallNode, Node};
 use crate::{
     analyzer_prism::utils,
     indexer::{entry::MethodKind, index::UnresolvedEntry},
-    type_inference::ruby_type::RubyType,
+    inferrer::r#type::ruby::RubyType,
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
         ruby_method::RubyMethod, ruby_namespace::RubyConstant,

@@ -60,7 +60,7 @@ pub fn tracked_code() -> impl Strategy<Value = TrackedCodeV2> {
         // These use unique identifiers and anchor comments for robust position tracking
         3 => graph_class_hierarchy(),
         3 => graph_mixin_relationships(),
-        2 => graph_type_inference(),
+        2 => graph_inferrer(),
         2 => graph_class_references(),
         2 => graph_completion_test(),
 

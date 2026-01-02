@@ -4,9 +4,9 @@
 //! type information through the CFG, applying type guards at
 //! branch points.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 
 use super::graph::{BlockId, ControlFlowGraph, EdgeKind, StatementKind};
 use super::guards::TypeGuard;
@@ -47,7 +47,7 @@ impl TypeState {
         let mut result = TypeState::new();
 
         // Collect all variable names
-        let all_vars: std::collections::HashSet<_> = self
+        let all_vars: HashSet<_> = self
             .variables
             .keys()
             .chain(other.variables.keys())
@@ -305,7 +305,7 @@ impl<'a> DataflowAnalyzer<'a> {
         // For simple CFGs (no loops), a single pass in topological order suffices
         // Only iterate for CFGs with back edges (loops)
         let has_loops = self.cfg.has_back_edges();
-        
+
         // Limit iterations - most Ruby methods converge in 1-3 iterations
         let max_iterations = if has_loops { 10 } else { 2 };
         let mut changed = true;
@@ -691,7 +691,7 @@ impl<'a> DataflowAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_inference::cfg::CfgBuilder;
+    use crate::inferrer::cfg::CfgBuilder;
 
     fn analyze_method(source: &str) -> DataflowResults {
         let result = ruby_prism::parse(source.as_bytes());

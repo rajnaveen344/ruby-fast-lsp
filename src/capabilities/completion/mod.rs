@@ -303,8 +303,8 @@ fn get_receiver_type_from_cfg(
     content: &str,
     position: Position,
     identifier: &Option<Identifier>,
-) -> Option<crate::type_inference::ruby_type::RubyType> {
-    use crate::type_inference::ruby_type::RubyType;
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
 
@@ -366,10 +366,20 @@ fn get_receiver_type_from_cfg(
     // For variables, use CFG-based type narrowing
     // CFG handles both method-level and top-level code
     if is_variable_name(receiver_text) {
-        let offset = position_to_offset(content, position);
-        if let Some(ty) = server
-            .type_narrowing
-            .get_narrowed_type(uri, receiver_text, offset)
+        // Calculate offset of the receiver variable (before the dot)
+        // We need to find where receiver_text starts in the line
+        let receiver_start_in_line = dot_pos - receiver_text.len();
+        let receiver_offset = position_to_offset(
+            content,
+            Position {
+                line: position.line,
+                character: receiver_start_in_line as u32,
+            },
+        );
+        if let Some(ty) =
+            server
+                .type_narrowing
+                .get_narrowed_type(uri, receiver_offset, Some(content))
         {
             return Some(ty);
         }
@@ -389,8 +399,8 @@ fn get_receiver_type_from_cfg(
 fn infer_type_from_constructor_assignment(
     content: &str,
     var_name: &str,
-) -> Option<crate::type_inference::ruby_type::RubyType> {
-    use crate::type_inference::ruby_type::RubyType;
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
 
@@ -446,8 +456,8 @@ fn infer_type_from_constructor_assignment(
 }
 
 /// Infer type from a literal expression
-fn infer_literal_type(text: &str) -> Option<crate::type_inference::ruby_type::RubyType> {
-    use crate::type_inference::ruby_type::RubyType;
+fn infer_literal_type(text: &str) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
 
     // String literal
     if text.starts_with('"') || text.starts_with('\'') {
@@ -1363,8 +1373,7 @@ end
             ];
 
             for module_fqn in modules {
-                let entry =
-                    create_test_entry(&mut *index, module_fqn, EntryKind::new_module());
+                let entry = create_test_entry(&mut *index, module_fqn, EntryKind::new_module());
                 index.add_entry(entry);
             }
 
@@ -1557,8 +1566,7 @@ A::B::"#;
             let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
             index.add_entry(a_module_entry);
 
-            let a_b_module_entry =
-                create_test_entry(&mut *index, "A::B", EntryKind::new_module());
+            let a_b_module_entry = create_test_entry(&mut *index, "A::B", EntryKind::new_module());
             index.add_entry(a_b_module_entry);
 
             let a_b_c_module_entry =
@@ -1668,12 +1676,10 @@ A::"#;
             let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
             index.add_entry(a_module_entry);
 
-            let a_b_module_entry =
-                create_test_entry(&mut *index, "A::B", EntryKind::new_module());
+            let a_b_module_entry = create_test_entry(&mut *index, "A::B", EntryKind::new_module());
             index.add_entry(a_b_module_entry);
 
-            let a_a_module_entry =
-                create_test_entry(&mut *index, "A::A", EntryKind::new_module());
+            let a_a_module_entry = create_test_entry(&mut *index, "A::A", EntryKind::new_module());
             index.add_entry(a_a_module_entry);
 
             // Add some common Rails/Ruby classes that start with A

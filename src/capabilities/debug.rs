@@ -233,7 +233,7 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                 }
                                 EntryKind::InstanceVariable(data) => {
                                     let type_str = if data.r#type
-                                        != crate::type_inference::ruby_type::RubyType::Unknown
+                                        != crate::inferrer::r#type::ruby::RubyType::Unknown
                                     {
                                         Some(data.r#type.to_string())
                                     } else {
@@ -243,7 +243,7 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                 }
                                 EntryKind::ClassVariable(data) => {
                                     let type_str = if data.r#type
-                                        != crate::type_inference::ruby_type::RubyType::Unknown
+                                        != crate::inferrer::r#type::ruby::RubyType::Unknown
                                     {
                                         Some(data.r#type.to_string())
                                     } else {
@@ -253,7 +253,7 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                 }
                                 EntryKind::GlobalVariable(data) => {
                                     let type_str = if data.r#type
-                                        != crate::type_inference::ruby_type::RubyType::Unknown
+                                        != crate::inferrer::r#type::ruby::RubyType::Unknown
                                     {
                                         Some(data.r#type.to_string())
                                     } else {
@@ -263,7 +263,7 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                 }
                                 EntryKind::LocalVariable(data) => {
                                     let type_str = if data.r#type
-                                        != crate::type_inference::ruby_type::RubyType::Unknown
+                                        != crate::inferrer::r#type::ruby::RubyType::Unknown
                                     {
                                         Some(data.r#type.to_string())
                                     } else {
@@ -621,7 +621,7 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
         if let EntryKind::Method(data) = &entry.kind {
             total_methods += 1;
             
-            if data.return_type.is_some() && data.return_type.as_ref() != Some(&crate::type_inference::ruby_type::RubyType::Unknown) {
+            if data.return_type.is_some() && data.return_type.as_ref() != Some(&crate::inferrer::r#type::ruby::RubyType::Unknown) {
                 methods_with_return_type += 1;
             }
 

@@ -5,8 +5,8 @@ use crate::indexer::entry::{
     entry_kind::{EntryKind, MethodParamInfo, ParamKind},
     MethodKind, MethodOrigin, MethodVisibility,
 };
-use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::return_type::ReturnTypeInferrer;
+use crate::inferrer::r#type::ruby::RubyType;
 
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
@@ -149,7 +149,7 @@ impl IndexVisitor {
                 .join("::");
             let is_singleton = method_kind == MethodKind::Class;
 
-            crate::type_inference::rbs_index::get_rbs_method_return_type_as_ruby_type(
+            crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
                 &class_name,
                 &method_name_str,
                 is_singleton,

@@ -8,7 +8,7 @@ use std::fmt::Display;
 use tower_lsp::lsp_types::Position;
 
 use crate::indexer::entry::MixinRef;
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::{
     fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeId,
 };

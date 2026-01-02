@@ -7,7 +7,7 @@
 //! if referenced classes/modules actually exist.
 
 use crate::indexer::index::RubyIndex;
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use tower_lsp::lsp_types::Range;

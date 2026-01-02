@@ -283,7 +283,7 @@ async fn run_type_check(
     _content: &str,
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
-    use crate::type_inference::ruby_type::RubyType;
+    use crate::inferrer::r#type::ruby::RubyType;
 
     // Extract expected type from <type>...</type> marker
     let open_tag = "<type>";

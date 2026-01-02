@@ -1,11 +1,13 @@
 use crate::config::RubyFastLspConfig;
 use crate::indexer::file_processor::FileProcessor;
+use crate::indexer::index::EntryId;
 use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
 
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
+use crate::inferrer::RubyType;
 use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, info, warn};
@@ -223,23 +225,32 @@ impl IndexingCoordinator {
 
     /// Phase 3: Infer return types for all methods in the index (parallelized)
     async fn infer_all_return_types(&self, server: &RubyLanguageServer) {
-        use crate::type_inference::return_type_inferrer::ReturnTypeInferrer;
+        use crate::inferrer::return_type::ReturnTypeInferrer;
         use rayon::prelude::*;
         use std::collections::HashMap;
 
         Self::send_progress_report(server, "Inferring types...".to_string(), 0, 0).await;
 
         // Get all methods needing inference, grouped by file
-        let methods_by_file: Vec<(tower_lsp::lsp_types::Url, Vec<(crate::indexer::index::EntryId, u32)>)> = {
+        let methods_by_file: Vec<(
+            tower_lsp::lsp_types::Url,
+            Vec<(crate::indexer::index::EntryId, u32)>,
+        )> = {
             let index = server.index.lock();
             let methods = index.get_methods_needing_inference();
             let total = methods.len();
             info!("Found {} methods needing return type inference", total);
 
-            let mut by_file: HashMap<tower_lsp::lsp_types::Url, Vec<(crate::indexer::index::EntryId, u32)>> = HashMap::new();
+            let mut by_file: HashMap<
+                tower_lsp::lsp_types::Url,
+                Vec<(crate::indexer::index::EntryId, u32)>,
+            > = HashMap::new();
             for (entry_id, file_id, line) in methods {
                 if let Some(url) = index.get_file_url(file_id) {
-                    by_file.entry(url.clone()).or_default().push((entry_id, line));
+                    by_file
+                        .entry(url.clone())
+                        .or_default()
+                        .push((entry_id, line));
                 }
             }
             by_file.into_iter().collect()
@@ -250,55 +261,62 @@ impl IndexingCoordinator {
 
         // Process files in batches to allow progress reporting between batches
         let batch_size = 10;
-        let mut all_results: Vec<(crate::indexer::index::EntryId, crate::type_inference::ruby_type::RubyType)> = Vec::new();
+        let mut all_results: Vec<(EntryId, RubyType)> = Vec::new();
         let index_clone = server.index.clone();
-        
+
         for (batch_idx, batch) in methods_by_file.chunks(batch_size).enumerate() {
             // Report progress before each batch
             let processed = batch_idx * batch_size;
-            let percentage = if total_files > 0 { (processed * 100) / total_files } else { 0 };
+            let percentage = if total_files > 0 {
+                (processed * 100) / total_files
+            } else {
+                0
+            };
             Self::send_progress_report(
                 server,
                 format!("Inferring types... {}%", percentage),
                 processed,
                 total_files,
-            ).await;
-            
+            )
+            .await;
+
             // Process this batch in parallel
-            let batch_results: Vec<Vec<(crate::indexer::index::EntryId, crate::type_inference::ruby_type::RubyType)>> = 
-                batch
-                    .par_iter()
-                    .filter_map(|(file_url, methods)| {
-                        // Load file content
-                        let file_content = file_url.to_file_path().ok()
-                            .and_then(|path| std::fs::read(&path).ok())?;
+            let batch_results: Vec<Vec<(EntryId, RubyType)>> = batch
+                .par_iter()
+                .filter_map(|(file_url, methods)| {
+                    // Load file content
+                    let file_content = file_url
+                        .to_file_path()
+                        .ok()
+                        .and_then(|path| std::fs::read(&path).ok())?;
 
-                        // Parse file once
-                        let parse_result = ruby_prism::parse(&file_content);
-                        let node = parse_result.node();
+                    // Parse file once
+                    let parse_result = ruby_prism::parse(&file_content);
+                    let node = parse_result.node();
 
-                        // Build line -> DefNode map once for this file (O(n) once, then O(1) lookups)
-                        let def_nodes = Self::collect_all_def_nodes(&node, &file_content);
+                    // Build line -> DefNode map once for this file (O(n) once, then O(1) lookups)
+                    let def_nodes = Self::collect_all_def_nodes(&node, &file_content);
 
-                        // Create inferrer for this file
-                        let inferrer = ReturnTypeInferrer::new(index_clone.clone());
+                    // Create inferrer for this file (bulk indexing mode - fast inference only)
+                    let inferrer = ReturnTypeInferrer::new(index_clone.clone());
 
-                        // Infer each method in this file using O(1) lookup
-                        let mut file_results = Vec::new();
-                        for (entry_id, line) in methods {
-                            if let Some(def_node) = def_nodes.get(line) {
-                                if let Some(inferred_ty) = inferrer.infer_return_type(&file_content, def_node) {
-                                    if inferred_ty != crate::type_inference::ruby_type::RubyType::Unknown {
-                                        file_results.push((*entry_id, inferred_ty));
-                                    }
+                    // Infer each method in this file using O(1) lookup
+                    // Use fast inference (no CFG) during bulk indexing for performance
+                    let mut file_results = Vec::new();
+                    for (entry_id, line) in methods {
+                        if let Some(def_node) = def_nodes.get(line) {
+                            if let Some(inferred_ty) = inferrer.infer_return_type_fast(def_node) {
+                                if inferred_ty != RubyType::Unknown {
+                                    file_results.push((*entry_id, inferred_ty));
                                 }
                             }
                         }
-                        
-                        Some(file_results)
-                    })
-                    .collect();
-            
+                    }
+
+                    Some(file_results)
+                })
+                .collect();
+
             // Flatten batch results
             for file_results in batch_results {
                 all_results.extend(file_results);
@@ -316,8 +334,13 @@ impl IndexingCoordinator {
         }
 
         info!("Inferred {} method return types", inferred_count);
-        Self::send_progress_report(server, "Inferring types".to_string(), total_files, total_files)
-            .await;
+        Self::send_progress_report(
+            server,
+            "Inferring types".to_string(),
+            total_files,
+            total_files,
+        )
+        .await;
     }
 
     /// Collect all DefNodes in the AST with their line numbers (O(n) once per file)

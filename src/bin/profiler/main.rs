@@ -24,8 +24,8 @@ mod sample_project;
 
 use log::{info, LevelFilter};
 use ruby_fast_lsp::capabilities::indexing;
+use ruby_fast_lsp::inferrer::{ReturnTypeInferrer, RubyType};
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::type_inference::return_type_inferrer::ReturnTypeInferrer;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -190,7 +190,7 @@ fn main() -> anyhow::Result<()> {
                 info!("=== PROFILING: Type Inference Only ===");
                 info!("Step 1: Indexing (not profiled focus)...");
                 run_indexing_only(&server, workspace_uri.clone()).await;
-                
+
                 info!("Step 2: Type Inference (profiled)...");
                 run_type_inference_only(&server).await;
             }
@@ -205,8 +205,14 @@ fn main() -> anyhow::Result<()> {
         if config.memory_profiling {
             let stats = dhat::HeapStats::get();
             info!("=== MEMORY STATS ===");
-            info!("Peak memory: {:.1} MB", stats.max_bytes as f64 / 1_000_000.0);
-            info!("Current memory: {:.1} MB", stats.curr_bytes as f64 / 1_000_000.0);
+            info!(
+                "Peak memory: {:.1} MB",
+                stats.max_bytes as f64 / 1_000_000.0
+            );
+            info!(
+                "Current memory: {:.1} MB",
+                stats.curr_bytes as f64 / 1_000_000.0
+            );
             info!("Total allocations: {} blocks", stats.total_blocks);
         }
     });
@@ -222,7 +228,7 @@ fn main() -> anyhow::Result<()> {
 
 async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) {
     let start = Instant::now();
-    
+
     match indexing::init_workspace(server, workspace_uri).await {
         Ok(_) => {
             info!("Full indexing completed in {:?}", start.elapsed());
@@ -235,7 +241,7 @@ async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) {
 
 async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) {
     let start = Instant::now();
-    
+
     // We need to run indexing without type inference
     // For now, just run full indexing - the profiler will show where time is spent
     match indexing::init_workspace(server, workspace_uri).await {
@@ -250,7 +256,7 @@ async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) {
 
 async fn run_type_inference_only(server: &RubyLanguageServer) {
     let start = Instant::now();
-    
+
     // Get all methods needing inference, grouped by file
     let methods_by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> = {
         let index = server.index.lock();
@@ -258,10 +264,14 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
         let total = methods.len();
         info!("Found {} methods needing return type inference", total);
 
-        let mut by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> = HashMap::new();
+        let mut by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> =
+            HashMap::new();
         for (entry_id, file_id, line) in methods {
             if let Some(url) = index.get_file_url(file_id) {
-                by_file.entry(url.clone()).or_default().push((entry_id, line));
+                by_file
+                    .entry(url.clone())
+                    .or_default()
+                    .push((entry_id, line));
             }
         }
         by_file
@@ -271,7 +281,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     info!("Inferring types across {} files", total_files);
 
     let mut inferred_count = 0;
-    
+
     // Process each file
     for (current, (file_url, methods)) in methods_by_file.into_iter().enumerate() {
         if current % 50 == 0 {
@@ -292,17 +302,14 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
         let node = parse_result.node();
 
         // Create inferrer for this file
-        let inferrer = ReturnTypeInferrer::new_with_content(
-            server.index.clone(),
-            &file_content,
-            &file_url,
-        );
+        let inferrer =
+            ReturnTypeInferrer::new_with_content(server.index.clone(), &file_content, &file_url);
 
         // Infer each method in this file
         for (entry_id, line) in methods {
             if let Some(def_node) = find_def_node_at_line(&node, line, &file_content) {
                 if let Some(inferred_ty) = inferrer.infer_return_type(&file_content, &def_node) {
-                    if inferred_ty != ruby_fast_lsp::type_inference::ruby_type::RubyType::Unknown {
+                    if inferred_ty != RubyType::Unknown {
                         server
                             .index
                             .lock()
@@ -315,7 +322,10 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     }
 
     info!("Type inference completed in {:?}", start.elapsed());
-    info!("Successfully inferred {} method return types", inferred_count);
+    info!(
+        "Successfully inferred {} method return types",
+        inferred_count
+    );
 }
 
 fn find_def_node_at_line<'a>(
@@ -389,12 +399,12 @@ fn find_def_node_at_line<'a>(
 
 fn print_stats(server: &RubyLanguageServer) {
     let index = server.index.lock();
-    
+
     info!("=== INDEX STATS ===");
     info!("Total entries: {}", index.entries_len());
     info!("Total definitions: {}", index.definitions_len());
     info!("Total files: {}", index.files_count());
-    
+
     let counts = index.count_entries_by_type();
     for (type_name, count) in counts {
         info!("  {}: {}", type_name, count);

@@ -3,7 +3,7 @@
 //! Type guards are conditions that narrow the type of a variable
 //! within a specific branch of control flow.
 
-use crate::type_inference::ruby_type::RubyType;
+use crate::inferrer::r#type::ruby::RubyType;
 
 /// Type guard extracted from conditionals
 #[derive(Debug, Clone, PartialEq)]

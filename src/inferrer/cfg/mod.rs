@@ -28,7 +28,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use type_inference::cfg::TypeNarrowingEngine;
+//! use inferrer::cfg::TypeNarrowingEngine;
 //!
 //! let engine = TypeNarrowingEngine::new();
 //!
@@ -36,7 +36,7 @@
 //! engine.on_file_open(&uri, &content);
 //!
 //! // Get narrowed type at a position
-//! let narrowed_type = engine.get_narrowed_type(&uri, "x", offset);
+//! let narrowed_type = engine.get_narrowed_type(&uri, offset, None);
 //! ```
 
 mod builder;
@@ -59,7 +59,7 @@ pub use guards::TypeGuard;
 mod type_narrowing_tests {
     use tower_lsp::lsp_types::Url;
 
-    use crate::type_inference::TypeNarrowingEngine;
+    use crate::inferrer::TypeNarrowingEngine;
 
     fn create_engine() -> TypeNarrowingEngine {
         TypeNarrowingEngine::new()
@@ -166,7 +166,7 @@ end
     #[test]
     fn test_case_when_type_guards() {
         // Test that case/when properly creates type guards for String, Integer, and nil
-        use crate::type_inference::cfg::{CfgBuilder, TypeGuard};
+        use crate::inferrer::cfg::{CfgBuilder, TypeGuard};
 
         let source = r#"
 def process(value)
