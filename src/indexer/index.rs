@@ -527,6 +527,11 @@ impl RubyIndex {
         self.by_uri.get(uri).cloned().unwrap_or_default()
     }
 
+    /// Get entry IDs for an FQN
+    pub fn get_entry_ids_for_fqn(&self, fqn: &FullyQualifiedName) -> Option<&Vec<EntryId>> {
+        self.by_fqn.get(fqn)
+    }
+
     /// Get mutable reference to the last definition entry (for updating mixins)
     pub fn get_last_definition_mut(&mut self, fqn: &FullyQualifiedName) -> Option<&mut Entry> {
         let id = *self.by_fqn.get(fqn)?.last()?;

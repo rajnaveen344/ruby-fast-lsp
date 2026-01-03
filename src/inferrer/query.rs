@@ -11,7 +11,6 @@ use crate::indexer::index::EntryId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use tower_lsp::lsp_types::{Position, Range, Url};
@@ -296,9 +295,12 @@ impl<'a> TypeQuery<'a> {
         let def_node = find_def_node_recursive(&node, line, self.content)?;
 
         // Create inferrer and infer the return type
-        let inferrer =
-            ReturnTypeInferrer::new_with_content(self.index.clone(), self.content, self.uri);
-        inferrer.infer_return_type(self.content, &def_node)
+        let mut index = self.index.lock();
+        crate::inferrer::return_type::infer_return_type_for_node(
+            &mut index,
+            self.content,
+            &def_node,
+        )
     }
 
     /// Get type for a local variable by name at a position.

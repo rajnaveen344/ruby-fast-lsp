@@ -125,7 +125,8 @@ pub async fn check(fixture_text: &str) {
 
     // Run type check if we have type tags (no cursor needed - uses tag position)
     if !type_tags.is_empty() {
-        run_type_check(&server, &uri, &content, &type_tags).await;
+        let file_contents_owned = vec![(uri.clone(), content.as_bytes().to_vec())];
+        run_type_check(&server, &uri, &content, &type_tags, &file_contents_owned).await;
         checks_run.push("type");
     }
 
@@ -276,7 +277,20 @@ pub async fn check_multi_file(files: &[(&str, &str)]) {
 
     // Run type check (no cursor needed - uses tag position)
     if !type_tags.is_empty() {
-        run_type_check(&server, primary_uri, &primary_content, &type_tags).await;
+        // Build file contents map for all files
+        let file_contents_owned: Vec<(Url, Vec<u8>)> = cleaned_files
+            .iter()
+            .enumerate()
+            .map(|(i, (_, content))| (uris[i].clone(), content.as_bytes().to_vec()))
+            .collect();
+        run_type_check(
+            &server,
+            primary_uri,
+            &primary_content,
+            &type_tags,
+            &file_contents_owned,
+        )
+        .await;
         checks_run.push("type");
     }
 
@@ -441,11 +455,17 @@ async fn run_type_check(
     uri: &Url,
     content: &str,
     expected_types: &[&Tag],
+    all_file_contents: &[(Url, Vec<u8>)],
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
     use crate::inferrer::query::TypeQuery;
     use crate::inferrer::r#type::ruby::RubyType;
-    use crate::inferrer::return_type::ReturnTypeInferrer;
+
+    // Build FileContentMap from all files
+    let file_contents: std::collections::HashMap<&Url, &[u8]> = all_file_contents
+        .iter()
+        .map(|(u, c)| (u, c.as_slice()))
+        .collect();
 
     for expected in expected_types {
         let expected_type = expected
@@ -485,15 +505,33 @@ async fn run_type_check(
                     let parse_result = ruby_prism::parse(content.as_bytes());
                     let node = parse_result.node();
 
-                    let ty = if let Some(def_node) =
+                    let ty = if let Some(_def_node) =
                         find_def_node_at_position(&node, position, content)
                     {
-                        let inferrer = ReturnTypeInferrer::new_with_content(
-                            server.index.clone(),
-                            content.as_bytes(),
-                            uri,
-                        );
-                        inferrer.infer_return_type(content.as_bytes(), &def_node)
+                        // Build method FQN from namespace + method name
+                        let method_fqn = crate::types::ruby_method::RubyMethod::new(
+                            &iden.to_string(),
+                            crate::indexer::entry::MethodKind::Instance,
+                        )
+                        .ok()
+                        .map(|m| {
+                            crate::types::fully_qualified_name::FullyQualifiedName::method(
+                                namespace.clone(),
+                                m,
+                            )
+                        });
+
+                        if let Some(fqn) = method_fqn {
+                            let mut index = server.index.lock();
+                            crate::inferrer::return_type::infer_method_return_type(
+                                &mut index,
+                                &fqn,
+                                None,
+                                Some(&file_contents),
+                            )
+                        } else {
+                            None
+                        }
                     } else {
                         let receiver_type = match receiver {
                             crate::analyzer_prism::MethodReceiver::None
@@ -522,12 +560,13 @@ async fn run_type_check(
                             _ => RubyType::Unknown,
                         };
 
-                        let inferrer = ReturnTypeInferrer::new_with_content(
-                            server.index.clone(),
-                            content.as_bytes(),
-                            uri,
-                        );
-                        inferrer.infer_method_call_return_type(&receiver_type, &iden.to_string())
+                        let mut index = server.index.lock();
+                        crate::inferrer::return_type::infer_method_call(
+                            &mut index,
+                            &receiver_type,
+                            &iden.to_string(),
+                            Some(&file_contents),
+                        )
                     };
                     (ty, "return")
                 }

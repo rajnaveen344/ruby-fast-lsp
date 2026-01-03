@@ -14,7 +14,7 @@ use crate::analyzer_prism::{Identifier, IdentifierType, MethodReceiver, RubyPris
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::inferrer::query::TypeQuery;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::return_type::ReturnTypeInferrer;
+use crate::inferrer::return_type::infer_return_type_for_node;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::utils::position_to_offset;
@@ -198,13 +198,15 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             // 1. Methods with known return types in the index
             // 2. Methods needing inference (same file or cross-file)
             // 3. Recursive inference for chained method calls
-            let inferrer = ReturnTypeInferrer::new_with_content(
-                server.index.clone(),
-                content.as_bytes(),
-                &uri,
+            let mut index = server.index.lock();
+            let file_contents: std::collections::HashMap<&tower_lsp::lsp_types::Url, &[u8]> =
+                std::iter::once((&uri, content.as_bytes())).collect();
+            let return_type = crate::inferrer::return_type::infer_method_call(
+                &mut index,
+                &receiver_type,
+                &method_name,
+                Some(&file_contents),
             );
-
-            let return_type = inferrer.infer_method_call_return_type(&receiver_type, &method_name);
 
             match return_type {
                 Some(t) => format!("```ruby\n{}\n```", t),
@@ -344,22 +346,15 @@ fn handle_method_definition_hover(
                     // Parse and infer
                     let parse_result = ruby_prism::parse(content.as_bytes());
                     let node = parse_result.node();
-                    let inferrer = ReturnTypeInferrer::new_with_content(
-                        server.index.clone(),
-                        content.as_bytes(),
-                        uri,
-                    );
 
                     if let Some(def_node) = find_def_node_at_line(&node, pos.line, content) {
+                        let mut index = server.index.lock();
                         if let Some(inferred_ty) =
-                            inferrer.infer_return_type(content.as_bytes(), &def_node)
+                            infer_return_type_for_node(&mut index, content.as_bytes(), &def_node)
                         {
                             if inferred_ty != RubyType::Unknown {
                                 // Cache in index
-                                server
-                                    .index
-                                    .lock()
-                                    .update_method_return_type(entry_id, inferred_ty.clone());
+                                index.update_method_return_type(entry_id, inferred_ty.clone());
 
                                 return Some(Hover {
                                     contents: HoverContents::Markup(MarkupContent {

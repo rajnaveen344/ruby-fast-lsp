@@ -6,7 +6,6 @@ use tower_lsp::lsp_types::{
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::inferrer::query::{infer_type_from_assignment, TypeQuery};
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::return_type::ReturnTypeInferrer;
 use crate::server::RubyLanguageServer;
 use tower_lsp::lsp_types::Url;
 
@@ -300,15 +299,21 @@ fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str,
     let parse_result = ruby_prism::parse(content.as_bytes());
     let node = parse_result.node();
 
-    let inferrer =
-        ReturnTypeInferrer::new_with_content(server.index.clone(), content.as_bytes(), uri);
-
     // Infer and cache (no lock held during inference)
     let inferred_types: Vec<(EntryId, RubyType)> = methods_needing_inference
         .iter()
         .filter_map(|(line, entry_id)| {
             let def_node = find_def_node_at_line(&node, *line, content)?;
-            let inferred_ty = inferrer.infer_return_type(content.as_bytes(), &def_node)?;
+            // We use a temporary index here, but we really want to update the main index.
+            // However, inference needs access to the index.
+            // Since we are processing the ACTIVE file, we can pass it as source.
+            // But we need to lock the index for inference.
+            let mut index = server.index.lock();
+            let inferred_ty = crate::inferrer::return_type::infer_return_type_for_node(
+                &mut index,
+                content.as_bytes(),
+                &def_node,
+            )?;
             Some((*entry_id, inferred_ty))
         })
         .collect();

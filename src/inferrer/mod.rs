@@ -23,4 +23,4 @@ pub use method::{
 };
 pub use r#type::*;
 pub use rbs::{get_rbs_method_return_type, has_rbs_class, rbs_declaration_count, rbs_method_count};
-pub use return_type::ReturnTypeInferrer;
+pub use return_type::infer_method_return_type;

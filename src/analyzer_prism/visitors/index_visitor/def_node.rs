@@ -1,12 +1,14 @@
 use log::warn;
 use ruby_prism::*;
 
-use crate::indexer::entry::{
-    entry_kind::{EntryKind, MethodParamInfo, ParamKind},
-    MethodKind, MethodOrigin, MethodVisibility,
-};
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::return_type::ReturnTypeInferrer;
+use crate::{
+    indexer::entry::{
+        entry_kind::{EntryKind, MethodParamInfo, ParamKind},
+        MethodKind, MethodOrigin, MethodVisibility,
+    },
+    inferrer::return_type::infer_return_values_for_node,
+};
 
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
@@ -188,9 +190,10 @@ impl IndexVisitor {
 
         // Validate return type if declared
         if let Some(expected_type) = &return_type {
-            let inferrer = ReturnTypeInferrer::new(self.index.clone());
-            let return_values =
-                inferrer.infer_return_values(self.document.content.as_bytes(), node);
+            let return_values = {
+                let mut index = self.index.lock();
+                infer_return_values_for_node(&mut index, self.document.content.as_bytes(), node)
+            };
 
             for (inferred_ty, start, end) in return_values {
                 // If inferred type is Unknown, we skip partial validation to avoid false positives
@@ -200,10 +203,9 @@ impl IndexVisitor {
 
                 // If inferred type is subtype of expected, it's fine.
                 if !inferred_ty.is_subtype_of(expected_type) {
-                    let range = tower_lsp::lsp_types::Range::new(
-                        self.document.offset_to_position(start),
-                        self.document.offset_to_position(end),
-                    );
+                    let start_pos = self.document.offset_to_position(start);
+                    let end_pos = self.document.offset_to_position(end);
+                    let range = tower_lsp::lsp_types::Range::new(start_pos, end_pos);
 
                     self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
                         range,

@@ -24,7 +24,8 @@ mod sample_project;
 
 use log::{info, LevelFilter};
 use ruby_fast_lsp::capabilities::indexing;
-use ruby_fast_lsp::inferrer::{ReturnTypeInferrer, RubyType};
+use ruby_fast_lsp::inferrer::return_type::infer_return_type_for_node;
+use ruby_fast_lsp::inferrer::RubyType;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::collections::HashMap;
 use std::env;
@@ -301,19 +302,15 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
         let parse_result = ruby_prism::parse(&file_content);
         let node = parse_result.node();
 
-        // Create inferrer for this file
-        let inferrer =
-            ReturnTypeInferrer::new_with_content(server.index.clone(), &file_content, &file_url);
-
         // Infer each method in this file
         for (entry_id, line) in methods {
             if let Some(def_node) = find_def_node_at_line(&node, line, &file_content) {
-                if let Some(inferred_ty) = inferrer.infer_return_type(&file_content, &def_node) {
+                let mut index = server.index.lock();
+                if let Some(inferred_ty) =
+                    infer_return_type_for_node(&mut index, &file_content, &def_node)
+                {
                     if inferred_ty != RubyType::Unknown {
-                        server
-                            .index
-                            .lock()
-                            .update_method_return_type(entry_id, inferred_ty);
+                        index.update_method_return_type(entry_id, inferred_ty);
                         inferred_count += 1;
                     }
                 }
