@@ -5,10 +5,13 @@
 ```
 ├── src/                    # Main LSP server source code
 ├── crates/                 # Additional workspace crates
-│   └── ast-visualizer/     # Web-based AST visualization tool
+│   ├── ast-visualizer/     # Web-based AST visualization tool
+│   ├── lsp-repl/           # LSP REPL debugger
+│   └── rbs-parser/         # RBS type signature parser
 ├── vsix/                   # VS Code extension files
-│   ├── stubs/              # Ruby stdlib stubs (v1.8-3.4)
+│   ├── stubs/              # Ruby stdlib stubs
 │   └── bin/                # Platform-specific binaries
+├── scripts/                # Utility scripts
 ├── target/                 # Build artifacts (generated)
 └── .ai/                    # AI assistant documentation
     └── steering/           # Project context for AI sessions
@@ -27,11 +30,13 @@
 - `analyzer_prism/` - Ruby code analysis using Prism parser
 - `indexer/` - Symbol indexing and workspace tracking
 - `capabilities/` - LSP feature implementations
+- `inferrer/` - Type inference engine and RBS integration
 - `handlers/` - Request and notification handlers
-- `types/` - Core data structures and interning logic
-- `type_inference/` - Type inference infrastructure
+- `types/` - Core data structures and representation
+- `bin/` - CLI tools and profilers
 - `test/` - Integration, unit, and simulation tests
-- `utils/` - Shared utilities including `parallelizer.rs`
+- `utils/` - Shared utilities (file ops, parser utils)
+- `yard/` - YARD documentation processing
 
 ## Analyzer Module (`src/analyzer_prism/`)
 
@@ -79,22 +84,19 @@ indexer/
 ├── mod.rs                  # Module exports
 ├── index.rs                # Core RubyIndex data structure
 ├── coordinator.rs          # Orchestrates indexing operations
-├── indexer_core.rs         # Core indexing logic
+├── graph.rs                # Symbol dependency graph
 ├── indexer_project.rs      # Project file indexing
 ├── indexer_stdlib.rs       # Ruby stdlib stubs indexing
 ├── indexer_gem.rs          # Gem dependency indexing
-├── ancestor_chain.rs       # Namespace hierarchy tracking
-├── dependency_tracker.rs   # Gem dependency resolution
+├── index_ref.rs            # Reference indexing
+├── file_processor.rs       # Individual file processing logic
+├── interner.rs             # String interning for memory efficiency
 ├── prefix_tree.rs          # Trie for completion lookups
-├── utils.rs                # Utility functions
 ├── version/                # Ruby version detection
-│   ├── mod.rs
-│   ├── version_detector.rs
-│   └── version_managers.rs # rbenv, rvm, asdf support
 └── entry/                  # Index entry definitions
     ├── mod.rs
     ├── entry_builder.rs    # Builder pattern for entries
-    └── entry_kind.rs       # Entry type definitions (Class, Module, Method, etc.)
+    └── entry_kind.rs       # Entry type definitions
 ```
 
 ## Capabilities Module (`src/capabilities/`)
@@ -103,29 +105,21 @@ indexer/
 capabilities/
 ├── mod.rs                  # Module exports
 ├── code_lens.rs            # Code lens (mixin usage counts)
-├── completion/             # Code completion
-│   ├── mod.rs              # Main completion logic
-│   ├── completion_ranker.rs # Completion ranking
-│   ├── constant.rs         # Constant completions
-│   ├── constant_completion.rs # Constant completion engine
-│   ├── constant_matcher.rs # Constant matching logic
-│   ├── scope_resolver.rs   # Scope resolution
-│   ├── snippets.rs         # Ruby snippet definitions
-│   └── variable.rs         # Variable completions
-├── definitions/            # Go-to-definition implementations
-│   ├── mod.rs
-│   ├── constant.rs         # Constant definitions
-│   ├── method.rs           # Method definitions
-│   └── variable.rs         # Variable definitions
-├── diagnostics.rs          # Syntax error diagnostics
+├── hover.rs                # Documentation and type hover
+├── completion/             # Code completion engine
+├── definitions/            # Go-to-definition (constant, method, variable)
+├── diagnostics.rs          # Syntax and semantic diagnostics
 ├── document_symbols.rs     # Document outline
 ├── folding_range.rs        # Code folding
-├── formatting.rs           # On-type formatting (auto-end)
+├── formatting.rs           # Auto-end and basic formatting
 ├── inlay_hints.rs          # Inlay hints
-├── namespace_tree.rs       # Namespace tree for UI
+├── namespace_tree.rs       # Namespace tree navigation
 ├── references.rs           # Find references
 ├── semantic_tokens.rs      # Syntax highlighting
-└── workspace_symbols.rs    # Workspace-wide symbol search
+├── type_hierarchy.rs       # Superclass/Subclass navigation
+├── workspace_symbols.rs    # Workspace-wide symbol search
+├── debug.rs                # Debugging utilities
+└── indexing/               # Indexing-related capabilities
 ```
 
 ## Types Module (`src/types/`)
@@ -136,20 +130,25 @@ types/
 ├── fully_qualified_name.rs   # FQN handling (Module::Class)
 ├── ruby_document.rs          # Document representation
 ├── ruby_method.rs            # Method metadata
-├── ruby_namespace.rs         # Namespace/constant types
+├── ruby_namespace.rs         # Namespace types
 ├── ruby_version.rs           # Ruby version handling
-└── scope.rs                  # Scope stack management
+├── scope.rs                  # Scope stack management
+├── compact_location.rs       # Efficient location representation
+└── unresolved_index.rs       # Handling for unresolved constants
 ```
 
 ## Type Inference Module (`src/type_inference/`)
 
 ```
-type_inference/
+inferrer/
 ├── mod.rs                  # Module exports
 ├── ruby_type.rs            # Type representation
-├── literal_analyzer.rs     # Literal type inference
-├── collection_analyzer.rs  # Array/Hash type inference
-└── method_signature.rs     # Method signature analysis
+├── query.rs                # Type query engine
+├── rbs.rs                  # RBS integration
+├── return_type.rs          # Method return type inference
+├── cfg/                    # Control Flow Graph for inference
+├── method/                 # Method-specific inference
+└── type/                   # Specialized type inference
 ```
 
 ## Testing Structure (`src/test/`)

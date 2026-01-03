@@ -8,10 +8,12 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 
 ```
 src/
-├── analyzer/       - Code understanding and analysis
-├── capabilities/   - LSP feature implementations
-├── indexer/        - File tracking and indexing
-├── parser/         - Ruby parsing utilities
+├── analyzer_prism/ - Ruby AST analysis and visitors
+├── capabilities/   - LSP feature implementations (hover, completion, etc.)
+├── indexer/        - Global symbol indexing and workspace tracking
+├── inferrer/       - Type inference and RBS integration
+├── handlers/       - LSP request/notification routing
+├── types/          - Core data structures (FQN, Document, Method)
 ├── server.rs       - LSP server coordination
 └── main.rs         - Application entry point
 tests/
@@ -46,27 +48,24 @@ The Indexer is responsible for building and maintaining an index of Ruby symbols
 - The indexer does not perform code analysis - it just stores locations
 - File operations are separated from the core indexing logic
 
-### 2. Analyzer (`src/analyzer/`)
+### 2. Analyzer (`src/analyzer_prism/`)
 
-The Analyzer is responsible for understanding Ruby code structure and semantics.
+The Analyzer is responsible for understanding Ruby code structure using the Prism parser.
 
-- **Primary Responsibility**: Analyze Ruby code to understand its structure
-- **Secondary Responsibility**: Extract semantic information from code
+- **Primary Responsibility**: Provide AST visitors for different analysis tasks (indexing, references, symbols)
+- **Secondary Responsibility**: Extract semantic information from Ruby source code
 
 #### Key Files:
 
-- `mod.rs`: Central module file that re-exports public components
-- `core.rs`: Core analyzer implementation with basic functionality
-- `identifier.rs`: Identifier resolution and fully qualified name determination
-- `context.rs`: Code context detection (current class, method, etc.)
-- `position.rs`: Position conversion utilities
+- `mod.rs`: Central module file and Identifier resolution
+- `scope_tracker.rs`: Tracks current namespace and scope during traversal
+- `visitors/`: A collection of specialized visitors for different LSP features
 
 #### Design Decisions:
 
-- The analyzer focuses on understanding what code means, not where it's located
-- The analyzer is stateless - it analyzes code on demand
-- Analysis is separated from indexing to maintain separation of concerns
-- Structured in smaller files with focused responsibilities
+- Uses the Visitor pattern for efficient AST traversal
+- Separates analysis logic from feature implementation (Capabilities)
+- Stateless analysis: processes one document at a time
 
 ### 3. Capabilities (`src/capabilities/`)
 
@@ -79,7 +78,10 @@ Capabilities implement specific LSP features by combining the Analyzer and Index
 
 - `definition.rs`: Go-to-definition functionality
 - `references.rs`: Find-references functionality
-- `semantic_tokens.rs`: Semantic highlighting functionality
+- `hover.rs`: Symbol information and documentation
+- `completion/`: Code completion engine
+- `semantic_tokens.rs`: Syntax highlighting functionality
+- `type_hierarchy.rs`: Superclass/Subclass navigation
 
 #### Design Decisions:
 
@@ -100,11 +102,25 @@ The Server coordinates between LSP clients and the internal components.
 - The server delegates actual implementation to capability modules
 - The server maintains minimal state (mostly for coordination)
 
-### 5. Parser (`src/parser/`)
+### 5. Inferrer (`src/inferrer/`)
 
-The Parser provides utilities for parsing Ruby code.
+The Inferrer handles type analysis and integration with RBS type signatures.
 
-- **Primary Responsibility**: Interface with Ruby Prism for Ruby parsing
+- **Primary Responsibility**: Infer types for Ruby expressions
+- **Secondary Responsibility**: Load and query RBS type information
+
+### 6. Handlers (`src/handlers/`)
+
+Handlers manage the routing of LSP requests and notifications.
+
+- **Primary Responsibility**: Receive requests from the server and route them to capabilities
+- **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
+
+### 7. Types (`src/types/`)
+
+Centrally defined types used throughout the system.
+
+- **Key Types**: `FullyQualifiedName`, `RubyDocument`, `RubyMethod`, `RubyVersion`
 
 ## Key Workflows
 

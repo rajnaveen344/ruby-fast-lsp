@@ -6,20 +6,20 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 
 ### Core Features
 
-| Feature                 | Status | Details                                                       |
-| ----------------------- | ------ | ------------------------------------------------------------- |
 | **Syntax Highlighting** | ✅     | Full semantic token-based highlighting                        |
 | **Workspace Indexing**  | ✅     | Project files, stdlib stubs, gem dependencies                 |
-| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods (basic) |
-| **Find References**     | ✅     | Classes, modules, constants, local variables                  |
+| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods         |
+| **Find References**     | ✅     | Classes, modules, constants, local variables, methods         |
 | **Code Completion**     | ✅     | Variables, constants, classes, modules, snippets              |
 | **Document Symbols**    | ✅     | Nested hierarchy with visibility info                         |
 | **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                         |
+| **Type Hierarchy**      | ✅     | Explore superclasses and subclasses                           |
+| **Hover**               | ✅     | Quick info for symbols                                        |
 | **Inlay Hints**         | ✅     | End keyword hints for blocks                                  |
 | **Code Folding**        | ✅     | Classes, modules, methods, control flow                       |
 | **Diagnostics**         | ✅     | Syntax errors, warnings, unresolved constants/methods         |
 | **Code Lens**           | ✅     | Module mixin usage counts                                     |
-| **On-Type Formatting**  | ✅     | Auto-insert `end` keyword                                     |
+| **Formatting**          | ✅     | On-type formatting (auto-end) and basic formatting            |
 
 ### Navigation Details
 
@@ -41,11 +41,9 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 
 ### Planned Features
 
-- Hover information ❌
 - Code actions / Quick fixes ❌
 - Rename support ❌
-- Formatting integration (Rubocop) ❌
-- Full type inference ❌
+- Full type inference (Infrastructure in place) 🚧
 - Meta-programming support ❌
 - Run/Debug support ❌
 
@@ -110,11 +108,16 @@ See [docs/testing.md](docs/testing.md) for detailed testing documentation.
 ### Project Structure
 
 - `src/` - Main LSP server implementation
-- `src/capabilities/` - LSP feature handlers (completion, definitions, etc.)
+- `src/capabilities/` - LSP feature handlers (completion, hover, definitions, etc.)
 - `src/indexer/` - Project indexing and symbol management
-- `src/type_inference/` - Type inference engine
+- `src/inferrer/` - Type inference engine
+- `src/analyzer_prism/` - Ruby code analysis using Prism
+- `src/types/` - Core data structures and representation
+- `src/handlers/` - Request and notification routing
 - `src/test/simulation/` - Property-based simulation tests
+- `crates/ast-visualizer/` - Web-based AST visualization tool
 - `crates/rbs-parser/` - RBS type signature parser
+- `crates/lsp-repl/` - LSP REPL for debugging
 - `vsix/` - VS Code extension packaging
 
 ## Contributing

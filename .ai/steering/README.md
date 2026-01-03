@@ -11,9 +11,12 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 **Key Entry Points:**
 
 - `src/main.rs` - Application entry point
-- `src/server.rs` - LSP server implementation
-- `src/capabilities/` - Feature implementations
+- `src/server.rs` - LSP server core
+- `src/handlers/` - Request/Notification routing
+- `src/capabilities/` - Feature implementations (hover, completion, etc.)
 - `src/indexer/` - Symbol indexing system
+- `src/inferrer/` - Type inference engine
+- `src/analyzer_prism/` - AST analysis using Prism
 
 ## Documentation Index
 
@@ -36,25 +39,25 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 - **Code completion**: Local variables, constants, classes, modules, snippets (with scope resolution).
 - **Document symbols**: Nested hierarchy with visibility info.
 - **Workspace symbols**: Fuzzy search across all indexed symbols using a prefix tree.
+- **Type Hierarchy**: Support for superclass and subclass navigation.
+- **Hover**: Quick info and documentation for symbols.
 - **Inlay hints**: End keyword hints for blocks and type hints for local variables.
 - **Code folding**: Classes, modules, methods, control flow, arrays, hashes.
-- **Diagnostics**: Syntax errors from prism and unresolved constant diagnostics.
+- **Diagnostics**: Syntax errors from prism and unresolved constant/method diagnostics.
 - **Code lens**: Module mixin usage (include/prepend/extend counts).
-- **On-type formatting**: Auto-insert `end` keyword.
+- **Formatting**: On-type `end` insertion and basic source formatting.
 - **Simulation Testing**: Property-based testing for LSP consistency.
 
 ### 🚧 In Progress / Limited
 
 - Method references (performance optimizations ongoing)
-- Instance/class/global variables
-- Advanced Type inference (infrastructure is solid, expanding coverage)
+- Advanced Type inference (Infrastructure in place, expanding coverage)
 
 ### ❌ Not Yet Implemented
 
-- Hover information
 - Code actions / Quick fixes
 - Rename support
-- Formatting integration (Rubocop)
+- Full Rubocop integration
 - Meta-programming support
 - Run/Debug support
 
@@ -62,29 +65,27 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    LSP Protocol Layer                        │
-│                (tower-lsp + server.rs)                       │
+│                    LSP Protocol Layer                       │
+│                (tower-lsp + server.rs)                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     Request Handlers                         │
-│                  (handlers/request.rs)                       │
+│                    Request/Notification                     │
+│                (request.rs,notification.rs)                 │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
+┌───────────────────┐  ┌───────────────┐  ┌───────────────────┐
+│   Capabilities    │  │   Inferrer    │  │      Indexer      │
+│ (src/capabilities)│─▶│(src/inferrer) │◀─│   (src/indexer)   │
+└───────────────────┘  └───────────────┘  └───────────────────┘
+          │                   │
+          ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      Capabilities                            │
-│    definitions/ | references | completion | symbols | etc.   │
+│                    Analyzer (Prism)                         │
+│                 (src/analyzer_prism/)                       │
 └─────────────────────────────────────────────────────────────┘
-                    │                     │
-                    ▼                     ▼
-┌───────────────────────────┐  ┌──────────────────────────────┐
-│        Indexer            │  │       Analyzer (Prism)       │
-│  - Symbol index           │  │  - AST traversal             │
-│  - Namespace tracking     │  │  - Scope tracking            │
-│  - Cross-file refs        │  │  - Identifier resolution     │
-└───────────────────────────┘  └──────────────────────────────┘
 ```
 
 ## Common Development Tasks
