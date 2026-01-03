@@ -14,6 +14,7 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -540,6 +541,23 @@ impl ReturnTypeInferrer {
             return Some(literal_type);
         }
 
+        // Handle constant receiver (e.g., Helper.get_name -> Helper is ClassReference)
+        if let Some(const_read) = node.as_constant_read_node() {
+            let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+            if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
+                return Some(RubyType::ClassReference(fqn));
+            }
+        }
+
+        // Handle constant path (e.g., Foo::Bar.method)
+        if let Some(const_path) = node.as_constant_path_node() {
+            let parts = self.extract_constant_path_parts(&const_path);
+            if !parts.is_empty() {
+                let fqn = FullyQualifiedName::Constant(parts.into());
+                return Some(RubyType::ClassReference(fqn));
+            }
+        }
+
         // Handle local variable with narrowed type
         if let Some(local_var) = node.as_local_variable_read_node() {
             let var_name = String::from_utf8_lossy(local_var.name().as_slice()).to_string();
@@ -560,7 +578,58 @@ impl ReturnTypeInferrer {
         None
     }
 
-    /// Get receiver type from a string name (for CFG statements)
+    /// Extract constant path parts from a ConstantPathNode
+    fn extract_constant_path_parts(&self, const_path: &ConstantPathNode) -> Vec<RubyConstant> {
+        let mut parts = Vec::new();
+
+        // Get the parent path recursively
+        if let Some(parent) = const_path.parent() {
+            if let Some(parent_path) = parent.as_constant_path_node() {
+                parts.extend(self.extract_constant_path_parts(&parent_path));
+            } else if let Some(const_read) = parent.as_constant_read_node() {
+                let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+                if let Ok(constant) = RubyConstant::try_from(name.as_str()) {
+                    parts.push(constant);
+                }
+            }
+        }
+
+        // Add the current name
+        if let Some(name_node) = const_path.name() {
+            let name = String::from_utf8_lossy(name_node.as_slice()).to_string();
+            if let Ok(constant) = RubyConstant::try_from(name.as_str()) {
+                parts.push(constant);
+            }
+        }
+
+        parts
+    }
+
+    /// Public API for hover: infer return type for a method call given receiver type and method name.
+    /// This triggers on-demand cross-file inference if the method's return type is not yet computed.
+    pub fn infer_method_call_return_type(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        // First try MethodResolver for already-computed types
+        {
+            let index = self.index.lock();
+            if let Some(ty) =
+                crate::inferrer::method::resolver::MethodResolver::resolve_method_return_type(
+                    &index,
+                    receiver_type,
+                    method_name,
+                )
+            {
+                return Some(ty);
+            }
+        }
+
+        // Fall back to on-demand inference (cross-file)
+        // This searches globally for methods with this name and infers their return types
+        self.lookup_method_in_index(method_name, None)
+    }
 
     /// Look up method return type using RBS
     fn lookup_method_return_type(
@@ -612,6 +681,9 @@ impl ReturnTypeInferrer {
         let mut other_file_methods: HashMap<FileId, Vec<(u32, crate::indexer::index::EntryId)>> =
             HashMap::new();
 
+        // Track if we found any methods at all in the index
+        let mut methods_found_in_index = false;
+
         // Get file_id for the current file if we have a URI
         let current_file_id = self
             .file_uri
@@ -626,25 +698,32 @@ impl ReturnTypeInferrer {
                     for entry_id in entry_ids {
                         if let Some(entry) = index.get_entry(*entry_id) {
                             if let EntryKind::Method(data) = &entry.kind {
+                                methods_found_in_index = true;
                                 if let Some(rt) = &data.return_type {
                                     if *rt != RubyType::Unknown {
                                         return_types.push(rt.clone());
                                     }
-                                } else if let Some(pos) = data.return_type_position {
+                                } else {
                                     // Method has no return type - collect for on-demand inference
+                                    // Use return_type_position if available, otherwise use entry location
+                                    let line = data
+                                        .return_type_position
+                                        .map(|pos| pos.line)
+                                        .unwrap_or(entry.location.range.start.line);
+
                                     let is_same_file = current_file_id
                                         .map(|fid| entry.location.file_id == fid)
                                         .unwrap_or(false);
 
                                     if is_same_file && self.content.is_some() {
                                         // Same file - use current content
-                                        same_file_methods.push((pos.line, *entry_id));
+                                        same_file_methods.push((line, *entry_id));
                                     } else {
                                         // Different file - group by file_id for batch loading
                                         other_file_methods
                                             .entry(entry.location.file_id)
                                             .or_default()
-                                            .push((pos.line, *entry_id));
+                                            .push((line, *entry_id));
                                     }
                                 }
                             }
@@ -652,6 +731,11 @@ impl ReturnTypeInferrer {
                     }
                 }
             }
+        }
+
+        // If no methods found in index at all, return None (method doesn't exist)
+        if !methods_found_in_index {
+            return None;
         }
 
         // Quick return if we found types already
@@ -760,7 +844,9 @@ impl ReturnTypeInferrer {
         if !return_types.is_empty() {
             Some(RubyType::union(return_types))
         } else {
-            None
+            // Method exists but we couldn't infer its type - return Unknown rather than None
+            // This distinguishes "method found but type unknown" from "method not found"
+            Some(RubyType::Unknown)
         }
     }
 

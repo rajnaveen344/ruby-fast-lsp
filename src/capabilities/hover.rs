@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
     Hover, HoverContents, HoverParams, HoverProviderCapability, MarkupContent, MarkupKind,
 };
 
-use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
+use crate::analyzer_prism::{Identifier, IdentifierType, MethodReceiver, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::inferrer::query::TypeQuery;
 use crate::inferrer::r#type::ruby::RubyType;
@@ -156,8 +156,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
             // Resolve receiver type - distinguish between Class and Module for proper method resolution
             let receiver_type = match receiver {
-                crate::analyzer_prism::MethodReceiver::None
-                | crate::analyzer_prism::MethodReceiver::SelfReceiver => {
+                MethodReceiver::None | MethodReceiver::SelfReceiver => {
                     // Implicit self or explicit self
                     if namespace.is_empty() {
                         RubyType::class("Object")
@@ -177,13 +176,13 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                         }
                     }
                 }
-                crate::analyzer_prism::MethodReceiver::Constant(path) => {
+                MethodReceiver::Constant(path) => {
                     // Constant receiver (e.g. valid class/module)
                     // Treat as ClassReference
                     let fqn = FullyQualifiedName::Constant(path.clone().into());
                     RubyType::ClassReference(fqn)
                 }
-                crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
+                MethodReceiver::LocalVariable(name) => {
                     // Use TypeQuery to get receiver's type
                     let type_query = TypeQuery::new(server.index.clone(), &uri, content.as_bytes());
                     type_query
@@ -194,85 +193,18 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 _ => RubyType::Unknown,
             };
 
-            let index = server.index.lock();
+            // Use ReturnTypeInferrer for on-demand cross-file inference
+            // This handles:
+            // 1. Methods with known return types in the index
+            // 2. Methods needing inference (same file or cross-file)
+            // 3. Recursive inference for chained method calls
+            let inferrer = ReturnTypeInferrer::new_with_content(
+                server.index.clone(),
+                content.as_bytes(),
+                &uri,
+            );
 
-            // Use MethodResolver to find return type
-            // This now handles both class and module contexts, including ancestor chain traversal
-            // and searching through classes that include a module
-            let return_type =
-                crate::inferrer::method::resolver::MethodResolver::resolve_method_return_type(
-                    &index,
-                    &receiver_type,
-                    &method_name,
-                );
-
-            // Fallback: Search in file if resolution fails (legacy behavior)
-            // Now updated to collect ALL matches in the file and union them
-            // Also triggers on-demand inference for methods without return types
-            let return_type = return_type.or_else(|| {
-                let mut local_types: Vec<RubyType> = Vec::new();
-                let mut methods_needing_inference: Vec<(u32, crate::indexer::index::EntryId)> =
-                    Vec::new();
-
-                for entry_id in index.get_entry_ids_for_uri(&uri) {
-                    if let Some(entry) = index.get_entry(entry_id) {
-                        if let EntryKind::Method(data) = &entry.kind {
-                            if data.name.to_string() == method_name {
-                                if let Some(rt) = &data.return_type {
-                                    if *rt != RubyType::Unknown {
-                                        local_types.push(rt.clone());
-                                    }
-                                } else if let Some(pos) = data.return_type_position {
-                                    // Collect for on-demand inference
-                                    methods_needing_inference.push((pos.line, entry_id));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // If we found types, return them
-                if !local_types.is_empty() {
-                    return Some(RubyType::union(local_types));
-                }
-
-                // Otherwise try on-demand inference for methods in this file
-                if !methods_needing_inference.is_empty() {
-                    drop(index); // Drop lock before inference
-
-                    // Parse and infer
-                    let parse_result = ruby_prism::parse(content.as_bytes());
-                    let node = parse_result.node();
-                    let inferrer = ReturnTypeInferrer::new_with_content(
-                        server.index.clone(),
-                        content.as_bytes(),
-                        &uri,
-                    );
-
-                    for (line, entry_id) in methods_needing_inference {
-                        if let Some(def_node) = find_def_node_at_line(&node, line, &content) {
-                            if let Some(inferred_ty) =
-                                inferrer.infer_return_type(content.as_bytes(), &def_node)
-                            {
-                                if inferred_ty != RubyType::Unknown {
-                                    // Cache in index
-                                    server
-                                        .index
-                                        .lock()
-                                        .update_method_return_type(entry_id, inferred_ty.clone());
-                                    local_types.push(inferred_ty);
-                                }
-                            }
-                        }
-                    }
-
-                    if !local_types.is_empty() {
-                        return Some(RubyType::union(local_types));
-                    }
-                }
-
-                None
-            });
+            let return_type = inferrer.infer_method_call_return_type(&receiver_type, &method_name);
 
             match return_type {
                 Some(t) => format!("```ruby\n{}\n```", t),

@@ -134,3 +134,39 @@ product<hover label="Product"> = Builder.new.build
     )
     .await;
 }
+
+/// Test hover on method call triggers cross-file type lookup.
+/// The helper method is defined in a different file and should be resolved.
+#[tokio::test]
+async fn test_hover_cross_file_method_inference() {
+    use crate::test::harness::check_multi_file;
+
+    // Primary file (main.rb) - where we hover
+    // Helper file provides the method definition with YARD return type
+    check_multi_file(&[
+        (
+            "main.rb",
+            r#"
+class Main
+  def greet
+    Helper.get_name<hover label="String">
+  end
+
+  puts gre<hover label="String">et
+end
+"#,
+        ),
+        (
+            "helper.rb",
+            r#"
+class Helper
+  # @return [String]
+  def self.get_name
+    "hello"
+  end
+end
+"#,
+        ),
+    ])
+    .await;
+}

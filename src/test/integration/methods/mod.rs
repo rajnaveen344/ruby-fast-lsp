@@ -4,6 +4,7 @@ mod attrs;
 mod branch_variable_return;
 mod goto;
 mod hover;
+mod inference;
 mod inferred_union_return;
 mod inlay_hints;
 mod inlay_hints_implicit_return;

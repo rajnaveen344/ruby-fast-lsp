@@ -23,8 +23,8 @@ mod check;
 mod fixture;
 mod inlay_hints;
 
-// Re-export unified check function (the only API)
-pub use check::check;
+// Re-export unified check functions (the only API)
+pub use check::{check, check_multi_file};
 
 // Re-export core utilities for tests (used internally by check)
 pub use fixture::{

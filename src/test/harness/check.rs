@@ -46,7 +46,8 @@ use tower_lsp::lsp_types::{
 };
 
 use super::fixture::{
-    extract_cursor, extract_tags, extract_tags_with_attributes, setup_with_fixture, Tag,
+    extract_cursor, extract_tags, extract_tags_with_attributes, setup_with_fixture,
+    setup_with_multi_file_fixture, Tag,
 };
 use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
@@ -79,7 +80,6 @@ pub async fn check(fixture_text: &str) {
     // Also extract simple tags for def/ref (they don't use attributes)
     let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
     let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
-    let (type_tags, _) = extract_tags(&text_without_cursor, "type");
 
     // Categorize tags by kind
     let hint_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hint").collect();
@@ -88,6 +88,7 @@ pub async fn check(fixture_text: &str) {
     let warn_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "warn").collect();
     let hover_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hover").collect();
     let th_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "th").collect();
+    let type_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "type").collect();
 
     // Separate "none" tags (range-scoped negative assertions) from positive assertions
     let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
@@ -122,11 +123,9 @@ pub async fn check(fixture_text: &str) {
         checks_run.push("references");
     }
 
-    // Run type check if we have cursor and type tags
-    if cursor.is_some() && !type_tags.is_empty() {
-        // Type check needs special handling - extract the type content
-        let (_, text_for_type) = extract_cursor(fixture_text);
-        run_type_check(&server, &uri, cursor.unwrap(), &text_for_type, &content).await;
+    // Run type check if we have type tags (no cursor needed - uses tag position)
+    if !type_tags.is_empty() {
+        run_type_check(&server, &uri, &content, &type_tags).await;
         checks_run.push("type");
     }
 
@@ -171,6 +170,154 @@ pub async fn check(fixture_text: &str) {
 
     // If no checks were run, that's okay - it means the fixture is valid with no expectations
     // (e.g., testing that valid code has no errors)
+}
+
+/// Multi-file check function for testing cross-file scenarios.
+///
+/// The first file in the list is the "primary" file where markers are extracted and checks run.
+/// Additional files provide context (e.g., class definitions, method implementations).
+///
+/// # Arguments
+/// * `files` - List of (filename, content) tuples. First file is primary.
+///
+/// # Example
+/// ```ignore
+/// check_multi_file(&[
+///     ("main.rb", r#"
+///         result<hover label="String"> = Helper.get_name
+///     "#),
+///     ("helper.rb", r#"
+///         class Helper
+///           # @return [String]
+///           def self.get_name
+///             "hello"
+///           end
+///         end
+///     "#),
+/// ]).await;
+/// ```
+pub async fn check_multi_file(files: &[(&str, &str)]) {
+    assert!(
+        !files.is_empty(),
+        "check_multi_file requires at least one file"
+    );
+
+    let (primary_filename, primary_fixture) = files[0];
+
+    // Extract cursor if present in primary file
+    let has_cursor = primary_fixture.contains("$0");
+    let (cursor, text_without_cursor) = if has_cursor {
+        let (pos, clean) = extract_cursor(primary_fixture);
+        (Some(pos), clean)
+    } else {
+        (None, primary_fixture.to_string())
+    };
+
+    // Extract all tags from primary file
+    let (all_tags, primary_content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
+
+    // Also extract simple tags for def/ref
+    let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
+    let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
+
+    // Categorize tags
+    let hint_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hint").collect();
+    let lens_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "lens").collect();
+    let err_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "err").collect();
+    let warn_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "warn").collect();
+    let hover_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hover").collect();
+    let th_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "th").collect();
+    let type_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "type").collect();
+
+    // Separate none tags
+    let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
+    let none_warn_tags: Vec<&Tag> = warn_tags.iter().filter(|t| t.is_none()).copied().collect();
+    let none_hint_tags: Vec<&Tag> = hint_tags.iter().filter(|t| t.is_none()).copied().collect();
+    let none_lens_tags: Vec<&Tag> = lens_tags.iter().filter(|t| t.is_none()).copied().collect();
+
+    let positive_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| !t.is_none()).copied().collect();
+    let positive_warn_tags: Vec<&Tag> =
+        warn_tags.iter().filter(|t| !t.is_none()).copied().collect();
+    let positive_hint_tags: Vec<&Tag> =
+        hint_tags.iter().filter(|t| !t.is_none()).copied().collect();
+    let positive_lens_tags: Vec<&Tag> =
+        lens_tags.iter().filter(|t| !t.is_none()).copied().collect();
+
+    // Build file list with cleaned primary content
+    let mut cleaned_files: Vec<(&str, String)> = Vec::new();
+    cleaned_files.push((primary_filename, primary_content.clone()));
+    for (filename, content) in files.iter().skip(1) {
+        cleaned_files.push((filename, content.to_string()));
+    }
+
+    let file_refs: Vec<(&str, &str)> = cleaned_files
+        .iter()
+        .map(|(f, c)| (*f, c.as_str()))
+        .collect();
+
+    // Setup server with all files
+    let (server, uris) = setup_with_multi_file_fixture(&file_refs).await;
+    let primary_uri = &uris[0];
+
+    // Track checks run
+    let mut checks_run = Vec::new();
+
+    // Run goto definition check
+    if cursor.is_some() && !def_ranges.is_empty() {
+        run_goto_check(&server, primary_uri, cursor.unwrap(), &def_ranges).await;
+        checks_run.push("goto");
+    }
+
+    // Run references check
+    if cursor.is_some() && !ref_ranges.is_empty() {
+        run_references_check(&server, primary_uri, cursor.unwrap(), &ref_ranges).await;
+        checks_run.push("references");
+    }
+
+    // Run type check (no cursor needed - uses tag position)
+    if !type_tags.is_empty() {
+        run_type_check(&server, primary_uri, &primary_content, &type_tags).await;
+        checks_run.push("type");
+    }
+
+    // Run inlay hints check
+    if !hint_tags.is_empty() {
+        run_inlay_hints_check(&server, primary_uri, &positive_hint_tags, &none_hint_tags).await;
+        checks_run.push("hints");
+    }
+
+    // Run diagnostics check
+    if !err_tags.is_empty() || !warn_tags.is_empty() {
+        run_diagnostics_check(
+            &server,
+            primary_uri,
+            &primary_content,
+            &positive_err_tags,
+            &positive_warn_tags,
+            &none_err_tags,
+            &none_warn_tags,
+        )
+        .await;
+        checks_run.push("diagnostics");
+    }
+
+    // Run code lens check
+    if !lens_tags.is_empty() {
+        run_code_lens_check(&server, primary_uri, &positive_lens_tags, &none_lens_tags).await;
+        checks_run.push("lens");
+    }
+
+    // Run hover check
+    if !hover_tags.is_empty() {
+        run_hover_check(&server, primary_uri, &hover_tags).await;
+        checks_run.push("hover");
+    }
+
+    // Run type hierarchy check
+    if cursor.is_some() && !th_tags.is_empty() {
+        run_type_hierarchy_check(&server, primary_uri, cursor.unwrap(), &th_tags).await;
+        checks_run.push("type_hierarchy");
+    }
 }
 
 /// Run goto definition check.
@@ -274,90 +421,197 @@ async fn run_references_check(
     }
 }
 
-/// Run type check.
+/// Run type check using TypeQuery.
+///
+/// The `<type label="..." kind="...">` tag checks the inferred type at the tag position.
+/// Works like `<hover>` - no cursor needed.
+///
+/// Attributes:
+/// - `label` (required): The expected type string (e.g., "String", "Integer")
+/// - `kind` (optional): The kind of type check:
+///   - `"return"` or `"->"`: Method return type (default for methods)
+///   - `"var"` or `":"`: Variable/parameter type (default for variables)
+///
+/// Examples:
+/// - `def gree<type label="String">ting` - infers return type (kind defaults to "return")
+/// - `def gree<type label="String" kind="return">ting` - explicit return type
+/// - `x<type label="String" kind="var"> = "hello"` - variable type
 async fn run_type_check(
     server: &crate::server::RubyLanguageServer,
     uri: &Url,
-    cursor: Position,
-    text_with_type_tag: &str,
-    _content: &str,
+    content: &str,
+    expected_types: &[&Tag],
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
+    use crate::inferrer::query::TypeQuery;
     use crate::inferrer::r#type::ruby::RubyType;
+    use crate::inferrer::return_type::ReturnTypeInferrer;
 
-    // Extract expected type from <type>...</type> marker
-    let open_tag = "<type>";
-    let close_tag = "</type>";
-    let expected_type = if let Some(open_pos) = text_with_type_tag.find(open_tag) {
-        let after_open = &text_with_type_tag[open_pos + open_tag.len()..];
-        if let Some(close_pos) = after_open.find(close_tag) {
-            after_open[..close_pos].to_string()
-        } else {
-            panic!("Unclosed <type> tag");
-        }
-    } else {
-        panic!("Type check requires <type>...</type> marker");
-    };
+    for expected in expected_types {
+        let expected_type = expected
+            .attributes
+            .get("label")
+            .expect("type tag missing 'label' attribute");
 
-    // Clean content without type tag
-    let clean_content =
-        text_with_type_tag.replace(&format!("{}{}{}", open_tag, expected_type, close_tag), "");
+        // Get kind attribute - defaults based on identifier type
+        let kind = expected.attributes.get("kind").map(|s| s.as_str());
 
-    let analyzer = RubyPrismAnalyzer::new(uri.clone(), clean_content.clone());
-    let (identifier_opt, _, _ancestors, _scope_stack) = analyzer.get_identifier(cursor);
+        let position = expected.range.start;
 
-    let inferred_type: Option<RubyType> = if let Some(identifier) = identifier_opt {
-        match &identifier {
-            crate::analyzer_prism::Identifier::RubyLocalVariable { name, scope, .. } => {
-                let mut found_type: Option<RubyType> = None;
-                {
-                    let docs = server.docs.lock();
-                    if let Some(doc_arc) = docs.get(uri) {
-                        let doc = doc_arc.read();
-                        if let Some(entries) = doc.get_local_var_entries(*scope) {
-                            for entry in entries {
-                                if let crate::indexer::entry::entry_kind::EntryKind::LocalVariable(
-                                    data,
-                                ) = &entry.kind
-                                {
-                                    if &data.name == name && data.r#type != RubyType::Unknown {
-                                        found_type = Some(data.r#type.clone());
-                                        break;
-                                    }
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let (identifier_opt, _, _ancestors, _scope_stack) = analyzer.get_identifier(position);
+
+        let type_query = TypeQuery::new(server.index.clone(), uri, content.as_bytes());
+
+        // Determine actual kind based on identifier type
+        let (inferred_type, actual_kind): (Option<RubyType>, &str) = if let Some(identifier) =
+            identifier_opt
+        {
+            match &identifier {
+                crate::analyzer_prism::Identifier::RubyLocalVariable { name, .. } => {
+                    (type_query.get_local_variable_type(name, position), "var")
+                }
+                crate::analyzer_prism::Identifier::RubyConstant { iden, .. } => {
+                    let fqn = crate::types::fully_qualified_name::FullyQualifiedName::namespace(
+                        iden.clone(),
+                    );
+                    (Some(RubyType::Class(fqn)), "const")
+                }
+                crate::analyzer_prism::Identifier::RubyMethod {
+                    iden,
+                    receiver,
+                    namespace,
+                } => {
+                    let parse_result = ruby_prism::parse(content.as_bytes());
+                    let node = parse_result.node();
+
+                    let ty = if let Some(def_node) =
+                        find_def_node_at_position(&node, position, content)
+                    {
+                        let inferrer = ReturnTypeInferrer::new_with_content(
+                            server.index.clone(),
+                            content.as_bytes(),
+                            uri,
+                        );
+                        inferrer.infer_return_type(content.as_bytes(), &def_node)
+                    } else {
+                        let receiver_type = match receiver {
+                            crate::analyzer_prism::MethodReceiver::None
+                            | crate::analyzer_prism::MethodReceiver::SelfReceiver => {
+                                if namespace.is_empty() {
+                                    RubyType::class("Object")
+                                } else {
+                                    let fqn = crate::types::fully_qualified_name::FullyQualifiedName::from(
+                                            namespace.clone(),
+                                        );
+                                    RubyType::Class(fqn)
                                 }
                             }
-                        }
-                    }
-                }
-                found_type
-            }
-            crate::analyzer_prism::Identifier::RubyConstant { iden, .. } => {
-                let fqn =
-                    crate::types::fully_qualified_name::FullyQualifiedName::namespace(iden.clone());
-                Some(RubyType::Class(fqn))
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
+                            crate::analyzer_prism::MethodReceiver::Constant(path) => {
+                                let fqn =
+                                        crate::types::fully_qualified_name::FullyQualifiedName::Constant(
+                                            path.clone().into(),
+                                        );
+                                RubyType::ClassReference(fqn)
+                            }
+                            crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
+                                type_query
+                                    .get_local_variable_type(name, position)
+                                    .unwrap_or(RubyType::Unknown)
+                            }
+                            _ => RubyType::Unknown,
+                        };
 
-    match inferred_type {
-        Some(ty) => {
-            let actual_str = ty.to_string();
-            let matches = actual_str == expected_type
-                || actual_str.ends_with(&expected_type)
-                || actual_str.contains(&expected_type);
+                        let inferrer = ReturnTypeInferrer::new_with_content(
+                            server.index.clone(),
+                            content.as_bytes(),
+                            uri,
+                        );
+                        inferrer.infer_method_call_return_type(&receiver_type, &iden.to_string())
+                    };
+                    (ty, "return")
+                }
+                crate::analyzer_prism::Identifier::RubyInstanceVariable { name, .. } => {
+                    let index = server.index.lock();
+                    let ty = index.file_entries(uri).iter().find_map(|entry| {
+                        if let crate::indexer::entry::entry_kind::EntryKind::InstanceVariable(
+                            data,
+                        ) = &entry.kind
+                        {
+                            if &data.name == name && data.r#type != RubyType::Unknown {
+                                return Some(data.r#type.clone());
+                            }
+                        }
+                        None
+                    });
+                    (ty, "var")
+                }
+                crate::analyzer_prism::Identifier::RubyClassVariable { name, .. } => {
+                    let index = server.index.lock();
+                    let ty = index.file_entries(uri).iter().find_map(|entry| {
+                        if let crate::indexer::entry::entry_kind::EntryKind::ClassVariable(data) =
+                            &entry.kind
+                        {
+                            if &data.name == name && data.r#type != RubyType::Unknown {
+                                return Some(data.r#type.clone());
+                            }
+                        }
+                        None
+                    });
+                    (ty, "var")
+                }
+                crate::analyzer_prism::Identifier::RubyGlobalVariable { name, .. } => {
+                    let index = server.index.lock();
+                    let ty = index.file_entries(uri).iter().find_map(|entry| {
+                        if let crate::indexer::entry::entry_kind::EntryKind::GlobalVariable(data) =
+                            &entry.kind
+                        {
+                            if &data.name == name && data.r#type != RubyType::Unknown {
+                                return Some(data.r#type.clone());
+                            }
+                        }
+                        None
+                    });
+                    (ty, "var")
+                }
+                _ => (None, "unknown"),
+            }
+        } else {
+            (None, "unknown")
+        };
+
+        // Validate kind attribute if provided
+        if let Some(expected_kind) = kind {
+            let kind_matches = match expected_kind {
+                "return" | "->" => actual_kind == "return",
+                "var" | ":" => actual_kind == "var",
+                "const" => actual_kind == "const",
+                _ => true, // Unknown kind, skip validation
+            };
             assert!(
-                matches,
-                "Type mismatch.\nExpected: {}\nActual: {}",
-                expected_type, actual_str
+                kind_matches,
+                "Kind mismatch at {:?}. Expected kind '{}' but found '{}'",
+                position, expected_kind, actual_kind
             );
         }
-        None => panic!(
-            "Could not infer type at position {:?}.\nExpected: {}",
-            cursor, expected_type
-        ),
+
+        match inferred_type {
+            Some(ty) => {
+                let actual_str = ty.to_string();
+                let matches = actual_str == *expected_type
+                    || actual_str.ends_with(expected_type)
+                    || actual_str.contains(expected_type);
+                assert!(
+                    matches,
+                    "Type mismatch at {:?}.\nExpected: {} (kind: {})\nActual: {}",
+                    position, expected_type, actual_kind, actual_str
+                );
+            }
+            None => panic!(
+                "Could not infer type at position {:?}.\nExpected: {} (kind: {})",
+                position, expected_type, actual_kind
+            ),
+        }
     }
 }
 
@@ -678,6 +932,102 @@ async fn run_hover_check(
             hover_content
         );
     }
+}
+
+/// Find a DefNode at the given position in the AST.
+fn find_def_node_at_position<'a>(
+    node: &ruby_prism::Node<'a>,
+    target_pos: Position,
+    content: &str,
+) -> Option<ruby_prism::DefNode<'a>> {
+    if let Some(def_node) = node.as_def_node() {
+        let loc = def_node.name_loc();
+        let start_offset = loc.start_offset();
+        let end_offset = loc.end_offset();
+
+        // Convert offsets to position
+        let before_start = &content.as_bytes()[..start_offset];
+        let start_line = before_start.iter().filter(|&&b| b == b'\n').count() as u32;
+        let last_newline = before_start
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let start_char = (start_offset - last_newline) as u32;
+
+        let before_end = &content.as_bytes()[..end_offset];
+        let end_line = before_end.iter().filter(|&&b| b == b'\n').count() as u32;
+        let last_newline_end = before_end
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let end_char = (end_offset - last_newline_end) as u32;
+
+        // Check if target position is within the method name range
+        if target_pos.line >= start_line
+            && target_pos.line <= end_line
+            && (target_pos.line > start_line || target_pos.character >= start_char)
+            && (target_pos.line < end_line || target_pos.character <= end_char)
+        {
+            return Some(def_node);
+        }
+    }
+
+    // Recurse into child nodes
+    if let Some(program) = node.as_program_node() {
+        for stmt in program.statements().body().iter() {
+            if let Some(found) = find_def_node_at_position(&stmt, target_pos, content) {
+                return Some(found);
+            }
+        }
+    }
+
+    if let Some(class_node) = node.as_class_node() {
+        if let Some(body) = class_node.body() {
+            if let Some(stmts) = body.as_statements_node() {
+                for stmt in stmts.body().iter() {
+                    if let Some(found) = find_def_node_at_position(&stmt, target_pos, content) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(module_node) = node.as_module_node() {
+        if let Some(body) = module_node.body() {
+            if let Some(stmts) = body.as_statements_node() {
+                for stmt in stmts.body().iter() {
+                    if let Some(found) = find_def_node_at_position(&stmt, target_pos, content) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(stmts) = node.as_statements_node() {
+        for stmt in stmts.body().iter() {
+            if let Some(found) = find_def_node_at_position(&stmt, target_pos, content) {
+                return Some(found);
+            }
+        }
+    }
+
+    if let Some(sclass) = node.as_singleton_class_node() {
+        if let Some(body) = sclass.body() {
+            if let Some(stmts) = body.as_statements_node() {
+                for stmt in stmts.body().iter() {
+                    if let Some(found) = find_def_node_at_position(&stmt, target_pos, content) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Run type hierarchy check.
