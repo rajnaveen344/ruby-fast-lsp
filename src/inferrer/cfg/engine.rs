@@ -246,7 +246,7 @@ impl TypeNarrowingEngine {
 
         // Run dataflow analysis
         let mut analyzer = DataflowAnalyzer::new(&cfg);
-        analyzer.analyze(TypeState::from_parameters(&params));
+        analyzer.analyze(TypeState::from_parameters(&params), |_, _, _, _| None);
         let dataflow = analyzer.into_results();
 
         Some(MethodCfgState {
@@ -269,7 +269,7 @@ impl TypeNarrowingEngine {
 
         // Run dataflow analysis
         let mut analyzer = DataflowAnalyzer::new(&cfg);
-        analyzer.analyze(TypeState::new());
+        analyzer.analyze(TypeState::new(), |_, _, _, _| None);
         let dataflow = analyzer.into_results();
 
         Some(MethodCfgState {

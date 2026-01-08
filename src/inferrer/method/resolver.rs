@@ -131,7 +131,9 @@ impl MethodResolver {
                         if let EntryKind::Method(data) = &entry.kind {
                             if all_fqns_to_search.contains(&data.owner) {
                                 if let Some(rt) = &data.return_type {
-                                    if !found_return_types.contains(rt) {
+                                    // Ignore Unknown types so we fall back to source inference
+                                    if !found_return_types.contains(rt) && *rt != RubyType::Unknown
+                                    {
                                         found_return_types.push(rt.clone());
                                     }
                                 }
@@ -463,10 +465,16 @@ impl MethodResolver {
                     log::debug!("Found local variable {} in index", var_name);
                     for entry in entries {
                         if let EntryKind::LocalVariable(data) = &entry.kind {
-                            let r#type = &data.r#type;
-                            log::debug!("Variable {} has type: {:?}", var_name, r#type);
-                            if *r#type != RubyType::Unknown {
-                                return Some(r#type.clone());
+                            if data.name == var_name {
+                                // TODO: Use position to find correct assignment from range
+                                if let Some(last_assignment) = data.assignments.last() {
+                                    log::debug!(
+                                        "Variable {} has type: {:?}",
+                                        var_name,
+                                        last_assignment.r#type
+                                    );
+                                    return Some(last_assignment.r#type.clone());
+                                }
                             }
                         }
                     }
@@ -748,6 +756,7 @@ mod tests {
                     "User",
                 )
                 .unwrap()])),
+                create_test_location().range,
             ))
             .build(&mut *index.lock())
             .unwrap();

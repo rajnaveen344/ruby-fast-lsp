@@ -61,7 +61,13 @@ pub async fn handle_inlay_hints(
         .collect();
 
     // Generate type hints from document.lvars for local variables
-    for entries in document.get_all_lvars().values() {
+    let mut type_updates = Vec::new();
+
+    eprintln!("Generating inlay hints for doc: {}", uri);
+    let lvars = document.get_all_lvars();
+    eprintln!("Found {} scopes", lvars.len());
+
+    for (_scope_id, entries) in lvars {
         for entry in entries {
             // Skip entries outside the requested range
             if !is_position_in_range(&entry.location.range.start, &requested_range)
@@ -71,48 +77,89 @@ pub async fn handle_inlay_hints(
             }
 
             if let EntryKind::LocalVariable(data) = &entry.kind {
-                let r#type = &data.r#type;
                 let name = &data.name;
-                let from_lvar = if r#type != &RubyType::Unknown {
-                    Some(r#type.clone())
-                } else {
-                    None
-                };
 
-                // Try type narrowing if not from lvar
-                let from_narrowing = from_lvar.clone().or_else(|| {
-                    let offset = position_to_offset(&content, entry.location.range.start);
-                    server
-                        .type_narrowing
-                        .get_narrowed_type(&uri, offset, Some(&content))
-                });
+                // For unknown types, we want to try inference
+                // Get type from document (base type or persisted flow type)
+                let from_lvar = data.assignments.last().map(|a| a.r#type.clone());
+
+                // Try type narrowing if not from lvar or if lvar is Unknown
+                let from_narrowing = match from_lvar.clone() {
+                    Some(ty) if ty != RubyType::Unknown => Some(ty),
+                    _ => {
+                        let offset = position_to_offset(&content, entry.location.range.start);
+                        server
+                            .type_narrowing
+                            .get_narrowed_type(&uri, offset, Some(&content))
+                    }
+                };
 
                 // Try method chain assignment inference if still unknown
                 let index = server.index.lock();
-                let final_type =
-                    from_narrowing.or_else(|| infer_type_from_assignment(&content, name, &index));
+                let final_type = from_narrowing
+                    .clone()
+                    .or_else(|| infer_type_from_assignment(&content, name, &index));
                 drop(index);
 
                 if let Some(ty) = final_type {
-                    if ty != RubyType::Unknown {
-                        let end_position = entry.location.range.end;
-                        let type_hint = InlayHint {
-                            position: end_position,
-                            label: InlayHintLabel::String(format!(": {}", ty)),
-                            kind: Some(InlayHintKind::TYPE),
-                            text_edits: None,
-                            tooltip: None,
-                            padding_left: None,
-                            padding_right: None,
-                            data: None,
-                        };
-                        all_hints.push(type_hint);
+                    // Collect update if we inferred something new
+                    // Check against what we already have in the document (from_lvar)
+                    let matches_existing = from_lvar.as_ref() == Some(&ty);
+                    if !matches_existing && ty != RubyType::Unknown {
+                        type_updates.push((
+                            data.scope_id,
+                            data.name.clone(),
+                            entry.location.range,
+                            ty.clone(),
+                        ));
                     }
+
+                    let label = if ty == RubyType::Unknown {
+                        ": ?".to_string()
+                    } else {
+                        format!(": {}", ty)
+                    };
+
+                    let end_position = entry.location.range.end;
+                    let type_hint = InlayHint {
+                        position: end_position,
+                        label: InlayHintLabel::String(label),
+                        kind: Some(InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    };
+                    all_hints.push(type_hint);
+                } else {
+                    // If we have an entry, it's a variable. If we don't know the type, show ?
+                    let label = ": ?".to_string();
+                    let end_position = entry.location.range.end;
+                    let type_hint = InlayHint {
+                        position: end_position,
+                        label: InlayHintLabel::String(label),
+                        kind: Some(InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    };
+                    all_hints.push(type_hint);
                 }
             }
         }
     }
     drop(document);
+
+    // Apply updates to the document (persistence)
+    if !type_updates.is_empty() {
+        let mut document = doc_arc.write(); // Apply updates to document
+        for (scope_id, name, range, ty) in type_updates {
+            document.update_local_var_type(scope_id, &name, range, ty);
+        }
+    }
 
     // Collect method entries that need return type inference
     // We need to do this in two passes to avoid holding the lock during inference
@@ -299,6 +346,10 @@ fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str,
     let parse_result = ruby_prism::parse(content.as_bytes());
     let node = parse_result.node();
 
+    // Create file content map for recursive inference
+    let mut file_contents = std::collections::HashMap::new();
+    file_contents.insert(uri, content.as_bytes());
+
     // Infer and cache (no lock held during inference)
     let inferred_types: Vec<(EntryId, RubyType)> = methods_needing_inference
         .iter()
@@ -309,10 +360,22 @@ fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str,
             // Since we are processing the ACTIVE file, we can pass it as source.
             // But we need to lock the index for inference.
             let mut index = server.index.lock();
+            // Get owner FQN from the entry to provide context for inference
+            // (e.g. so we know 'self' refers to the class)
+            let owner_fqn = index.get_entry(*entry_id).and_then(|e| {
+                if let EntryKind::Method(m) = &e.kind {
+                    Some(m.owner.clone())
+                } else {
+                    None
+                }
+            });
+
             let inferred_ty = crate::inferrer::return_type::infer_return_type_for_node(
                 &mut index,
                 content.as_bytes(),
                 &def_node,
+                owner_fqn,
+                Some(&file_contents),
             )?;
             Some((*entry_id, inferred_ty))
         })

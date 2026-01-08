@@ -1,10 +1,10 @@
 use ruby_prism::*;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
+use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
-
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
@@ -69,14 +69,23 @@ impl IndexVisitor {
             return literal_type;
         }
 
-        // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` without full resolution
+        // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` and `Module::Class.new`
         if let Some(call_node) = value_node.as_call_node() {
             if call_node.name().as_slice() == b"new" {
                 if let Some(receiver) = call_node.receiver() {
-                    // Check for simple constant receiver: `MyClass.new`
-                    if let Some(const_node) = receiver.as_constant_read_node() {
-                        let name =
-                            String::from_utf8_lossy(const_node.name().as_slice()).to_string();
+                    let fqn_string = if let Some(const_node) = receiver.as_constant_read_node() {
+                        // Simple constant: `User.new`
+                        Some(String::from_utf8_lossy(const_node.name().as_slice()).to_string())
+                    } else if let Some(path_node) = receiver.as_constant_path_node() {
+                        // Namespaced constant: `MyApp::User.new`
+                        // We need to flatten the path node (e.g. parent -> child)
+                        // This is a simplified flattening for typical cases
+                        Self::flatten_constant_path(&path_node)
+                    } else {
+                        None
+                    };
+
+                    if let Some(name) = fqn_string {
                         use crate::types::fully_qualified_name::FullyQualifiedName;
                         if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
                             return RubyType::Class(fqn);
@@ -86,7 +95,63 @@ impl IndexVisitor {
             }
         }
 
+        // Handle local variable reads: look up the type from already-indexed entries
+        if let Some(lvar_read) = value_node.as_local_variable_read_node() {
+            let var_name = String::from_utf8_lossy(lvar_read.name().as_slice()).to_string();
+            let lvar_line = self
+                .document
+                .prism_location_to_lsp_range(&lvar_read.location())
+                .start
+                .line;
+
+            // Search all scopes for this variable
+            for (_scope_id, entries) in self.document.get_all_lvars() {
+                // Find entries for this variable that are before the read position
+                // and return the type from the most recent one
+                let matching_entry = entries
+                    .iter()
+                    .filter(|entry| {
+                        if let EntryKind::LocalVariable(data) = &entry.kind {
+                            data.name == var_name && entry.location.range.start.line < lvar_line
+                        } else {
+                            false
+                        }
+                    })
+                    .last();
+
+                if let Some(entry) = matching_entry {
+                    if let EntryKind::LocalVariable(data) = &entry.kind {
+                        // Get the most recent assignment type
+                        if let Some(assignment) = data.assignments.last() {
+                            if assignment.r#type != RubyType::Unknown {
+                                return assignment.r#type.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         RubyType::Unknown
+    }
+
+    /// Helper to flatten a ConstantPathNode into a string (e.g., "Module::Class")
+    fn flatten_constant_path(node: &ConstantPathNode) -> Option<String> {
+        let mut parts = Vec::new();
+        use crate::analyzer_prism::utils;
+        utils::collect_namespaces(node, &mut parts);
+
+        if parts.is_empty() {
+            None
+        } else {
+            // Join parts with "::"
+            let path_str = parts
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            Some(path_str)
+        }
     }
 
     /// Extract YARD documentation from comments preceding a method definition using Prism comments.

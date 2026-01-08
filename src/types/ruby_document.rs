@@ -1,9 +1,16 @@
 use log::debug;
 use ruby_prism::Location as PrismLocation;
-use std::{cmp, collections::BTreeMap};
+use std::{
+    cmp,
+    collections::{BTreeMap, HashMap},
+};
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
-use crate::{indexer::entry::Entry, types::scope::LVScopeId};
+use crate::{
+    indexer::entry::{Entry, EntryKind},
+    inferrer::RubyType,
+    types::scope::LVScopeId,
+};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -26,7 +33,7 @@ pub struct RubyDocument {
     lvars: BTreeMap<LVScopeId, Vec<Entry>>,
 
     /// Local variable references (keyed by (scope_id, variable_name) for proper scoping)
-    lvar_references: std::collections::HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>>,
+    lvar_references: HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>>,
 
     /// Comments in the document (start_offset, end_offset)
     comments: Vec<(usize, usize)>,
@@ -44,7 +51,7 @@ impl RubyDocument {
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
             lvars: BTreeMap::new(),
-            lvar_references: std::collections::HashMap::new(),
+            lvar_references: HashMap::new(),
             comments,
         };
         doc.compute_line_offsets();
@@ -244,6 +251,33 @@ impl RubyDocument {
             .entry((scope_id, name))
             .or_default()
             .push(location);
+    }
+
+    /// Update the type of a local variable (persistence from inference)
+    pub fn update_local_var_type(
+        &mut self,
+        scope_id: LVScopeId,
+        name: &str,
+        range: Range,
+        new_type: RubyType,
+    ) {
+        if let Some(entries) = self.lvars.get_mut(&scope_id) {
+            for entry in entries {
+                if let EntryKind::LocalVariable(data) = &mut entry.kind {
+                    if data.name == name && entry.location.range == range {
+                        use crate::indexer::entry::entry_kind::LocalVariableAssignment;
+                        data.assignments.push(LocalVariableAssignment {
+                            range: Range {
+                                start: Position::new(0, 0),
+                                end: Position::new(u32::MAX, u32::MAX),
+                            },
+                            r#type: new_type,
+                        });
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     /// Get all references to a local variable by name within specific scopes

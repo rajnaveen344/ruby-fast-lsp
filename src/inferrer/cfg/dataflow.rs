@@ -269,6 +269,27 @@ impl DataflowResults {
                 .and_then(|s| s.variables.get(var_name).cloned())
         }
     }
+
+    /// Get the full type state at a specific offset
+    pub fn get_state_at_offset(&self, block_id: BlockId, offset: usize) -> Option<TypeState> {
+        let snapshots = self.statement_snapshots.get(&block_id)?;
+
+        if snapshots.is_empty() {
+            return self.block_entry_states.get(&block_id).cloned();
+        }
+
+        let idx = snapshots.partition_point(|s| s.end_offset <= offset);
+
+        if idx < snapshots.len() {
+            Some(TypeState {
+                variables: snapshots[idx].variables.clone(),
+            })
+        } else {
+            snapshots.last().map(|s| TypeState {
+                variables: s.variables.clone(),
+            })
+        }
+    }
 }
 
 /// Dataflow analyzer that propagates types through the CFG
@@ -293,13 +314,16 @@ impl<'a> DataflowAnalyzer<'a> {
     }
 
     /// Run the dataflow analysis
-    pub fn analyze(&mut self, initial_state: TypeState) {
+    pub fn analyze<F>(&mut self, initial_state: TypeState, mut resolver: F)
+    where
+        F: FnMut(&str, usize, usize, &TypeState) -> Option<RubyType>,
+    {
         // Initialize entry block with initial state
         self.block_entry_states
             .insert(self.cfg.entry, initial_state.clone());
 
         // Compute initial exit state for entry block
-        let entry_exit = self.compute_exit_state(self.cfg.entry, initial_state);
+        let entry_exit = self.compute_exit_state(self.cfg.entry, initial_state, &mut resolver);
         self.block_exit_states.insert(self.cfg.entry, entry_exit);
 
         // For simple CFGs (no loops), a single pass in topological order suffices
@@ -317,7 +341,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
             // Process blocks in reverse post-order for faster convergence
             for block_id in self.cfg.reverse_post_order() {
-                if self.process_block(block_id) {
+                if self.process_block(block_id, &mut resolver) {
                     changed = true;
                 }
             }
@@ -334,7 +358,10 @@ impl<'a> DataflowAnalyzer<'a> {
     }
 
     /// Process a single block, returns true if state changed
-    fn process_block(&mut self, block_id: BlockId) -> bool {
+    fn process_block<F>(&mut self, block_id: BlockId, resolver: &mut F) -> bool
+    where
+        F: FnMut(&str, usize, usize, &TypeState) -> Option<RubyType>,
+    {
         // Compute entry state by merging all predecessor exit states
         let entry_state = self.compute_entry_state(block_id);
 
@@ -352,7 +379,7 @@ impl<'a> DataflowAnalyzer<'a> {
             .insert(block_id, entry_state.clone());
 
         // Compute exit state by processing block statements
-        let exit_state = self.compute_exit_state(block_id, entry_state);
+        let exit_state = self.compute_exit_state(block_id, entry_state, resolver);
         self.block_exit_states.insert(block_id, exit_state);
 
         true
@@ -418,7 +445,15 @@ impl<'a> DataflowAnalyzer<'a> {
 
     /// Compute exit state by processing statements in the block
     /// Also records per-statement type snapshots for O(log n) position lookup
-    fn compute_exit_state(&mut self, block_id: BlockId, mut state: TypeState) -> TypeState {
+    fn compute_exit_state<F>(
+        &mut self,
+        block_id: BlockId,
+        mut state: TypeState,
+        resolver: &mut F,
+    ) -> TypeState
+    where
+        F: FnMut(&str, usize, usize, &TypeState) -> Option<RubyType>,
+    {
         let mut snapshots = Vec::new();
 
         if let Some(block) = self.cfg.get_block(block_id) {
@@ -437,6 +472,14 @@ impl<'a> DataflowAnalyzer<'a> {
                         else if let Some(src_var) = source_variable {
                             if let Some(src_type) = state.get_type(src_var) {
                                 state.set_type(target.clone(), src_type.clone());
+                            }
+                        }
+                        // Third priority: resolve external type (e.g. method call)
+                        else {
+                            if let Some(resolved) =
+                                resolver(target, stmt.start_offset, stmt.end_offset, &state)
+                            {
+                                state.set_type(target.clone(), resolved);
                             }
                         }
                     }
@@ -713,7 +756,7 @@ mod tests {
         let initial_state = TypeState::from_parameters(&cfg.parameters);
 
         let mut analyzer = DataflowAnalyzer::new(&cfg);
-        analyzer.analyze(initial_state);
+        analyzer.analyze(initial_state, |_, _, _, _| None);
         analyzer.into_results()
     }
 

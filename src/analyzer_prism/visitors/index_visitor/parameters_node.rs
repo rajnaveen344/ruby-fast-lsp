@@ -101,14 +101,17 @@ impl IndexVisitor {
 
         // Create an entry with EntryKind::LocalVariable
         let entry = {
+            let location = self.document.prism_location_to_lsp_location(&location);
+            let assignment_range = location.range.clone();
             let mut index = self.index.lock();
             EntryBuilder::new()
                 .fqn(fqn)
-                .location(self.document.prism_location_to_lsp_location(&location))
+                .location(location)
                 .kind(EntryKind::new_local_variable(
                     param_name.to_string(),
                     current_scope,
                     RubyType::Unknown,
+                    assignment_range,
                 ))
                 .build(&mut index)
         };

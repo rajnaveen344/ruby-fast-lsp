@@ -17,6 +17,8 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::return_type::infer_return_type_for_node;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_namespace::RubyConstant;
+use crate::types::scope::LVScopeId;
 use crate::utils::position_to_offset;
 
 /// Return the hover capability.
@@ -39,7 +41,8 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
 
     // Get identifier at position
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.clone());
-    let (identifier_opt, identifier_type, _namespace, scope_id) = analyzer.get_identifier(position);
+    let (identifier_opt, identifier_type, _current_namespace, scope_id) =
+        analyzer.get_identifier(position);
     let identifier = identifier_opt?;
 
     let hover_text = match &identifier {
@@ -53,14 +56,34 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 if let Some(doc_arc) = docs.get(&uri) {
                     let doc = doc_arc.read();
                     doc.get_local_var_entries(scope_id).and_then(|entries| {
-                        entries.iter().find_map(|entry| {
-                            if let EntryKind::LocalVariable(data) = &entry.kind {
-                                if &data.name == name && data.r#type != RubyType::Unknown {
-                                    return Some(data.r#type.clone());
+                        // Find all entries for this variable that are before or at the cursor position
+                        // Then take the last one (most recent assignment before cursor)
+                        entries
+                            .iter()
+                            .filter(|entry| {
+                                if let EntryKind::LocalVariable(data) = &entry.kind {
+                                    // Entry is for this variable AND is before cursor
+                                    &data.name == name
+                                        && entry.location.range.start.line <= position.line
+                                } else {
+                                    false
                                 }
-                            }
-                            None
-                        })
+                            })
+                            .last()
+                            .and_then(|entry| {
+                                if let EntryKind::LocalVariable(data) = &entry.kind {
+                                    // Get the most recent assignment type from this entry
+                                    data.assignments
+                                        .iter()
+                                        .filter(|a| a.range.start.line <= position.line)
+                                        .last()
+                                        .map(|a| &a.r#type)
+                                        .filter(|ty| **ty != RubyType::Unknown)
+                                        .cloned()
+                                } else {
+                                    None
+                                }
+                            })
                     })
                 } else {
                     None
@@ -68,8 +91,9 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             };
 
             // 2. Try TypeQuery (method params, assignment inference)
-            let from_query =
-                from_lvar.or_else(|| type_query.get_local_variable_type(name, position));
+            let from_query = from_lvar
+                .clone()
+                .or_else(|| type_query.get_local_variable_type(name, position));
 
             // 3. Try type narrowing engine
             let from_narrowing = from_query.or_else(|| {
@@ -80,7 +104,40 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
             });
 
             match from_narrowing {
-                Some(t) => t.to_string(),
+                Some(t) => {
+                    // Persist inferred type if it's new/better
+                    if t != RubyType::Unknown && from_lvar.is_none() {
+                        let docs = server.docs.lock();
+                        if let Some(doc_arc) = docs.get(&uri) {
+                            // Need to find the range of the entry to update
+                            let range_opt = {
+                                let doc = doc_arc.read();
+                                doc.get_local_var_entries(scope_id).and_then(|entries| {
+                                    entries
+                                        .iter()
+                                        .find(|entry| {
+                                            if let EntryKind::LocalVariable(data) = &entry.kind {
+                                                if &data.name == name {
+                                                    // Simple range check
+                                                    let r = &entry.location.range;
+                                                    return position.line >= r.start.line
+                                                        && position.line <= r.end.line;
+                                                }
+                                            }
+                                            false
+                                        })
+                                        .map(|e| e.location.range.clone())
+                                })
+                            };
+
+                            if let Some(range) = range_opt {
+                                let mut doc = doc_arc.write();
+                                doc.update_local_var_type(scope_id, name, range, t.clone());
+                            }
+                        }
+                    }
+                    t.to_string()
+                }
                 None => name.clone(),
             }
         }
@@ -154,44 +211,10 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
                 );
             }
 
-            // Resolve receiver type - distinguish between Class and Module for proper method resolution
-            let receiver_type = match receiver {
-                MethodReceiver::None | MethodReceiver::SelfReceiver => {
-                    // Implicit self or explicit self
-                    if namespace.is_empty() {
-                        RubyType::class("Object")
-                    } else {
-                        let fqn = FullyQualifiedName::from(namespace.clone());
-                        // Check if this is a module (not a class) for proper method resolution
-                        let index = server.index.lock();
-                        let is_module = index.get(&fqn).map_or(false, |entries| {
-                            entries
-                                .iter()
-                                .any(|e| matches!(e.kind, EntryKind::Module(_)))
-                        });
-                        if is_module {
-                            RubyType::Module(fqn)
-                        } else {
-                            RubyType::Class(fqn)
-                        }
-                    }
-                }
-                MethodReceiver::Constant(path) => {
-                    // Constant receiver (e.g. valid class/module)
-                    // Treat as ClassReference
-                    let fqn = FullyQualifiedName::Constant(path.clone().into());
-                    RubyType::ClassReference(fqn)
-                }
-                MethodReceiver::LocalVariable(name) => {
-                    // Use TypeQuery to get receiver's type
-                    let type_query = TypeQuery::new(server.index.clone(), &uri, content.as_bytes());
-                    type_query
-                        .get_local_variable_type(name, position)
-                        .unwrap_or(RubyType::Unknown)
-                }
-                // TODO: Handle other receiver types (InstanceVar, chains, etc)
-                _ => RubyType::Unknown,
-            };
+            // Resolve receiver type with full recursion
+            let receiver_type = resolve_receiver_type(
+                server, &uri, &content, position, receiver, namespace, scope_id,
+            );
 
             // Use ReturnTypeInferrer for on-demand cross-file inference
             // This handles:
@@ -277,6 +300,136 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
     })
 }
 
+/// Helper to resolve receiver type recursively
+fn resolve_receiver_type(
+    server: &RubyLanguageServer,
+    uri: &tower_lsp::lsp_types::Url,
+    content: &str,
+    position: tower_lsp::lsp_types::Position,
+    receiver: &MethodReceiver,
+    namespace: &[RubyConstant],
+    _scope_id: LVScopeId,
+) -> RubyType {
+    match receiver {
+        MethodReceiver::None | MethodReceiver::SelfReceiver => {
+            // Implicit self or explicit self
+            if namespace.is_empty() {
+                RubyType::class("Object")
+            } else {
+                let fqn = FullyQualifiedName::from(namespace.to_vec());
+                // Check if this is a module (not a class) for proper method resolution
+                let index = server.index.lock();
+                let is_module = index.get(&fqn).map_or(false, |entries| {
+                    entries
+                        .iter()
+                        .any(|e| matches!(e.kind, EntryKind::Module(_)))
+                });
+                if is_module {
+                    RubyType::Module(fqn)
+                } else {
+                    RubyType::Class(fqn)
+                }
+            }
+        }
+        MethodReceiver::Constant(path) => {
+            // Constant receiver (e.g. valid class/module)
+            let fqn = FullyQualifiedName::Constant(path.clone().into());
+            RubyType::ClassReference(fqn)
+        }
+        MethodReceiver::LocalVariable(name) => {
+            // Use TypeQuery to get receiver's type
+            let type_query = TypeQuery::new(server.index.clone(), uri, content.as_bytes());
+            type_query
+                .get_local_variable_type(name, position)
+                .unwrap_or(RubyType::Unknown)
+        }
+        MethodReceiver::InstanceVariable(name) => {
+            let index = server.index.lock();
+            index
+                .file_entries(uri)
+                .iter()
+                .find_map(|entry| {
+                    if let EntryKind::InstanceVariable(data) = &entry.kind {
+                        if &data.name == name && data.r#type != RubyType::Unknown {
+                            return Some(data.r#type.clone());
+                        }
+                    }
+                    None
+                })
+                .unwrap_or(RubyType::Unknown)
+        }
+        MethodReceiver::ClassVariable(name) => {
+            let index = server.index.lock();
+            index
+                .file_entries(uri)
+                .iter()
+                .find_map(|entry| {
+                    if let EntryKind::ClassVariable(data) = &entry.kind {
+                        if &data.name == name && data.r#type != RubyType::Unknown {
+                            return Some(data.r#type.clone());
+                        }
+                    }
+                    None
+                })
+                .unwrap_or(RubyType::Unknown)
+        }
+        MethodReceiver::GlobalVariable(name) => {
+            let index = server.index.lock();
+            index
+                .file_entries(uri)
+                .iter()
+                .find_map(|entry| {
+                    if let EntryKind::GlobalVariable(data) = &entry.kind {
+                        if &data.name == name && data.r#type != RubyType::Unknown {
+                            return Some(data.r#type.clone());
+                        }
+                    }
+                    None
+                })
+                .unwrap_or(RubyType::Unknown)
+        }
+        MethodReceiver::MethodCall {
+            inner_receiver,
+            method_name,
+        } => {
+            // Special handling for .new on constants -> return instance type
+            if method_name == "new" {
+                if let MethodReceiver::Constant(path) = inner_receiver.as_ref() {
+                    let fqn = FullyQualifiedName::Constant(path.clone().into());
+                    return RubyType::Class(fqn);
+                }
+            }
+
+            let inner_type = resolve_receiver_type(
+                server,
+                uri,
+                content,
+                position,
+                inner_receiver,
+                namespace,
+                _scope_id,
+            );
+
+            if inner_type == RubyType::Unknown {
+                return RubyType::Unknown;
+            }
+
+            let mut index = server.index.lock();
+            let file_contents: std::collections::HashMap<&tower_lsp::lsp_types::Url, &[u8]> =
+                std::iter::once((uri, content.as_bytes())).collect();
+
+            crate::inferrer::return_type::infer_method_call(
+                &mut index,
+                &inner_type,
+                method_name,
+                Some(&file_contents),
+            )
+            .unwrap_or(RubyType::Unknown)
+        }
+        MethodReceiver::Expression => RubyType::Unknown,
+    }
+}
+
 /// Handle hover for method definitions - shows inferred/documented return type
 fn handle_method_definition_hover(
     server: &RubyLanguageServer,
@@ -330,6 +483,9 @@ fn handle_method_definition_hover(
 
             // Try on-demand inference
             if let Some(pos) = data.return_type_position {
+                // Capture owner FQN before dropping lock
+                let owner_fqn = data.owner.clone();
+
                 let entry_id_opt = index.get_entry_ids_for_uri(uri).into_iter().find(|eid| {
                     if let Some(e) = index.get_entry(*eid) {
                         if let EntryKind::Method(d) = &e.kind {
@@ -349,9 +505,13 @@ fn handle_method_definition_hover(
 
                     if let Some(def_node) = find_def_node_at_line(&node, pos.line, content) {
                         let mut index = server.index.lock();
-                        if let Some(inferred_ty) =
-                            infer_return_type_for_node(&mut index, content.as_bytes(), &def_node)
-                        {
+                        if let Some(inferred_ty) = infer_return_type_for_node(
+                            &mut index,
+                            content.as_bytes(),
+                            &def_node,
+                            Some(owner_fqn),
+                            None,
+                        ) {
                             if inferred_ty != RubyType::Unknown {
                                 // Cache in index
                                 index.update_method_return_type(entry_id, inferred_ty.clone());

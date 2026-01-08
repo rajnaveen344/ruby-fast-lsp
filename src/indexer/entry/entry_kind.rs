@@ -113,12 +113,22 @@ pub struct ConstantData {
     pub visibility: Option<ConstVisibility>,
 }
 
+/// Assignment or narrowing for a local variable, valid for a specific range
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalVariableAssignment {
+    /// The range where this type assignment is valid
+    pub range: tower_lsp::lsp_types::Range,
+    /// The type assigned or narrowed to
+    pub r#type: RubyType,
+}
+
 /// Data for LocalVariable entries
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalVariableData {
     pub name: String,
     pub scope_id: LVScopeId,
-    pub r#type: RubyType,
+    /// Ordered list of assignments/narrowings
+    pub assignments: Vec<LocalVariableAssignment>,
 }
 
 /// Data for InstanceVariable entries
@@ -213,11 +223,21 @@ impl EntryKind {
         }))
     }
 
-    pub fn new_local_variable(name: String, scope_id: LVScopeId, r#type: RubyType) -> Self {
+    pub fn new_local_variable(
+        name: String,
+        scope_id: LVScopeId,
+        r#type: RubyType,
+        assignment_range: tower_lsp::lsp_types::Range,
+    ) -> Self {
+        let assignment = LocalVariableAssignment {
+            range: assignment_range,
+            r#type,
+        };
+
         EntryKind::LocalVariable(Box::new(LocalVariableData {
             name,
             scope_id,
-            r#type,
+            assignments: vec![assignment],
         }))
     }
 
@@ -297,7 +317,13 @@ impl Display for EntryKind {
                 write!(f, "Constant{}", vis_str)
             }
             EntryKind::LocalVariable(data) => {
-                write!(f, "Local Variable: {} ({})", data.name, data.r#type)
+                let count = data.assignments.len();
+                let type_info = if count == 1 {
+                    format!("{}", data.assignments[0].r#type)
+                } else {
+                    format!("{} assignments", count)
+                };
+                write!(f, "Local Variable: {} ({})", data.name, type_info)
             }
             EntryKind::InstanceVariable(data) => {
                 write!(f, "Instance Variable: {} ({})", data.name, data.r#type)

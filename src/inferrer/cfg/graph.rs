@@ -448,6 +448,16 @@ impl ControlFlowGraph {
         None
     }
 
+    /// Find the block containing a given offset
+    pub fn find_block_at_offset(&self, offset: usize) -> Option<BlockId> {
+        for (id, block) in &self.blocks {
+            if offset >= block.location.start_offset && offset < block.location.end_offset {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
     /// Get the number of blocks
     pub fn block_count(&self) -> usize {
         self.blocks.len()

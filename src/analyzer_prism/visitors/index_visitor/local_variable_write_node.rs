@@ -72,14 +72,17 @@ impl IndexVisitor {
         let fqn = FullyQualifiedName::local_variable(variable_name.clone(), current_scope).unwrap();
 
         let entry = {
+            let location = self.document.prism_location_to_lsp_location(&name_loc);
+            let assignment_range = location.range.clone();
             let mut index = self.index.lock();
             EntryBuilder::new()
                 .fqn(fqn)
-                .location(self.document.prism_location_to_lsp_location(&name_loc))
+                .location(location)
                 .kind(EntryKind::new_local_variable(
                     variable_name.clone(),
                     current_scope,
                     inferred_type.clone(),
+                    assignment_range,
                 ))
                 .build(&mut index)
         };

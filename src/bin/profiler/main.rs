@@ -307,7 +307,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
             if let Some(def_node) = find_def_node_at_line(&node, line, &file_content) {
                 let mut index = server.index.lock();
                 if let Some(inferred_ty) =
-                    infer_return_type_for_node(&mut index, &file_content, &def_node)
+                    infer_return_type_for_node(&mut index, &file_content, &def_node, None, None)
                 {
                     if inferred_ty != RubyType::Unknown {
                         index.update_method_return_type(entry_id, inferred_ty);

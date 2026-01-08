@@ -262,13 +262,18 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                     ("GlobalVariable".to_string(), None, type_str, None)
                                 }
                                 EntryKind::LocalVariable(data) => {
-                                    let type_str = if data.r#type
-                                        != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                    {
-                                        Some(data.r#type.to_string())
-                                    } else {
-                                        None
-                                    };
+                                    let type_str =
+                                        if let Some(last_assignment) = data.assignments.last() {
+                                            if last_assignment.r#type
+                                                != crate::inferrer::r#type::ruby::RubyType::Unknown
+                                            {
+                                                Some(last_assignment.r#type.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
                                     ("LocalVariable".to_string(), None, type_str, None)
                                 }
                                 EntryKind::Reference => ("Reference".to_string(), None, None, None),
@@ -543,7 +548,13 @@ fn parse_fqn(fqn_str: &str) -> Option<FullyQualifiedName> {
         let after_dot = &fqn_str[dot_pos + 1..];
 
         // If before_dot contains ::, treat as class method
-        if before_dot.contains("::") || before_dot.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        if before_dot.contains("::")
+            || before_dot
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+        {
             let namespace = parse_namespace(before_dot)?;
             let method = crate::types::ruby_method::RubyMethod::new(
                 after_dot,
@@ -615,19 +626,28 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
 
     let mut total_methods = 0;
     let mut methods_with_return_type = 0;
-    let mut file_method_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut file_method_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for entry in index.all_entries() {
         if let EntryKind::Method(data) = &entry.kind {
             total_methods += 1;
-            
-            if data.return_type.is_some() && data.return_type.as_ref() != Some(&crate::inferrer::r#type::ruby::RubyType::Unknown) {
+
+            if data.return_type.is_some()
+                && data.return_type.as_ref()
+                    != Some(&crate::inferrer::r#type::ruby::RubyType::Unknown)
+            {
                 methods_with_return_type += 1;
             }
 
             // Count methods per file
             if let Some(url) = index.get_file_url(entry.location.file_id) {
-                let file_name = url.path().split('/').last().unwrap_or("unknown").to_string();
+                let file_name = url
+                    .path()
+                    .split('/')
+                    .last()
+                    .unwrap_or("unknown")
+                    .to_string();
                 *file_method_counts.entry(file_name).or_insert(0) += 1;
             }
         }
@@ -646,7 +666,10 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
     let top_files_by_method_count: Vec<FileMethodCount> = file_counts
         .into_iter()
         .take(10)
-        .map(|(file, count)| FileMethodCount { file, method_count: count })
+        .map(|(file, count)| FileMethodCount {
+            file,
+            method_count: count,
+        })
         .collect();
 
     InferenceStatsResponse {
@@ -657,4 +680,3 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
         top_files_by_method_count,
     }
 }
-

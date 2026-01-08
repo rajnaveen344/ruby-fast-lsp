@@ -53,12 +53,46 @@ impl IndexVisitor {
 
             let current_fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
 
-            if current_fqn.is_empty() {
-                return;
-            }
+            let target_fqn = if current_fqn.is_empty() {
+                // Top-level include/extend/prepend applies to Object
+                if let Ok(fqn) = FullyQualifiedName::try_from("Object") {
+                    fqn
+                } else {
+                    return;
+                }
+            } else {
+                current_fqn
+            };
 
             let mut index = self.index.lock();
-            if let Some(entry) = index.get_last_definition_mut(&current_fqn) {
+
+            // Ensure Object exists if we are targeting it
+            if target_fqn.to_string() == "Object" && index.get(&target_fqn).is_none() {
+                let file_id = index.get_or_insert_file(&self.document.uri);
+                let location = crate::types::compact_location::CompactLocation::new(
+                    file_id,
+                    self.document
+                        .prism_location_to_lsp_location(&node.location())
+                        .range,
+                );
+
+                let entry = crate::indexer::entry::EntryBuilder::new()
+                    .fqn(target_fqn.clone())
+                    .compact_location(location)
+                    .kind(EntryKind::Class(Box::new(
+                        crate::indexer::entry::entry_kind::ClassData {
+                            superclass: None, // BasicObject implicit
+                            includes: Vec::new(),
+                            prepends: Vec::new(),
+                            extends: Vec::new(),
+                        },
+                    )))
+                    .build(&mut index)
+                    .unwrap();
+                index.add_entry(entry);
+            }
+
+            if let Some(entry) = index.get_last_definition_mut(&target_fqn) {
                 // Only add mixins to class/module entries, not constants or other entries
                 if !matches!(entry.kind, EntryKind::Class(_) | EntryKind::Module(_)) {
                     return;

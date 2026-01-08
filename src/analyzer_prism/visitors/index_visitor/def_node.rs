@@ -173,7 +173,7 @@ impl IndexVisitor {
                 .kind(EntryKind::new_method(
                     method.clone(),
                     params,
-                    owner_fqn,
+                    owner_fqn.clone(),
                     MethodVisibility::Public,
                     MethodOrigin::Direct,
                     None,
@@ -192,7 +192,17 @@ impl IndexVisitor {
         if let Some(expected_type) = &return_type {
             let return_values = {
                 let mut index = self.index.lock();
-                infer_return_values_for_node(&mut index, self.document.content.as_bytes(), node)
+                let file_contents_map = std::collections::HashMap::from([(
+                    &self.document.uri,
+                    self.document.content.as_bytes(),
+                )]);
+                infer_return_values_for_node(
+                    &mut index,
+                    self.document.content.as_bytes(),
+                    node,
+                    Some(owner_fqn.clone()),
+                    Some(&file_contents_map),
+                )
             };
 
             for (inferred_ty, start, end) in return_values {

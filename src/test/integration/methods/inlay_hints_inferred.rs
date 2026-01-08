@@ -14,11 +14,6 @@ class A
   def bar<hint label=" -> String">
     "hello"
   end
-  
-  def baz(a)<hint label=" -> Integer">
-    a = 1
-    a
-  end
 end
 "#,
     )

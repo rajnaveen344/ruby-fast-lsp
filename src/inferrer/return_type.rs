@@ -20,6 +20,7 @@ use crate::indexer::index::{FileId, RubyIndex};
 use crate::inferrer::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use ruby_prism::*;
@@ -88,7 +89,40 @@ pub fn infer_method_return_type(
     }
 
     let return_types: Vec<RubyType> = return_values.into_iter().map(|(ty, _, _)| ty).collect();
-    let union_type = RubyType::union(return_types);
+    let mut union_type = RubyType::union(return_types);
+
+    // If inference failed (Unknown) or returned NilClass (likely stub/empty body),
+    // fallback to declared return type from Index (YARD/RBS)
+    if union_type == RubyType::Unknown || union_type == RubyType::nil_class() {
+        if let Some(entries) = index.get(method_fqn) {
+            let mut declared_types = Vec::new();
+            for entry in entries {
+                if let EntryKind::Method(data) = &entry.kind {
+                    if let Some(rt) = &data.return_type {
+                        if *rt != RubyType::Unknown {
+                            declared_types.push(rt.clone());
+                        }
+                    }
+                }
+            }
+
+            if !declared_types.is_empty() {
+                let declared_union = RubyType::union(declared_types);
+                // If we inferred NilClass (stub) but have a declared type, prefer declared.
+                // If we inferred Unknown, definitely use declared.
+                if union_type == RubyType::Unknown {
+                    union_type = declared_union;
+                } else if union_type == RubyType::nil_class() {
+                    // Only override NilClass if declared is NOT NilClass (and not Unknown)
+                    if declared_union != RubyType::nil_class()
+                        && declared_union != RubyType::Unknown
+                    {
+                        union_type = declared_union;
+                    }
+                }
+            }
+        }
+    }
 
     update_index_cache(index, method_fqn, &union_type);
 
@@ -101,16 +135,18 @@ pub fn infer_return_values_for_node(
     index: &mut RubyIndex,
     source: &[u8],
     def_node: &DefNode,
+    owner_fqn: Option<FullyQualifiedName>,
+    file_contents: Option<&FileContentMap>,
 ) -> Vec<(RubyType, usize, usize)> {
     let mut stack = Vec::new();
-    // We don't know the owner FQN here, so we use empty.
-    let owner_fqn = FullyQualifiedName::Constant(vec![]);
+    // Use provided owner or empty default
+    let owner_fqn = owner_fqn.unwrap_or(FullyQualifiedName::Constant(vec![]));
     let mut ctx = InferenceContext {
         index,
         stack: &mut stack,
         source,
         owner_fqn,
-        file_contents: None,
+        file_contents,
     };
     infer_from_def_node(&mut ctx, def_node)
 }
@@ -121,8 +157,10 @@ pub fn infer_return_type_for_node(
     index: &mut RubyIndex,
     source: &[u8],
     def_node: &DefNode,
+    owner_fqn: Option<FullyQualifiedName>,
+    file_contents: Option<&FileContentMap>,
 ) -> Option<RubyType> {
-    let values = infer_return_values_for_node(index, source, def_node);
+    let values = infer_return_values_for_node(index, source, def_node, owner_fqn, file_contents);
     if values.is_empty() {
         None
     } else {
@@ -148,17 +186,31 @@ pub fn infer_method_call(
         return Some(ty);
     }
 
-    // 2. Fallback to source inference
-    let method_fqn = match receiver_type {
-        RubyType::ClassReference(fqn) | RubyType::Class(fqn) => FullyQualifiedName::method(
-            fqn.namespace_parts(),
-            RubyMethod::new(method_name, MethodKind::Instance).ok()?,
-        ),
+    // 2. Fallback to source inference with MRO lookup
+    let receiver_fqn = match receiver_type {
+        RubyType::ClassReference(fqn) | RubyType::Class(fqn) => fqn.clone(),
         // TODO: Handle other types
         _ => return None,
     };
 
-    infer_method_return_type(index, &method_fqn, None, file_contents)
+    let ruby_method = RubyMethod::new(method_name, MethodKind::Instance).ok()?;
+
+    // Search for method in the receiver's ancestor chain (MRO)
+    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn, false);
+
+    for ancestor in &ancestor_chain {
+        let method_fqn =
+            FullyQualifiedName::method(ancestor.namespace_parts(), ruby_method.clone());
+
+        // Check if method exists in index before inferring (optimization)
+        if index.get(&method_fqn).is_some() {
+            if let Some(ty) = infer_method_return_type(index, &method_fqn, None, file_contents) {
+                return Some(ty);
+            }
+        }
+    }
+
+    None
 }
 
 fn check_cache(
@@ -180,16 +232,28 @@ fn check_cache(
         }
     }
 
-    index.get(method_fqn)?.iter().find_map(|entry| {
-        if let EntryKind::Method(data) = &entry.kind {
-            if let Some(rt) = &data.return_type {
-                if *rt != RubyType::Unknown {
-                    return Some(rt.clone());
+    if let Some(entries) = index.get(method_fqn) {
+        let mut cached_types = Vec::new();
+        for entry in entries {
+            if let EntryKind::Method(data) = &entry.kind {
+                if let Some(rt) = &data.return_type {
+                    if *rt != RubyType::Unknown {
+                        cached_types.push(rt.clone());
+                    }
                 }
             }
         }
-        None
-    })
+
+        if !cached_types.is_empty() {
+            // If we have multiple entries, we want the union of all of them.
+            // However, we only want to return if we have a type for *all* definitions?
+            // Or just union what we have?
+            // If we have partial info (some unknown), we might want to re-infer?
+            // For now, unioning what we have is better than just taking the first one.
+            return Some(RubyType::union(cached_types));
+        }
+    }
+    None
 }
 
 fn get_method_locations(index: &RubyIndex, method_fqn: &FullyQualifiedName) -> Vec<(FileId, u32)> {
@@ -325,22 +389,81 @@ impl<'a> InferenceContext<'a> {
             return Some(RubyType::nil_class());
         }
 
+        // Handle return node (evaluate to the returned value's type)
+        if let Some(return_node) = node.as_return_node() {
+            if let Some(args) = return_node.arguments() {
+                let args_list: Vec<_> = args.arguments().iter().collect();
+                if args_list.is_empty() {
+                    return Some(RubyType::nil_class());
+                } else if args_list.len() == 1 {
+                    return self.infer_expression(&args_list[0], state);
+                } else {
+                    // Multiple return values -> Array
+                    let mut elem_types = Vec::new();
+                    for arg in args_list {
+                        if let Some(ty) = self.infer_expression(&arg, state) {
+                            elem_types.push(ty);
+                        } else {
+                            elem_types.push(RubyType::Unknown);
+                        }
+                    }
+                    return Some(RubyType::Array(elem_types));
+                }
+            }
+            return Some(RubyType::nil_class());
+        }
+
         None
     }
 
     fn infer_call(&mut self, call: &CallNode, state: Option<&TypeState>) -> Option<RubyType> {
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
-        let ruby_method = RubyMethod::new(&method_name, MethodKind::Instance).ok()?;
 
-        // 1. Determine receiver type
-        let receiver_type = if let Some(receiver) = call.receiver() {
-            self.infer_expression(&receiver, state)
+        // 1. Determine receiver type and whether this is a class method call
+        let (recv_type, is_class_method) = if let Some(receiver) = call.receiver() {
+            // Check if receiver is a constant (class method call like Helper.get_name)
+            if let Some(const_read) = receiver.as_constant_read_node() {
+                let class_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+                let fqn = FullyQualifiedName::try_from(class_name.as_str()).ok()?;
+                (RubyType::ClassReference(fqn), true)
+            } else if let Some(const_path) = receiver.as_constant_path_node() {
+                // Handle namespaced constants like MyApp::Helper.get_name
+                use crate::analyzer_prism::utils;
+                let mut parts = Vec::new();
+                utils::collect_namespaces(&const_path, &mut parts);
+                if parts.is_empty() {
+                    return Some(RubyType::Unknown);
+                }
+                let fqn_str = parts
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::");
+                let fqn = FullyQualifiedName::try_from(fqn_str.as_str()).ok()?;
+                (RubyType::ClassReference(fqn), true)
+            } else {
+                // Instance method call - infer receiver type
+                (self.infer_expression(&receiver, state)?, false)
+            }
         } else {
-            // Implicit self
-            Some(RubyType::ClassReference(self.owner_fqn.clone()))
+            // Implicit self (instance method)
+            (RubyType::ClassReference(self.owner_fqn.clone()), false)
         };
 
-        let recv_type = receiver_type?;
+        // Special handling for .new
+        if method_name == "new" {
+            if let RubyType::ClassReference(fqn) = &recv_type {
+                return Some(RubyType::Class(fqn.clone()));
+            }
+        }
+
+        // Create appropriate method kind
+        let method_kind = if is_class_method {
+            MethodKind::Class
+        } else {
+            MethodKind::Instance
+        };
+        let ruby_method = RubyMethod::new(&method_name, method_kind).ok()?;
 
         // 2. Get the receiver's FQN for MRO lookup
         let receiver_fqn = match &recv_type {
@@ -374,8 +497,38 @@ impl<'a> InferenceContext<'a> {
             return Some(ty);
         }
 
-        // 5. Method not found - return Unknown
+        // 5. Fallback to RBS for built-in methods (String, Integer, Array, etc.)
+        let receiver_class_name = Self::get_class_name_for_rbs(&recv_type);
+        if let Some(class_name) = receiver_class_name {
+            let is_singleton = matches!(
+                recv_type,
+                RubyType::ClassReference(_) | RubyType::ModuleReference(_)
+            );
+            if let Some(rbs_type) =
+                get_rbs_method_return_type_as_ruby_type(&class_name, &method_name, is_singleton)
+            {
+                return Some(rbs_type);
+            }
+        }
+
+        // 6. Method not found - return Unknown
         Some(RubyType::Unknown)
+    }
+
+    /// Get class name from RubyType for RBS lookup
+    fn get_class_name_for_rbs(ruby_type: &RubyType) -> Option<String> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+                if let FullyQualifiedName::Constant(parts) = fqn {
+                    parts.last().map(|c| c.to_string())
+                } else {
+                    None
+                }
+            }
+            RubyType::Array(_) => Some("Array".to_string()),
+            RubyType::Hash(_, _) => Some("Hash".to_string()),
+            _ => None,
+        }
     }
 
     /// Search for a method by looking at classes that include the current module.
@@ -564,10 +717,9 @@ fn infer_from_def_node(
     let literal_analyzer = LiteralAnalyzer::new();
 
     // Try fast path first (simple literals, no CFG needed)
-    if let Some(ty) = try_simple_inference_static(&literal_analyzer, def_node) {
-        // Find location for simple inference (whole method)
-        let loc = def_node.location();
-        return vec![(ty, loc.start_offset(), loc.end_offset())];
+    if let Some(result) = try_simple_inference_static(&literal_analyzer, def_node) {
+        let (ty, start, end) = result;
+        return vec![(ty, start, end)];
     }
 
     // Fall back to CFG-based inference
@@ -576,8 +728,21 @@ fn infer_from_def_node(
 
     let mut analyzer = DataflowAnalyzer::new(&cfg);
     let initial_state = TypeState::from_parameters(&cfg.parameters);
-    analyzer.analyze(initial_state);
-    let _results = analyzer.into_results();
+
+    // Use a resolver to handle assignments from method calls or other expressions
+    analyzer.analyze(initial_state, |_, start, end, state| {
+        // We need to find the node corresponding to this assignment to infer its value type
+        if let Some(body) = def_node.body() {
+            // Find the node that exactly matches the assignment range
+            if let Some(value_node) = find_write_value_at_range(&body, start, end) {
+                // Infer the type of the value expression
+                return ctx.infer_expression(&value_node, Some(state));
+            }
+        }
+        None
+    });
+
+    let results = analyzer.into_results();
 
     // Collect return types from exit blocks
     let mut return_values = Vec::new();
@@ -586,17 +751,29 @@ fn infer_from_def_node(
         if let Some(block) = cfg.blocks.get(exit_id) {
             for stmt in &block.statements {
                 if let StatementKind::Return { value_type } = &stmt.kind {
-                    let ty = value_type.clone();
+                    let mut ty = value_type.clone();
 
                     // If CFG didn't infer type (e.g. method call), try to re-infer using context
                     if ty.is_none() || ty == Some(RubyType::Unknown) {
-                        // Ideally we'd find the return node and re-infer.
-                        // For now we just use what we have.
+                        if let Some(body) = def_node.body() {
+                            // Try to find state at this return statement
+                            let state = results.get_state_at_offset(*exit_id, stmt.start_offset);
+
+                            if let Some(inferred) = infer_return_value_at_range(
+                                &body,
+                                stmt.start_offset,
+                                stmt.end_offset,
+                                ctx,
+                                state.as_ref(),
+                            ) {
+                                ty = Some(inferred);
+                            }
+                        }
                     }
 
-                    if let Some(t) = ty {
-                        return_values.push((t, stmt.start_offset, stmt.end_offset));
-                    }
+                    // If type is None (inference failed), treat as Unknown
+                    let t = ty.unwrap_or(RubyType::Unknown);
+                    return_values.push((t, stmt.start_offset, stmt.end_offset));
                 }
             }
         }
@@ -625,12 +802,33 @@ fn infer_from_def_node(
             };
 
             if let Some(node) = last_node {
-                // Get exit state from CFG if possible
-                if let Some(ty) = ctx.infer_expression(&node, None) {
-                    let start = node.location().start_offset();
-                    let end = node.location().end_offset();
-                    return_values.push((ty, start, end));
+                // Find the type state available at this node
+                let start_offset = node.location().start_offset();
+                let mut best_state: Option<TypeState> = None;
+
+                // 1. Try to find the block containing this node
+                if let Some(block_id) = cfg.find_block_at_offset(start_offset) {
+                    // 2. Get the state at the specific offset within that block
+                    if let Some(state) = results.get_state_at_offset(block_id, start_offset) {
+                        best_state = Some(state);
+                    }
                 }
+
+                // Fallback: Check initial parameters state if no block state found
+                if best_state.is_none() {
+                    if let Some(entry_state) = results.get_entry_state(cfg.entry) {
+                        best_state = Some(entry_state.clone());
+                    }
+                }
+
+                // Get exit state from CFG if possible
+                // If inference fails, treat as Unknown
+                let ty = ctx
+                    .infer_expression(&node, best_state.as_ref())
+                    .unwrap_or(RubyType::Unknown);
+                let start = node.location().start_offset();
+                let end = node.location().end_offset();
+                return_values.push((ty, start, end));
             }
         }
     } else {
@@ -644,32 +842,393 @@ fn infer_from_def_node(
 }
 
 /// Fast path inference for simple methods (static version).
-fn try_simple_inference_static(analyzer: &LiteralAnalyzer, method: &DefNode) -> Option<RubyType> {
+fn try_simple_inference_static(
+    analyzer: &LiteralAnalyzer,
+    method: &DefNode,
+) -> Option<(RubyType, usize, usize)> {
     let body = method.body()?;
 
     if let Some(stmts) = body.as_statements_node() {
         let stmt_list: Vec<_> = stmts.body().iter().collect();
 
         if stmt_list.is_empty() {
-            return Some(RubyType::nil_class());
+            let loc = method.name_loc();
+            return Some((RubyType::nil_class(), loc.start_offset(), loc.end_offset()));
         }
 
         let last = stmt_list.last()?;
 
         if let Some(ret) = last.as_return_node() {
+            let loc = ret.location();
+
             if let Some(args) = ret.arguments() {
                 let args_list: Vec<_> = args.arguments().iter().collect();
                 if args_list.len() == 1 {
-                    return analyzer.analyze_literal(&args_list[0]);
+                    if let Some(ty) = analyzer.analyze_literal(&args_list[0]) {
+                        return Some((ty, loc.start_offset(), loc.end_offset()));
+                    } else {
+                        // Cannot analyze as literal, fallback to full inference
+                        return None;
+                    }
+                }
+            }
+            // No arguments -> return nil
+            return Some((RubyType::nil_class(), loc.start_offset(), loc.end_offset()));
+        }
+
+        if let Some(ty) = analyzer.analyze_literal(last) {
+            let loc = last.location();
+            return Some((ty, loc.start_offset(), loc.end_offset()));
+        }
+        return None;
+    }
+
+    if let Some(ty) = analyzer.analyze_literal(&body) {
+        let loc = body.location();
+        return Some((ty, loc.start_offset(), loc.end_offset()));
+    }
+    None
+}
+
+/// Find a return node at the given range and infer its value type
+fn infer_return_value_at_range(
+    node: &Node,
+    start: usize,
+    end: usize,
+    ctx: &mut InferenceContext,
+    state: Option<&TypeState>,
+) -> Option<RubyType> {
+    let loc = node.location();
+    if loc.start_offset() > start || loc.end_offset() < end {
+        return None;
+    }
+
+    if let Some(ret) = node.as_return_node() {
+        if loc.start_offset() == start && loc.end_offset() == end {
+            if let Some(args) = ret.arguments() {
+                let args_list: Vec<_> = args.arguments().iter().collect();
+                if args_list.len() == 1 {
+                    return ctx.infer_expression(&args_list[0], state);
+                } else if args_list.len() > 1 {
+                    // Multiple return values -> Array
+                    let mut elem_types = Vec::new();
+                    for arg in args_list {
+                        if let Some(ty) = ctx.infer_expression(&arg, state) {
+                            elem_types.push(ty);
+                        } else {
+                            elem_types.push(RubyType::Unknown);
+                        }
+                    }
+                    return Some(RubyType::Array(elem_types));
                 }
             }
             return Some(RubyType::nil_class());
         }
-
-        return analyzer.analyze_literal(last);
     }
 
-    analyzer.analyze_literal(&body)
+    // Recurse into children
+    if let Some(stmts) = node.as_statements_node() {
+        for stmt in stmts.body().iter() {
+            if let Some(ty) = infer_return_value_at_range(&stmt, start, end, ctx, state) {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(if_node) = node.as_if_node() {
+        if let Some(stmts) = if_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+        if let Some(sub) = if_node.subsequent() {
+            if let Some(ty) = infer_return_value_at_range(&sub, start, end, ctx, state) {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(unless_node) = node.as_unless_node() {
+        if let Some(stmts) = unless_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+        if let Some(else_clause) = unless_node.else_clause() {
+            if let Some(stmts) = else_clause.statements() {
+                if let Some(ty) =
+                    infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+                {
+                    return Some(ty);
+                }
+            }
+        }
+    }
+
+    if let Some(else_node) = node.as_else_node() {
+        if let Some(stmts) = else_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(begin_node) = node.as_begin_node() {
+        if let Some(stmts) = begin_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+        if let Some(rescue) = begin_node.rescue_clause() {
+            if let Some(ty) = infer_return_value_at_range(&rescue.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+        if let Some(ensure) = begin_node.ensure_clause() {
+            if let Some(stmts) = ensure.statements() {
+                if let Some(ty) =
+                    infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+                {
+                    return Some(ty);
+                }
+            }
+        }
+    }
+
+    if let Some(rescue_node) = node.as_rescue_node() {
+        if let Some(stmts) = rescue_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+        if let Some(sub) = rescue_node.subsequent() {
+            if let Some(ty) = infer_return_value_at_range(&sub.as_node(), start, end, ctx, state) {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(case_node) = node.as_case_node() {
+        for condition in case_node.conditions().iter() {
+            if let Some(when_node) = condition.as_when_node() {
+                if let Some(stmts) = when_node.statements() {
+                    if let Some(ty) =
+                        infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+                    {
+                        return Some(ty);
+                    }
+                }
+            }
+        }
+        if let Some(else_clause) = case_node.else_clause() {
+            if let Some(stmts) = else_clause.statements() {
+                if let Some(ty) =
+                    infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+                {
+                    return Some(ty);
+                }
+            }
+        }
+    }
+
+    if let Some(while_node) = node.as_while_node() {
+        if let Some(stmts) = while_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(until_node) = node.as_until_node() {
+        if let Some(stmts) = until_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+    }
+
+    if let Some(for_node) = node.as_for_node() {
+        if let Some(stmts) = for_node.statements() {
+            if let Some(ty) = infer_return_value_at_range(&stmts.as_node(), start, end, ctx, state)
+            {
+                return Some(ty);
+            }
+        }
+    }
+
+    None
+}
+
+/// Find a write node's value that exactly matches the given range within a root node
+fn find_write_value_at_range<'a>(node: &Node<'a>, start: usize, end: usize) -> Option<Node<'a>> {
+    let loc = node.location();
+    // Optimization: if root range doesn't cover target range, skip
+    if loc.start_offset() > start || loc.end_offset() < end {
+        return None;
+    }
+
+    // Check if root itself matches
+    if loc.start_offset() == start && loc.end_offset() == end {
+        return extract_write_value(node);
+    }
+
+    // Recurse into children based on node type
+    if let Some(stmts) = node.as_statements_node() {
+        for stmt in stmts.body().iter() {
+            if let Some(found) = find_write_value_at_range(&stmt, start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(if_node) = node.as_if_node() {
+        if let Some(stmts) = if_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        if let Some(sub) = if_node.subsequent() {
+            if let Some(found) = find_write_value_at_range(&sub, start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(unless_node) = node.as_unless_node() {
+        if let Some(stmts) = unless_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        if let Some(else_clause) = unless_node.else_clause() {
+            if let Some(stmts) = else_clause.statements() {
+                if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                    return Some(found);
+                }
+            }
+        }
+        return None;
+    }
+
+    if let Some(else_node) = node.as_else_node() {
+        if let Some(stmts) = else_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(begin_node) = node.as_begin_node() {
+        if let Some(stmts) = begin_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        if let Some(rescue) = begin_node.rescue_clause() {
+            if let Some(found) = find_write_value_at_range(&rescue.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        if let Some(ensure) = begin_node.ensure_clause() {
+            if let Some(stmts) = ensure.statements() {
+                if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                    return Some(found);
+                }
+            }
+        }
+        return None;
+    }
+
+    if let Some(rescue_node) = node.as_rescue_node() {
+        if let Some(stmts) = rescue_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        if let Some(sub) = rescue_node.subsequent() {
+            if let Some(found) = find_write_value_at_range(&sub.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(case_node) = node.as_case_node() {
+        for condition in case_node.conditions().iter() {
+            if let Some(when_node) = condition.as_when_node() {
+                if let Some(stmts) = when_node.statements() {
+                    if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+        if let Some(else_clause) = case_node.else_clause() {
+            if let Some(stmts) = else_clause.statements() {
+                if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                    return Some(found);
+                }
+            }
+        }
+        return None;
+    }
+
+    if let Some(while_node) = node.as_while_node() {
+        if let Some(stmts) = while_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(until_node) = node.as_until_node() {
+        if let Some(stmts) = until_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    if let Some(for_node) = node.as_for_node() {
+        if let Some(stmts) = for_node.statements() {
+            if let Some(found) = find_write_value_at_range(&stmts.as_node(), start, end) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+
+    None
+}
+
+/// Extract the value expression from a write/assignment node
+fn extract_write_value<'a>(node: &Node<'a>) -> Option<Node<'a>> {
+    if let Some(write) = node.as_local_variable_write_node() {
+        return Some(write.value());
+    }
+    if let Some(write) = node.as_instance_variable_write_node() {
+        return Some(write.value());
+    }
+    if let Some(write) = node.as_class_variable_write_node() {
+        return Some(write.value());
+    }
+    if let Some(write) = node.as_global_variable_write_node() {
+        return Some(write.value());
+    }
+    None
 }
 
 /// Find a DefNode at the given line in the AST.
@@ -761,7 +1320,13 @@ mod tests {
             let statements = program.statements();
             for stmt in statements.body().iter() {
                 if let Some(def_node) = stmt.as_def_node() {
-                    return infer_return_type_for_node(&mut index, source.as_bytes(), &def_node);
+                    return infer_return_type_for_node(
+                        &mut index,
+                        source.as_bytes(),
+                        &def_node,
+                        None,
+                        None,
+                    );
                 }
             }
         }
@@ -1059,8 +1624,13 @@ end
             for stmt in program.statements().body().iter() {
                 if let Some(def_node) = stmt.as_def_node() {
                     let mut index = crate::indexer::index::RubyIndex::new();
-                    let result =
-                        infer_return_type_for_node(&mut index, source.as_bytes(), &def_node);
+                    let result = infer_return_type_for_node(
+                        &mut index,
+                        source.as_bytes(),
+                        &def_node,
+                        None,
+                        None,
+                    );
                     assert_eq!(result, Some(RubyType::string()));
                     return;
                 }

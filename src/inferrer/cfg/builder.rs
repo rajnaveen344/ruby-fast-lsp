@@ -8,7 +8,7 @@ use ruby_prism::*;
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 
-use super::graph::{BlockId, BlockLocation, CfgEdge, ControlFlowGraph, Statement, StatementKind};
+use super::graph::{BlockId, CfgEdge, ControlFlowGraph, Statement, StatementKind};
 use super::guards::TypeGuard;
 
 /// Builds a Control Flow Graph from Ruby AST
@@ -35,12 +35,6 @@ impl<'a> CfgBuilder<'a> {
         let entry = self.cfg.create_block();
         self.cfg.entry = entry;
         self.current_block = Some(entry);
-
-        // Set entry block location
-        let location = self.node_location(method);
-        if let Some(block) = self.cfg.get_block_mut(entry) {
-            block.location = location;
-        }
 
         // Extract parameters
         if let Some(params) = method.parameters() {
@@ -81,12 +75,6 @@ impl<'a> CfgBuilder<'a> {
         self.cfg.entry = entry;
         self.current_block = Some(entry);
 
-        // Set entry block location from statements (offset-only for performance)
-        let loc = statements.location();
-        if let Some(block) = self.cfg.get_block_mut(entry) {
-            block.location = BlockLocation::from_offsets(loc.start_offset(), loc.end_offset());
-        }
-
         // Process each statement
         for stmt in statements.body().iter() {
             self.process_node(&stmt);
@@ -97,12 +85,6 @@ impl<'a> CfgBuilder<'a> {
         }
 
         self.cfg
-    }
-
-    /// Get node location as BlockLocation (offset-only, no line/col computation)
-    fn node_location(&self, node: &DefNode) -> BlockLocation {
-        let loc = node.location();
-        BlockLocation::from_offsets(loc.start_offset(), loc.end_offset())
     }
 
     /// Process method parameters
@@ -187,6 +169,16 @@ impl<'a> CfgBuilder<'a> {
     fn add_statement(&mut self, stmt: Statement) {
         if let Some(block_id) = self.current_block {
             if let Some(block) = self.cfg.get_block_mut(block_id) {
+                // Update block location
+                if block.location.start_offset == 0 && block.location.end_offset == 0 {
+                    block.location.start_offset = stmt.start_offset;
+                    block.location.end_offset = stmt.end_offset;
+                } else {
+                    block.location.start_offset =
+                        block.location.start_offset.min(stmt.start_offset);
+                    block.location.end_offset = block.location.end_offset.max(stmt.end_offset);
+                }
+
                 block.statements.push(stmt);
             }
         }
@@ -665,10 +657,19 @@ impl<'a> CfgBuilder<'a> {
 
     /// Process return statement
     fn process_return(&mut self, return_node: &ReturnNode) {
-        let value_type = return_node
-            .arguments()
-            .and_then(|args| args.arguments().iter().next())
-            .and_then(|arg| self.literal_analyzer.analyze_literal(&arg));
+        let value_type = if let Some(args) = return_node.arguments() {
+            let args_list: Vec<_> = args.arguments().iter().collect();
+            if args_list.is_empty() {
+                Some(RubyType::nil_class())
+            } else if args_list.len() == 1 {
+                self.literal_analyzer.analyze_literal(&args_list[0])
+            } else {
+                // Multiple return values -> Array
+                Some(RubyType::Array(vec![RubyType::Unknown]))
+            }
+        } else {
+            Some(RubyType::nil_class())
+        };
 
         let loc = return_node.location();
         self.add_statement(Statement::return_stmt(

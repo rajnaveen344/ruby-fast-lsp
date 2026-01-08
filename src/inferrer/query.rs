@@ -7,7 +7,7 @@
 //! directly interacting with the inferrer or index.
 
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index::EntryId;
+use crate::indexer::index::{EntryId, RubyIndex};
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::ruby::RubyType;
@@ -300,6 +300,8 @@ impl<'a> TypeQuery<'a> {
             &mut index,
             self.content,
             &def_node,
+            None,
+            None,
         )
     }
 
@@ -461,7 +463,7 @@ fn find_def_node_recursive<'a>(
 pub fn infer_type_from_assignment(
     content: &str,
     var_name: &str,
-    index: &crate::indexer::index::RubyIndex,
+    index: &RubyIndex,
 ) -> Option<RubyType> {
     // Look for assignment pattern: `var_name = ...`
     for line in content.lines() {
