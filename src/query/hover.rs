@@ -183,4 +183,42 @@ impl IndexQuery<'_> {
             })
             .unwrap_or(false)
     }
+
+    /// Get hover info for a method call.
+    pub fn get_call_node_hover_info(
+        &self,
+        receiver: &crate::analyzer_prism::MethodReceiver,
+        method_name: &str,
+        ancestors: &[RubyConstant],
+        _type_narrowing: Option<&crate::inferrer::TypeNarrowingEngine>,
+        _uri: &Url,
+        _position: tower_lsp::lsp_types::Position,
+        _content: &str,
+    ) -> Option<HoverInfo> {
+        use crate::analyzer_prism::MethodReceiver;
+
+        match receiver {
+            MethodReceiver::Constant(_path) => {
+                // Future TODO: Implement class method hover lookup
+                None
+            }
+            MethodReceiver::None | MethodReceiver::SelfReceiver => {
+                // Implicit receiver: use our new helper
+                self.get_method_info_for_implicit_receiver(method_name, ancestors)
+                    .map(|info| {
+                        let content = if let Some(doc) = &info.documentation {
+                            format!("**{}**\n\n{}", info.fqn, doc)
+                        } else {
+                            format!("**{}**", info.fqn)
+                        };
+                        let ty = info.return_type.unwrap_or(RubyType::Unknown);
+                        HoverInfo::with_type(content, ty)
+                    })
+            }
+            _ => {
+                // Future TODO: Implement resolved type receiver hover
+                None
+            }
+        }
+    }
 }

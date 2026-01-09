@@ -31,62 +31,6 @@ impl IndexQuery<'_> {
         self.find_references_for_identifier(&identifier, &ancestors)
     }
 
-    /// Find references for a given identifier.
-    fn find_references_for_identifier(
-        &self,
-        identifier: &Identifier,
-        ancestors: &[RubyConstant],
-    ) -> Option<Vec<Location>> {
-        match identifier {
-            Identifier::RubyConstant { namespace: _, iden } => {
-                let mut combined_ns = ancestors.to_vec();
-                combined_ns.extend(iden.clone());
-                let fqn = FullyQualifiedName::namespace(combined_ns);
-                self.find_constant_references(&fqn)
-            }
-            Identifier::RubyMethod {
-                namespace: _,
-                receiver,
-                iden,
-            } => self.find_method_references(receiver, iden, ancestors),
-            Identifier::RubyInstanceVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyClassVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyGlobalVariable { name, .. } => {
-                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
-                    self.find_variable_references(&fqn)
-                } else {
-                    None
-                }
-            }
-            Identifier::RubyLocalVariable { name, scope, .. } => {
-                if let Some(doc) = self.doc {
-                    self.find_local_variable_references(name, *scope, doc)
-                } else {
-                    None
-                }
-            }
-            Identifier::YardType { type_name, .. } => {
-                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
-                    self.find_constant_references(&fqn)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
     /// Find references to a constant by FQN.
     pub fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
         let entries = self.index.references(fqn);
@@ -141,6 +85,100 @@ impl IndexQuery<'_> {
             None
         } else {
             Some(all_references)
+        }
+    }
+
+    /// Find references to a local variable using document.lvars (file-local storage).
+    pub fn find_local_variable_references(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        document: &RubyDocument,
+    ) -> Option<Vec<Location>> {
+        let mut all_locations = Vec::new();
+
+        // Get the definition location for this scope
+        if let Some(entries) = document.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name {
+                        all_locations.push(Location {
+                            uri: document.uri.clone(),
+                            range: entry.location.range,
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Get all references to this local variable (scoped)
+        let refs = document.get_lvar_references(name, &[scope_id]);
+        all_locations.extend(refs);
+
+        if all_locations.is_empty() {
+            None
+        } else {
+            Some(all_locations)
+        }
+    }
+}
+
+// Private helpers
+impl IndexQuery<'_> {
+    /// Find references for a given identifier.
+    fn find_references_for_identifier(
+        &self,
+        identifier: &Identifier,
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        match identifier {
+            Identifier::RubyConstant { namespace: _, iden } => {
+                let mut combined_ns = ancestors.to_vec();
+                combined_ns.extend(iden.clone());
+                let fqn = FullyQualifiedName::namespace(combined_ns);
+                self.find_constant_references(&fqn)
+            }
+            Identifier::RubyMethod {
+                namespace: _,
+                receiver,
+                iden,
+            } => self.find_method_references(receiver, iden, ancestors),
+            Identifier::RubyInstanceVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyLocalVariable { name, scope, .. } => {
+                if let Some(doc) = self.doc {
+                    self.find_local_variable_references(name, *scope, doc)
+                } else {
+                    None
+                }
+            }
+            Identifier::YardType { type_name, .. } => {
+                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
+                    self.find_constant_references(&fqn)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -326,40 +364,6 @@ impl IndexQuery<'_> {
             None
         } else {
             Some(all_references)
-        }
-    }
-    /// Find references to a local variable using document.lvars (file-local storage).
-    pub fn find_local_variable_references(
-        &self,
-        name: &str,
-        scope_id: LVScopeId,
-        document: &RubyDocument,
-    ) -> Option<Vec<Location>> {
-        let mut all_locations = Vec::new();
-
-        // Get the definition location for this scope
-        if let Some(entries) = document.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    if &data.name == name {
-                        all_locations.push(Location {
-                            uri: document.uri.clone(),
-                            range: entry.location.range,
-                        });
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Get all references to this local variable (scoped)
-        let refs = document.get_lvar_references(name, &[scope_id]);
-        all_locations.extend(refs);
-
-        if all_locations.is_empty() {
-            None
-        } else {
-            Some(all_locations)
         }
     }
 }

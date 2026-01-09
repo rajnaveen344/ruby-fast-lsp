@@ -61,6 +61,81 @@ impl IndexQuery<'_> {
         )
     }
 
+    /// Find definitions for a local variable using document.lvars (file-local storage)
+    pub fn find_local_variable_definitions_at_position(
+        &self,
+        name: &str,
+        scope_id: crate::types::scope::LVScopeId,
+        document: &crate::types::ruby_document::RubyDocument,
+        position: Position,
+    ) -> Option<Vec<Location>> {
+        // Try exact scope ID match with position filter
+        if let Some(entries) = document.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    // Ensure we find the definition that is BEFORE the usage
+                    if &data.name == name && entry.location.range.start < position {
+                        let loc = Location {
+                            uri: document.uri.clone(),
+                            range: entry.location.range,
+                        };
+                        return Some(vec![loc]);
+                    }
+                }
+            }
+        }
+
+        // Fallback: search all scopes in the document for this variable name
+        if let Some(location) = document.find_local_var_by_name(name) {
+            if location.range.start < position {
+                return Some(vec![location]);
+            }
+        }
+
+        None
+    }
+
+    /// Find definitions for a global variable.
+    pub fn find_global_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
+        if let Ok(fqn) = FullyQualifiedName::global_variable(name.to_string()) {
+            return self.find_variable_definitions(&fqn);
+        }
+        None
+    }
+
+    /// Find definitions for a constant (class or module) by path.
+    pub fn find_constant_definitions_by_path(
+        &self,
+        constant_path: &[RubyConstant],
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        let fqn = self.resolve_constant_fqn(constant_path, ancestors);
+        info!("Resolved constant FQN: {}", fqn);
+
+        let entries = self.index.get(&fqn)?;
+
+        // Filter for definition entries (classes or modules)
+        let locations: Vec<Location> = entries
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_)
+                )
+            })
+            .filter_map(|e| self.index.to_lsp_location(&e.location))
+            .collect();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+}
+
+// Private helpers
+impl IndexQuery<'_> {
     /// Find definitions for a given identifier.
     fn find_definitions_for_identifier(
         &self,
@@ -108,89 +183,6 @@ impl IndexQuery<'_> {
             }
             Identifier::YardType { type_name, .. } => self.find_yard_type_definitions(type_name),
         }
-    }
-
-    /// Find definitions for a local variable using document.lvars (file-local storage)
-    pub fn find_local_variable_definitions_at_position(
-        &self,
-        name: &str,
-        scope_id: crate::types::scope::LVScopeId,
-        document: &crate::types::ruby_document::RubyDocument,
-        position: Position,
-    ) -> Option<Vec<Location>> {
-        // Try exact scope ID match with position filter
-        if let Some(entries) = document.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    // Ensure we find the definition that is BEFORE the usage
-                    if &data.name == name && entry.location.range.start < position {
-                        let loc = Location {
-                            uri: document.uri.clone(),
-                            range: entry.location.range,
-                        };
-                        return Some(vec![loc]);
-                    }
-                }
-            }
-        }
-
-        // Fallback: search all scopes in the document for this variable name
-        if let Some(location) = document.find_local_var_by_name(name) {
-            if location.range.start < position {
-                return Some(vec![location]);
-            }
-        }
-
-        None
-    }
-
-    /// Find constant definitions by path within ancestry scope.
-    ///
-    /// The `constant_path` is the path being referenced (e.g., `["Inner", "CONST_A"]` for `Inner::CONST_A`).
-    /// The `ancestors` is the current namespace context (e.g., `["Outer"]` when inside `module Outer`).
-    pub fn find_constant_definitions_by_path(
-        &self,
-        constant_path: &[RubyConstant],
-        ancestors: &[RubyConstant],
-    ) -> Option<Vec<Location>> {
-        // Try combining ancestors with the constant path
-        // Start with full scope: ancestors + constant_path
-        let mut search_parts = ancestors.to_vec();
-        search_parts.extend(constant_path.iter().cloned());
-
-        loop {
-            let fqn = FullyQualifiedName::Constant(search_parts.clone());
-            if let Some(entries) = self.index.get(&fqn) {
-                let locations: Vec<Location> = entries
-                    .iter()
-                    .filter_map(|e| self.index.to_lsp_location(&e.location))
-                    .collect();
-                if !locations.is_empty() {
-                    return Some(locations);
-                }
-            }
-
-            // Try without the first ancestor (scope resolution - walk up)
-            if search_parts.len() > constant_path.len() {
-                search_parts.remove(0);
-            } else {
-                break;
-            }
-        }
-
-        // Try just the constant path itself (absolute reference)
-        let fqn = FullyQualifiedName::Constant(constant_path.to_vec());
-        if let Some(entries) = self.index.get(&fqn) {
-            let locations: Vec<Location> = entries
-                .iter()
-                .filter_map(|e| self.index.to_lsp_location(&e.location))
-                .collect();
-            if !locations.is_empty() {
-                return Some(locations);
-            }
-        }
-
-        None
     }
 
     /// Find definitions for a YARD type reference string (e.g., "String", "Foo::Bar").
@@ -299,18 +291,44 @@ impl IndexQuery<'_> {
         None
     }
 
-    /// Find global variable definitions.
-    pub fn find_global_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
-        // Global variables are stored with just their name (e.g., "$foo")
-        if let Ok(fqn) = FullyQualifiedName::global_variable(name.to_string()) {
-            return self.index.get(&fqn).map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|e| self.index.to_lsp_location(&e.location))
-                    .collect()
-            });
+    /// Resolve constant FQN from path.
+    fn resolve_constant_fqn(
+        &self,
+        constant_path: &[RubyConstant],
+        ancestors: &[RubyConstant],
+    ) -> FullyQualifiedName {
+        let mut current_context = ancestors.to_vec();
+
+        // 1. Iteratively check scopes from most specific to least specific
+        loop {
+            let mut probe_ns = current_context.clone();
+            probe_ns.extend(constant_path.iter().cloned());
+            let probe_fqn = FullyQualifiedName::Constant(probe_ns);
+
+            // If found in index (and is a Class/Module/Constant?), return it
+            if self.index.get(&probe_fqn).is_some() {
+                return probe_fqn;
+            }
+
+            if current_context.is_empty() {
+                break;
+            }
+            current_context.pop();
         }
-        None
+
+        // 2. Default to just the path (absolute/toplevel)
+        // This acts as the final fallback if not found in any scope (or if defined at toplevel but not indexed yet?)
+        FullyQualifiedName::Constant(constant_path.to_vec())
+    }
+
+    /// Find variable definitions by FQN.
+    fn find_variable_definitions(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        self.index.get(fqn).map(|entries| {
+            entries
+                .iter()
+                .filter_map(|e| self.index.to_lsp_location(&e.location))
+                .collect()
+        })
     }
 
     /// Find definition by FQN directly.
