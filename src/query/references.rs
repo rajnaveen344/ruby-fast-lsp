@@ -1,0 +1,365 @@
+//! Reference Query - Find usages of symbols
+//!
+//! Consolidates reference logic from `capabilities/references.rs`.
+
+use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use crate::indexer::entry::{EntryKind, MethodKind};
+use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_document::RubyDocument;
+use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyConstant;
+use crate::types::scope::LVScopeId;
+use crate::yard::YardTypeConverter;
+use log::info;
+use tower_lsp::lsp_types::{Location, Position, Url};
+
+use super::IndexQuery;
+
+impl IndexQuery<'_> {
+    /// Find all references to the symbol at the given position.
+    pub fn find_references_at_position(
+        &self,
+        uri: &Url,
+        position: Position,
+        content: &str,
+    ) -> Option<Vec<Location>> {
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let (identifier_opt, _, ancestors, _scope_stack) = analyzer.get_identifier(position);
+
+        let identifier = identifier_opt?;
+
+        self.find_references_for_identifier(&identifier, &ancestors)
+    }
+
+    /// Find references for a given identifier.
+    fn find_references_for_identifier(
+        &self,
+        identifier: &Identifier,
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        match identifier {
+            Identifier::RubyConstant { namespace: _, iden } => {
+                let mut combined_ns = ancestors.to_vec();
+                combined_ns.extend(iden.clone());
+                let fqn = FullyQualifiedName::namespace(combined_ns);
+                self.find_constant_references(&fqn)
+            }
+            Identifier::RubyMethod {
+                namespace: _,
+                receiver,
+                iden,
+            } => self.find_method_references(receiver, iden, ancestors),
+            Identifier::RubyInstanceVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::class_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                if let Ok(fqn) = FullyQualifiedName::global_variable(name.clone()) {
+                    self.find_variable_references(&fqn)
+                } else {
+                    None
+                }
+            }
+            Identifier::RubyLocalVariable { name, scope, .. } => {
+                if let Some(doc) = self.doc {
+                    self.find_local_variable_references(name, *scope, doc)
+                } else {
+                    None
+                }
+            }
+            Identifier::YardType { type_name, .. } => {
+                if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
+                    self.find_constant_references(&fqn)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Find references to a constant by FQN.
+    pub fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        let entries = self.index.references(fqn);
+        if !entries.is_empty() {
+            info!("Found {} constant references to: {}", entries.len(), fqn);
+            return Some(entries);
+        }
+        None
+    }
+
+    /// Find references to a variable (instance, class, or global).
+    pub fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        let entries = self.index.references(fqn);
+        if !entries.is_empty() {
+            info!("Found {} variable references to: {}", entries.len(), fqn);
+            return Some(entries);
+        }
+        None
+    }
+
+    /// Find references to a method (mixin-aware).
+    pub fn find_method_references(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+
+        match receiver {
+            MethodReceiver::Constant(receiver_ns) => {
+                let receiver_fqn = self.resolve_receiver_fqn(receiver_ns, ancestors);
+                if let Some(refs) = self.find_method_refs_with_receiver(&receiver_fqn, method) {
+                    all_references.extend(refs);
+                }
+            }
+            MethodReceiver::None | MethodReceiver::SelfReceiver => {
+                let context_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+                if let Some(refs) = self.find_method_refs_without_receiver(&context_fqn, method) {
+                    all_references.extend(refs);
+                }
+            }
+            _ => {
+                // Variable/expression receiver - search by method name
+                if let Some(refs) = self.find_method_refs_by_name(method) {
+                    all_references.extend(refs);
+                }
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Resolve receiver FQN from namespace path.
+    fn resolve_receiver_fqn(
+        &self,
+        receiver_ns: &[RubyConstant],
+        ancestors: &[RubyConstant],
+    ) -> FullyQualifiedName {
+        if !receiver_ns.is_empty() && !ancestors.is_empty() {
+            let first_receiver_part = &receiver_ns[0];
+            if let Some(pos) = ancestors.iter().position(|c| c == first_receiver_part) {
+                let mut resolved_ns = ancestors[..=pos].to_vec();
+                resolved_ns.extend(receiver_ns[1..].iter().cloned());
+                return FullyQualifiedName::Constant(resolved_ns);
+            } else {
+                let mut full_ns = vec![ancestors[0].clone()];
+                full_ns.extend(receiver_ns.iter().cloned());
+                return FullyQualifiedName::Constant(full_ns);
+            }
+        }
+        let mut full_ns = ancestors.to_vec();
+        full_ns.extend(receiver_ns.iter().cloned());
+        FullyQualifiedName::Constant(full_ns)
+    }
+
+    /// Find method references with a receiver.
+    fn find_method_refs_with_receiver(
+        &self,
+        receiver_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+        let kinds_to_check = if method.get_kind() == MethodKind::Unknown {
+            vec![MethodKind::Instance, MethodKind::Class]
+        } else {
+            vec![method.get_kind()]
+        };
+
+        for kind in kinds_to_check {
+            if let Some(refs) = self.find_method_refs_in_ancestor_chain(receiver_fqn, method, kind)
+            {
+                all_references.extend(refs);
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Find method references without a receiver.
+    fn find_method_refs_without_receiver(
+        &self,
+        context_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+        let method_kind = method.get_kind();
+
+        if let Some(refs) =
+            self.find_method_refs_in_ancestor_chain(context_fqn, method, method_kind)
+        {
+            all_references.extend(refs);
+        }
+
+        // Also search in classes that include this module
+        if let Some(refs) =
+            self.find_method_refs_in_sibling_modules(context_fqn, method, method_kind)
+        {
+            all_references.extend(refs);
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Find method references in ancestor chain.
+    fn find_method_refs_in_ancestor_chain(
+        &self,
+        context_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        kind: MethodKind,
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+        let is_class_method = kind == MethodKind::Class;
+        let ancestor_chain = self.index.get_ancestor_chain(context_fqn, is_class_method);
+
+        for ancestor_fqn in ancestor_chain {
+            let method_fqn =
+                FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
+            let refs = self.index.references(&method_fqn);
+            if !refs.is_empty() {
+                all_references.extend(refs);
+            }
+
+            // Also check including classes
+            if let Some(refs) = self.find_method_refs_in_including_classes(&ancestor_fqn, method) {
+                all_references.extend(refs);
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Find method references in sibling modules.
+    fn find_method_refs_in_sibling_modules(
+        &self,
+        module_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        kind: MethodKind,
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+        let including_classes = self.index.get_including_classes(module_fqn);
+
+        for including_class_fqn in including_classes {
+            if let Some(refs) =
+                self.find_method_refs_in_ancestor_chain(&including_class_fqn, method, kind)
+            {
+                all_references.extend(refs);
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Find method references in classes including a module.
+    fn find_method_refs_in_including_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+        let including_classes = self.index.get_including_classes(module_fqn);
+
+        for including_class_fqn in including_classes {
+            let method_fqn =
+                FullyQualifiedName::method(including_class_fqn.namespace_parts(), method.clone());
+            let refs = self.index.references(&method_fqn);
+            if !refs.is_empty() {
+                all_references.extend(refs);
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+
+    /// Find method references by name (fallback for expression receivers).
+    fn find_method_refs_by_name(&self, method: &RubyMethod) -> Option<Vec<Location>> {
+        let mut all_references = Vec::new();
+
+        if let Some(entries) = self.index.get_methods_by_name(method) {
+            for entry in entries {
+                if let EntryKind::Method(_) = &entry.kind {
+                    if let Some(fqn) = self.index.get_fqn(entry.fqn_id) {
+                        let refs = self.index.references(fqn);
+                        if !refs.is_empty() {
+                            all_references.extend(refs);
+                        }
+                    }
+                }
+            }
+        }
+
+        if all_references.is_empty() {
+            None
+        } else {
+            Some(all_references)
+        }
+    }
+    /// Find references to a local variable using document.lvars (file-local storage).
+    pub fn find_local_variable_references(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        document: &RubyDocument,
+    ) -> Option<Vec<Location>> {
+        let mut all_locations = Vec::new();
+
+        // Get the definition location for this scope
+        if let Some(entries) = document.get_local_var_entries(scope_id) {
+            for entry in entries {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if &data.name == name {
+                        all_locations.push(Location {
+                            uri: document.uri.clone(),
+                            range: entry.location.range,
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Get all references to this local variable (scoped)
+        let refs = document.get_lvar_references(name, &[scope_id]);
+        all_locations.extend(refs);
+
+        if all_locations.is_empty() {
+            None
+        } else {
+            Some(all_locations)
+        }
+    }
+}
