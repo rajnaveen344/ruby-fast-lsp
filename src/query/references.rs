@@ -5,7 +5,6 @@
 use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use crate::indexer::entry::{EntryKind, MethodKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
@@ -15,7 +14,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::IndexQuery;
 
-impl IndexQuery<'_> {
+impl IndexQuery {
     /// Find all references to the symbol at the given position.
     pub fn find_references_at_position(
         &self,
@@ -33,7 +32,8 @@ impl IndexQuery<'_> {
 
     /// Find references to a constant by FQN.
     fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        let entries = self.index.references(fqn);
+        let index = self.index.lock();
+        let entries = index.references(fqn);
         if !entries.is_empty() {
             info!("Found {} constant references to: {}", entries.len(), fqn);
             return Some(entries);
@@ -43,7 +43,8 @@ impl IndexQuery<'_> {
 
     /// Find references to a variable (instance, class, or global).
     fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        let entries = self.index.references(fqn);
+        let index = self.index.lock();
+        let entries = index.references(fqn);
         if !entries.is_empty() {
             info!("Found {} variable references to: {}", entries.len(), fqn);
             return Some(entries);
@@ -93,8 +94,9 @@ impl IndexQuery<'_> {
         &self,
         name: &str,
         scope_id: LVScopeId,
-        document: &RubyDocument,
     ) -> Option<Vec<Location>> {
+        let doc_arc = self.doc.as_ref()?;
+        let document = doc_arc.read();
         let mut all_locations = Vec::new();
 
         // Get the definition location for this scope
@@ -125,7 +127,7 @@ impl IndexQuery<'_> {
 }
 
 // Private helpers
-impl IndexQuery<'_> {
+impl IndexQuery {
     /// Find references for a given identifier.
     fn find_references_for_identifier(
         &self,
@@ -166,11 +168,7 @@ impl IndexQuery<'_> {
                 }
             }
             Identifier::RubyLocalVariable { name, scope, .. } => {
-                if let Some(doc) = self.doc {
-                    self.find_local_variable_references(name, *scope, doc)
-                } else {
-                    None
-                }
+                self.find_local_variable_references(name, *scope)
             }
             Identifier::YardType { type_name, .. } => {
                 if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {
@@ -268,21 +266,30 @@ impl IndexQuery<'_> {
         method: &RubyMethod,
         kind: MethodKind,
     ) -> Option<Vec<Location>> {
+        let index = self.index.lock();
         let mut all_references = Vec::new();
         let is_class_method = kind == MethodKind::Class;
-        let ancestor_chain = self.index.get_ancestor_chain(context_fqn, is_class_method);
+        let ancestor_chain = index.get_ancestor_chain(context_fqn, is_class_method);
 
         for ancestor_fqn in ancestor_chain {
             let method_fqn =
                 FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
-            let refs = self.index.references(&method_fqn);
+            let refs = index.references(&method_fqn);
             if !refs.is_empty() {
                 all_references.extend(refs);
             }
 
             // Also check including classes
-            if let Some(refs) = self.find_method_refs_in_including_classes(&ancestor_fqn, method) {
-                all_references.extend(refs);
+            let including_classes = index.get_including_classes(&ancestor_fqn);
+            for including_class_fqn in including_classes {
+                let inc_method_fqn = FullyQualifiedName::method(
+                    including_class_fqn.namespace_parts(),
+                    method.clone(),
+                );
+                let inc_refs = index.references(&inc_method_fqn);
+                if !inc_refs.is_empty() {
+                    all_references.extend(inc_refs);
+                }
             }
         }
 
@@ -300,39 +307,20 @@ impl IndexQuery<'_> {
         method: &RubyMethod,
         kind: MethodKind,
     ) -> Option<Vec<Location>> {
+        let index = self.index.lock();
         let mut all_references = Vec::new();
-        let including_classes = self.index.get_including_classes(module_fqn);
+        let including_classes = index.get_including_classes(module_fqn);
+        let is_class_method = kind == MethodKind::Class;
 
         for including_class_fqn in including_classes {
-            if let Some(refs) =
-                self.find_method_refs_in_ancestor_chain(&including_class_fqn, method, kind)
-            {
-                all_references.extend(refs);
-            }
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
-    }
-
-    /// Find method references in classes including a module.
-    fn find_method_refs_in_including_classes(
-        &self,
-        module_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        let mut all_references = Vec::new();
-        let including_classes = self.index.get_including_classes(module_fqn);
-
-        for including_class_fqn in including_classes {
-            let method_fqn =
-                FullyQualifiedName::method(including_class_fqn.namespace_parts(), method.clone());
-            let refs = self.index.references(&method_fqn);
-            if !refs.is_empty() {
-                all_references.extend(refs);
+            let ancestor_chain = index.get_ancestor_chain(&including_class_fqn, is_class_method);
+            for ancestor_fqn in ancestor_chain {
+                let method_fqn =
+                    FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
+                let refs = index.references(&method_fqn);
+                if !refs.is_empty() {
+                    all_references.extend(refs);
+                }
             }
         }
 
@@ -345,13 +333,14 @@ impl IndexQuery<'_> {
 
     /// Find method references by name (fallback for expression receivers).
     fn find_method_refs_by_name(&self, method: &RubyMethod) -> Option<Vec<Location>> {
+        let index = self.index.lock();
         let mut all_references = Vec::new();
 
-        if let Some(entries) = self.index.get_methods_by_name(method) {
+        if let Some(entries) = index.get_methods_by_name(method) {
             for entry in entries {
                 if let EntryKind::Method(_) = &entry.kind {
-                    if let Some(fqn) = self.index.get_fqn(entry.fqn_id) {
-                        let refs = self.index.references(fqn);
+                    if let Some(fqn) = index.get_fqn(entry.fqn_id) {
+                        let refs = index.references(fqn);
                         if !refs.is_empty() {
                             all_references.extend(refs);
                         }

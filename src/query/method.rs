@@ -7,7 +7,8 @@ use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
-// use crate::indexer::index::RubyIndex;
+use crate::indexer::index::RubyIndex;
+use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -33,7 +34,7 @@ pub struct MethodInfo {
     pub documentation: Option<String>,
 }
 
-impl IndexQuery<'_> {
+impl IndexQuery {
     /// Find definitions for a Ruby method with type-aware filtering.
     ///
     /// Uses the type narrowing engine to filter results based on receiver type when available.
@@ -126,8 +127,6 @@ impl IndexQuery<'_> {
         position: Position,
         content: &str,
     ) -> Option<RubyType> {
-        use crate::inferrer::method::resolver::MethodResolver;
-
         let inner_type = match inner_receiver {
             MethodReceiver::None | MethodReceiver::SelfReceiver => return None,
             MethodReceiver::Constant(path) => {
@@ -161,102 +160,13 @@ impl IndexQuery<'_> {
             MethodReceiver::Expression => return None,
         };
 
-        MethodResolver::resolve_method_return_type(self.index, &inner_type, method_name)
-    }
-
-    // --- Original Simple Queries ---
-
-    /// Get detailed method info for implicit receiver (ancestors + mixins).
-    pub(super) fn get_method_info_for_implicit_receiver(
-        &self,
-        method_name: &str,
-        ancestors: &[RubyConstant],
-    ) -> Option<MethodInfo> {
-        let method = RubyMethod::new(method_name, MethodKind::Instance).ok()?;
-        let context_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
-        let mut visited = HashSet::new();
-
-        // Helper to find entry in a specific FQN
-        let find_in_module = |module_fqn: &FullyQualifiedName| -> Option<MethodInfo> {
-            let method_fqn =
-                FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
-            if let Some(entries) = self.index.get(&method_fqn) {
-                for entry in entries {
-                    if let EntryKind::Method(data) = &entry.kind {
-                        let is_class_method = data.name.get_kind() == MethodKind::Class;
-                        let documentation =
-                            data.yard_doc.as_ref().and_then(|d| d.format_return_type());
-                        return Some(MethodInfo {
-                            fqn: method_fqn.clone(),
-                            return_type: data.return_type.clone(),
-                            is_class_method,
-                            documentation,
-                        });
-                    }
-                }
-            }
-            None
-        };
-
-        // 1. Ancestor Chain
-        let ancestor_chain = self.index.get_ancestor_chain(&context_fqn, false);
-        for ancestor_fqn in &ancestor_chain {
-            if visited.contains(ancestor_fqn) {
-                continue;
-            }
-            visited.insert(ancestor_fqn.clone());
-
-            if let Some(info) = find_in_module(ancestor_fqn) {
-                return Some(info);
-            }
-
-            // Mixins
-            let included = self.get_included_modules(ancestor_fqn);
-            for mod_fqn in included {
-                if !visited.insert(mod_fqn.clone()) {
-                    continue;
-                }
-                if let Some(info) = find_in_module(&mod_fqn) {
-                    return Some(info);
-                }
-            }
-        }
-
-        // 2. Sibling Modules (Modules included in the same class)
-        // This is handled partly above if we are inside a class.
-        // But if we are inside a module, we might want to check classes that include THIS module?
-        // find_method_without_receiver does `search_in_sibling_modules_with_visited`.
-
-        let including_classes = self.index.get_including_classes(&context_fqn);
-        for class_fqn in including_classes {
-            // Treat including class as if it's an ancestor (it provides context)
-            // Check its ancestors?
-            let class_ancestors = self.index.get_ancestor_chain(&class_fqn, false);
-            for ancestor_fqn in class_ancestors {
-                if !visited.insert(ancestor_fqn.clone()) {
-                    continue;
-                }
-                if let Some(info) = find_in_module(&ancestor_fqn) {
-                    return Some(info);
-                }
-                // And its mixins
-                for mod_fqn in self.get_included_modules(&ancestor_fqn) {
-                    if !visited.insert(mod_fqn.clone()) {
-                        continue;
-                    }
-                    if let Some(info) = find_in_module(&mod_fqn) {
-                        return Some(info);
-                    }
-                }
-            }
-        }
-
-        None
+        let index = self.index.lock();
+        MethodResolver::resolve_method_return_type(&index, &inner_type, method_name)
     }
 }
 
 // Private helpers
-impl IndexQuery<'_> {
+impl IndexQuery {
     // --- Search Helpers ---
 
     fn handle_constant_receiver(
@@ -266,16 +176,19 @@ impl IndexQuery<'_> {
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
         if let Some(receiver_ns) = receiver {
+            let index = self.index.lock();
             let current_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
             if let Some(resolved_fqn) =
-                resolve_constant_fqn_from_parts(self.index, receiver_ns, false, &current_fqn)
+                resolve_constant_fqn_from_parts(&index, receiver_ns, false, &current_fqn)
             {
+                drop(index);
                 if let FullyQualifiedName::Constant(resolved_ns) = resolved_fqn {
                     self.find_method_with_receiver(&resolved_ns, method)
                 } else {
                     None
                 }
             } else {
+                drop(index);
                 self.find_method_with_receiver(receiver_ns, method)
             }
         } else {
@@ -336,11 +249,12 @@ impl IndexQuery<'_> {
             return self.search_by_name(method);
         }
 
+        let index = self.index.lock();
         let mut filtered_locations = Vec::new();
 
-        if let Some(entries) = self.index.get_methods_by_name(method) {
+        if let Some(entries) = index.get_methods_by_name(method) {
             for entry in entries.iter() {
-                let fqn = match self.index.get_fqn(entry.fqn_id) {
+                let fqn = match index.get_fqn(entry.fqn_id) {
                     Some(f) => f,
                     None => continue,
                 };
@@ -353,7 +267,7 @@ impl IndexQuery<'_> {
                         .join("::");
 
                     if type_names.iter().any(|t| *t == class_name) {
-                        if let Some(loc) = self.index.to_lsp_location(&entry.location) {
+                        if let Some(loc) = index.to_lsp_location(&entry.location) {
                             filtered_locations.push(loc);
                         }
                     }
@@ -362,6 +276,7 @@ impl IndexQuery<'_> {
         }
 
         if filtered_locations.is_empty() {
+            drop(index);
             self.search_by_name(method)
         } else {
             Some(filtered_locations)
@@ -369,10 +284,11 @@ impl IndexQuery<'_> {
     }
 
     fn search_by_name(&self, method: &RubyMethod) -> Option<Vec<Location>> {
-        self.index.get_methods_by_name(method).and_then(|entries| {
+        let index = self.index.lock();
+        index.get_methods_by_name(method).and_then(|entries| {
             let locations: Vec<Location> = entries
                 .iter()
-                .filter_map(|entry| self.index.to_lsp_location(&entry.location))
+                .filter_map(|entry| index.to_lsp_location(&entry.location))
                 .collect();
             if locations.is_empty() {
                 None
@@ -387,8 +303,6 @@ impl IndexQuery<'_> {
         content: &str,
         var_name: &str,
     ) -> Option<RubyType> {
-        use crate::inferrer::method::resolver::MethodResolver;
-
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix(var_name) {
@@ -434,6 +348,7 @@ impl IndexQuery<'_> {
                             after_new
                         };
 
+                        let index = self.index.lock();
                         for method_call in after_new.split('.') {
                             let method_name = method_call
                                 .split(|c: char| c == '(' || c.is_whitespace())
@@ -446,7 +361,7 @@ impl IndexQuery<'_> {
                             }
 
                             if let Some(return_type) = MethodResolver::resolve_method_return_type(
-                                self.index,
+                                &index,
                                 &current_type,
                                 method_name,
                             ) {
@@ -504,10 +419,11 @@ impl IndexQuery<'_> {
         }
         visited.insert(receiver_fqn.clone());
 
-        let found_locations = if self.is_class_context(receiver_fqn) {
-            self.search_method_in_class_hierarchy(receiver_fqn, method, kind)
+        let index = self.index.lock();
+        let found_locations = if Self::is_class_context_static(&index, receiver_fqn) {
+            Self::search_method_in_class_hierarchy_static(&index, receiver_fqn, method, kind)
         } else {
-            self.search_method_in_including_classes(receiver_fqn, method)
+            Self::search_method_in_including_classes_static(&index, receiver_fqn, method)
         };
 
         if found_locations.is_empty() {
@@ -517,8 +433,8 @@ impl IndexQuery<'_> {
         }
     }
 
-    fn search_method_in_class_hierarchy(
-        &self,
+    fn search_method_in_class_hierarchy_static(
+        index: &RubyIndex,
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
         kind: MethodKind,
@@ -529,24 +445,28 @@ impl IndexQuery<'_> {
         let mut modules_to_search = HashSet::new();
         modules_to_search.insert(receiver_fqn.clone());
 
-        let ancestor_chain = self.index.get_ancestor_chain(receiver_fqn, is_class_method);
+        let ancestor_chain = index.get_ancestor_chain(receiver_fqn, is_class_method);
 
         for ancestor_fqn in &ancestor_chain {
             modules_to_search.insert(ancestor_fqn.clone());
-            let included_modules = self.get_included_modules(ancestor_fqn);
+            let included_modules = Self::get_included_modules_static(index, ancestor_fqn);
             for module_fqn in included_modules {
-                self.collect_all_searchable_modules(&module_fqn, &mut modules_to_search);
+                Self::collect_all_searchable_modules_static(
+                    index,
+                    &module_fqn,
+                    &mut modules_to_search,
+                );
             }
         }
 
         for module_fqn in &modules_to_search {
             let method_fqn =
                 FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
-            if let Some(entries) = self.index.get(&method_fqn) {
+            if let Some(entries) = index.get(&method_fqn) {
                 found_locations.extend(
                     entries
                         .iter()
-                        .filter_map(|e| self.index.to_lsp_location(&e.location)),
+                        .filter_map(|e| index.to_lsp_location(&e.location)),
                 );
             }
         }
@@ -554,8 +474,8 @@ impl IndexQuery<'_> {
         deduplicate_locations(found_locations)
     }
 
-    fn search_method_in_including_classes(
-        &self,
+    fn search_method_in_including_classes_static(
+        index: &RubyIndex,
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<Location> {
@@ -564,40 +484,48 @@ impl IndexQuery<'_> {
 
         modules_to_search.insert(receiver_fqn.clone());
 
-        let including_classes = self.index.get_including_classes(receiver_fqn);
+        let including_classes = index.get_including_classes(receiver_fqn);
 
         for class_fqn in including_classes {
-            self.collect_all_searchable_modules(&class_fqn, &mut modules_to_search);
-            let included_modules = self.get_included_modules(&class_fqn);
+            Self::collect_all_searchable_modules_static(index, &class_fqn, &mut modules_to_search);
+            let included_modules = Self::get_included_modules_static(index, &class_fqn);
             for module_fqn in included_modules {
-                self.collect_all_searchable_modules(&module_fqn, &mut modules_to_search);
+                Self::collect_all_searchable_modules_static(
+                    index,
+                    &module_fqn,
+                    &mut modules_to_search,
+                );
             }
         }
 
         for module_fqn in &modules_to_search {
             let method_fqn =
                 FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
-            if let Some(entries) = self.index.get(&method_fqn) {
+            if let Some(entries) = index.get(&method_fqn) {
                 found_locations.extend(
                     entries
                         .iter()
-                        .filter_map(|e| self.index.to_lsp_location(&e.location)),
+                        .filter_map(|e| index.to_lsp_location(&e.location)),
                 );
             }
         }
         deduplicate_locations(found_locations)
     }
 
-    fn get_included_modules(&self, class_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+    fn get_included_modules_static(
+        index: &RubyIndex,
+        class_fqn: &FullyQualifiedName,
+    ) -> Vec<FullyQualifiedName> {
         let mut included_modules = Vec::new();
         let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-        let ancestor_chain = self.index.get_ancestor_chain(class_fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(class_fqn, false);
 
         for ancestor_fqn in &ancestor_chain {
-            if let Some(entries) = self.index.get(ancestor_fqn) {
+            if let Some(entries) = index.get(ancestor_fqn) {
                 for entry in entries.iter() {
-                    self.process_entry_mixins(
+                    Self::process_entry_mixins_static(
+                        index,
                         &entry.kind,
                         ancestor_fqn,
                         &mut included_modules,
@@ -609,8 +537,8 @@ impl IndexQuery<'_> {
         included_modules
     }
 
-    fn process_entry_mixins(
-        &self,
+    fn process_entry_mixins_static(
+        index: &RubyIndex,
         entry_kind: &EntryKind,
         ancestor_fqn: &FullyQualifiedName,
         included_modules: &mut Vec<FullyQualifiedName>,
@@ -622,19 +550,34 @@ impl IndexQuery<'_> {
             _ => return,
         };
 
-        self.process_mixins(prepends, ancestor_fqn, included_modules, seen_modules, true);
-        self.process_mixins(
+        Self::process_mixins_static(
+            index,
+            prepends,
+            ancestor_fqn,
+            included_modules,
+            seen_modules,
+            true,
+        );
+        Self::process_mixins_static(
+            index,
             includes,
             ancestor_fqn,
             included_modules,
             seen_modules,
             false,
         );
-        self.process_mixins(extends, ancestor_fqn, included_modules, seen_modules, false);
+        Self::process_mixins_static(
+            index,
+            extends,
+            ancestor_fqn,
+            included_modules,
+            seen_modules,
+            false,
+        );
     }
 
-    fn process_mixins(
-        &self,
+    fn process_mixins_static(
+        index: &RubyIndex,
         mixins: &[crate::indexer::entry::MixinRef],
         ancestor_fqn: &FullyQualifiedName,
         included_modules: &mut Vec<FullyQualifiedName>,
@@ -649,7 +592,7 @@ impl IndexQuery<'_> {
 
         for mixin_ref in iter {
             if let Some(resolved_fqn) = resolve_constant_fqn_from_parts(
-                self.index,
+                index,
                 &mixin_ref.parts,
                 mixin_ref.absolute,
                 ancestor_fqn,
@@ -661,8 +604,8 @@ impl IndexQuery<'_> {
         }
     }
 
-    fn is_class_context(&self, fqn: &FullyQualifiedName) -> bool {
-        if let Some(entries) = self.index.get(fqn) {
+    fn is_class_context_static(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
+        if let Some(entries) = index.get(fqn) {
             for entry in entries {
                 match &entry.kind {
                     EntryKind::Class(_) => return true,
@@ -674,8 +617,8 @@ impl IndexQuery<'_> {
         true
     }
 
-    fn collect_all_searchable_modules(
-        &self,
+    fn collect_all_searchable_modules_static(
+        index: &RubyIndex,
         fqn: &FullyQualifiedName,
         modules_to_search: &mut HashSet<FullyQualifiedName>,
     ) {
@@ -684,16 +627,16 @@ impl IndexQuery<'_> {
         }
         modules_to_search.insert(fqn.clone());
 
-        let ancestor_chain = self.index.get_ancestor_chain(fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(fqn, false);
         for ancestor_fqn in &ancestor_chain {
             if !modules_to_search.contains(ancestor_fqn) {
                 modules_to_search.insert(ancestor_fqn.clone());
             }
         }
 
-        let included_modules = self.get_included_modules(fqn);
+        let included_modules = Self::get_included_modules_static(index, fqn);
         for module_fqn in included_modules {
-            self.collect_all_searchable_modules(&module_fqn, modules_to_search);
+            Self::collect_all_searchable_modules_static(index, &module_fqn, modules_to_search);
         }
     }
 
@@ -704,9 +647,11 @@ impl IndexQuery<'_> {
         kind: MethodKind,
         visited: &mut HashSet<FullyQualifiedName>,
     ) -> Option<Vec<Location>> {
-        let mut found_locations = Vec::new();
-        let included_modules = self.get_included_modules(class_fqn);
+        let index = self.index.lock();
+        let included_modules = Self::get_included_modules_static(&index, class_fqn);
+        drop(index);
 
+        let mut found_locations = Vec::new();
         for module_fqn in included_modules {
             if let Some(locations) =
                 self.search_in_ancestor_chain_with_visited(&module_fqn, method, kind, visited)

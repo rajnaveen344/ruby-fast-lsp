@@ -4,8 +4,8 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::inferrer::query::{infer_type_from_assignment, TypeQuery};
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::query::{infer_type_from_assignment, TypeQuery};
 use crate::server::RubyLanguageServer;
 use tower_lsp::lsp_types::Url;
 

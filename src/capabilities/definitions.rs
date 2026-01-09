@@ -5,7 +5,6 @@
 //! - Document analysis for local variables
 //! - YARD parser for type comments
 
-// use log::info;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::query::IndexQuery;
@@ -17,15 +16,16 @@ pub async fn find_definition_at_position(
     uri: Url,
     position: Position,
 ) -> Option<Vec<Location>> {
-    // Get the document content
-    let doc_guard = server.docs.lock();
-    let doc_arc = doc_guard.get(&uri)?;
-    let doc = doc_arc.read();
-    let content = doc.content.clone();
+    // Get document content and Arc
+    let (content, doc_arc) = {
+        let doc_guard = server.docs.lock();
+        let doc_arc = doc_guard.get(&uri)?.clone();
+        let doc = doc_arc.read();
+        (doc.content.clone(), doc_arc.clone())
+    };
 
-    // Create unified query with document context
-    let index = server.index.lock();
-    let query = IndexQuery::with_doc(&index, &doc);
+    // Create unified query with document context (no lock held here)
+    let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
 
     // query.find_definitions_at_position already checks YARD and uses analyzer
     // AND now handles local variables via self.doc

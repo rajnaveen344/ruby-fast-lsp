@@ -458,8 +458,8 @@ async fn run_type_check(
     all_file_contents: &[(Url, Vec<u8>)],
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
-    use crate::inferrer::query::TypeQuery;
     use crate::inferrer::r#type::ruby::RubyType;
+    use crate::query::TypeQuery;
 
     // Build FileContentMap from all files
     let file_contents: std::collections::HashMap<&Url, &[u8]> = all_file_contents

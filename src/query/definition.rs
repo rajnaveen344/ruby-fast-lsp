@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use super::IndexQuery;
 use crate::inferrer::TypeNarrowingEngine;
 
-impl IndexQuery<'_> {
+impl IndexQuery {
     /// Find definitions for an identifier at the given position.
     ///
     /// This handles all identifier types:
@@ -66,9 +66,11 @@ impl IndexQuery<'_> {
         &self,
         name: &str,
         scope_id: crate::types::scope::LVScopeId,
-        document: &crate::types::ruby_document::RubyDocument,
         position: Position,
     ) -> Option<Vec<Location>> {
+        let doc_arc = self.doc.as_ref()?;
+        let document = doc_arc.read();
+
         // Try exact scope ID match with position filter
         if let Some(entries) = document.get_local_var_entries(scope_id) {
             for entry in entries {
@@ -112,7 +114,8 @@ impl IndexQuery<'_> {
         let fqn = self.resolve_constant_fqn(constant_path, ancestors);
         info!("Resolved constant FQN: {}", fqn);
 
-        let entries = self.index.get(&fqn)?;
+        let index = self.index.lock();
+        let entries = index.get(&fqn)?;
 
         // Filter for definition entries (classes or modules)
         let locations: Vec<Location> = entries
@@ -123,7 +126,7 @@ impl IndexQuery<'_> {
                     EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_)
                 )
             })
-            .filter_map(|e| self.index.to_lsp_location(&e.location))
+            .filter_map(|e| index.to_lsp_location(&e.location))
             .collect();
 
         if locations.is_empty() {
@@ -135,7 +138,7 @@ impl IndexQuery<'_> {
 }
 
 // Private helpers
-impl IndexQuery<'_> {
+impl IndexQuery {
     /// Find definitions for a given identifier.
     fn find_definitions_for_identifier(
         &self,
@@ -175,11 +178,7 @@ impl IndexQuery<'_> {
                 self.find_global_variable_definitions(name)
             }
             Identifier::RubyLocalVariable { name, scope, .. } => {
-                if let Some(doc) = self.doc {
-                    self.find_local_variable_definitions_at_position(name, *scope, doc, position)
-                } else {
-                    None
-                }
+                self.find_local_variable_definitions_at_position(name, *scope, position)
             }
             Identifier::YardType { type_name, .. } => self.find_yard_type_definitions(type_name),
         }
@@ -214,11 +213,12 @@ impl IndexQuery<'_> {
 
         // Find definition
         let fqn = FullyQualifiedName::Constant(namespace);
-        self.index.get(&fqn).map(|entries| {
+        let index = self.index.lock();
+        index.get(&fqn).map(|entries| {
             entries
                 .iter()
                 .filter(|e| matches!(e.kind, EntryKind::Class(_) | EntryKind::Module(_)))
-                .filter_map(|e| self.index.to_lsp_location(&e.location))
+                .filter_map(|e| index.to_lsp_location(&e.location))
                 .collect()
         })
     }
@@ -229,23 +229,25 @@ impl IndexQuery<'_> {
         method_name: &crate::types::ruby_method::RubyMethod,
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
+        let index = self.index.lock();
+
         // First, look for methods in the current class/module ancestry
         let context_fqn = FullyQualifiedName::from(ancestors.to_vec());
-        let ancestor_chain = self.index.get_ancestor_chain(&context_fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(&context_fqn, false);
 
         for ancestor_fqn in &ancestor_chain {
-            if let Some(entries) = self.index.get_methods_by_name(method_name) {
+            if let Some(entries) = index.get_methods_by_name(method_name) {
                 let locations: Vec<Location> = entries
                     .iter()
                     .filter(|e| {
                         // Check if method belongs to this ancestor
-                        if let Some(fqn) = self.index.get_fqn(e.fqn_id) {
+                        if let Some(fqn) = index.get_fqn(e.fqn_id) {
                             fqn.namespace_parts() == ancestor_fqn.namespace_parts()
                         } else {
                             false
                         }
                     })
-                    .filter_map(|e| self.index.to_lsp_location(&e.location))
+                    .filter_map(|e| index.to_lsp_location(&e.location))
                     .collect();
 
                 if !locations.is_empty() {
@@ -255,10 +257,10 @@ impl IndexQuery<'_> {
         }
 
         // Fallback: return any method with this name
-        self.index.get_methods_by_name(method_name).map(|entries| {
+        index.get_methods_by_name(method_name).map(|entries| {
             entries
                 .iter()
-                .filter_map(|e| self.index.to_lsp_location(&e.location))
+                .filter_map(|e| index.to_lsp_location(&e.location))
                 .collect()
         })
     }
@@ -267,10 +269,11 @@ impl IndexQuery<'_> {
     fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Instance variables are stored with just their name (e.g., "@foo")
         if let Ok(fqn) = FullyQualifiedName::instance_variable(name.to_string()) {
-            return self.index.get(&fqn).map(|entries| {
+            let index = self.index.lock();
+            return index.get(&fqn).map(|entries| {
                 entries
                     .iter()
-                    .filter_map(|e| self.index.to_lsp_location(&e.location))
+                    .filter_map(|e| index.to_lsp_location(&e.location))
                     .collect()
             });
         }
@@ -281,10 +284,11 @@ impl IndexQuery<'_> {
     fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Class variables are stored with just their name (e.g., "@@foo")
         if let Ok(fqn) = FullyQualifiedName::class_variable(name.to_string()) {
-            return self.index.get(&fqn).map(|entries| {
+            let index = self.index.lock();
+            return index.get(&fqn).map(|entries| {
                 entries
                     .iter()
-                    .filter_map(|e| self.index.to_lsp_location(&e.location))
+                    .filter_map(|e| index.to_lsp_location(&e.location))
                     .collect()
             });
         }
@@ -297,6 +301,7 @@ impl IndexQuery<'_> {
         constant_path: &[RubyConstant],
         ancestors: &[RubyConstant],
     ) -> FullyQualifiedName {
+        let index = self.index.lock();
         let mut current_context = ancestors.to_vec();
 
         // 1. Iteratively check scopes from most specific to least specific
@@ -306,7 +311,7 @@ impl IndexQuery<'_> {
             let probe_fqn = FullyQualifiedName::Constant(probe_ns);
 
             // If found in index (and is a Class/Module/Constant?), return it
-            if self.index.get(&probe_fqn).is_some() {
+            if index.get(&probe_fqn).is_some() {
                 return probe_fqn;
             }
 
@@ -323,10 +328,11 @@ impl IndexQuery<'_> {
 
     /// Find variable definitions by FQN.
     fn find_variable_definitions(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        self.index.get(fqn).map(|entries| {
+        let index = self.index.lock();
+        index.get(fqn).map(|entries| {
             entries
                 .iter()
-                .filter_map(|e| self.index.to_lsp_location(&e.location))
+                .filter_map(|e| index.to_lsp_location(&e.location))
                 .collect()
         })
     }
@@ -336,11 +342,19 @@ impl IndexQuery<'_> {
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
+    use crate::indexer::index_ref::Index;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    fn create_test_query() -> IndexQuery {
+        let index = RubyIndex::new();
+        let index_ref = Index::new(Arc::new(Mutex::new(index)));
+        IndexQuery::new(index_ref)
+    }
 
     #[test]
     fn test_builtin_types_return_none() {
-        let index = RubyIndex::new();
-        let query = IndexQuery::new(&index);
+        let query = create_test_query();
         assert!(query.find_yard_type_definitions("nil").is_none());
         assert!(query.find_yard_type_definitions("true").is_none());
         assert!(query.find_yard_type_definitions("false").is_none());
@@ -350,16 +364,14 @@ mod tests {
 
     #[test]
     fn test_empty_type_returns_none() {
-        let index = RubyIndex::new();
-        let query = IndexQuery::new(&index);
+        let query = create_test_query();
         assert!(query.find_yard_type_definitions("").is_none());
         assert!(query.find_yard_type_definitions("  ").is_none());
     }
 
     #[test]
     fn test_invalid_constant_returns_none() {
-        let index = RubyIndex::new();
-        let query = IndexQuery::new(&index);
+        let query = create_test_query();
         // lowercase names are not valid constants
         assert!(query.find_yard_type_definitions("lowercase").is_none());
     }

@@ -9,7 +9,6 @@
 
 pub mod cfg;
 pub mod method;
-pub mod query;
 pub mod rbs;
 pub mod return_type;
 pub mod r#type;
