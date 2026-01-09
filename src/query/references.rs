@@ -32,7 +32,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find references to a constant by FQN.
-    pub fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+    fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
         let entries = self.index.references(fqn);
         if !entries.is_empty() {
             info!("Found {} constant references to: {}", entries.len(), fqn);
@@ -42,7 +42,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find references to a variable (instance, class, or global).
-    pub fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+    fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
         let entries = self.index.references(fqn);
         if !entries.is_empty() {
             info!("Found {} variable references to: {}", entries.len(), fqn);
@@ -52,7 +52,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find references to a method (mixin-aware).
-    pub fn find_method_references(
+    fn find_method_references(
         &self,
         receiver: &MethodReceiver,
         method: &RubyMethod,
@@ -89,7 +89,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find references to a local variable using document.lvars (file-local storage).
-    pub fn find_local_variable_references(
+    fn find_local_variable_references(
         &self,
         name: &str,
         scope_id: LVScopeId,

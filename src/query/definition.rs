@@ -62,7 +62,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find definitions for a local variable using document.lvars (file-local storage)
-    pub fn find_local_variable_definitions_at_position(
+    fn find_local_variable_definitions_at_position(
         &self,
         name: &str,
         scope_id: crate::types::scope::LVScopeId,
@@ -96,7 +96,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find definitions for a global variable.
-    pub fn find_global_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
+    fn find_global_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         if let Ok(fqn) = FullyQualifiedName::global_variable(name.to_string()) {
             return self.find_variable_definitions(&fqn);
         }
@@ -104,7 +104,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find definitions for a constant (class or module) by path.
-    pub fn find_constant_definitions_by_path(
+    fn find_constant_definitions_by_path(
         &self,
         constant_path: &[RubyConstant],
         ancestors: &[RubyConstant],
@@ -186,7 +186,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find definitions for a YARD type reference string (e.g., "String", "Foo::Bar").
-    pub fn find_yard_type_definitions(&self, type_name: &str) -> Option<Vec<Location>> {
+    fn find_yard_type_definitions(&self, type_name: &str) -> Option<Vec<Location>> {
         // Handle built-in types
         let builtins = ["nil", "true", "false", "void", "Boolean", "bool"];
         if builtins.iter().any(|b| b.eq_ignore_ascii_case(type_name)) {
@@ -224,7 +224,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find method definitions by name.
-    pub fn find_method_definitions_by_name(
+    fn find_method_definitions_by_name(
         &self,
         method_name: &crate::types::ruby_method::RubyMethod,
         ancestors: &[RubyConstant],
@@ -264,7 +264,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find instance variable definitions.
-    pub fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
+    fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Instance variables are stored with just their name (e.g., "@foo")
         if let Ok(fqn) = FullyQualifiedName::instance_variable(name.to_string()) {
             return self.index.get(&fqn).map(|entries| {
@@ -278,7 +278,7 @@ impl IndexQuery<'_> {
     }
 
     /// Find class variable definitions.
-    pub fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
+    fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Class variables are stored with just their name (e.g., "@@foo")
         if let Ok(fqn) = FullyQualifiedName::class_variable(name.to_string()) {
             return self.index.get(&fqn).map(|entries| {
@@ -329,14 +329,6 @@ impl IndexQuery<'_> {
                 .filter_map(|e| self.index.to_lsp_location(&e.location))
                 .collect()
         })
-    }
-
-    /// Find definition by FQN directly.
-    pub fn find_definition_by_fqn(&self, fqn: &FullyQualifiedName) -> Option<Location> {
-        self.index
-            .get(fqn)?
-            .first()
-            .and_then(|e| self.index.to_lsp_location(&e.location))
     }
 }
 

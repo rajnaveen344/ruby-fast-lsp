@@ -37,7 +37,7 @@ impl IndexQuery<'_> {
     /// Find definitions for a Ruby method with type-aware filtering.
     ///
     /// Uses the type narrowing engine to filter results based on receiver type when available.
-    pub fn find_method_definitions(
+    pub(super) fn find_method_definitions(
         &self,
         receiver: &MethodReceiver,
         method: &RubyMethod,
@@ -117,7 +117,7 @@ impl IndexQuery<'_> {
     }
 
     /// Resolve the type of a method call receiver by looking up the method's return type
-    pub fn resolve_method_call_type(
+    pub(super) fn resolve_method_call_type(
         &self,
         inner_receiver: &MethodReceiver,
         method_name: &str,
@@ -164,186 +164,10 @@ impl IndexQuery<'_> {
         MethodResolver::resolve_method_return_type(self.index, &inner_type, method_name)
     }
 
-    /// Find methods matching the given method object in the current implicit context (ancestors + mixins).
-    pub fn find_methods_for_implicit_receiver(
-        &self,
-        method: &RubyMethod,
-        ancestors: &[RubyConstant],
-    ) -> Option<Vec<Location>> {
-        self.find_method_without_receiver(method, ancestors)
-    }
-
     // --- Original Simple Queries ---
 
-    /// Find a method entry at a specific position in a file.
-    pub fn find_method_at_position(
-        &self,
-        uri: &Url,
-        position: Position,
-        method_name: &str,
-    ) -> Option<MethodInfo> {
-        let entries = self.index.file_entries(uri);
-
-        for entry in entries {
-            if let EntryKind::Method(data) = &entry.kind {
-                if data.name.to_string() == method_name {
-                    let range = &entry.location.range;
-                    if position.line >= range.start.line && position.line <= range.end.line {
-                        let fqn = self.index.get_fqn(entry.fqn_id)?.clone();
-                        let is_class_method = data.name.get_kind() == MethodKind::Class;
-                        let documentation =
-                            data.yard_doc.as_ref().and_then(|d| d.format_return_type());
-
-                        return Some(MethodInfo {
-                            fqn,
-                            return_type: data.return_type.clone(),
-                            is_class_method,
-                            documentation,
-                        });
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Get method return type from the index.
-    pub fn get_method_return_type_from_index(
-        &self,
-        receiver_type: &RubyType,
-        method_name: &str,
-    ) -> Option<RubyType> {
-        let receiver_fqn = match receiver_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) | RubyType::ClassReference(fqn) => fqn,
-            _ => return None,
-        };
-
-        let is_class_method = matches!(receiver_type, RubyType::ClassReference(_));
-        let ancestor_chain = self.index.get_ancestor_chain(receiver_fqn, is_class_method);
-
-        let kind = if is_class_method {
-            MethodKind::Class
-        } else {
-            MethodKind::Instance
-        };
-        let ruby_method = RubyMethod::new(method_name, kind).ok()?;
-
-        for ancestor_fqn in ancestor_chain {
-            let method_fqn =
-                FullyQualifiedName::method(ancestor_fqn.namespace_parts(), ruby_method.clone());
-
-            if let Some(entries) = self.index.get(&method_fqn) {
-                for entry in entries {
-                    if let EntryKind::Method(data) = &entry.kind {
-                        if let Some(ref rt) = data.return_type {
-                            if *rt != RubyType::Unknown {
-                                return Some(rt.clone());
-                            }
-                        }
-                        if let Some(ref yard) = data.yard_doc {
-                            if let Some(return_type_str) = yard.format_return_type() {
-                                return ruby_type_from_yard(&return_type_str);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Get method info for a method in a class/module.
-    pub fn get_method_info(
-        &self,
-        namespace: &[RubyConstant],
-        method_name: &str,
-    ) -> Option<MethodInfo> {
-        let context_fqn = FullyQualifiedName::from(namespace.to_vec());
-        let ancestor_chain = self.index.get_ancestor_chain(&context_fqn, false);
-
-        let ruby_method = RubyMethod::new(method_name, MethodKind::Instance).ok()?;
-
-        for ancestor_fqn in ancestor_chain {
-            let method_fqn =
-                FullyQualifiedName::method(ancestor_fqn.namespace_parts(), ruby_method.clone());
-
-            if let Some(entries) = self.index.get(&method_fqn) {
-                for entry in entries {
-                    if let EntryKind::Method(data) = &entry.kind {
-                        let is_class_method = data.name.get_kind() == MethodKind::Class;
-                        let documentation =
-                            data.yard_doc.as_ref().and_then(|d| d.format_return_type());
-
-                        return Some(MethodInfo {
-                            fqn: method_fqn,
-                            return_type: data.return_type.clone(),
-                            is_class_method,
-                            documentation,
-                        });
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Get all methods available on a type (including ancestor chain).
-    pub fn get_methods_for_type(&self, receiver_type: &RubyType) -> Vec<MethodInfo> {
-        let receiver_fqn = match receiver_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) => fqn,
-            RubyType::ClassReference(fqn) => fqn,
-            _ => return Vec::new(),
-        };
-
-        let is_class_method = matches!(receiver_type, RubyType::ClassReference(_));
-        let ancestor_chain = self.index.get_ancestor_chain(receiver_fqn, is_class_method);
-
-        let mut methods = Vec::new();
-        let mut seen_names = std::collections::HashSet::new();
-
-        for ancestor_fqn in ancestor_chain {
-            if let Some(entries) = self.index.get(&ancestor_fqn) {
-                for entry in entries {
-                    if let EntryKind::Method(data) = &entry.kind {
-                        let method_kind = data.name.get_kind();
-                        let matches_kind = if is_class_method {
-                            method_kind == MethodKind::Class
-                        } else {
-                            method_kind == MethodKind::Instance
-                        };
-
-                        if matches_kind {
-                            let name = data.name.to_string();
-                            if seen_names.insert(name.clone()) {
-                                if let Some(fqn) = self.index.get_fqn(entry.fqn_id) {
-                                    methods.push(MethodInfo {
-                                        fqn: fqn.clone(),
-                                        return_type: data.return_type.clone(),
-                                        is_class_method,
-                                        documentation: data
-                                            .yard_doc
-                                            .as_ref()
-                                            .and_then(|d| d.format_return_type()),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        methods
-    }
-
-    /// Check if a method exists on a type.
-    pub fn has_method(&self, receiver_type: &RubyType, method_name: &str) -> bool {
-        self.get_method_return_type_from_index(receiver_type, method_name)
-            .is_some()
-    }
-
     /// Get detailed method info for implicit receiver (ancestors + mixins).
-    pub fn get_method_info_for_implicit_receiver(
+    pub(super) fn get_method_info_for_implicit_receiver(
         &self,
         method_name: &str,
         ancestors: &[RubyConstant],
@@ -952,33 +776,5 @@ fn get_type_names(ty: &RubyType) -> Vec<String> {
         RubyType::Hash(_, _) => vec!["Hash".to_string()],
         RubyType::Union(types) => types.iter().flat_map(get_type_names).collect(),
         RubyType::Unknown => vec![],
-    }
-}
-
-fn ruby_type_from_yard(yard_type: &str) -> Option<RubyType> {
-    match yard_type.trim() {
-        "String" => Some(RubyType::class("String")),
-        "Integer" => Some(RubyType::class("Integer")),
-        "Float" => Some(RubyType::class("Float")),
-        "Boolean" | "TrueClass" | "FalseClass" => Some(RubyType::boolean()),
-        "NilClass" | "nil" => Some(RubyType::nil_class()),
-        "Symbol" => Some(RubyType::symbol()),
-        "Array" => Some(RubyType::array_of(RubyType::Unknown)),
-        "Hash" => Some(RubyType::hash_of(RubyType::Unknown, RubyType::Unknown)),
-        "void" => Some(RubyType::nil_class()),
-        other => {
-            if other
-                .chars()
-                .next()
-                .map(|c| c.is_uppercase())
-                .unwrap_or(false)
-            {
-                FullyQualifiedName::try_from(other)
-                    .ok()
-                    .map(RubyType::Class)
-            } else {
-                None
-            }
-        }
     }
 }

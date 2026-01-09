@@ -1,13 +1,15 @@
 //! Hover Query - Query methods for hover information
 //!
-//! Provides query methods that can be used by capabilities/hover.rs
-//! to get type information for various constructs.
+//! Provides unified query methods for hover information.
+//! The primary entry point is `get_hover_at_position`.
 
+use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
-use tower_lsp::lsp_types::{Range, Url};
+use tower_lsp::lsp_types::{Position, Range, Url};
 
 use super::IndexQuery;
 
@@ -42,13 +44,137 @@ impl HoverInfo {
     }
 }
 
+// =============================================================================
+// Public API - One unified entry point per feature
+// =============================================================================
+
 impl IndexQuery<'_> {
+    /// Get hover info for the symbol at position.
+    ///
+    /// This is the unified entry point for hover requests. It handles:
+    /// - Local variables
+    /// - Instance/class/global variables
+    /// - Constants (classes, modules)
+    /// - Methods
+    /// - YARD type references
+    pub fn get_hover_at_position(
+        &self,
+        uri: &Url,
+        position: Position,
+        content: &str,
+        _type_narrowing: Option<&TypeNarrowingEngine>,
+    ) -> Option<HoverInfo> {
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let (identifier_opt, _identifier_type, ancestors, _scope_id) =
+            analyzer.get_identifier(position);
+
+        let identifier = identifier_opt?;
+
+        self.get_hover_for_identifier(uri, &identifier, &ancestors)
+    }
+
+    /// Resolve the type of the symbol at position.
+    ///
+    /// This is the unified entry point for type resolution. It handles:
+    /// - Local variables
+    /// - Instance/class/global variables
+    /// - Constants
+    /// - Method call return types
+    pub fn resolve_type_at_position(
+        &self,
+        uri: &Url,
+        position: Position,
+        content: &str,
+        _type_narrowing: Option<&TypeNarrowingEngine>,
+    ) -> Option<RubyType> {
+        let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+        let (identifier_opt, _identifier_type, ancestors, _scope_id) =
+            analyzer.get_identifier(position);
+
+        let identifier = identifier_opt?;
+
+        self.resolve_type_for_identifier(uri, &identifier, &ancestors)
+    }
+}
+
+// =============================================================================
+// Private helpers
+// =============================================================================
+
+impl IndexQuery<'_> {
+    /// Get hover info for a specific identifier.
+    fn get_hover_for_identifier(
+        &self,
+        uri: &Url,
+        identifier: &Identifier,
+        ancestors: &[RubyConstant],
+    ) -> Option<HoverInfo> {
+        match identifier {
+            Identifier::RubyLocalVariable { name, .. } => {
+                // For local variables, just show the name for now
+                // Full type inference requires TypeQuery which needs more context
+                Some(HoverInfo::text(name.clone()))
+            }
+            Identifier::RubyConstant { iden, .. } => self.get_constant_hover_info(iden),
+            Identifier::RubyMethod {
+                iden,
+                receiver,
+                namespace: _,
+            } => {
+                let method_name = iden.to_string();
+                self.get_method_hover_info(receiver, &method_name, ancestors)
+            }
+            Identifier::RubyInstanceVariable { name, .. } => {
+                self.get_instance_variable_hover_info(uri, name)
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                self.get_class_variable_hover_info(uri, name)
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                self.get_global_variable_hover_info(uri, name)
+            }
+            Identifier::YardType { type_name, .. } => Some(HoverInfo::text(type_name.clone())),
+        }
+    }
+
+    /// Resolve type for a specific identifier.
+    fn resolve_type_for_identifier(
+        &self,
+        uri: &Url,
+        identifier: &Identifier,
+        ancestors: &[RubyConstant],
+    ) -> Option<RubyType> {
+        match identifier {
+            Identifier::RubyLocalVariable { .. } => {
+                // Local variable type inference requires TypeQuery
+                None
+            }
+            Identifier::RubyConstant { iden, .. } => {
+                let fqn = FullyQualifiedName::namespace(iden.clone());
+                Some(RubyType::Class(fqn))
+            }
+            Identifier::RubyMethod {
+                iden,
+                receiver,
+                namespace: _,
+            } => {
+                let method_name = iden.to_string();
+                self.resolve_method_return_type(receiver, &method_name, ancestors)
+            }
+            Identifier::RubyInstanceVariable { name, .. } => {
+                self.get_instance_variable_type(uri, name)
+            }
+            Identifier::RubyClassVariable { name, .. } => self.get_class_variable_type(uri, name),
+            Identifier::RubyGlobalVariable { name, .. } => self.get_global_variable_type(uri, name),
+            Identifier::YardType { .. } => None,
+        }
+    }
+
     /// Get hover info for a constant (class or module).
-    pub fn get_constant_hover_info(&self, constant_path: &[RubyConstant]) -> Option<HoverInfo> {
+    fn get_constant_hover_info(&self, constant_path: &[RubyConstant]) -> Option<HoverInfo> {
         let fqn = FullyQualifiedName::namespace(constant_path.to_vec());
         let entries = self.index.get(&fqn)?;
 
-        // Find if it's a class or module
         let entry_kind = entries.iter().find_map(|entry| match &entry.kind {
             EntryKind::Class(_) => Some("class"),
             EntryKind::Module(_) => Some("module"),
@@ -71,7 +197,7 @@ impl IndexQuery<'_> {
     }
 
     /// Get hover info for an instance variable.
-    pub fn get_instance_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
+    fn get_instance_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -87,7 +213,7 @@ impl IndexQuery<'_> {
     }
 
     /// Get hover info for a class variable.
-    pub fn get_class_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
+    fn get_class_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -103,7 +229,7 @@ impl IndexQuery<'_> {
     }
 
     /// Get hover info for a global variable.
-    pub fn get_global_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
+    fn get_global_variable_hover_info(&self, uri: &Url, name: &str) -> Option<HoverInfo> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -118,8 +244,49 @@ impl IndexQuery<'_> {
         Some(HoverInfo::text(name.to_string()))
     }
 
+    /// Get hover info for a method.
+    fn get_method_hover_info(
+        &self,
+        receiver: &MethodReceiver,
+        method_name: &str,
+        ancestors: &[RubyConstant],
+    ) -> Option<HoverInfo> {
+        match receiver {
+            MethodReceiver::None | MethodReceiver::SelfReceiver => self
+                .get_method_info_for_implicit_receiver(method_name, ancestors)
+                .map(|info| {
+                    let content = if let Some(doc) = &info.documentation {
+                        format!("**{}**\n\n{}", info.fqn, doc)
+                    } else {
+                        format!("**{}**", info.fqn)
+                    };
+                    let ty = info.return_type.unwrap_or(RubyType::Unknown);
+                    HoverInfo::with_type(content, ty)
+                }),
+            _ => {
+                // For other receivers, just show the method name
+                Some(HoverInfo::text(format!("def {}", method_name)))
+            }
+        }
+    }
+
+    /// Resolve return type for a method.
+    fn resolve_method_return_type(
+        &self,
+        receiver: &MethodReceiver,
+        method_name: &str,
+        ancestors: &[RubyConstant],
+    ) -> Option<RubyType> {
+        match receiver {
+            MethodReceiver::None | MethodReceiver::SelfReceiver => self
+                .get_method_info_for_implicit_receiver(method_name, ancestors)
+                .and_then(|info| info.return_type),
+            _ => None,
+        }
+    }
+
     /// Get type for an instance variable.
-    pub fn get_instance_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
+    fn get_instance_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -133,7 +300,7 @@ impl IndexQuery<'_> {
     }
 
     /// Get type for a class variable.
-    pub fn get_class_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
+    fn get_class_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -147,7 +314,7 @@ impl IndexQuery<'_> {
     }
 
     /// Get type for a global variable.
-    pub fn get_global_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
+    fn get_global_variable_type(&self, uri: &Url, name: &str) -> Option<RubyType> {
         let entries = self.index.file_entries(uri);
 
         for entry in entries {
@@ -158,67 +325,5 @@ impl IndexQuery<'_> {
             }
         }
         None
-    }
-
-    /// Check if a FQN is a module (not a class).
-    pub fn is_module(&self, fqn: &FullyQualifiedName) -> bool {
-        self.index
-            .get(fqn)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .any(|e| matches!(e.kind, EntryKind::Module(_)))
-            })
-            .unwrap_or(false)
-    }
-
-    /// Check if a FQN is a class.
-    pub fn is_class(&self, fqn: &FullyQualifiedName) -> bool {
-        self.index
-            .get(fqn)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .any(|e| matches!(e.kind, EntryKind::Class(_)))
-            })
-            .unwrap_or(false)
-    }
-
-    /// Get hover info for a method call.
-    pub fn get_call_node_hover_info(
-        &self,
-        receiver: &crate::analyzer_prism::MethodReceiver,
-        method_name: &str,
-        ancestors: &[RubyConstant],
-        _type_narrowing: Option<&crate::inferrer::TypeNarrowingEngine>,
-        _uri: &Url,
-        _position: tower_lsp::lsp_types::Position,
-        _content: &str,
-    ) -> Option<HoverInfo> {
-        use crate::analyzer_prism::MethodReceiver;
-
-        match receiver {
-            MethodReceiver::Constant(_path) => {
-                // Future TODO: Implement class method hover lookup
-                None
-            }
-            MethodReceiver::None | MethodReceiver::SelfReceiver => {
-                // Implicit receiver: use our new helper
-                self.get_method_info_for_implicit_receiver(method_name, ancestors)
-                    .map(|info| {
-                        let content = if let Some(doc) = &info.documentation {
-                            format!("**{}**\n\n{}", info.fqn, doc)
-                        } else {
-                            format!("**{}**", info.fqn)
-                        };
-                        let ty = info.return_type.unwrap_or(RubyType::Unknown);
-                        HoverInfo::with_type(content, ty)
-                    })
-            }
-            _ => {
-                // Future TODO: Implement resolved type receiver hover
-                None
-            }
-        }
     }
 }
