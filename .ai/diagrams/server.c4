@@ -1,0 +1,214 @@
+// =============================================================================
+// Ruby Fast LSP - Server Components (Level 3)
+// =============================================================================
+// This file extends the model with component-level details for the LSP Server.
+// =============================================================================
+
+model {
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - LSP Server
+    // =========================================================================
+
+    extend lsp.server {
+        // --- Notification Handlers (no response required) ---
+        notificationHandlers = component 'Notification Handlers' {
+            technology 'handlers/notification.rs'
+            description 'Handles: initialize, initialized, didOpen, didChange, didSave, didClose'
+        }
+    
+        // --- Request Handlers (response required) ---
+        requestHandlers = component 'Request Handlers' {
+            technology 'handlers/request.rs'
+            description 'Handles: definitions, references, hover, completion, symbols, etc.'
+        }
+    }
+
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - Capabilities Layer
+    // =========================================================================
+    // The layer between handlers and query that orchestrates the logic
+
+    extend lsp {
+        capabilities = container 'Capabilities' {
+            technology 'Rust'
+            description 'Orchestration layer that bridges handlers to queries. Contains business logic.'
+
+            definitionsCap = component 'Definitions' {
+                technology 'capabilities/definitions.rs'
+                description 'Orchestrates definition lookup across identifier types.'
+            }
+
+            referencesCap = component 'References' {
+                technology 'capabilities/references.rs'
+                description 'Orchestrates finding all references to a symbol.'
+            }
+
+            hoverCap = component 'Hover' {
+                technology 'capabilities/hover.rs'
+                description 'Orchestrates hover content generation.'
+            }
+
+            completionCap = component 'Completion' {
+                technology 'capabilities/completion/'
+                description 'Orchestrates autocomplete suggestions.'
+            }
+
+            diagnosticsCap = component 'Diagnostics' {
+                technology 'capabilities/diagnostics.rs'
+                description 'Generates syntax and semantic diagnostics.'
+            }
+
+            inlayHintsCap = component 'Inlay Hints' {
+                technology 'capabilities/inlay_hints.rs'
+                description 'Provides type hints and parameter hints.'
+            }
+
+            indexingCap = component 'Indexing' {
+                technology 'capabilities/indexing/'
+                description 'Handles document lifecycle and workspace indexing.'
+            }
+        }
+    }
+
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - Query Layer
+    // =========================================================================
+
+    extend lsp.query {
+        definitionQuery = component 'Definition Query' {
+            technology 'query/definition.rs'
+            description 'Finds where a symbol is defined.'
+        }
+
+        referencesQuery = component 'References Query' {
+            technology 'query/references.rs'
+            description 'Finds all usages of a symbol.'
+        }
+
+        hoverQuery = component 'Hover Query' {
+            technology 'query/hover.rs'
+            description 'Gets type and documentation for hover.'
+        }
+
+        methodQuery = component 'Method Query' {
+            technology 'query/method.rs'
+            description 'Resolves method calls and receivers.'
+        }
+
+        typesQuery = component 'Types Query' {
+            technology 'query/types.rs'
+            description 'Provides type inference utilities.'
+        }
+    }
+
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - Ruby Index
+    // =========================================================================
+
+    extend lsp.index {
+        entryStore = component 'Entry Store' {
+            technology 'SlotMap'
+            description 'Stores Class, Module, Method, Constant, ClassVar, InstanceVar, GlobalVar.'
+        }
+
+        inheritanceGraph = component 'Inheritance Graph' {
+            technology 'graph.rs'
+            description 'Tracks superclass and mixin relationships.'
+        }
+
+        prefixTree = component 'Prefix Tree' {
+            technology 'prefix_tree.rs'
+            description 'Enables fast completion lookups.'
+        }
+    }
+
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - Document Cache
+    // =========================================================================
+
+    extend lsp.docs {
+        rubyDocument = component 'Ruby Document' {
+            technology 'RubyDocument struct'
+            description 'Stores local variable symbols for a single open file.'
+        }
+    }
+
+    // --- Component Relationships ---
+  
+    // Notification Handlers → Capabilities (Indexing)
+    lsp.server.notificationHandlers -> lsp.capabilities.indexingCap 'Document lifecycle'
+    lsp.capabilities.indexingCap -> lsp.indexer.coordinator 'initialized: Start Indexing'
+    lsp.capabilities.indexingCap -> lsp.docs 'didOpen/Close: Manage cache'
+    lsp.capabilities.indexingCap -> lsp.index.entryStore 'didChange/Save: Re-index'
+
+    // Request Handlers → Capabilities Layer
+    lsp.server.requestHandlers -> lsp.capabilities.definitionsCap 'Go to Definition'
+    lsp.server.requestHandlers -> lsp.capabilities.referencesCap 'Find References'
+    lsp.server.requestHandlers -> lsp.capabilities.hoverCap 'Hover'
+    lsp.server.requestHandlers -> lsp.capabilities.completionCap 'Completion'
+
+    // Capabilities → Query Layer
+    lsp.capabilities.definitionsCap -> lsp.query.definitionQuery 'find_definitions_at_position'
+    lsp.capabilities.referencesCap -> lsp.query.referencesQuery 'find_references_at_position'
+    lsp.capabilities.hoverCap -> lsp.query.hoverQuery 'get_hover_for_position'
+    lsp.capabilities.completionCap -> lsp.query 'get_completions'
+
+    // Query Layer → Index and Docs
+    lsp.query.definitionQuery -> lsp.index.entryStore 'Lookup by FQN'
+    lsp.query.definitionQuery -> lsp.docs.rubyDocument 'Local variables'
+    lsp.query.referencesQuery -> lsp.index.entryStore 'Search references'
+    lsp.query.hoverQuery -> lsp.index.entryStore 'Get type info'
+    lsp.query.hoverQuery -> lsp.docs.rubyDocument 'Get local var type'
+    lsp.query.methodQuery -> lsp.index.inheritanceGraph 'Resolve via MRO'
+}
+
+// =============================================================================
+// VIEWS
+// =============================================================================
+
+views {
+    // Level 3: Component Diagram - Server
+    view serverComponents of lsp.server {
+        title 'Level 3: Server Components'
+        description 'Shows how the LSP Server handles requests via capabilities.'
+
+        include *
+        include lsp.capabilities
+
+        autoLayout LeftRight
+    }
+
+    // Level 3: Component Diagram - Capabilities
+    view capabilitiesComponents of lsp.capabilities {
+        title 'Level 3: Capabilities Components'
+        description 'Shows the capabilities layer that orchestrates handler logic.'
+
+        include *
+        include lsp.query
+
+        autoLayout LeftRight
+    }
+
+    // Level 3: Component Diagram - Query Layer
+    view queryComponents of lsp.query {
+        title 'Level 3: Query Layer Components'
+        description 'Shows the query modules that access Index and Docs.'
+
+        include *
+        include lsp.index
+        include lsp.docs
+
+        autoLayout TopBottom
+    }
+
+    // Level 3: Component Diagram - Index
+    view indexComponents of lsp.index {
+        title 'Level 3: Ruby Index Components'
+        description 'Shows the internal data structures of the Index.'
+
+        include *
+
+        autoLayout LeftRight
+    }
+}
+

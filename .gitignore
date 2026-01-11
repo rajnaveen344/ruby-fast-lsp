@@ -11,3 +11,5 @@ src/test/simulation/soak_failures.log
 *heap.json
 # Pre-zipped stubs (generated from vsix/stubs, not tracked in git)
 vsix/stubs-zipped/
+# LikeC4 snapshots
+.likec4

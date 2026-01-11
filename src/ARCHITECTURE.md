@@ -9,8 +9,9 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 ```
 src/
 ├── analyzer_prism/ - Ruby AST analysis and visitors
-├── capabilities/   - LSP feature implementations (hover, completion, etc.)
-├── indexer/        - Global symbol indexing and workspace tracking
+├── capabilities/   - LSP feature implementations (AST-only logic)
+├── indexer/        - Data Layer: Global symbol indexing and workspace tracking
+├── query/          - Service Layer: Unified RubyIndex query engine
 ├── inferrer/       - Type inference and RBS integration
 ├── handlers/       - LSP request/notification routing
 ├── types/          - Core data structures (FQN, Document, Method)
@@ -69,27 +70,50 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 
 ### 3. Capabilities (`src/capabilities/`)
 
-Capabilities implement specific LSP features by combining the Analyzer and Indexer.
+Capabilities implement specific LSP features by coordinating between the Analyzer and the Query Engine.
 
-- **Primary Responsibility**: Implement LSP feature endpoints
+- **Primary Responsibility**: Implement LSP feature endpoints and handle AST-only logic
 - **Secondary Responsibility**: Convert between LSP types and internal types
 
 #### Key Files:
 
-- `definition.rs`: Go-to-definition functionality
-- `references.rs`: Find-references functionality
-- `hover.rs`: Symbol information and documentation
-- `completion/`: Code completion engine
+- `definition.rs`: Go-to-definition entry point
+- `references.rs`: Find-references entry point
+- `hover.rs`: Hover information entry point
+- `completion/`: Code completion coordination
 - `semantic_tokens.rs`: Syntax highlighting functionality
 - `type_hierarchy.rs`: Superclass/Subclass navigation
 
 #### Design Decisions:
 
 - Each capability is self-contained in its own module
-- Capabilities use the analyzer and indexer as services
-- Capabilities handle LSP-specific concerns (request/response formats)
+- Capabilities focus on AST traversal and local scope analysis
+- For index-heavy queries, capabilities delegate to the **Query Engine**
+- Capabilities handle LSP-specific concerns (request/validation/shaping)
 
-### 4. Server (`src/server.rs`)
+### 4. Query Engine (`src/query/`)
+
+The Query Engine provides a unified service layer for querying the `RubyIndex`.
+
+- **Primary Responsibility**: Consolidate business logic for index-based queries
+- **Secondary Responsibility**: Provide composable helpers for complex resolution (e.g., method return types)
+
+#### Key Files:
+
+- `mod.rs`: Defines `IndexQuery` struct and entry points
+- `definition.rs`: Unified definition lookups
+- `references.rs`: Unified reference lookups
+- `hover.rs`: Type and documentation lookups
+- `types.rs`: Type inference helpers
+- `method.rs`: Method resolution and dispatch logic
+
+#### Design Decisions:
+
+- Consolidates all "index-aware" logic into one place
+- Provides a stable API for capabilities to query project-wide information
+- Enables complex "chained" queries through composable helpers
+
+### 5. Server (`src/server.rs`)
 
 The Server coordinates between LSP clients and the internal components.
 
@@ -137,11 +161,14 @@ Centrally defined types used throughout the system.
 ### 2. Go to Definition
 
 1. Client sends a "go to definition" request with a position
-2. Server delegates to the definition capability
+2. Server delegates to the definition capability (`src/capabilities/definition.rs`)
 3. Definition capability:
-   - Uses the analyzer to identify the symbol at the position
-   - Uses the indexer to find where that symbol is defined
-   - Returns the location to the client
+   - Uses the analyzer to identify the identifier and local scope at the position
+   - If not a local variable, delegates to the **Query Engine** (`src/query/definition.rs`)
+4. Query Engine:
+   - Uses `IndexQuery` to perform project-wide lookups in `RubyIndex` (handling inheritance, mixins, etc.)
+   - Returns resolved locations
+5. Capability returns the location(s) to the client
 
 ### 3. File Change Handling
 
@@ -155,25 +182,35 @@ Centrally defined types used throughout the system.
 
 ## Component Interactions
 
-### Analyzer and Indexer Relationship
+### 3-Layer Architecture
 
-The separation between the Analyzer and Indexer is crucial:
+The Ruby Fast LSP follows a clear 3-layer architecture:
 
-- **Analyzer**: Focuses on "what is this piece of code?"
-- **Indexer**: Focuses on "where are all the definitions and references?"
+1. **API Layer** (`server.rs`, `handlers/`): Handles LSP protocol, request validation, and routing.
+2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `IndexQuery` acts as the primary service interface for data lookups.
+3. **Data Layer** (`src/indexer/`): Manages the in-memory `RubyIndex`, providing raw access to symbol data.
+
+### Analyzer, Query Engine, and Indexer Relationship
+
+The separation between these components is crucial:
+
+- **Analyzer**: Focuses on "what is this piece of code?" (local context)
+- **Query Engine**: Focuses on "where is this in the project and how does it relate to other code?" (global context)
+- **Indexer**: Focuses on storing and retrieving raw symbol data efficiently.
 
 This separation allows:
+
 1. Independent evolution of each component
 2. Clearer testing boundaries
 3. Better caching strategies (indexer can be persistent, analyzer is on-demand)
 
-### Capability and Service Relationship
+### Capability and Query Engine Relationship
 
-Capabilities use the Analyzer and Indexer as services:
+Capabilities use the Query Engine as their primary data service:
 
-1. They depend on these services but don't implement their logic
-2. They focus on translating between LSP requests and internal operations
-3. They handle LSP-specific concerns like request validation
+1. Capabilities handle the AST traversal and identifying _what_ the user is interacting with.
+2. They call the Query Engine to resolve _where_ that thing is defined or referenced across the workspace.
+3. They translate the results back into LSP-specific formats.
 
 ## Future Extensions
 

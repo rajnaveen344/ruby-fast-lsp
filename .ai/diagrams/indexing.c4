@@ -1,0 +1,125 @@
+// =============================================================================
+// Ruby Fast LSP - Indexing Lifecycle (Dynamic View)
+// =============================================================================
+// This file extends the model with components and a dynamic view 
+// showing how indexing works from initialization to completion.
+// =============================================================================
+
+model {
+  // =========================================================================
+  // INDEXING COMPONENTS
+  // =========================================================================
+
+  extend lsp {
+    indexer = container 'Indexer' {
+      technology 'Rust'
+      description 'Orchestrates the multi-phase indexing process.'
+
+      coordinator = component 'Coordinator' {
+        technology 'coordinator.rs'
+        description 'Runs Phase 1 (definitions), Phase 2 (references).'
+      }
+
+      projectIndexer = component 'Project Indexer' {
+        technology 'indexer_project.rs'
+        description 'Indexes workspace Ruby files.'
+      }
+
+      stdlibIndexer = component 'Stdlib Indexer' {
+        technology 'indexer_stdlib.rs'
+        description 'Indexes Ruby core stubs and stdlib modules.'
+      }
+
+      gemIndexer = component 'Gem Indexer' {
+        technology 'indexer_gem.rs'
+        description 'Discovers and indexes gem dependencies.'
+      }
+    }
+
+    analyzer = container 'Analyzer' {
+      technology 'Prism Visitors'
+      description 'Traverses the AST to extract symbols.'
+
+      indexVisitor = component 'Index Visitor' {
+        technology 'index_visitor.rs'
+        description 'Extracts definitions: Class, Module, Method, etc.'
+      }
+
+      referenceVisitor = component 'Reference Visitor' {
+        technology 'reference_visitor.rs'
+        description 'Extracts references to symbols.'
+      }
+    }
+  }
+
+  // --- Indexing Relationships ---
+
+  lsp.indexer.coordinator -> lsp.indexer.projectIndexer 'Phase 1 & 2'
+  lsp.indexer.coordinator -> lsp.indexer.stdlibIndexer 'Index stdlib'
+  lsp.indexer.coordinator -> lsp.indexer.gemIndexer 'Index gems'
+
+  lsp.indexer.projectIndexer -> lsp.analyzer.indexVisitor 'Phase 1 - Definitions'
+  lsp.indexer.stdlibIndexer -> lsp.analyzer.indexVisitor 'Stdlib Definitions'
+  lsp.indexer.gemIndexer -> lsp.analyzer.indexVisitor 'Gem Definitions'
+
+  lsp.indexer.projectIndexer -> lsp.analyzer.referenceVisitor 'Phase 2 - References'
+
+  lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store symbols'
+  lsp.analyzer.indexVisitor -> lsp.index.inheritanceGraph 'Add edges'
+  lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store refs'
+
+  lsp.indexer.coordinator -> lsp.index.inheritanceGraph 'Resolve mixins'
+  lsp.indexer.coordinator -> lsp.index.prefixTree 'Build trie'
+}
+
+// =============================================================================
+// VIEWS
+// =============================================================================
+
+views {
+  // Component Diagram - Indexer
+  view indexerComponents of lsp.indexer {
+    title 'Level 3: Indexer Components'
+    description 'Shows the indexer sub-modules.'
+
+    include *
+    include lsp.analyzer
+
+    autoLayout LeftRight
+  }
+
+  // Dynamic View - Indexing Lifecycle
+  dynamic view indexingLifecycle {
+    title 'Indexing Lifecycle'
+    description 'Shows the step-by-step flow from initialization to ready.'
+
+    // Step 1: LSP Initialized
+    ide -> lsp.server 'initialized notification'
+    lsp.server -> lsp.indexer.coordinator 'Spawn background indexing task'
+
+    // Step 2: Phase 1 - Definitions
+    lsp.indexer.coordinator -> lsp.indexer.projectIndexer 'Phase 1: Index definitions'
+    lsp.indexer.projectIndexer -> lsp.analyzer.indexVisitor 'Parse & visit AST'
+    lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store Class, Module, Method...'
+
+    // Step 3: Stdlib & Gems
+    lsp.indexer.coordinator -> lsp.indexer.stdlibIndexer 'Index stdlib stubs'
+    lsp.indexer.coordinator -> lsp.indexer.gemIndexer 'Index gem libraries'
+
+    // Step 4: Resolve Inheritance
+    lsp.indexer.coordinator -> lsp.index.inheritanceGraph 'Resolve superclasses & mixins'
+
+    // Step 5: Phase 2 - References
+    lsp.indexer.coordinator -> lsp.indexer.projectIndexer 'Phase 2: Index references'
+    lsp.indexer.projectIndexer -> lsp.analyzer.referenceVisitor 'Extract symbol usages'
+    lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store reference locations'
+
+    // Step 6: Build Trie
+    lsp.indexer.coordinator -> lsp.index.prefixTree 'Build completion trie'
+
+    // Step 7: Ready
+    lsp.server -> ide 'Indexing complete'
+
+    autoLayout TopBottom
+  }
+}

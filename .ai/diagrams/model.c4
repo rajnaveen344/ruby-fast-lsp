@@ -1,0 +1,122 @@
+// =============================================================================
+// Ruby Fast LSP - C4 Model Specification
+// =============================================================================
+// This file defines the base specification and core model elements.
+// Other .c4 files extend this model with specific views and details.
+// =============================================================================
+
+specification {
+    element person {
+        style {
+            shape person
+            color red
+        }
+    }
+    element softwareSystem {
+        style {
+            color blue
+        }
+    }
+    element container {
+        style {
+            color indigo
+        }
+    }
+    element component {
+        style {
+            color slate
+        }
+    }
+}
+
+// =============================================================================
+// LEVEL 1: SYSTEM CONTEXT
+// =============================================================================
+// Who uses the system and what external systems does it interact with?
+
+model {
+    // --- Actors ---
+    developer = person 'Ruby Developer' {
+        description 'Uses VS Code or other IDE to write Ruby code.'
+    }
+
+    // --- External Systems ---
+    ide = softwareSystem 'IDE (VS Code, Zed, etc.)' {
+        description 'Editor that communicates with the LSP server.'
+    }
+
+    prism = softwareSystem 'Prism Parser' {
+        description 'Parses Ruby source code into an AST.'
+    }
+
+    filesystem = softwareSystem 'File System' {
+        description 'Source files, gems, and stdlib stubs.'
+    }
+
+    // --- Our System ---
+    lsp = softwareSystem 'Ruby Fast LSP' {
+        description 'A high-performance Language Server for Ruby.'
+    
+        // =========================================================================
+        // LEVEL 2: CONTAINERS
+        // =========================================================================
+        // What are the major components of the system?
+
+        server = container 'LSP Server' {
+            technology 'Rust / tower-lsp'
+            description 'Receives LSP requests and routes them to handlers.'
+        }
+
+        index = container 'Ruby Index' {
+            technology 'Rust / SlotMap'
+            description 'Stores all cross-file symbols: Class, Module, Method, Constant, etc.'
+        }
+
+        docs = container 'Document Cache' {
+            technology 'Rust / HashMap'
+            description 'Stores RubyDocument objects with local variable symbols for open files.'
+        }
+
+        query = container 'Query Layer' {
+            technology 'Rust'
+            description 'Provides a clean API for handlers to query Index and Docs.'
+        }
+    }
+
+    // --- Level 1 Relationships (System Context) ---
+    developer -> ide 'Writes Ruby code in'
+    ide -> lsp 'Sends LSP requests to'
+    lsp -> prism 'Parses Ruby code with'
+    lsp -> filesystem 'Reads files from'
+
+    // --- Level 2 Relationships (Containers) ---
+    ide -> lsp.server 'initialize, definitions, hover, etc.'
+    lsp.query -> lsp.index 'Queries cross-file symbols'
+    lsp.query -> lsp.docs 'Queries local variables'
+}
+
+// =============================================================================
+// VIEWS
+// =============================================================================
+
+views {
+    // Level 1: System Context Diagram
+    view context of lsp {
+        title 'Level 1: System Context'
+        description 'Shows Ruby Fast LSP and its external dependencies.'
+
+        include developer, ide, lsp, prism, filesystem
+
+        autoLayout TopBottom
+    }
+
+    // Level 2: Container Diagram
+    view containers of lsp {
+        title 'Level 2: Containers'
+        description 'Shows the major containers within Ruby Fast LSP.'
+
+        include *
+
+        autoLayout TopBottom
+    }
+}

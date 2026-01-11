@@ -1,0 +1,189 @@
+// =============================================================================
+// Ruby Fast LSP - LSP Notification Flows (Dynamic Views)
+// =============================================================================
+// This file provides dynamic views showing how each LSP notification is handled.
+// Notifications are events sent from the IDE that don't require a response.
+// =============================================================================
+
+views {
+    // =========================================================================
+    // INITIALIZED NOTIFICATION
+    // =========================================================================
+    dynamic view initialized {
+        title 'notifications/Initialized'
+        description 'Triggers background workspace indexing after LSP handshake completes.'
+
+        ide -> lsp.server 'initialized notification'
+        lsp.server -> lsp.indexer.coordinator 'Spawn background indexing task'
+
+        // Phase 1: Index definitions (stdlib, gems, project)
+        lsp.indexer.coordinator -> lsp.indexer.stdlibIndexer 'Index stdlib stubs'
+        lsp.indexer.coordinator -> lsp.indexer.gemIndexer 'Index gem dependencies'
+        lsp.indexer.coordinator -> lsp.indexer.projectIndexer 'Index workspace files'
+
+        // Store in index
+        lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store Class, Module, Method...'
+        lsp.indexer.coordinator -> lsp.index.inheritanceGraph 'Resolve superclasses & mixins'
+
+        // Phase 2: Index references
+        lsp.indexer.coordinator -> lsp.indexer.projectIndexer 'Index references'
+        lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store reference locations'
+
+        // Finalize
+        lsp.indexer.coordinator -> lsp.index.prefixTree 'Build completion trie'
+        lsp.server -> ide 'Progress: Indexing complete'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID OPEN NOTIFICATION
+    // =========================================================================
+    dynamic view didOpen {
+        title 'notifications/Did Open'
+        description 'Handles opening a document: caches content, clears old index data, re-indexes, publishes diagnostics.'
+
+        ide -> lsp.server 'didOpen notification'
+
+        // Cache the document
+        lsp.server -> lsp.docs 'Create/update RubyDocument'
+
+        // Clear old index data for this file
+        lsp.server -> lsp.index.entryStore 'Remove old definitions for URI'
+        lsp.server -> lsp.index.entryStore 'Remove old references for URI'
+
+        // Re-index the file
+        lsp.server -> lsp.analyzer.indexVisitor 'Parse & extract definitions'
+        lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store new definitions'
+        lsp.server -> lsp.analyzer.referenceVisitor 'Extract references'
+        lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store new references'
+
+        // Resolve inheritance
+        lsp.server -> lsp.index.inheritanceGraph 'Resolve mixins'
+
+        // Publish diagnostics
+        lsp.server -> ide 'publishDiagnostics'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID CHANGE NOTIFICATION
+    // =========================================================================
+    dynamic view didChange {
+        title 'notifications/Did Change'
+        description 'Handles text changes: updates cache, clears old index data, re-indexes, refreshes diagnostics.'
+
+        ide -> lsp.server 'didChange notification'
+
+        // Update cached document
+        lsp.server -> lsp.docs 'Update RubyDocument content'
+
+        // Clear old index data for this file
+        lsp.server -> lsp.index.entryStore 'Remove old definitions for URI'
+        lsp.server -> lsp.index.entryStore 'Remove old references for URI'
+
+        // Re-index the file
+        lsp.server -> lsp.analyzer.indexVisitor 'Parse & re-extract definitions'
+        lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store new definitions'
+        lsp.server -> lsp.analyzer.referenceVisitor 'Re-extract references'
+        lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store new references'
+
+        // Resolve inheritance
+        lsp.server -> lsp.index.inheritanceGraph 'Resolve mixins'
+
+        // Publish fresh diagnostics
+        lsp.server -> ide 'publishDiagnostics'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID SAVE NOTIFICATION
+    // =========================================================================
+    dynamic view didSave {
+        title 'notifications/Did Save'
+        description 'Handles file save: clears old index data, full re-index, YARD diagnostics, inlay hint refresh.'
+
+        ide -> lsp.server 'didSave notification'
+
+        // Clear old index data for this file
+        lsp.server -> lsp.index.entryStore 'Remove old definitions for URI'
+        lsp.server -> lsp.index.entryStore 'Remove old references for URI'
+
+        // Full re-index
+        lsp.server -> lsp.analyzer.indexVisitor 'Parse & full index pass'
+        lsp.analyzer.indexVisitor -> lsp.index.entryStore 'Store new definitions'
+        lsp.server -> lsp.analyzer.referenceVisitor 'Full reference pass'
+        lsp.analyzer.referenceVisitor -> lsp.index.entryStore 'Store new references'
+
+        // Resolve inheritance
+        lsp.server -> lsp.index.inheritanceGraph 'Resolve mixins'
+
+        // Publish diagnostics (including YARD)
+        lsp.server -> ide 'publishDiagnostics'
+
+        // Request inlay hints refresh
+        lsp.server -> ide 'inlayHint/refresh'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID CLOSE NOTIFICATION
+    // =========================================================================
+    dynamic view didClose {
+        title 'notifications/Did Close'
+        description 'Handles file close: removes from doc cache but keeps index entries.'
+
+        ide -> lsp.server 'didClose notification'
+
+        // Remove from doc cache (keep index entries for cross-file queries)
+        lsp.server -> lsp.docs 'Remove RubyDocument from cache'
+
+        // Keep unresolved diagnostics visible
+        lsp.server -> ide 'publishDiagnostics (unresolved only)'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID CHANGE WATCHED FILES NOTIFICATION
+    // =========================================================================
+    dynamic view didChangeWatchedFiles {
+        title 'notifications/Did Change Watched Files'
+        description 'Handles external file changes: invalidates namespace tree cache.'
+
+        ide -> lsp.server 'didChangeWatchedFiles notification'
+
+        // Invalidate caches for affected Ruby files
+        lsp.server -> lsp.index 'Invalidate namespace tree cache'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DID CHANGE CONFIGURATION NOTIFICATION
+    // =========================================================================
+    dynamic view didChangeConfiguration {
+        title 'notifications/Did Change Configuration'
+        description 'Handles configuration updates: applies new Ruby version and settings.'
+
+        ide -> lsp.server 'didChangeConfiguration (settings applied)'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // SHUTDOWN REQUEST
+    // =========================================================================
+    dynamic view shutdown {
+        title 'notifications/Shutdown'
+        description 'Handles graceful shutdown of the LSP server.'
+
+        ide -> lsp.server 'shutdown request'
+        lsp.server -> ide 'shutdown response (success)'
+
+        autoLayout TopBottom
+    }
+}

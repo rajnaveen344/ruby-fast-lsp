@@ -1,0 +1,323 @@
+// =============================================================================
+// Ruby Fast LSP - LSP Request Flows (Dynamic Views)
+// =============================================================================
+// This file provides dynamic views showing how each LSP request is handled.
+// Requests are messages from the IDE that require a response.
+// =============================================================================
+
+views {
+    // =========================================================================
+    // GO TO DEFINITION
+    // =========================================================================
+    dynamic view definition {
+        title 'requests/Definition'
+        description 'Shows how definition query branches based on identifier type (Constant, Method, LocalVar, InstanceVar, ClassVar, GlobalVar, YardType).'
+
+        // Entry point: Handlers → Capabilities → Query
+        ide -> lsp.server 'definition request (uri, position)'
+        lsp.server -> lsp.capabilities.definitionsCap 'find_definition_at_position'
+        lsp.capabilities.definitionsCap -> lsp.query.definitionQuery 'IndexQuery.find_definitions_at_position'
+
+        // Branch: Constant (Class, Module)
+        lsp.query.definitionQuery -> lsp.index.entryStore 'Constant: resolve_fqn → get'
+
+        // Branch: Method (uses MRO)
+        lsp.query.definitionQuery -> lsp.index.inheritanceGraph 'Method: get_ancestor_chain'
+        lsp.index.inheritanceGraph -> lsp.index.entryStore 'Method: get_methods_by_name'
+
+        // Branch: Local Variable
+        lsp.query.definitionQuery -> lsp.docs.rubyDocument 'LocalVar: get_local_var_entries'
+
+        // Branch: Instance Variable
+        lsp.query.definitionQuery -> lsp.index.entryStore 'InstanceVar: @name → fqn → get'
+
+        // Branch: Class Variable
+        lsp.query.definitionQuery -> lsp.index.entryStore 'ClassVar: @@name → fqn → get'
+
+        // Branch: Global Variable
+        lsp.query.definitionQuery -> lsp.index.entryStore 'GlobalVar: $name → fqn → get'
+
+        // Branch: YARD Type (in comments)
+        lsp.query.definitionQuery -> lsp.index.entryStore 'YardType: parse → Constant lookup'
+
+        // Return result
+        lsp.query.definitionQuery -> lsp.server 'Return Location(s)'
+        lsp.server -> ide 'GotoDefinitionResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // FIND REFERENCES
+    // =========================================================================
+    dynamic view references {
+        title 'requests/References'
+        description 'Handles finding all references to a symbol.'
+
+        ide -> lsp.server 'references request'
+
+        // Query for references
+        lsp.server -> lsp.query 'Find all references'
+        lsp.query -> lsp.docs 'Check for local variable refs'
+        lsp.query -> lsp.index.entryStore 'Look up reference locations'
+
+        // Return result
+        lsp.index.entryStore -> lsp.query 'Return reference list'
+        lsp.query -> lsp.server 'Return Locations'
+        lsp.server -> ide 'ReferencesResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // HOVER
+    // =========================================================================
+    dynamic view hover {
+        title 'requests/Hover'
+        description 'Shows type information and documentation on hover.'
+
+        ide -> lsp.server 'hover request'
+
+        // Query for hover info
+        lsp.server -> lsp.query 'Get hover info'
+        lsp.query -> lsp.docs 'Resolve symbol at position'
+        lsp.query -> lsp.index.entryStore 'Look up symbol details'
+
+        // Return result
+        lsp.index.entryStore -> lsp.query 'Return Entry with docs'
+        lsp.query -> lsp.server 'Return Hover content'
+        lsp.server -> ide 'HoverResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // COMPLETION
+    // =========================================================================
+    dynamic view completion {
+        title 'requests/Completion'
+        description 'Provides autocomplete suggestions for symbols and methods.'
+
+        ide -> lsp.server 'completion request'
+
+        // Query for completions
+        lsp.server -> lsp.query 'Get completion items'
+        lsp.query -> lsp.docs 'Resolve context at position'
+        lsp.query -> lsp.index.prefixTree 'Search by prefix'
+        lsp.query -> lsp.index.entryStore 'Get symbol details'
+
+        // Return result
+        lsp.index.entryStore -> lsp.query 'Return matching entries'
+        lsp.query -> lsp.server 'Return CompletionItems'
+        lsp.server -> ide 'CompletionResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // SEMANTIC TOKENS
+    // =========================================================================
+    dynamic view semanticTokens {
+        title 'requests/Semantic Tokens'
+        description 'Provides semantic highlighting tokens for syntax coloring.'
+
+        ide -> lsp.server 'semanticTokens/full request'
+
+        // Query for tokens
+        lsp.server -> lsp.docs 'Get RubyDocument'
+        lsp.server -> lsp.analyzer.indexVisitor 'Parse AST for tokens'
+
+        // Return result
+        lsp.server -> ide 'SemanticTokensResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // INLAY HINTS
+    // =========================================================================
+    dynamic view inlayHints {
+        title 'requests/Inlay Hints'
+        description 'Provides inline type hints and parameter names.'
+
+        ide -> lsp.server 'inlayHint request'
+
+        // Query for hints
+        lsp.server -> lsp.docs 'Get RubyDocument with hints'
+        lsp.server -> lsp.query 'Compute type inferences'
+
+        // Return result
+        lsp.server -> ide 'InlayHintResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DOCUMENT SYMBOLS
+    // =========================================================================
+    dynamic view documentSymbols {
+        title 'requests/Document Symbols'
+        description 'Provides symbol outline for the current file (breadcrumb, outline view).'
+
+        ide -> lsp.server 'documentSymbol request'
+
+        // Query for symbols
+        lsp.server -> lsp.index.entryStore 'Get file entries'
+
+        // Return result
+        lsp.server -> ide 'DocumentSymbolResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // WORKSPACE SYMBOLS
+    // =========================================================================
+    dynamic view workspaceSymbols {
+        title 'requests/Workspace Symbols'
+        description 'Provides symbol search across the entire workspace (Cmd+T).'
+
+        ide -> lsp.server 'workspaceSymbol request'
+
+        // Query for symbols
+        lsp.server -> lsp.index.prefixTree 'Search symbols by query'
+        lsp.server -> lsp.index.entryStore 'Get symbol locations'
+
+        // Return result
+        lsp.server -> ide 'WorkspaceSymbolResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // FOLDING RANGE
+    // =========================================================================
+    dynamic view foldingRange {
+        title 'requests/Folding Range'
+        description 'Provides code folding regions for classes, methods, blocks.'
+
+        ide -> lsp.server 'foldingRange request'
+
+        // Query for folding ranges
+        lsp.server -> lsp.docs 'Get RubyDocument'
+        lsp.server -> lsp.docs 'Parse AST for fold regions'
+
+        // Return result
+        lsp.server -> ide 'FoldingRangeResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // CODE LENS
+    // =========================================================================
+    dynamic view codeLens {
+        title 'requests/Code Lens'
+        description 'Provides inline actions like reference counts on methods.'
+
+        ide -> lsp.server 'codeLens request'
+
+        // Query for code lens
+        lsp.server -> lsp.index.entryStore 'Get file entries'
+        lsp.server -> lsp.index.entryStore 'Count references'
+
+        // Return result
+        lsp.server -> ide 'CodeLensResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // ON TYPE FORMATTING
+    // =========================================================================
+    dynamic view onTypeFormatting {
+        title 'requests/On Type Formatting'
+        description 'Provides auto-formatting when typing (e.g., auto-indent after `end`).'
+
+        ide -> lsp.server 'onTypeFormatting request'
+
+        // Compute formatting
+        lsp.server -> lsp.docs 'Get RubyDocument'
+
+        // Return result
+        lsp.server -> ide 'TextEdits'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // TYPE HIERARCHY - PREPARE
+    // =========================================================================
+    dynamic view typeHierarchyPrepare {
+        title 'requests/Type Hierarchy Prepare'
+        description 'Prepares type hierarchy for a class/module at position.'
+
+        ide -> lsp.server 'prepareTypeHierarchy request'
+
+        // Query for type
+        lsp.server -> lsp.query 'Resolve symbol at position'
+        lsp.query -> lsp.index.entryStore 'Get Class/Module entry'
+
+        // Return result
+        lsp.server -> ide 'TypeHierarchyItem'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // TYPE HIERARCHY - SUPERTYPES
+    // =========================================================================
+    dynamic view typeHierarchySupertypes {
+        title 'requests/Type Hierarchy Supertypes'
+        description 'Gets parent classes and included modules.'
+
+        ide -> lsp.server 'supertypes request'
+
+        // Query for supertypes
+        lsp.server -> lsp.index.inheritanceGraph 'Get parent classes'
+        lsp.server -> lsp.index.inheritanceGraph 'Get included modules'
+
+        // Return result
+        lsp.server -> ide 'TypeHierarchyItems'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // TYPE HIERARCHY - SUBTYPES
+    // =========================================================================
+    dynamic view typeHierarchySubtypes {
+        title 'requests/Type Hierarchy Subtypes'
+        description 'Gets child classes and including modules.'
+
+        ide -> lsp.server 'subtypes request'
+
+        // Query for subtypes
+        lsp.server -> lsp.index.inheritanceGraph 'Get child classes'
+        lsp.server -> lsp.index.inheritanceGraph 'Get including modules'
+
+        // Return result
+        lsp.server -> ide 'TypeHierarchyItems'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // NAMESPACE TREE (Custom)
+    // =========================================================================
+    dynamic view namespaceTree {
+        title 'requests/Namespace Tree'
+        description 'Custom request to get namespace tree for explorer view.'
+
+        ide -> lsp.server 'rubyLsp/namespaceTree request'
+
+        // Query for namespace tree
+        lsp.server -> lsp.index.entryStore 'Get all namespaces'
+        lsp.server -> lsp.index.entryStore 'Build tree structure'
+
+        // Return result
+        lsp.server -> ide 'NamespaceTreeResponse'
+
+        autoLayout TopBottom
+    }
+}
