@@ -5,9 +5,8 @@ use tower_lsp::lsp_types::{
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::query::{infer_type_from_assignment, TypeQuery};
+use crate::query::{IndexQuery, TypeQuery};
 use crate::server::RubyLanguageServer;
-use tower_lsp::lsp_types::Url;
 
 pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
     InlayHintServerCapabilities::Options(InlayHintOptions {
@@ -31,26 +30,27 @@ pub async fn handle_inlay_hints(
     let uri = params.text_document.uri;
     let requested_range = params.range;
 
-    // Only provide hints for open files (documents in memory)
-    let document_guard = server.docs.lock();
-    let doc_arc = match document_guard.get(&uri) {
-        Some(doc) => doc.clone(),
-        None => {
-            // File is not open - no inlay hints available
-            return Vec::new();
+    // Get document content and Arc safely
+    let (content, doc_arc) = {
+        let doc_guard = server.docs.lock();
+        match doc_guard.get(&uri) {
+            Some(doc_arc) => {
+                let doc = doc_arc.read();
+                (doc.content.clone(), doc_arc.clone())
+            }
+            None => return Vec::new(),
         }
     };
-    drop(document_guard);
 
-    let document = doc_arc.read();
-    let content = document.content.clone();
+    // Create unified query context (owns index reference, so no direct server.index.lock needed)
+    let query = IndexQuery::with_doc(server.index.clone(), doc_arc.clone());
 
-    // Lazily infer return types for methods in the VISIBLE RANGE only
-    // This keeps performance fast - only analyze methods the user can see
-    drop(document); // Drop read lock before calling inference
-    infer_methods_in_range(server, &uri, &content, &requested_range);
+    // infer_and_update_visible_types handles the "dirty" work of AST parsing
+    // and updating the index with inferred return types.
+    // This encapsulates the index access within the Query layer.
+    query.infer_and_update_visible_types(&uri, &content, &requested_range);
 
-    // Re-acquire document for structural hints
+    // Re-acquire document for structural hints (read lock)
     let document = doc_arc.read();
 
     // Get structural hints from the document (filtered to range)
@@ -65,7 +65,6 @@ pub async fn handle_inlay_hints(
 
     eprintln!("Generating inlay hints for doc: {}", uri);
     let lvars = document.get_all_lvars();
-    eprintln!("Found {} scopes", lvars.len());
 
     for (_scope_id, entries) in lvars {
         for entry in entries {
@@ -77,13 +76,10 @@ pub async fn handle_inlay_hints(
             }
 
             if let EntryKind::LocalVariable(data) = &entry.kind {
-                let name = &data.name;
-
-                // For unknown types, we want to try inference
                 // Get type from document (base type or persisted flow type)
                 let from_lvar = data.assignments.last().map(|a| a.r#type.clone());
 
-                // Try type narrowing if not from lvar or if lvar is Unknown
+                // Try type narrowing
                 let from_narrowing = match from_lvar.clone() {
                     Some(ty) if ty != RubyType::Unknown => Some(ty),
                     _ => {
@@ -94,12 +90,13 @@ pub async fn handle_inlay_hints(
                     }
                 };
 
-                // Try method chain assignment inference if still unknown
-                let index = server.index.lock();
-                let final_type = from_narrowing
-                    .clone()
-                    .or_else(|| infer_type_from_assignment(&content, name, &index));
-                drop(index);
+                // Resolve final type using Query layer logic
+                let final_type = query.resolve_local_var_type(
+                    &content,
+                    &data.name,
+                    from_lvar.as_ref(),
+                    from_narrowing.clone(),
+                );
 
                 if let Some(ty) = final_type {
                     // Collect update if we inferred something new
@@ -173,10 +170,21 @@ pub async fn handle_inlay_hints(
 
     let method_data: Vec<MethodHintData>;
     {
-        let index = server.index.lock();
+        // Use query layer to get entries instead of raw lock if possible,
+        // but for iteration we still need access.
+        // Ideally we would move this filtering logic to Query too, but for now
+        // we use index_ref() to access.
+        let index_ref = query.index_ref();
+        let index = index_ref.lock();
         let entries = index.file_entries(&uri);
 
         // Generate hints for non-method entries and collect method data
+        // ... (rest of logic remains similar but using the index from query)
+        // Note: The original code iterated over entries. We'll keep this structure
+        // but use the index from query context.
+
+        let mut local_hints = Vec::new(); // Temporary collection
+
         for entry in &entries {
             // Skip entries outside the requested range
             if !is_position_in_range(&entry.location.range.start, &requested_range)
@@ -206,10 +214,11 @@ pub async fn handle_inlay_hints(
                         padding_right: None,
                         data: None,
                     };
-                    all_hints.push(type_hint);
+                    local_hints.push(type_hint);
                 }
             }
         }
+        all_hints.extend(local_hints);
 
         // Collect method data for second pass (lazy inference happens outside lock)
         method_data = entries
@@ -296,161 +305,6 @@ pub async fn handle_inlay_hints(
     }
 
     all_hints
-}
-
-/// Infer return types for methods in the VISIBLE RANGE only.
-/// This is called lazily when hints are requested for a specific viewport.
-/// Only methods within the range are analyzed - keeps performance fast O(visible methods).
-fn infer_methods_in_range(server: &RubyLanguageServer, uri: &Url, content: &str, range: &Range) {
-    use crate::indexer::entry::entry_kind::EntryKind;
-    use crate::indexer::index::EntryId;
-
-    // Collect only method entries that:
-    // 1. Are within the visible range
-    // 2. Need inference (return_type is None)
-    let methods_needing_inference: Vec<(u32, EntryId)> = {
-        let index = server.index.lock();
-        index
-            .get_entry_ids_for_uri(uri)
-            .iter()
-            .filter_map(|&entry_id| {
-                if let Some(entry) = index.get_entry(entry_id) {
-                    if let EntryKind::Method(data) = &entry.kind {
-                        // Check if method is within visible range
-                        let method_line = entry.location.range.start.line;
-                        if method_line >= range.start.line && method_line <= range.end.line {
-                            // Only include if needs inference
-                            if data.return_type.is_none() {
-                                if let Some(pos) = data.return_type_position {
-                                    return Some((pos.line, entry_id));
-                                }
-                            }
-                        }
-                    }
-                }
-                None
-            })
-            .collect()
-    };
-
-    // Fast path: nothing to infer
-    if methods_needing_inference.is_empty() {
-        return;
-    }
-
-    // Parse the file ONCE and infer only the visible methods
-    // Using new_with_content with URI enables on-demand inference of called methods
-    // The URI is used to filter methods to only those in the SAME FILE, avoiding
-    // the O(n) AST traversal problem where we used to search for methods from
-    // other files in the current file's AST
-    let parse_result = ruby_prism::parse(content.as_bytes());
-    let node = parse_result.node();
-
-    // Create file content map for recursive inference
-    let mut file_contents = std::collections::HashMap::new();
-    file_contents.insert(uri, content.as_bytes());
-
-    // Infer and cache (no lock held during inference)
-    let inferred_types: Vec<(EntryId, RubyType)> = methods_needing_inference
-        .iter()
-        .filter_map(|(line, entry_id)| {
-            let def_node = find_def_node_at_line(&node, *line, content)?;
-            // We use a temporary index here, but we really want to update the main index.
-            // However, inference needs access to the index.
-            // Since we are processing the ACTIVE file, we can pass it as source.
-            // But we need to lock the index for inference.
-            let mut index = server.index.lock();
-            // Get owner FQN from the entry to provide context for inference
-            // (e.g. so we know 'self' refers to the class)
-            let owner_fqn = index.get_entry(*entry_id).and_then(|e| {
-                if let EntryKind::Method(m) = &e.kind {
-                    Some(m.owner.clone())
-                } else {
-                    None
-                }
-            });
-
-            let inferred_ty = crate::inferrer::return_type::infer_return_type_for_node(
-                &mut index,
-                content.as_bytes(),
-                &def_node,
-                owner_fqn,
-                Some(&file_contents),
-            )?;
-            Some((*entry_id, inferred_ty))
-        })
-        .collect();
-
-    // Update the index (brief lock)
-    if !inferred_types.is_empty() {
-        let mut index = server.index.lock();
-        for (entry_id, inferred_ty) in inferred_types {
-            index.update_method_return_type(entry_id, inferred_ty);
-        }
-    }
-}
-
-/// Find a DefNode at the given line in the AST.
-fn find_def_node_at_line<'a>(
-    node: &ruby_prism::Node<'a>,
-    target_line: u32,
-    content: &str,
-) -> Option<ruby_prism::DefNode<'a>> {
-    // Try to match DefNode
-    if let Some(def_node) = node.as_def_node() {
-        let offset = def_node.location().start_offset();
-        // Calculate line from byte offset (count newlines before this offset)
-        let line = content.as_bytes()[..offset]
-            .iter()
-            .filter(|&&b| b == b'\n')
-            .count() as u32;
-        if line == target_line {
-            return Some(def_node);
-        }
-    }
-
-    // Recurse into child nodes
-    if let Some(program) = node.as_program_node() {
-        for stmt in program.statements().body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    if let Some(class_node) = node.as_class_node() {
-        if let Some(body) = class_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(module_node) = node.as_module_node() {
-        if let Some(body) = module_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(stmts) = node.as_statements_node() {
-        for stmt in stmts.body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]

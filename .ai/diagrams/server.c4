@@ -138,8 +138,6 @@ model {
     // Notification Handlers → Capabilities (Indexing)
     lsp.server.notificationHandlers -> lsp.capabilities.indexingCap 'Document lifecycle'
     lsp.capabilities.indexingCap -> lsp.indexer.coordinator 'initialized: Start Indexing'
-    lsp.capabilities.indexingCap -> lsp.docs 'didOpen/Close: Manage cache'
-    lsp.capabilities.indexingCap -> lsp.index.entryStore 'didChange/Save: Re-index'
 
     // Request Handlers → Capabilities Layer
     lsp.server.requestHandlers -> lsp.capabilities.definitionsCap 'Go to Definition'

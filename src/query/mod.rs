@@ -18,11 +18,13 @@
 
 mod definition;
 mod hover;
+mod inlay_hints;
 mod method;
 mod references;
 mod types;
 
 pub use hover::HoverInfo;
+pub use inlay_hints::InlayHintData;
 pub use method::MethodInfo;
 pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};
 
