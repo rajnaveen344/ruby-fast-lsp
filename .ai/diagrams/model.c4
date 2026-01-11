@@ -91,7 +91,7 @@ model {
 
     // --- Level 2 Relationships (Containers) ---
     ide -> lsp.server 'initialize, definitions, hover, etc.'
-    lsp.query -> lsp.index 'Queries cross-file symbols'
+    lsp.query -> lsp.index 'Queries and updates cross-file symbols'
     lsp.query -> lsp.docs 'Queries local variables'
 }
 

@@ -60,7 +60,7 @@ model {
 
             inlayHintsCap = component 'Inlay Hints' {
                 technology 'capabilities/inlay_hints.rs'
-                description 'Provides type hints and parameter hints.'
+                description 'Provides type hints and parameter hints via on-demand inference using the Ruby Index.'
             }
 
             indexingCap = component 'Indexing' {
@@ -98,6 +98,11 @@ model {
         typesQuery = component 'Types Query' {
             technology 'query/types.rs'
             description 'Provides type inference utilities.'
+        }
+
+        inlayHintsQuery = component 'Inlay Hints Query' {
+            technology 'query/inlay_hints.rs'
+            description 'Optimized inference for visible code ranges.'
         }
     }
 
@@ -144,12 +149,14 @@ model {
     lsp.server.requestHandlers -> lsp.capabilities.referencesCap 'Find References'
     lsp.server.requestHandlers -> lsp.capabilities.hoverCap 'Hover'
     lsp.server.requestHandlers -> lsp.capabilities.completionCap 'Completion'
+    lsp.server.requestHandlers -> lsp.capabilities.inlayHintsCap 'Inlay Hints'
 
     // Capabilities → Query Layer
     lsp.capabilities.definitionsCap -> lsp.query.definitionQuery 'find_definitions_at_position'
     lsp.capabilities.referencesCap -> lsp.query.referencesQuery 'find_references_at_position'
     lsp.capabilities.hoverCap -> lsp.query.hoverQuery 'get_hover_for_position'
     lsp.capabilities.completionCap -> lsp.query 'get_completions'
+    lsp.capabilities.inlayHintsCap -> lsp.query.inlayHintsQuery 'infer_and_update_visible_types'
 
     // Query Layer → Index and Docs
     lsp.query.definitionQuery -> lsp.index.entryStore 'Lookup by FQN'
@@ -158,6 +165,8 @@ model {
     lsp.query.hoverQuery -> lsp.index.entryStore 'Get type info'
     lsp.query.hoverQuery -> lsp.docs.rubyDocument 'Get local var type'
     lsp.query.methodQuery -> lsp.index.inheritanceGraph 'Resolve via MRO'
+    lsp.query.inlayHintsQuery -> lsp.index.entryStore 'Update inferred types'
+    lsp.query.inlayHintsQuery -> lsp.docs.rubyDocument 'Read/write local variable types'
 }
 
 // =============================================================================
@@ -183,6 +192,8 @@ views {
 
         include *
         include lsp.query
+        include lsp.index
+        include lsp.docs
 
         autoLayout LeftRight
     }

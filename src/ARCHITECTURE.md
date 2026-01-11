@@ -83,6 +83,7 @@ Capabilities implement specific LSP features by coordinating between the Analyze
 - `completion/`: Code completion coordination
 - `semantic_tokens.rs`: Syntax highlighting functionality
 - `type_hierarchy.rs`: Superclass/Subclass navigation
+- `inlay_hints.rs`: Inline type and parameter hints coordination
 
 #### Design Decisions:
 
@@ -106,6 +107,7 @@ The Query Engine provides a unified service layer for querying the `RubyIndex`.
 - `hover.rs`: Type and documentation lookups
 - `types.rs`: Type inference helpers
 - `method.rs`: Method resolution and dispatch logic
+- `inlay_hints.rs`: Unified inlay hints and on-demand inference logic
 
 #### Design Decisions:
 
