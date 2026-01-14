@@ -127,3 +127,66 @@ product<hint label=": Product"> = Builder.new.build
     )
     .await;
 }
+
+/// Inlay hint for variable assigned from bare method call (implicit self).
+/// This tests the case where `a = method_a` inside a class calls a method on self.
+#[tokio::test]
+async fn method_call_implicit_self() {
+    check(
+        r#"
+class Test
+  # @return [String]
+  def method_a
+  end
+
+  def caller
+    a<hint label="String"> = method_a
+  end
+end
+"#,
+    )
+    .await;
+}
+
+/// Inlay hint for variable assigned from method call on local variable.
+/// This tests the case where `b = a.to_s` where `a` is a String.
+#[tokio::test]
+async fn method_call_on_local_variable_chain() {
+    check(
+        r#"
+class Test
+  # @return [String]
+  def method_a
+  end
+
+  def caller
+    a<hint label="String"> = method_a
+    b<hint label="String"> = a.to_s
+  end
+end
+"#,
+    )
+    .await;
+}
+
+/// Inlay hint for deeply chained method calls.
+/// This tests `c = a.to_s.to_s.to_s` - recursive type inference.
+#[tokio::test]
+async fn deeply_chained_method_calls() {
+    check(
+        r#"
+class Test
+  # @return [String]
+  def method_a
+  end
+
+  def caller
+    a<hint label="String"> = method_a
+    b<hint label="String"> = a.to_s.to_s
+    c<hint label="String"> = a.to_s.to_s.to_s
+  end
+end
+"#,
+    )
+    .await;
+}

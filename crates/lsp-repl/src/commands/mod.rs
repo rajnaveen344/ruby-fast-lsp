@@ -109,4 +109,3 @@ fn help_text(client: &LspClient) -> String {
 
     help
 }
-

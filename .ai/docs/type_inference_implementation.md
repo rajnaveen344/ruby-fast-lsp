@@ -87,7 +87,7 @@
   - Handles receiver type resolution (literals, constants, variables)
   - Looks up methods by owner FQN and method name
   - Special handling for `.new` calls (returns instance type)
-  - Supports chained method calls
+  - Supports chained method calls via recursive AST traversal
   - Integrated with IndexVisitor for variable assignments
 
 ### ✅ Completed (continued)

@@ -1,7 +1,7 @@
 //! Stub Loader Module
 //!
 //! Provides functionality to load Ruby stubs from directories.
-//! 
+//!
 //! In production (VSIX), stubs are shipped as zip files and extracted
 //! by the VS Code extension on first activation. The LSP server then
 //! reads from the extracted directories with proper file:// URIs.

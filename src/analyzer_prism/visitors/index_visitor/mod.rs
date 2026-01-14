@@ -1,11 +1,14 @@
 use ruby_prism::*;
+use tower_lsp::lsp_types::Diagnostic;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
+use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 
@@ -30,7 +33,7 @@ pub struct IndexVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
-    pub diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl IndexVisitor {
@@ -61,78 +64,117 @@ impl IndexVisitor {
     }
 
     /// Infer type from a value node during indexing.
-    /// This is the shared type inference logic used by all variable write nodes.
+    ///
+    /// This recursively walks the AST to infer types:
+    /// - Literals → their type (String, Integer, etc.)
+    /// - Constants → ClassReference
+    /// - Local variables → look up their type
+    /// - Method calls → recursively infer receiver type, then resolve method return type
     pub fn infer_type_from_value(&self, value_node: &Node) -> RubyType {
-        // ... (this method body is unchanged, providing context)
-        // Try literal analysis first
+        // 1. Try literal analysis first (String, Integer, Array, Hash, Symbol, etc.)
         if let Some(literal_type) = self.literal_analyzer.analyze_literal(value_node) {
             return literal_type;
         }
 
-        // LIGHTWEIGHT OPTIMIZATION: Handle `Constant.new` and `Module::Class.new`
-        if let Some(call_node) = value_node.as_call_node() {
-            if call_node.name().as_slice() == b"new" {
-                if let Some(receiver) = call_node.receiver() {
-                    let fqn_string = if let Some(const_node) = receiver.as_constant_read_node() {
-                        // Simple constant: `User.new`
-                        Some(String::from_utf8_lossy(const_node.name().as_slice()).to_string())
-                    } else if let Some(path_node) = receiver.as_constant_path_node() {
-                        // Namespaced constant: `MyApp::User.new`
-                        // We need to flatten the path node (e.g. parent -> child)
-                        // This is a simplified flattening for typical cases
-                        Self::flatten_constant_path(&path_node)
-                    } else {
-                        None
-                    };
+        // 2. Constant read: `User` → ClassReference(User)
+        if let Some(const_node) = value_node.as_constant_read_node() {
+            let name = String::from_utf8_lossy(const_node.name().as_slice()).to_string();
+            if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
+                return RubyType::ClassReference(fqn);
+            }
+        }
 
-                    if let Some(name) = fqn_string {
-                        use crate::types::fully_qualified_name::FullyQualifiedName;
-                        if let Ok(fqn) = FullyQualifiedName::try_from(name.as_str()) {
-                            return RubyType::Class(fqn);
-                        }
-                    }
+        // 3. Constant path: `MyApp::User` → ClassReference(MyApp::User)
+        if let Some(path_node) = value_node.as_constant_path_node() {
+            if let Some(path_str) = Self::flatten_constant_path(&path_node) {
+                if let Ok(fqn) = FullyQualifiedName::try_from(path_str.as_str()) {
+                    return RubyType::ClassReference(fqn);
                 }
             }
         }
 
-        // Handle local variable reads: look up the type from already-indexed entries
+        // 4. Local variable read: look up the variable's type
         if let Some(lvar_read) = value_node.as_local_variable_read_node() {
             let var_name = String::from_utf8_lossy(lvar_read.name().as_slice()).to_string();
-            let lvar_line = self
-                .document
-                .prism_location_to_lsp_range(&lvar_read.location())
-                .start
-                .line;
+            if let Some(ty) = self.get_local_var_type(&var_name, &lvar_read.location()) {
+                return ty;
+            }
+            return RubyType::Unknown;
+        }
 
-            // Search all scopes for this variable
-            for (_scope_id, entries) in self.document.get_all_lvars() {
-                // Find entries for this variable that are before the read position
-                // and return the type from the most recent one
-                let matching_entry = entries
-                    .iter()
-                    .filter(|entry| {
-                        if let EntryKind::LocalVariable(data) = &entry.kind {
-                            data.name == var_name && entry.location.range.start.line < lvar_line
-                        } else {
-                            false
-                        }
-                    })
-                    .last();
+        // 5. Method call: recursively infer receiver type, then resolve method
+        if let Some(call_node) = value_node.as_call_node() {
+            let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();
 
-                if let Some(entry) = matching_entry {
-                    if let EntryKind::LocalVariable(data) = &entry.kind {
-                        // Get the most recent assignment type
-                        if let Some(assignment) = data.assignments.last() {
-                            if assignment.r#type != RubyType::Unknown {
-                                return assignment.r#type.clone();
-                            }
-                        }
-                    }
+            // Determine receiver type
+            let receiver_type = if let Some(receiver) = call_node.receiver() {
+                // Has explicit receiver - recursively infer its type
+                self.infer_type_from_value(&receiver)
+            } else {
+                // No receiver (implicit self) - use current class/module context
+                let namespace = self.scope_tracker.get_ns_stack();
+                if namespace.is_empty() {
+                    return RubyType::Unknown;
                 }
+                let current_fqn = FullyQualifiedName::Constant(namespace.into());
+                RubyType::Class(current_fqn)
+            };
+
+            if receiver_type == RubyType::Unknown {
+                return RubyType::Unknown;
+            }
+
+            // Special case: `.new` on a ClassReference returns an instance
+            if method_name == "new" {
+                if let RubyType::ClassReference(fqn) = &receiver_type {
+                    return RubyType::Class(fqn.clone());
+                }
+            }
+
+            // Resolve method return type
+            let index = self.index.lock();
+            if let Some(return_type) =
+                MethodResolver::resolve_method_return_type(&index, &receiver_type, &method_name)
+            {
+                return return_type;
             }
         }
 
         RubyType::Unknown
+    }
+
+    /// Helper to get the type of a local variable by name at a given location.
+    fn get_local_var_type(&self, var_name: &str, location: &Location) -> Option<RubyType> {
+        let lvar_line = self
+            .document
+            .prism_location_to_lsp_range(location)
+            .start
+            .line;
+
+        // Search all scopes for this variable
+        for (_scope_id, entries) in self.document.get_all_lvars() {
+            // Find entries for this variable that are before the read position
+            let matching_entry = entries
+                .iter()
+                .filter(|entry| {
+                    if let EntryKind::LocalVariable(data) = &entry.kind {
+                        data.name == var_name && entry.location.range.start.line < lvar_line
+                    } else {
+                        false
+                    }
+                })
+                .last();
+
+            if let Some(entry) = matching_entry {
+                if let EntryKind::LocalVariable(data) = &entry.kind {
+                    if let Some(assignment) = data.assignments.last() {
+                        return Some(assignment.r#type.clone());
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Helper to flatten a ConstantPathNode into a string (e.g., "Module::Class")

@@ -48,7 +48,10 @@ fn build_params(
                 "number" | "integer" => {
                     let n: i64 = args[i].parse().unwrap_or(0);
                     // Convert to 0-indexed if it's a line/character position
-                    if param_def.name == "line" || param_def.name == "character" || param_def.name == "col" {
+                    if param_def.name == "line"
+                        || param_def.name == "character"
+                        || param_def.name == "col"
+                    {
                         json!(n.saturating_sub(1))
                     } else {
                         json!(n)
@@ -72,7 +75,10 @@ fn build_params(
     }
 
     // Add current file URI if the command expects it and it wasn't provided
-    if def.params.iter().any(|p| p.name == "uri" || p.name == "file")
+    if def
+        .params
+        .iter()
+        .any(|p| p.name == "uri" || p.name == "file")
         && !params.contains_key("uri")
         && !params.contains_key("file")
     {
@@ -219,4 +225,3 @@ mod tests {
         assert_eq!(optional_count, 1);
     }
 }
-

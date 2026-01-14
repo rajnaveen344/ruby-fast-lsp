@@ -27,6 +27,7 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 | [tech.md](./tech.md)                         | Technology stack, dependencies, and common commands                          | Building, testing, and understanding technical constraints |
 | [testing.md](./testing.md)                   | Testing strategy, test harness, and fixtures                                 | Writing tests, understanding test patterns                 |
 | [ruby-ast-mapping.md](./ruby-ast-mapping.md) | Ruby language features to Prism AST node types                               | Working with Ruby parsing and analysis                     |
+| [tigerstyle.md](./tigerstyle.md)             | TigerStyle coding principles (safety, performance, DX)                       | Writing code, reviewing PRs, understanding code standards  |
 
 ## Current Feature Status (v0.1.0)
 

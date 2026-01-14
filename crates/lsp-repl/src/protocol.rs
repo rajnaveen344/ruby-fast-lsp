@@ -160,7 +160,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_error_response_deserialization() {
-        let json = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
         let response: JsonRpcResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.id, 1);
         assert!(response.result.is_none());
@@ -218,4 +219,3 @@ mod tests {
         assert!(matches!(msg, JsonRpcMessage::Notification(_)));
     }
 }
-

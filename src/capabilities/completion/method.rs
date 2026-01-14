@@ -10,8 +10,8 @@ use tower_lsp::lsp_types::{
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MethodKind;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::rbs::{get_rbs_class_methods, RbsMethodInfo};
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::rbs::{get_rbs_class_methods, RbsMethodInfo};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
 /// Find method completions for a receiver type

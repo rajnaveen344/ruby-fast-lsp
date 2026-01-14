@@ -6,18 +6,18 @@ use std::path::{Path, PathBuf};
 /// Creates a sample Ruby project in a temporary directory
 pub fn create_sample_project() -> std::io::Result<PathBuf> {
     let temp_dir = std::env::temp_dir().join("ruby_fast_lsp_profiler_sample");
-    
+
     if temp_dir.exists() {
         fs::remove_dir_all(&temp_dir)?;
     }
-    
+
     fs::create_dir_all(&temp_dir)?;
-    
+
     let dirs = ["app/models", "app/services", "app/controllers", "lib"];
     for dir in dirs {
         fs::create_dir_all(temp_dir.join(dir))?;
     }
-    
+
     create_base_model(&temp_dir)?;
     create_user_model(&temp_dir)?;
     create_post_model(&temp_dir)?;
@@ -29,7 +29,7 @@ pub fn create_sample_project() -> std::io::Result<PathBuf> {
     create_helpers(&temp_dir)?;
     create_additional_models(&temp_dir, 20)?;
     create_additional_services(&temp_dir, 10)?;
-    
+
     Ok(temp_dir)
 }
 
@@ -43,7 +43,9 @@ pub fn cleanup_sample_project() -> std::io::Result<()> {
 }
 
 fn create_base_model(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/models/application_record.rb"), r#"class ApplicationRecord
+    fs::write(
+        root.join("app/models/application_record.rb"),
+        r#"class ApplicationRecord
   def self.find(id)
     new
   end
@@ -88,11 +90,14 @@ fn create_base_model(root: &Path) -> std::io::Result<()> {
     Time.now
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_user_model(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/models/user.rb"), r#"class User < ApplicationRecord
+    fs::write(
+        root.join("app/models/user.rb"),
+        r#"class User < ApplicationRecord
   attr_accessor :name, :email, :age
 
   def initialize(name: nil, email: nil, age: nil)
@@ -154,11 +159,14 @@ fn create_user_model(root: &Path) -> std::io::Result<()> {
     }
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_post_model(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/models/post.rb"), r#"class Post < ApplicationRecord
+    fs::write(
+        root.join("app/models/post.rb"),
+        r#"class Post < ApplicationRecord
   attr_accessor :title, :body, :user_id, :published
 
   def initialize(title: nil, body: nil, user_id: nil)
@@ -222,11 +230,14 @@ fn create_post_model(root: &Path) -> std::io::Result<()> {
     }
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_comment_model(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/models/comment.rb"), r#"class Comment < ApplicationRecord
+    fs::write(
+        root.join("app/models/comment.rb"),
+        r#"class Comment < ApplicationRecord
   attr_accessor :body, :user_id, :post_id
 
   def initialize(body: nil, user_id: nil, post_id: nil)
@@ -263,11 +274,14 @@ fn create_comment_model(root: &Path) -> std::io::Result<()> {
     all.take(limit)
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_user_service(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/services/user_service.rb"), r#"class UserService
+    fs::write(
+        root.join("app/services/user_service.rb"),
+        r#"class UserService
   def initialize(user = nil)
     @user = user
   end
@@ -326,11 +340,14 @@ fn create_user_service(root: &Path) -> std::io::Result<()> {
     user ? user : nil
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_post_service(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/services/post_service.rb"), r#"class PostService
+    fs::write(
+        root.join("app/services/post_service.rb"),
+        r#"class PostService
   def initialize(user = nil)
     @user = user
   end
@@ -392,11 +409,14 @@ fn create_post_service(root: &Path) -> std::io::Result<()> {
     Post.published.take(limit)
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_users_controller(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/controllers/users_controller.rb"), r#"class UsersController
+    fs::write(
+        root.join("app/controllers/users_controller.rb"),
+        r#"class UsersController
   def initialize
     @service = UserService.new
   end
@@ -445,11 +465,14 @@ fn create_users_controller(root: &Path) -> std::io::Result<()> {
     { status: status, error: message }
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_posts_controller(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("app/controllers/posts_controller.rb"), r#"class PostsController
+    fs::write(
+        root.join("app/controllers/posts_controller.rb"),
+        r#"class PostsController
   def initialize(current_user = nil)
     @current_user = current_user
     @service = PostService.new(current_user)
@@ -509,11 +532,14 @@ fn create_posts_controller(root: &Path) -> std::io::Result<()> {
     { status: status, error: message }
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_helpers(root: &Path) -> std::io::Result<()> {
-    fs::write(root.join("lib/helpers.rb"), r#"module Helpers
+    fs::write(
+        root.join("lib/helpers.rb"),
+        r#"module Helpers
   def self.format_date(time)
     time.strftime("%Y-%m-%d")
   end
@@ -563,12 +589,14 @@ module ArrayExtensions
     map { |item| item[key] }
   end
 end
-"#)
+"#,
+    )
 }
 
 fn create_additional_models(root: &Path, count: usize) -> std::io::Result<()> {
     for i in 0..count {
-        let content = format!(r#"class Model{i} < ApplicationRecord
+        let content = format!(
+            r#"class Model{i} < ApplicationRecord
   attr_accessor :name, :value, :status
 
   def initialize(name: nil, value: nil)
@@ -620,15 +648,21 @@ fn create_additional_models(root: &Path, count: usize) -> std::io::Result<()> {
     pending.each(&:process)
   end
 end
-"#, i = i);
-        fs::write(root.join("app/models").join(format!("model{}.rb", i)), content)?;
+"#,
+            i = i
+        );
+        fs::write(
+            root.join("app/models").join(format!("model{}.rb", i)),
+            content,
+        )?;
     }
     Ok(())
 }
 
 fn create_additional_services(root: &Path, count: usize) -> std::io::Result<()> {
     for i in 0..count {
-        let content = format!(r#"class Service{i}
+        let content = format!(
+            r#"class Service{i}
   def initialize(config = {{}})
     @config = config
     @results = []
@@ -691,8 +725,13 @@ fn create_additional_services(root: &Path, count: usize) -> std::io::Result<()> 
     inputs.map {{ |input| service.execute(input) }}
   end
 end
-"#, i = i);
-        fs::write(root.join("app/services").join(format!("service{}.rb", i)), content)?;
+"#,
+            i = i
+        );
+        fs::write(
+            root.join("app/services").join(format!("service{}.rb", i)),
+            content,
+        )?;
     }
     Ok(())
 }
