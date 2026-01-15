@@ -29,5 +29,5 @@ pub async fn find_definition_at_position(
 
     // query.find_definitions_at_position already checks YARD and uses analyzer
     // AND now handles local variables via self.doc
-    query.find_definitions_at_position(&uri, position, &content, Some(&server.type_narrowing))
+    query.find_definitions_at_position(&uri, position, &content)
 }

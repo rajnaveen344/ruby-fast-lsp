@@ -1,0 +1,323 @@
+// =============================================================================
+// Ruby Fast LSP - Type Narrowing & CFG Architecture (Level 3 & Dynamic Views)
+// =============================================================================
+// This file documents the Control Flow Graph (CFG) and type narrowing system.
+//
+// Architecture Overview:
+// - TypeNarrowingEngine: Main API for type queries
+// - CFG Builder: Converts Ruby AST to control flow graph
+// - Dataflow Analyzer: Propagates type information through CFG
+// - Type Guards: Conditional type narrowing (is_a?, nil?, etc.)
+// =============================================================================
+
+model {
+    // =========================================================================
+    // LEVEL 3: COMPONENTS - Type Narrowing System
+    // =========================================================================
+
+    extend lsp {
+        typeNarrowing = container 'Type Narrowing System' {
+            technology 'inferrer/cfg/'
+            description 'Control flow analysis and type narrowing engine for precise type inference.'
+
+            engine = component 'Type Narrowing Engine' {
+                technology 'cfg/engine.rs'
+                description 'Main API entry point. Manages file states, lazy analysis, and type queries. Provides get_narrowed_type(uri, offset) method.'
+            }
+
+            cfgBuilder = component 'CFG Builder' {
+                technology 'cfg/builder.rs'
+                description 'Converts Ruby AST (from Prism parser) into Control Flow Graph. Detects type guards from conditionals.'
+            }
+
+            dataflowAnalyzer = component 'Dataflow Analyzer' {
+                technology 'cfg/dataflow.rs'
+                description 'Forward dataflow analysis. Propagates type states through CFG blocks, applies guards, creates per-statement snapshots.'
+            }
+
+            cfgGraph = component 'CFG Graph' {
+                technology 'cfg/graph.rs'
+                description 'Core data structures: BasicBlock, ControlFlowGraph, EdgeKind, Statement. Represents method control flow.'
+            }
+
+            typeGuards = component 'Type Guards' {
+                technology 'cfg/guards.rs'
+                description 'Type guard definitions: IsA, IsNil, NotNil, RespondsTo, CaseMatch. Handles negation and De Morgan laws.'
+            }
+        }
+    }
+
+    // --- Relationships ---
+
+    // Server owns TypeNarrowingEngine
+    lsp.server -> lsp.typeNarrowing.engine 'Owns (Arc), lifecycle management'
+
+    // Engine orchestrates analysis
+    lsp.typeNarrowing.engine -> lsp.typeNarrowing.cfgBuilder 'Build CFG for method'
+    lsp.typeNarrowing.engine -> lsp.typeNarrowing.dataflowAnalyzer 'Run dataflow analysis'
+    lsp.typeNarrowing.engine -> prism 'Parse Ruby source'
+
+    // CFG Builder creates graph
+    lsp.typeNarrowing.cfgBuilder -> prism 'Traverse AST'
+    lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Create blocks & edges'
+    lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.typeGuards 'Detect guards from conditions'
+
+    // Dataflow uses graph and guards
+    lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.cfgGraph 'Traverse blocks'
+    lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'Apply guards to narrow types'
+
+    // Capabilities query engine
+    lsp.capabilities -> lsp.typeNarrowing.engine 'get_narrowed_type(uri, offset)'
+}
+
+// =============================================================================
+// DYNAMIC VIEWS
+// =============================================================================
+
+views {
+    // =========================================================================
+    // TYPE NARROWING QUERY FLOW
+    // =========================================================================
+    dynamic view typeNarrowingQueryFlow {
+        title 'Type Narrowing Query Flow'
+        description 'Shows how a capability queries narrowed type at a specific position.'
+
+        // Step 1: Capability triggers query
+        lsp.capabilities -> lsp.typeNarrowing.engine 'get_narrowed_type(uri, offset, content)'
+
+        // Step 2: Parse Ruby source
+        lsp.typeNarrowing.engine -> prism 'parse(content)'
+        prism -> lsp.typeNarrowing.engine 'AST root node'
+
+        // Step 3: Find method containing offset
+        // (Internal: recursive AST traversal to find DefNode at offset)
+
+        // Step 4: Check cache or build CFG
+        lsp.typeNarrowing.engine -> lsp.typeNarrowing.cfgBuilder 'build_cfg(def_node)'
+        lsp.typeNarrowing.cfgBuilder -> prism 'Traverse method AST'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.typeGuards 'detect_type_guard(condition)'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.engine 'ControlFlowGraph'
+
+        // Step 5: Run dataflow analysis
+        lsp.typeNarrowing.engine -> lsp.typeNarrowing.dataflowAnalyzer 'analyze_dataflow(cfg)'
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.engine 'DataflowResults (with snapshots)'
+
+        // Step 6: Infer variable name and lookup type
+        // (Internal: find variable name at offset, binary search snapshots)
+
+        // Step 7: Return narrowed type
+        lsp.typeNarrowing.engine -> lsp.capabilities 'Option<RubyType>'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // CFG BUILDING PROCESS
+    // =========================================================================
+    dynamic view cfgBuildingProcess {
+        title 'CFG Building from Ruby AST'
+        description 'Shows how Ruby AST is converted into Control Flow Graph with type guards.'
+
+        // Step 1: Start with method definition node
+        lsp.typeNarrowing.cfgBuilder -> prism 'Get DefNode from AST'
+
+        // Step 2: Create entry block
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Create entry BasicBlock'
+
+        // Step 3: Process parameters
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Add parameters to CFG'
+
+        // Step 4: Process method body (if/unless/case/while)
+        lsp.typeNarrowing.cfgBuilder -> prism 'Traverse IfNode'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.typeGuards 'detect_type_guard(condition)'
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.cfgBuilder 'TypeGuard (IsNil, IsA, etc.)'
+
+        // Step 5: Create branching structure
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Create then_block with guard'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Create else_block with negated guard'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Add ConditionalTrue/False edges'
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Create merge_block'
+
+        // Step 6: Process nested statements recursively
+        // (Continues for nested control flow)
+
+        // Step 7: Return complete CFG
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.engine 'ControlFlowGraph'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DATAFLOW ANALYSIS PROCESS
+    // =========================================================================
+    dynamic view dataflowAnalysisProcess {
+        title 'Dataflow Analysis & Type Propagation'
+        description 'Shows how types are propagated through CFG blocks with guard application.'
+
+        // Step 1: Initialize with entry state
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.cfgGraph 'Get entry block & parameters'
+
+        // Step 2: Compute entry state for block
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.cfgGraph 'Get predecessors'
+        // (Merge predecessor exit states)
+
+        // Step 3: Apply edge guards
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'apply_guard(TypeGuard::IsA)'
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.dataflowAnalyzer 'Narrowed TypeState'
+
+        // Step 4: Apply block entry guards
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'apply_guard(block.entry_guards)'
+
+        // Step 5: Process statements sequentially
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.cfgGraph 'Get block statements'
+        // For each statement:
+        //   - Update variable type based on assignment
+        //   - Record snapshot (offset -> TypeState)
+
+        // Step 6: Compute exit state
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.dataflowAnalyzer 'Record block exit state'
+
+        // Step 7: Iterate until convergence
+        // (Repeat for all blocks in reverse post-order, max 10 iterations)
+
+        // Step 8: Return results with per-statement snapshots
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.engine 'DataflowResults'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // TYPE GUARD APPLICATION
+    // =========================================================================
+    dynamic view typeGuardApplication {
+        title 'Type Guard Application & Narrowing'
+        description 'Shows how different type guards narrow variable types at conditional branches.'
+
+        // Example: if value.is_a?(String)
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'apply_guard(IsA { variable: "value", target: String })'
+
+        // Type guard logic:
+        // - IsA(String): value -> String
+        // - IsNil: value -> NilClass
+        // - NotNil: value -> value \ NilClass (remove nil from union)
+        // - CaseMatch: value -> pattern_type
+        // - And([guards]): apply all sequentially
+        // - Or([guards]): conservative, don't narrow
+        // - Not(guard): apply inverse
+
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.dataflowAnalyzer 'Narrowed type: String'
+
+        // At merge point (after if):
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.dataflowAnalyzer 'Merge then/else types -> Union'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DOCUMENT LIFECYCLE INTEGRATION
+    // =========================================================================
+    dynamic view documentLifecycleIntegration {
+        title 'Type Narrowing Document Lifecycle'
+        description 'Shows how TypeNarrowingEngine integrates with document open/change/close events.'
+
+        // File opened
+        ide -> lsp.server 'textDocument/didOpen'
+        lsp.server -> lsp.typeNarrowing.engine 'on_file_open(uri, content)'
+        lsp.typeNarrowing.engine -> lsp.typeNarrowing.engine 'Register file, create empty FileCfgState'
+
+        // File changed
+        ide -> lsp.server 'textDocument/didChange'
+        lsp.server -> lsp.typeNarrowing.engine 'on_file_change(uri, new_content)'
+        lsp.typeNarrowing.engine -> lsp.typeNarrowing.engine 'Update content, invalidate cached CFGs'
+
+        // File closed
+        ide -> lsp.server 'textDocument/didClose'
+        lsp.server -> lsp.typeNarrowing.engine 'on_file_close(uri)'
+        lsp.typeNarrowing.engine -> lsp.typeNarrowing.engine 'Remove file state from cache'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // CAPABILITY INTEGRATION EXAMPLES
+    // =========================================================================
+    dynamic view capabilityIntegration {
+        title 'Capability Integration with Type Narrowing'
+        description 'Shows how hover, completion, and inlay hints use type narrowing.'
+
+        // Hover uses narrowed type
+        ide -> lsp.capabilities 'hover(uri, position)'
+        lsp.capabilities -> lsp.typeNarrowing.engine 'get_narrowed_type(uri, offset)'
+        lsp.typeNarrowing.engine -> lsp.capabilities 'String (narrowed from Unknown)'
+        lsp.capabilities -> ide 'Hover: "value: String"'
+
+        // Completion uses narrowed receiver type
+        ide -> lsp.capabilities 'completion(uri, position)'
+        lsp.capabilities -> lsp.typeNarrowing.engine 'get_narrowed_type(uri, offset) for receiver'
+        lsp.typeNarrowing.engine -> lsp.capabilities 'String'
+        lsp.capabilities -> lsp.index 'Get String methods'
+        lsp.index -> lsp.capabilities 'Methods: upcase, downcase, split, ...'
+        lsp.capabilities -> ide 'Completion items for String'
+
+        // Inlay hints could use narrowed types
+        // (Currently not integrated, potential future enhancement)
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // COMPONENT VIEW: TYPE NARROWING ARCHITECTURE
+    // =========================================================================
+    view typeNarrowingComponents of lsp.typeNarrowing {
+        title 'Type Narrowing System Components'
+        description 'Shows the internal architecture of CFG and type narrowing.'
+
+        include *
+        include lsp.server
+        include lsp.capabilities
+        include prism
+
+        autoLayout LeftRight
+    }
+
+    // =========================================================================
+    // EXAMPLE: IF/NIL NARROWING
+    // =========================================================================
+    dynamic view exampleIfNilNarrowing {
+        title 'Example: if value.nil? Narrowing'
+        description 'Concrete example showing type narrowing through if/nil condition.'
+
+        // Ruby code:
+        // def process(value)              # value: Unknown
+        //   if value.nil?                 # Guard: IsNil(value)
+        //     puts "nil"                  # value: NilClass
+        //   else                          # Guard: NotNil(value)
+        //     value.upcase                # value: Unknown \ NilClass
+        //   end
+        // end
+
+        // CFG Structure:
+        // Entry: value -> Unknown
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Entry block: value=Unknown'
+
+        // Detect guard from condition
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.typeGuards 'detect_type_guard(value.nil?)'
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.cfgBuilder 'TypeGuard::IsNil("value")'
+
+        // Then block (true branch)
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Then block with IsNil guard'
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'apply_guard(IsNil)'
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.dataflowAnalyzer 'value -> NilClass'
+
+        // Else block (false branch)
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Else block with NotNil guard'
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.typeGuards 'apply_guard(Not(IsNil))'
+        lsp.typeNarrowing.typeGuards -> lsp.typeNarrowing.dataflowAnalyzer 'value -> Unknown \ NilClass'
+
+        // Merge block
+        lsp.typeNarrowing.cfgBuilder -> lsp.typeNarrowing.cfgGraph 'Merge block'
+        lsp.typeNarrowing.dataflowAnalyzer -> lsp.typeNarrowing.dataflowAnalyzer 'Merge: NilClass | (Unknown \ NilClass) -> Unknown'
+
+        autoLayout TopBottom
+    }
+}

@@ -230,11 +230,11 @@ pub async fn find_completion_at_position(
             constant::find_constant_completions(&index, &analyzer, position, partial_string);
         completions.extend(constant_completions);
     } else if is_method_call_context {
-        // Method call context: provide type-aware method completions using CFG
+        // Method call context: provide type-aware method completions
 
-        // Get receiver type using CFG-based type inference
+        // Get receiver type using type snapshots
         let receiver_type =
-            get_receiver_type_from_cfg(server, &uri, &document.content, position, &partial_name);
+            get_receiver_type_from_snapshots(server, &uri, &document.content, position, &partial_name);
 
         if let Some(receiver_type) = receiver_type {
             // Determine if this is a class method call (receiver is a constant)
@@ -290,14 +290,14 @@ pub async fn find_completion_at_position(
     CompletionResponse::Array(completions)
 }
 
-/// Get the receiver type using CFG-based type inference
+/// Get the receiver type using type snapshots from TypeTracker
 ///
 /// This function determines the type of the receiver expression at a completion position.
 /// It handles:
 /// - Constant receivers (e.g., `User.find`) -> ClassReference
 /// - Literal receivers (e.g., `"hello".`, `123.`) -> direct type
-/// - Variable receivers (e.g., `name.`) -> CFG narrowed type (works for both methods and top-level)
-fn get_receiver_type_from_cfg(
+/// - Variable receivers (e.g., `name.`) -> type from snapshots
+fn get_receiver_type_from_snapshots(
     server: &RubyLanguageServer,
     uri: &Url,
     content: &str,
@@ -363,8 +363,7 @@ fn get_receiver_type_from_cfg(
         }
     }
 
-    // For variables, use CFG-based type narrowing
-    // CFG handles both method-level and top-level code
+    // For variables, use type snapshots from TypeTracker
     if is_variable_name(receiver_text) {
         // Calculate offset of the receiver variable (before the dot)
         // We need to find where receiver_text starts in the line
@@ -376,16 +375,21 @@ fn get_receiver_type_from_cfg(
                 character: receiver_start_in_line as u32,
             },
         );
-        if let Some(ty) =
-            server
-                .type_narrowing
-                .get_narrowed_type(uri, receiver_offset, Some(content))
-        {
-            return Some(ty);
+
+        // Get type from document snapshots
+        if let Some(doc_arc) = server.docs.lock().get(uri) {
+            let doc = doc_arc.read();
+            let snapshots = doc.get_type_snapshots();
+            if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
+                snapshots,
+                receiver_offset,
+                receiver_text,
+            ) {
+                return Some(ty);
+            }
         }
 
         // Fallback: Look for constructor assignment pattern (var = ClassName.new)
-        // CFG doesn't track method call return types, so we need to handle .new specially
         if let Some(ty) = infer_type_from_constructor_assignment(content, receiver_text) {
             return Some(ty);
         }

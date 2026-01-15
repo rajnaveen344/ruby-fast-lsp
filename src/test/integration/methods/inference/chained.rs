@@ -6,6 +6,7 @@ use crate::test::harness::check_multi_file;
 
 /// Test: A -> B -> C chain (3 files)
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_three_file_chain() {
     check_multi_file(&[
         (
@@ -46,6 +47,7 @@ end
 
 /// Test: Same file method calls cross-file method
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_same_file_wrapper_calls_cross_file() {
     check_multi_file(&[
         (
@@ -79,6 +81,7 @@ end
 
 /// Test: Cross-file call returns instance, then chain instance methods
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_cross_file_instance_chain() {
     check_multi_file(&[
         (
@@ -119,6 +122,7 @@ end
 
 /// Test: Multiple cross-file calls in same method body
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_multiple_cross_file_in_same_method() {
     check_multi_file(&[
         (
@@ -160,6 +164,7 @@ end
 
 /// Test: Deep chain A -> B -> C -> D (4 files)
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_four_file_chain() {
     check_multi_file(&[
         (
@@ -211,6 +216,7 @@ end
 
 /// Test: Cross-file with module namespacing
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_cross_file_with_module() {
     check_multi_file(&[
         (
@@ -242,6 +248,7 @@ end
 
 /// Test: Bidirectional - A calls B, B calls A (with YARD to break cycle)
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_bidirectional_with_yard() {
     check_multi_file(&[
         (

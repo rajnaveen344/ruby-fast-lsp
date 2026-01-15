@@ -18,7 +18,6 @@ use generators::HoverContext;
 use nodes::HoverNode;
 
 use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
-use crate::inferrer::TypeNarrowingEngine;
 use crate::query::IndexQuery;
 use tower_lsp::lsp_types::{Position, Url};
 
@@ -26,7 +25,7 @@ impl IndexQuery {
     /// Get hover info for the symbol at position.
     ///
     /// This is the unified entry point for hover requests. It handles:
-    /// - Local variables (with type inference from TypeQuery, document lvars, type narrowing)
+    /// - Local variables (with type inference from TypeQuery, document lvars, type snapshots)
     /// - Instance/class/global variables
     /// - Constants (classes, modules)
     /// - Methods (with receiver type resolution and return type inference)
@@ -36,7 +35,6 @@ impl IndexQuery {
         uri: &Url,
         position: Position,
         content: &str,
-        type_narrowing: Option<&TypeNarrowingEngine>,
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
@@ -54,7 +52,6 @@ impl IndexQuery {
             uri,
             content,
             document: self.doc.as_ref(),
-            type_narrowing,
         };
 
         // Step 4: Generate hover content based on node type

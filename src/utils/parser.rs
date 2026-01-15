@@ -14,3 +14,17 @@ pub fn position_to_offset(content: &str, position: Position) -> usize {
     }
     offset
 }
+
+/// Convert byte offset to 0-indexed line number
+pub fn offset_to_line(content: &str, offset: usize) -> u32 {
+    let mut current_offset = 0;
+    for (line_num, line) in content.lines().enumerate() {
+        let line_end = current_offset + line.len();
+        if offset <= line_end {
+            return line_num as u32;
+        }
+        current_offset = line_end + 1; // +1 for newline
+    }
+    // If offset is beyond content, return last line
+    content.lines().count().saturating_sub(1) as u32
+}

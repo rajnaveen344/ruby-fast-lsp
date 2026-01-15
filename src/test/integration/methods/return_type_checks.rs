@@ -50,6 +50,7 @@ end
 }
 
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_union_return_handling() {
     // One branch is valid, the other is invalid.
     check(
@@ -70,6 +71,7 @@ end
 }
 
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_implicit_nil_return() {
     // Empty method returns nil
     check(

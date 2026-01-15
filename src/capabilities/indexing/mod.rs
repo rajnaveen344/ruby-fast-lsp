@@ -43,9 +43,6 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     }
     debug!("Doc cache size: {}", server.docs.lock().len());
 
-    // Track file for type narrowing analysis
-    server.type_narrowing.on_file_open(&uri, &content);
-
     // Process file with unified FileProcessor::process_file
     let indexer = FileProcessor::new(server.index.clone());
     let options = ProcessingOptions {
@@ -107,9 +104,6 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
             docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc)));
         }
     }
-
-    // Update type narrowing engine with new content
-    server.type_narrowing.on_file_change(&uri, &final_content);
 
     // Full processing on every change - includes unresolved diagnostics
     let indexer = FileProcessor::new(server.index.clone());
@@ -216,9 +210,6 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     // Remove the document from in-memory cache but keep definitions/references in the index
     server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", server.docs.lock().len());
-
-    // Remove type narrowing CFG cache for this file
-    server.type_narrowing.on_file_close(&uri);
 
     // Keep unresolved entry diagnostics visible (project-wide diagnostics)
     let diagnostics = get_unresolved_diagnostics(server, &uri);

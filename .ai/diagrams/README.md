@@ -4,14 +4,15 @@ This directory contains [LikeC4](https://likec4.dev/) diagrams that document the
 
 ## File Structure
 
-| File               | Description                                                                                                     |
-| ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `model.c4`         | **Base model.** Defines specification, actors, external systems, and Level 1-2 diagrams (Context & Containers). |
-| `server.c4`        | **Server components.** Level 3 details for LSP Server, Query Layer, Index, and Docs.                            |
-| `indexing.c4`      | **Indexing lifecycle.** Indexer and Analyzer components with a dynamic view of the indexing process.            |
-| `requests.c4`      | **Request flow.** Dynamic view showing how an LSP request (e.g., Go to Definition) flows through the system.    |
-| `notifications.c4` | **Notification flow.** Dynamic views for LSP notifications (didOpen, didChange, didSave, etc.).                  |
-| `inlay_hints.c4`   | **Inlay hints flow.** Dynamic views showing request flow, internal architecture, and on-demand type inference.   |
+| File                  | Description                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `model.c4`            | **Base model.** Defines specification, actors, external systems, and Level 1-2 diagrams (Context & Containers). |
+| `server.c4`           | **Server components.** Level 3 details for LSP Server, Query Layer, Index, and Docs.                            |
+| `indexing.c4`         | **Indexing lifecycle.** Indexer and Analyzer components with a dynamic view of the indexing process.            |
+| `requests.c4`         | **Request flow.** Dynamic view showing how an LSP request (e.g., Go to Definition) flows through the system.    |
+| `notifications.c4`    | **Notification flow.** Dynamic views for LSP notifications (didOpen, didChange, didSave, etc.).                  |
+| `inlay_hints.c4`      | **Inlay hints flow.** Dynamic views showing request flow, internal architecture, and on-demand type inference.   |
+| `type_narrowing.c4`   | **Type narrowing & CFG.** CFG building, dataflow analysis, type guard application, and capability integration.   |
 
 ## C4 Levels
 
@@ -69,6 +70,42 @@ The inlay hints implementation follows a clean, principled architecture within t
 - **On-demand computation**: Hints and types computed fresh on each request
 - **Range-based filtering**: Only processes nodes in requested range
 - **Lazy type inference**: Method return types inferred only for visible methods
+
+### Type Narrowing & CFG Architecture
+
+The type narrowing system uses Control Flow Graph (CFG) analysis to provide precise type inference:
+
+1. **Type Narrowing Query**: Capability (hover, completion) requests narrowed type at position
+2. **CFG Building**: Ruby AST converted to control flow graph with type guards
+3. **Dataflow Analysis**: Types propagated through blocks, guards applied at conditionals
+4. **Type Guard Application**: Conditionals (is_a?, nil?, etc.) narrow types on branches
+5. **Document Lifecycle**: Engine tracks file open/change/close, invalidates cached CFGs
+6. **Capability Integration**: Hover and completion use narrowed types for better accuracy
+
+**Key Components** (`inferrer/cfg/`):
+- `engine.rs`: TypeNarrowingEngine - main API with lazy analysis and caching
+- `builder.rs`: CFG Builder - converts AST to control flow graph
+- `dataflow.rs`: Dataflow Analyzer - propagates types through CFG blocks
+- `graph.rs`: CFG data structures - BasicBlock, edges, statements
+- `guards.rs`: Type guards - IsA, IsNil, NotNil, RespondsTo, CaseMatch
+
+**How It Works:**
+- **Lazy Analysis**: Only analyzes methods containing queried positions
+- **Type Guards**: Detect from conditionals (`if x.is_a?(String)` → `TypeGuard::IsA`)
+- **Guard Application**: True branch narrows to type, false branch applies inverse
+- **Type Merging**: Join points create unions (`String | NilClass`)
+- **Per-Statement Snapshots**: O(log n) position lookup via binary search
+
+**Example:**
+```ruby
+def process(value)        # value: Unknown
+  if value.nil?           # Guard: IsNil(value)
+    puts "nil"            # value: NilClass
+  else                    # Guard: NotNil(value)
+    value.upcase          # value: Unknown \ NilClass
+  end
+end
+```
 
 ## Viewing the Diagrams
 

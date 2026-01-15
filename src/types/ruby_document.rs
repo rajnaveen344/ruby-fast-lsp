@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, 
 
 use crate::{
     indexer::entry::{Entry, EntryKind},
-    inferrer::RubyType,
+    inferrer::{type_tracker::TypeSnapshot, RubyType},
     types::scope::LVScopeId,
 };
 
@@ -37,6 +37,9 @@ pub struct RubyDocument {
 
     /// Comments in the document (start_offset, end_offset)
     comments: Vec<(usize, usize)>,
+
+    /// Type snapshots for local variables (from TypeTracker)
+    type_snapshots: Vec<TypeSnapshot>,
 }
 
 impl RubyDocument {
@@ -53,6 +56,7 @@ impl RubyDocument {
             lvars: BTreeMap::new(),
             lvar_references: HashMap::new(),
             comments,
+            type_snapshots: Vec::new(),
         };
         doc.compute_line_offsets();
         doc
@@ -78,6 +82,7 @@ impl RubyDocument {
         self.version = version;
         self.lvars.clear();
         self.lvar_references.clear();
+        self.type_snapshots.clear();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }
@@ -197,6 +202,16 @@ impl RubyDocument {
     /// Returns a reference to the entire lvars map for iteration
     pub fn get_all_lvars(&self) -> &std::collections::BTreeMap<LVScopeId, Vec<Entry>> {
         &self.lvars
+    }
+
+    /// Set type snapshots for the document
+    pub fn set_type_snapshots(&mut self, snapshots: Vec<TypeSnapshot>) {
+        self.type_snapshots = snapshots;
+    }
+
+    /// Get type snapshots for the document
+    pub fn get_type_snapshots(&self) -> &[TypeSnapshot] {
+        &self.type_snapshots
     }
 
     /// Check if a local variable with the given name exists in any of the provided scope IDs

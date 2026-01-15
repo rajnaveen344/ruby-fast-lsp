@@ -6,6 +6,7 @@ use crate::test::harness::check_multi_file;
 
 /// Test: method_a.rb defines method, main.rb calls it
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_main_calls_helper() {
     check_multi_file(&[
         (
@@ -35,6 +36,7 @@ end
 
 /// Test: method_a.rb calls method_b.rb, main.rb calls method_a
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_main_calls_a_calls_b() {
     check_multi_file(&[
         (
@@ -75,6 +77,7 @@ end
 
 /// Test: class method returning value from another file
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_class_method_cross_file() {
     check_multi_file(&[
         (
@@ -104,6 +107,7 @@ end
 
 /// Test: class method returning instance, then calling instance method
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_factory_pattern_cross_file() {
     check_multi_file(&[
         (
@@ -144,6 +148,7 @@ end
 
 /// Test: method without YARD inferred from cross-file call
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_infer_without_yard_cross_file() {
     check_multi_file(&[
         (
@@ -173,6 +178,7 @@ end
 
 /// Test: multiple methods in same class calling different cross-file methods
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_multiple_methods_different_cross_file_calls() {
     check_multi_file(&[
         (

@@ -132,9 +132,6 @@ fn main() {
                 .lock()
                 .insert(file_uri.clone(), Arc::new(RwLock::new(document)));
 
-            // Track file for type narrowing
-            server.type_narrowing.on_file_open(&file_uri, &content);
-
             // Process file (index definitions/references)
             let indexer = FileProcessor::new(server.index.clone());
             let options = ProcessingOptions {
@@ -176,7 +173,6 @@ fn main() {
         info!("\n=== PHASE 3: Closing File ===");
         {
             server.docs.lock().remove(&file_uri);
-            server.type_narrowing.on_file_close(&file_uri);
             // Note: Index entries are NOT removed (intentional for cross-file navigation)
         }
 
@@ -214,8 +210,6 @@ fn main() {
                 info!("Created new document");
             }
             drop(docs);
-
-            server.type_narrowing.on_file_open(&file_uri, &content);
 
             let indexer = FileProcessor::new(server.index.clone());
             let options = ProcessingOptions {

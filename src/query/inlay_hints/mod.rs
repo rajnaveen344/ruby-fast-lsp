@@ -40,7 +40,6 @@ pub use generators::{
 
 use crate::indexer::entry::EntryKind;
 use crate::indexer::index::EntryId;
-use crate::inferrer::cfg::TypeNarrowingEngine;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::query::IndexQuery;
 use crate::types::ruby_document::RubyDocument;
@@ -59,7 +58,6 @@ impl IndexQuery {
         document: &RubyDocument,
         range: &Range,
         content: &str,
-        type_narrowing: Option<&TypeNarrowingEngine>,
     ) -> Vec<InlayHintData> {
         let uri = &document.uri;
 
@@ -79,7 +77,6 @@ impl IndexQuery {
             index: self.index.clone(),
             uri,
             content,
-            type_narrowing,
         };
 
         // Step 5: Generate hints from collected nodes
@@ -237,7 +234,7 @@ mod tests {
             end: Position::new(10, 0),
         };
 
-        let hints = query.get_inlay_hints(&doc, &range, content, None);
+        let hints = query.get_inlay_hints(&doc, &range, content);
 
         // Should have at least the "class Foo" end hint
         assert!(!hints.is_empty());
@@ -255,7 +252,7 @@ mod tests {
             end: Position::new(10, 0),
         };
 
-        let hints = query.get_inlay_hints(&doc, &range, content, None);
+        let hints = query.get_inlay_hints(&doc, &range, content);
 
         // Should have "def foo" end hint and implicit return
         assert!(hints.iter().any(|h| h.label.contains("def foo")));

@@ -6,7 +6,6 @@
 use super::nodes::{InlayNode, VariableKind};
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::cfg::TypeNarrowingEngine;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
 use tower_lsp::lsp_types::{Position, Url};
@@ -40,7 +39,6 @@ pub struct HintContext<'a> {
     pub index: Index<Unlocked>,
     pub uri: &'a Url,
     pub content: &'a str,
-    pub type_narrowing: Option<&'a TypeNarrowingEngine>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
@@ -256,29 +254,32 @@ fn infer_variable_type(
                 for entry in entries {
                     if let EntryKind::LocalVariable(data) = &entry.kind {
                         if data.name == name {
-                            // Check if position matches
-                            if entry.location.range.end == *position {
-                                // Try type narrowing first
-                                if let Some(engine) = context.type_narrowing {
-                                    let offset = crate::utils::position_to_offset(
-                                        context.content,
-                                        *position,
-                                    );
-                                    if let Some(ty) = engine.get_narrowed_type(
-                                        context.uri,
-                                        offset,
-                                        Some(context.content),
-                                    ) {
-                                        if ty != RubyType::Unknown {
-                                            return Some(ty);
-                                        }
-                                    }
-                                }
-
-                                // Fall back to assignment type
-                                if let Some(assignment) = data.assignments.last() {
+                            // Find the assignment at this specific position
+                            // Each assignment has a range, and we want the one where the
+                            // variable name ends at our hint position
+                            for assignment in &data.assignments {
+                                if assignment.range.start.line == position.line {
+                                    // Found the assignment at this line
                                     if assignment.r#type != RubyType::Unknown {
                                         return Some(assignment.r#type.clone());
+                                    }
+                                }
+                            }
+
+                            // Fallback: if no assignment matched by position, try snapshots
+                            if entry.location.range.end == *position {
+                                let snapshots = document.get_type_snapshots();
+                                let offset = crate::utils::position_to_offset(
+                                    context.content,
+                                    *position,
+                                );
+                                if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
+                                    snapshots,
+                                    offset,
+                                    &name,
+                                ) {
+                                    if ty != RubyType::Unknown {
+                                        return Some(ty);
                                     }
                                 }
                             }

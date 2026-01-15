@@ -7,9 +7,9 @@ use super::nodes::HoverNode;
 use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::cfg::TypeNarrowingEngine;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::return_type::infer_return_type_for_node;
+use crate::inferrer::type_tracker::get_type_at_offset;
 use crate::query::TypeQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
@@ -25,7 +25,6 @@ pub struct HoverContext<'a> {
     pub uri: &'a Url,
     pub content: &'a str,
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
-    pub type_narrowing: Option<&'a TypeNarrowingEngine>,
 }
 
 /// Hover information for a symbol.
@@ -76,7 +75,7 @@ pub fn generate_local_variable_hover(
     // Try multiple type resolution strategies
     let from_lvar = get_type_from_document_lvar(context, name, *position, *scope_id);
     let from_query = from_lvar.or_else(|| get_type_from_type_query(context, name, *position));
-    let resolved_type = from_query.or_else(|| get_type_from_narrowing(context, *position));
+    let resolved_type = from_query.or_else(|| get_type_from_snapshots(context, name, *position));
 
     match resolved_type {
         Some(t) => Some(HoverInfo::text(t.to_string())),
@@ -124,11 +123,17 @@ fn get_type_from_type_query(
     type_query.get_local_variable_type(name, position)
 }
 
-/// Get type from type narrowing engine.
-fn get_type_from_narrowing(context: &HoverContext, position: Position) -> Option<RubyType> {
-    let narrowing = context.type_narrowing?;
+/// Get type from type snapshots in document.
+fn get_type_from_snapshots(
+    context: &HoverContext,
+    name: &str,
+    position: Position,
+) -> Option<RubyType> {
+    let doc_arc = context.document?;
+    let doc = doc_arc.read();
+    let snapshots = doc.get_type_snapshots();
     let offset = position_to_offset(context.content, position);
-    narrowing.get_narrowed_type(context.uri, offset, Some(context.content))
+    get_type_at_offset(snapshots, offset, name)
 }
 
 /// Generate hover info for a constant (class/module).
@@ -446,12 +451,9 @@ fn resolve_receiver_type(
                 }
             }
 
-            // Try type narrowing
-            if let Some(narrowing) = context.type_narrowing {
-                let offset = position_to_offset(context.content, position);
-                if let Some(t) = narrowing.get_narrowed_type(context.uri, offset, Some(context.content)) {
-                    return t;
-                }
+            // Try type snapshots
+            if let Some(t) = get_type_from_snapshots(context, name, position) {
+                return t;
             }
 
             RubyType::Unknown

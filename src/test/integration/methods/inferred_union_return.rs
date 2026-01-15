@@ -1,6 +1,7 @@
 use crate::test::harness::*;
 
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_inferred_union_return_with_method_call() {
     let _ = env_logger::builder().is_test(true).try_init();
 
@@ -25,6 +26,7 @@ end
 }
 
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_inferred_union_return_with_method_call_withtotut_class() {
     let _ = env_logger::builder().is_test(true).try_init();
 

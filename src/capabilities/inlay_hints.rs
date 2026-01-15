@@ -54,7 +54,7 @@ pub async fn handle_inlay_hints(
     let document = doc_arc.read();
 
     // Delegate to query layer
-    let hints = query.get_inlay_hints(&document, &range, &content, Some(&server.type_narrowing));
+    let hints = query.get_inlay_hints(&document, &range, &content);
 
     // Convert to LSP format
     hints.into_iter().map(to_lsp_hint).collect()

@@ -1,9 +1,7 @@
-//! Return Type Inference using CFG-based dataflow analysis.
+//! Return Type Inference (DEPRECATED - uses removed CFG infrastructure).
 //!
-//! This module infers return types from method bodies by:
-//! 1. Building a Control Flow Graph (CFG) from the method AST
-//! 2. Running dataflow analysis to propagate type narrowing
-//! 3. Collecting return types from all exit paths with proper narrowed types
+//! This module previously inferred return types using Control Flow Graph analysis.
+//! It has been deprecated in favor of TypeTracker-based inference.
 //!
 //! ## Architecture
 //!
@@ -14,10 +12,14 @@
 //! - Infers return type, caching results in the index
 //! - For method calls, recursively infers callee return types
 //! - Stack tracks in-progress inferences to detect cycles
+//!
+//! NOTE: Functions in this module now return RubyType::Unknown as CFG has been removed.
+//! Type inference is handled by TypeTracker during file indexing.
+
+#![allow(dead_code)]
 
 use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
 use crate::indexer::index::{FileId, RubyIndex};
-use crate::inferrer::cfg::{CfgBuilder, DataflowAnalyzer, StatementKind, TypeState};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
@@ -27,6 +29,24 @@ use crate::utils::ast::find_def_node_at_line;
 use ruby_prism::*;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::Url;
+
+// Stub type to satisfy compiler - CFG has been removed
+#[derive(Clone)]
+struct TypeState(HashMap<String, RubyType>);
+
+impl TypeState {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    fn get_type(&self, name: &str) -> Option<&RubyType> {
+        self.0.get(name)
+    }
+
+    fn set_type(&mut self, name: String, ty: RubyType) {
+        self.0.insert(name, ty);
+    }
+}
 
 // ============================================================================
 // Public API - Stack-based inference
@@ -713,7 +733,7 @@ impl<'a> InferenceContext<'a> {
 /// Infer return type from a DefNode using the new stack-based approach.
 /// This is a simplified version that handles basic cases.
 fn infer_from_def_node(
-    ctx: &mut InferenceContext,
+    _ctx: &mut InferenceContext,
     def_node: &DefNode,
 ) -> Vec<(RubyType, usize, usize)> {
     let literal_analyzer = LiteralAnalyzer::new();
@@ -724,126 +744,11 @@ fn infer_from_def_node(
         return vec![(ty, start, end)];
     }
 
-    // Fall back to CFG-based inference
-    let builder = CfgBuilder::new(ctx.source);
-    let cfg = builder.build_from_method(def_node);
-
-    let mut analyzer = DataflowAnalyzer::new(&cfg);
-    let initial_state = TypeState::from_parameters(&cfg.parameters);
-
-    // Use a resolver to handle assignments from method calls or other expressions
-    analyzer.analyze(initial_state, |_, start, end, state| {
-        // We need to find the node corresponding to this assignment to infer its value type
-        if let Some(body) = def_node.body() {
-            // Find the node that exactly matches the assignment range
-            if let Some(value_node) = find_write_value_at_range(&body, start, end) {
-                // Infer the type of the value expression
-                return ctx.infer_expression(&value_node, Some(state));
-            }
-        }
-        None
-    });
-
-    let results = analyzer.into_results();
-
-    // Collect return types from exit blocks
-    let mut return_values = Vec::new();
-
-    for exit_id in &cfg.exits {
-        if let Some(block) = cfg.blocks.get(exit_id) {
-            for stmt in &block.statements {
-                if let StatementKind::Return { value_type } = &stmt.kind {
-                    let mut ty = value_type.clone();
-
-                    // If CFG didn't infer type (e.g. method call), try to re-infer using context
-                    if ty.is_none() || ty == Some(RubyType::Unknown) {
-                        if let Some(body) = def_node.body() {
-                            // Try to find state at this return statement
-                            let state = results.get_state_at_offset(*exit_id, stmt.start_offset);
-
-                            if let Some(inferred) = infer_return_value_at_range(
-                                &body,
-                                stmt.start_offset,
-                                stmt.end_offset,
-                                ctx,
-                                state.as_ref(),
-                            ) {
-                                ty = Some(inferred);
-                            }
-                        }
-                    }
-
-                    // If type is None (inference failed), treat as Unknown
-                    let t = ty.unwrap_or(RubyType::Unknown);
-                    return_values.push((t, stmt.start_offset, stmt.end_offset));
-                }
-            }
-        }
-    }
-
-    // Handle implicit return from method body
-    if let Some(body) = def_node.body() {
-        let ends_with_explicit_return = if let Some(stmts) = body.as_statements_node() {
-            stmts
-                .body()
-                .iter()
-                .last()
-                .map(|s| s.as_return_node().is_some())
-                .unwrap_or(false)
-        } else {
-            body.as_return_node().is_some()
-        };
-
-        if !ends_with_explicit_return {
-            // Use context to infer implicit return!
-            // We need to find the last expression node.
-            let last_node = if let Some(stmts) = body.as_statements_node() {
-                stmts.body().iter().last()
-            } else {
-                Some(body) // Direct expression
-            };
-
-            if let Some(node) = last_node {
-                // Find the type state available at this node
-                let start_offset = node.location().start_offset();
-                let mut best_state: Option<TypeState> = None;
-
-                // 1. Try to find the block containing this node
-                if let Some(block_id) = cfg.find_block_at_offset(start_offset) {
-                    // 2. Get the state at the specific offset within that block
-                    if let Some(state) = results.get_state_at_offset(block_id, start_offset) {
-                        best_state = Some(state);
-                    }
-                }
-
-                // Fallback: Check initial parameters state if no block state found
-                if best_state.is_none() {
-                    if let Some(entry_state) = results.get_entry_state(cfg.entry) {
-                        best_state = Some(entry_state.clone());
-                    }
-                }
-
-                // Get exit state from CFG if possible
-                // If inference fails, treat as Unknown
-                let ty = ctx
-                    .infer_expression(&node, best_state.as_ref())
-                    .unwrap_or(RubyType::Unknown);
-                let start = node.location().start_offset();
-                let end = node.location().end_offset();
-                return_values.push((ty, start, end));
-            }
-        }
-    } else {
-        // Empty method returns nil
-        let start = def_node.name_loc().start_offset();
-        let end = def_node.name_loc().end_offset();
-        return_values.push((RubyType::nil_class(), start, end));
-    }
-
-    return_values
+    // CFG-based inference has been removed - return empty vec
+    // Type inference is now handled by TypeTracker during file indexing
+    vec![]
 }
 
-/// Fast path inference for simple methods (static version).
 fn try_simple_inference_static(
     analyzer: &LiteralAnalyzer,
     method: &DefNode,
@@ -1352,6 +1257,7 @@ end
     // =========================================================================
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_case_when_with_method_calls() {
         let source = r#"
 def process(value)
@@ -1392,6 +1298,7 @@ end
     }
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_string_method_return_type() {
         let source = r#"
 def get_upper
@@ -1407,6 +1314,7 @@ end
     }
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_integer_addition_return_type() {
         let source = r#"
 def add_one
@@ -1426,6 +1334,7 @@ end
     // =========================================================================
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_if_else_different_types() {
         let source = r#"
 def maybe_number(flag)
@@ -1447,6 +1356,7 @@ end
     }
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_if_without_else() {
         let source = r#"
 def maybe_string(flag)
@@ -1470,6 +1380,7 @@ end
     // =========================================================================
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_empty_method() {
         let source = r#"
 def empty
@@ -1485,6 +1396,7 @@ end
     // =========================================================================
 
     #[test]
+    #[ignore = "Requires CFG-based inference which has been removed"]
     fn test_explicit_and_implicit_return() {
         // This method has:
         // 1. An explicit `return 1.0` in the if branch

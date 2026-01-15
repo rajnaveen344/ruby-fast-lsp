@@ -20,6 +20,7 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::indexer::index_ref::{Index, Unlocked};
+use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
@@ -166,12 +167,34 @@ impl FileProcessor {
             visitor.visit(&node);
             diagnostics.extend(visitor.diagnostics);
 
+            // Run TypeTracker to infer types for all code
+            let mut updated_document = visitor.document.clone();
+            if let Some(program) = node.as_program_node() {
+                let mut all_snapshots = Vec::new();
+
+                // First, track top-level statements (outside methods)
+                let mut top_level_tracker = TypeTracker::new(
+                    content.as_bytes(),
+                    self.index.clone(),
+                    uri,
+                );
+                top_level_tracker.track_program(&program);
+                all_snapshots.extend(top_level_tracker.snapshots().iter().cloned());
+
+                // NOTE: Method return types are ONLY derived from YARD/RBS signatures.
+                // We do NOT infer return types from method bodies to keep the system simple and fast.
+                // Methods without YARD/RBS annotations will have Unknown return type.
+
+                // Store all snapshots in document (for variable type tracking only)
+                updated_document.set_type_snapshots(all_snapshots);
+            }
+
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
             {
                 let mut docs = server.docs.lock();
                 docs.insert(
                     uri.clone(),
-                    Arc::new(parking_lot::RwLock::new(visitor.document.clone())),
+                    Arc::new(parking_lot::RwLock::new(updated_document)),
                 );
             }
 
@@ -346,3 +369,4 @@ impl FileProcessor {
         self.index_references(&uri, &content)
     }
 }
+

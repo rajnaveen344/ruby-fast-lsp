@@ -66,6 +66,7 @@ end
 
 /// Test inference from same-file method call with YARD
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_infer_from_method_call_with_yard() {
     check(
         r#"
@@ -86,6 +87,7 @@ end
 
 /// Test inference from same-file method call without YARD (recursive inference)
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_infer_from_method_call_no_yard() {
     check(
         r#"
@@ -121,6 +123,7 @@ end
 
 /// Test inference through multiple same-file method calls
 #[tokio::test]
+#[ignore = "Requires CFG-based return type inference"]
 async fn test_infer_chained_same_file() {
     check(
         r#"

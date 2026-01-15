@@ -11,7 +11,6 @@ use log::info;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::IndexQuery;
-use crate::inferrer::TypeNarrowingEngine;
 
 impl IndexQuery {
     /// Find definitions for an identifier at the given position.
@@ -26,7 +25,6 @@ impl IndexQuery {
         uri: &Url,
         position: Position,
         content: &str,
-        type_narrowing: Option<&TypeNarrowingEngine>,
     ) -> Option<Vec<Location>> {
         // First check if we're in a YARD comment type reference
         if let Some(yard_type) = YardParser::find_type_at_position(content, position) {
@@ -55,7 +53,6 @@ impl IndexQuery {
             &identifier,
             &ancestors,
             position,
-            type_narrowing,
             uri,
             content,
         )
@@ -145,7 +142,6 @@ impl IndexQuery {
         identifier: &Identifier,
         ancestors: &[RubyConstant],
         position: Position,
-        type_narrowing: Option<&TypeNarrowingEngine>,
         uri: &Url,
         content: &str,
     ) -> Option<Vec<Location>> {
@@ -159,14 +155,9 @@ impl IndexQuery {
                 receiver,
                 iden,
             } => {
-                if let Some(narrowing) = type_narrowing {
-                    self.find_method_definitions(
-                        receiver, iden, ancestors, narrowing, uri, position, content,
-                    )
-                } else {
-                    // Fallback if no narrowing engine provided
-                    self.find_method_definitions_by_name(iden, ancestors)
-                }
+                self.find_method_definitions(
+                    receiver, iden, ancestors, uri, position, content,
+                )
             }
             Identifier::RubyInstanceVariable { name, .. } => {
                 self.find_instance_variable_definitions(name)
@@ -224,6 +215,7 @@ impl IndexQuery {
     }
 
     /// Find method definitions by name.
+    #[allow(dead_code)]
     fn find_method_definitions_by_name(
         &self,
         method_name: &crate::types::ruby_method::RubyMethod,

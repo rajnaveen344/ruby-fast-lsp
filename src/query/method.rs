@@ -10,7 +10,6 @@ use crate::indexer::entry::MethodKind;
 use crate::indexer::index::RubyIndex;
 use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::TypeNarrowingEngine;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -37,13 +36,12 @@ pub struct MethodInfo {
 impl IndexQuery {
     /// Find definitions for a Ruby method with type-aware filtering.
     ///
-    /// Uses the type narrowing engine to filter results based on receiver type when available.
+    /// Uses type snapshots to filter results based on receiver type when available.
     pub(super) fn find_method_definitions(
         &self,
         receiver: &MethodReceiver,
         method: &RubyMethod,
         ancestors: &[RubyConstant],
-        type_narrowing: &TypeNarrowingEngine,
         uri: &Url,
         position: Position,
         content: &str,
@@ -59,7 +57,7 @@ impl IndexQuery {
             | MethodReceiver::InstanceVariable(name)
             | MethodReceiver::ClassVariable(name)
             | MethodReceiver::GlobalVariable(name) => {
-                // Try to get the receiver's type using type narrowing
+                // Try to get the receiver's type using type snapshots
                 let line = content.lines().nth(position.line as usize).unwrap_or("");
                 let before_cursor = &line[..std::cmp::min(position.character as usize, line.len())];
                 let receiver_offset = if let Some(var_pos) = before_cursor.rfind(name) {
@@ -74,12 +72,20 @@ impl IndexQuery {
                     position_to_offset(content, position)
                 };
 
-                if let Some(receiver_type) =
-                    type_narrowing.get_narrowed_type(uri, receiver_offset, Some(content))
-                {
-                    debug!("Found receiver type for '{}': {:?}", name, receiver_type);
-                    return self.search_by_name_filtered(method, &receiver_type);
+                // Try type snapshots from document
+                if let Some(doc_arc) = &self.doc {
+                    let doc = doc_arc.read();
+                    let snapshots = doc.get_type_snapshots();
+                    if let Some(receiver_type) = crate::inferrer::type_tracker::get_type_at_offset(
+                        snapshots,
+                        receiver_offset,
+                        name,
+                    ) {
+                        debug!("Found receiver type for '{}': {:?}", name, receiver_type);
+                        return self.search_by_name_filtered(method, &receiver_type);
+                    }
                 }
+
                 // Fallback: Check for constructor assignment pattern
                 if let Some(receiver_type) =
                     self.infer_type_from_constructor_assignment(content, name)
@@ -97,7 +103,6 @@ impl IndexQuery {
                 let receiver_type = self.resolve_method_call_type(
                     inner_receiver,
                     method_name,
-                    type_narrowing,
                     uri,
                     position,
                     content,
@@ -122,7 +127,6 @@ impl IndexQuery {
         &self,
         inner_receiver: &MethodReceiver,
         method_name: &str,
-        type_narrowing: &TypeNarrowingEngine,
         uri: &Url,
         position: Position,
         content: &str,
@@ -137,8 +141,23 @@ impl IndexQuery {
             | MethodReceiver::ClassVariable(name)
             | MethodReceiver::GlobalVariable(name) => {
                 let offset = position_to_offset(content, position);
-                if let Some(ty) = type_narrowing.get_narrowed_type(uri, offset, Some(content)) {
-                    ty
+
+                // Try type snapshots from document
+                if let Some(doc_arc) = &self.doc {
+                    let doc = doc_arc.read();
+                    let snapshots = doc.get_type_snapshots();
+                    if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
+                        snapshots,
+                        offset,
+                        name,
+                    ) {
+                        ty
+                    } else if let Some(ty) = self.infer_type_from_constructor_assignment(content, name)
+                    {
+                        ty
+                    } else {
+                        return None;
+                    }
                 } else if let Some(ty) = self.infer_type_from_constructor_assignment(content, name)
                 {
                     ty
@@ -152,7 +171,6 @@ impl IndexQuery {
             } => self.resolve_method_call_type(
                 nested_receiver,
                 nested_method,
-                type_narrowing,
                 uri,
                 position,
                 content,

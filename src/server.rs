@@ -7,7 +7,6 @@ use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::TypeNarrowingEngine;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};
@@ -84,8 +83,6 @@ pub struct RubyLanguageServer {
     /// The process ID of the parent process (VS Code extension host).
     /// Used to detect when the parent process dies so we can exit cleanly.
     pub parent_process_id: Arc<Mutex<Option<u32>>>,
-    /// Type narrowing engine for CFG-based type analysis
-    pub type_narrowing: Arc<TypeNarrowingEngine>,
     /// Whether initial indexing is complete
     pub indexing_complete: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -104,7 +101,6 @@ impl RubyLanguageServer {
             reindex_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
-            type_narrowing: Arc::new(TypeNarrowingEngine::new()),
             indexing_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
@@ -279,7 +275,6 @@ impl Default for RubyLanguageServer {
             reindex_timer: Arc::new(Mutex::new(None)),
             workspace_uri: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
-            type_narrowing: Arc::new(TypeNarrowingEngine::new()),
             indexing_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }

@@ -1,22 +1,18 @@
 //! Type inference for Ruby code.
 //!
 //! This module provides type inference capabilities including:
-//! - Control Flow Graph (CFG) based dataflow analysis
+//! - Simple forward type tracking via TypeTracker
 //! - Type representation and analysis
 //! - Method resolution and signatures
 //! - RBS type definitions
 //! - Return type inference
 
-pub mod cfg;
 pub mod method;
 pub mod rbs;
 pub mod return_type;
 pub mod r#type;
+pub mod type_tracker;
 
-pub use cfg::{
-    BasicBlock, BlockId, CfgBuilder, ControlFlowGraph, DataflowAnalyzer, DataflowResults,
-    TypeGuard, TypeNarrowingEngine, TypeState,
-};
 pub use method::{
     MethodResolver, MethodSignature, MethodSignatureContext, MethodVisibility, Parameter,
 };

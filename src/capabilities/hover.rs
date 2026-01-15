@@ -37,8 +37,7 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
     let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
 
     // Get hover info from query layer
-    let hover_info =
-        query.get_hover_at_position(&uri, position, &content, Some(&server.type_narrowing))?;
+    let hover_info = query.get_hover_at_position(&uri, position, &content)?;
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {

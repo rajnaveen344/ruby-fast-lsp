@@ -101,7 +101,6 @@ impl<'a> TypeQuery<'a> {
         &mut self,
         document: &RubyDocument,
         range: &Range,
-        type_narrowing: Option<&crate::inferrer::cfg::TypeNarrowingEngine>,
     ) -> Vec<TypeHint> {
         // First, trigger method return type inference for visible methods
         self.infer_visible_method_types(range);
@@ -109,7 +108,7 @@ impl<'a> TypeQuery<'a> {
         let mut hints = Vec::new();
 
         // 1. Local variable hints from document.lvars
-        hints.extend(self.get_local_var_hints(document, range, type_narrowing));
+        hints.extend(self.get_local_var_hints(document, range));
 
         // 2. Instance/class/global variable hints from index
         hints.extend(self.get_variable_hints_in_range(range));
@@ -200,7 +199,6 @@ impl<'a> TypeQuery<'a> {
         &self,
         document: &RubyDocument,
         range: &Range,
-        type_narrowing: Option<&crate::inferrer::cfg::TypeNarrowingEngine>,
     ) -> Vec<TypeHint> {
         let mut hints = Vec::new();
         let content_str = std::str::from_utf8(self.content).unwrap_or("");
@@ -218,28 +216,12 @@ impl<'a> TypeQuery<'a> {
                     // Get type from assignment tracking
                     let from_lvar = data.assignments.last().map(|a| a.r#type.clone());
 
-                    // Try type narrowing if available
-                    let from_narrowing = match from_lvar.clone() {
-                        Some(ty) if ty != RubyType::Unknown => Some(ty),
-                        _ => {
-                            if let Some(tn) = type_narrowing {
-                                let offset = crate::utils::position_to_offset(
-                                    content_str,
-                                    entry.location.range.start,
-                                );
-                                tn.get_narrowed_type(self.uri, offset, Some(content_str))
-                            } else {
-                                None
-                            }
-                        }
-                    };
-
-                    // Resolve final type
+                    // Resolve final type (type narrowing removed)
                     let final_type = self.resolve_local_var_type_internal(
                         content_str,
                         &data.name,
                         from_lvar.as_ref(),
-                        from_narrowing,
+                        None,
                     );
 
                     let ruby_type = final_type.unwrap_or(RubyType::Unknown);

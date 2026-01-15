@@ -9,7 +9,11 @@
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo clippy:*)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(for file in src/inferrer/cfg/*.rs)",
+      "Bash(done)",
+      "Bash(pkill:*)",
+      "Bash(git stash:*)"
     ]
   }
 }
