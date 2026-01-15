@@ -1,27 +1,105 @@
+//! Inlay Hints Query Module
+//!
+//! This module provides a clean, principled implementation of inlay hints:
+//!
+//! 1. **Collector** (`collector.rs`): Visits the AST and collects relevant nodes
+//! 2. **Nodes** (`nodes.rs`): Data types representing collected AST nodes
+//! 3. **Generators** (`generators.rs`): Convert nodes to hints
+//!
+//! # Architecture
+//!
+//! ```text
+//! LSP Request
+//!      │
+//!      ▼
+//! InlayHintQuery::get_inlay_hints()
+//!      │
+//!      ├─► Parse AST
+//!      │
+//!      ├─► InlayNodeCollector.collect()
+//!      │        │
+//!      │        └─► Vec<InlayNode>
+//!      │
+//!      ├─► generate_structural_hints()
+//!      ├─► generate_variable_type_hints()
+//!      ├─► generate_method_hints()
+//!      └─► generate_chained_call_hints()
+//!               │
+//!               └─► Vec<InlayHintData>
+//! ```
+
+mod collector;
+mod generators;
+pub mod nodes;
+
+pub use collector::InlayNodeCollector;
+pub use generators::{
+    generate_chained_call_hints, generate_method_hints, generate_structural_hints,
+    generate_variable_type_hints, HintContext, InlayHintData, InlayHintKind,
+};
+
 use crate::indexer::entry::EntryKind;
 use crate::indexer::index::EntryId;
+use crate::inferrer::cfg::TypeNarrowingEngine;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::query::{infer_type_from_assignment, IndexQuery};
-use tower_lsp::lsp_types::{Position, Range, Url};
-
-/// Data structure for inlay hints
-#[derive(Debug, Clone)]
-pub struct InlayHintData {
-    pub position: Position,
-    pub label: String,
-    pub kind: InlayHintKind,
-    pub tooltip: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub enum InlayHintKind {
-    Type,
-    Parameter,
-}
+use crate::query::IndexQuery;
+use crate::types::ruby_document::RubyDocument;
+use tower_lsp::lsp_types::{Range, Url};
 
 impl IndexQuery {
+    /// Get all inlay hints for a document within the specified range.
+    ///
+    /// This is the main entry point for inlay hints. It:
+    /// 1. Triggers method return type inference for visible methods
+    /// 2. Collects relevant AST nodes via InlayNodeCollector
+    /// 3. Generates hints from the collected nodes
+    pub fn get_inlay_hints(
+        &self,
+        document: &RubyDocument,
+        range: &Range,
+        content: &str,
+        type_narrowing: Option<&TypeNarrowingEngine>,
+    ) -> Vec<InlayHintData> {
+        let uri = &document.uri;
+
+        // Step 1: Trigger method return type inference for visible methods
+        self.infer_and_update_visible_types(uri, content, range);
+
+        // Step 2: Parse AST
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let root = parse_result.node();
+
+        // Step 3: Collect relevant nodes
+        let collector = InlayNodeCollector::new(document, *range, content.as_bytes());
+        let nodes = collector.collect(&root);
+
+        // Step 4: Create hint context
+        let context = HintContext {
+            index: self.index.clone(),
+            uri,
+            content,
+            type_narrowing,
+        };
+
+        // Step 5: Generate hints from collected nodes
+        let mut hints = Vec::new();
+
+        // Structural hints (end labels, implicit returns)
+        hints.extend(generate_structural_hints(&nodes));
+
+        // Variable type hints
+        hints.extend(generate_variable_type_hints(&nodes, &context, document));
+
+        // Method return type and parameter hints
+        hints.extend(generate_method_hints(&nodes, &context));
+
+        // Chained method call hints (currently placeholder)
+        hints.extend(generate_chained_call_hints(&nodes, &context));
+
+        hints
+    }
+
     /// Infer return types for methods in the visible range and update the index.
-    /// This logic was moved from capabilities/inlay_hints.rs to encapsulate index access.
     pub fn infer_and_update_visible_types(&self, uri: &Url, content: &str, range: &Range) {
         // Collect only method entries that:
         // 1. Are within the visible range
@@ -82,8 +160,7 @@ impl IndexQuery {
                     }
                 });
 
-                // Call inference logic (requires mutable index for caching results internally)
-                // Note: infer_return_type_for_node uses &mut index but we have MutexGuard
+                // Call inference logic
                 let inferred_ty = crate::inferrer::return_type::infer_return_type_for_node(
                     &mut index,
                     content.as_bytes(),
@@ -96,7 +173,7 @@ impl IndexQuery {
             })
             .collect();
 
-        // Update the index (brief lock) with results
+        // Update the index with results
         if !inferred_types.is_empty() {
             let mut index = self.index.lock();
             for (entry_id, inferred_ty) in inferred_types {
@@ -105,7 +182,7 @@ impl IndexQuery {
         }
     }
 
-    /// Helper to get local variable type using inference if needed
+    /// Helper to resolve local variable type using inference if needed.
     pub fn resolve_local_var_type(
         &self,
         content: &str,
@@ -129,11 +206,11 @@ impl IndexQuery {
 
         // 3. Try fallback inference
         let index = self.index.lock();
-        infer_type_from_assignment(content, name, &index)
+        crate::query::infer_type_from_assignment(content, name, &index)
     }
 }
 
-/// Helper to find DefNode at line (copied from inlay_hints.rs context)
+/// Helper to find DefNode at line.
 fn find_def_node_at_line<'a>(
     node: &ruby_prism::Node<'a>,
     target_line: u32,
@@ -153,7 +230,6 @@ fn find_def_node_at_line<'a>(
     }
 
     // Recurse into child nodes (Program, Class, Module, Statements)
-    // Simplified traversal for brevity - ensuring we cover main structures
     if let Some(program) = node.as_program_node() {
         return find_in_statements(&program.statements(), target_line, content);
     }
@@ -189,4 +265,56 @@ fn find_in_statements<'a>(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::index::RubyIndex;
+    use crate::indexer::index_ref::Index;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+    use tower_lsp::lsp_types::{Position, Url};
+
+    fn create_test_query() -> IndexQuery {
+        let index = RubyIndex::new();
+        let index_ref = Index::new(Arc::new(Mutex::new(index)));
+        IndexQuery::new(index_ref)
+    }
+
+    #[test]
+    fn test_get_inlay_hints_basic() {
+        let query = create_test_query();
+        let content = "class Foo\nend";
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let doc = RubyDocument::new(uri, content.to_string(), 1);
+        let range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(10, 0),
+        };
+
+        let hints = query.get_inlay_hints(&doc, &range, content, None);
+
+        // Should have at least the "class Foo" end hint
+        assert!(!hints.is_empty());
+        assert!(hints.iter().any(|h| h.label.contains("class Foo")));
+    }
+
+    #[test]
+    fn test_get_inlay_hints_method() {
+        let query = create_test_query();
+        let content = "def foo\n  42\nend";
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let doc = RubyDocument::new(uri, content.to_string(), 1);
+        let range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(10, 0),
+        };
+
+        let hints = query.get_inlay_hints(&doc, &range, content, None);
+
+        // Should have "def foo" end hint and implicit return
+        assert!(hints.iter().any(|h| h.label.contains("def foo")));
+        assert!(hints.iter().any(|h| h.label == "return"));
+    }
 }

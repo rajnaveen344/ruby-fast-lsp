@@ -17,7 +17,6 @@
 //! the actual processing to `FileProcessor` with appropriate options.
 
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-use crate::analyzer_prism::visitors::inlay_visitor::InlayVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::indexer::index_ref::{Index, Unlocked};
@@ -254,18 +253,6 @@ impl FileProcessor {
             }
 
             // Merge lvar_references from visitor's document into existing document
-        }
-
-        // 5. Run InlayVisitor (Structural Hints)
-        if options.index_definitions {
-            if let Some(doc_arc) = server.docs.lock().get(uri) {
-                let document = doc_arc.read();
-                let mut inlay_visitor = InlayVisitor::new(&document);
-                inlay_visitor.visit(&node);
-                let structural_hints = inlay_visitor.inlay_hints();
-                drop(document);
-                doc_arc.write().set_inlay_hints(structural_hints);
-            }
         }
 
         // Mark as indexed

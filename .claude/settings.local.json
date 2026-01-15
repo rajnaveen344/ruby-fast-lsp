@@ -6,7 +6,10 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(npx:*)"
     ]
   }
 }

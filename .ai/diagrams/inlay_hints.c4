@@ -1,0 +1,137 @@
+// =============================================================================
+// Ruby Fast LSP - Inlay Hints Implementation (Dynamic Views)
+// =============================================================================
+// This file documents the clean, principled inlay hints architecture.
+//
+// Note: The inlayHintsQuery component (defined in server.c4) contains:
+// - InlayNodeCollector (collector.rs): Visitor that collects AST nodes
+// - InlayNode types (nodes.rs): Data structures for collected nodes
+// - Hint Generators (generators.rs): Convert nodes to hints
+// - HintContext: Provides access to Index and type inference
+// =============================================================================
+
+// No additional model elements - inlayHintsQuery is already defined in server.c4
+
+// =============================================================================
+// DYNAMIC VIEWS
+// =============================================================================
+
+views {
+    // =========================================================================
+    // INLAY HINTS REQUEST FLOW
+    // =========================================================================
+    dynamic view inlayHintsFlow {
+        title 'Inlay Hints Request Flow'
+        description 'Shows the clean, principled flow from LSP request to hint generation.'
+
+        // Step 1: Request Reception
+        ide -> lsp.server 'textDocument/inlayHint (uri, range)'
+        lsp.server -> lsp.capabilities.inlayHintsCap 'handle_inlay_hints(params)'
+
+        // Step 2: Query Layer Orchestration
+        lsp.capabilities.inlayHintsCap -> lsp.docs 'Get document content'
+        lsp.capabilities.inlayHintsCap -> lsp.query.inlayHintsQuery 'get_inlay_hints(doc, range, content, type_narrowing)'
+
+        // Step 3: AST Parsing (within InlayHintsQuery)
+        lsp.query.inlayHintsQuery -> prism 'parse(source)'
+        prism -> lsp.query.inlayHintsQuery 'AST root node'
+
+        // Step 4: Node Collection (InlayNodeCollector visitor)
+        // Internally: collector.collect(root) → Vec<InlayNode>
+
+        // Step 5: Type Inference (within generators)
+        lsp.query.inlayHintsQuery -> lsp.index 'Lookup method entries, infer types'
+        lsp.query.inlayHintsQuery -> lsp.docs 'Lookup local variables'
+
+        // Step 6: Return Results
+        lsp.query.inlayHintsQuery -> lsp.capabilities.inlayHintsCap 'Vec<InlayHintData>'
+        lsp.capabilities.inlayHintsCap -> lsp.server 'Convert to LSP InlayHint'
+        lsp.server -> ide 'InlayHint[] response'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // INLAY HINTS INTERNAL ARCHITECTURE
+    // =========================================================================
+    dynamic view inlayHintsArchitecture {
+        title 'Inlay Hints Internal Architecture'
+        description 'Shows the internal flow within InlayHintsQuery: Collector → Nodes → Generators.'
+
+        // This is a conceptual view showing the internal flow
+        // (InlayHintsQuery is a single component, these are its internal steps)
+
+        lsp.capabilities.inlayHintsCap -> lsp.query.inlayHintsQuery 'get_inlay_hints()'
+
+        // Internal flow (documented in code):
+        // 1. Parse AST via Prism
+        lsp.query.inlayHintsQuery -> prism 'parse(content)'
+        prism -> lsp.query.inlayHintsQuery 'AST'
+
+        // 2. InlayNodeCollector.collect(root) → Vec<InlayNode>
+        //    - visit_class_node → BlockEnd(Class)
+        //    - visit_module_node → BlockEnd(Module)
+        //    - visit_def_node → BlockEnd(Method) + MethodDef + ImplicitReturn
+        //    - visit_*_variable_write_node → VariableWrite(kind)
+        //    - visit_call_node → ChainedCall (if line break)
+
+        // 3. Generate hints from nodes
+        //    - generate_structural_hints(nodes) → end labels, implicit returns
+        //    - generate_variable_type_hints(nodes) → variable types
+        //    - generate_method_hints(nodes) → return types, param types
+
+        // 4. Type inference via Index and Docs
+        lsp.query.inlayHintsQuery -> lsp.index 'Type inference'
+        lsp.query.inlayHintsQuery -> lsp.docs 'Local variable lookup'
+
+        // 5. Return InlayHintData
+        lsp.query.inlayHintsQuery -> lsp.capabilities.inlayHintsCap 'Vec<InlayHintData>'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // METHOD RETURN TYPE INFERENCE
+    // =========================================================================
+    dynamic view methodReturnTypeInference {
+        title 'Method Return Type Inference Flow'
+        description 'Shows how visible methods get their return types inferred on-demand.'
+
+        lsp.capabilities.inlayHintsCap -> lsp.query.inlayHintsQuery 'get_inlay_hints(doc, range)'
+
+        // Step 1: Identify visible methods needing inference
+        lsp.query.inlayHintsQuery -> lsp.index 'Get methods in visible range with return_type = None'
+
+        // Step 2: Parse and infer
+        lsp.query.inlayHintsQuery -> prism 'parse(content)'
+        prism -> lsp.query.inlayHintsQuery 'AST'
+
+        // Step 3: Infer return type for each visible method
+        // (uses inferrer/return_type.rs)
+        lsp.query.inlayHintsQuery -> lsp.index 'infer_return_type_for_node()'
+
+        // Step 4: Update index with inferred types
+        lsp.query.inlayHintsQuery -> lsp.index 'update_method_return_type(entry_id, type)'
+
+        // Step 5: Generate hints with fresh types
+        lsp.query.inlayHintsQuery -> lsp.capabilities.inlayHintsCap 'InlayHints with inferred types'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // COMPONENT VIEW: INLAY HINTS IN CONTEXT
+    // =========================================================================
+    view inlayHintsContext of lsp.query {
+        title 'Inlay Hints Query in Context'
+        description 'Shows InlayHintsQuery and its relationships to other components.'
+
+        include *
+        include lsp.capabilities.inlayHintsCap
+        include lsp.index
+        include lsp.docs
+        include prism
+
+        autoLayout LeftRight
+    }
+}

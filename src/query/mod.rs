@@ -24,7 +24,7 @@ mod references;
 mod types;
 
 pub use hover::HoverInfo;
-pub use inlay_hints::InlayHintData;
+pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::MethodInfo;
 pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};
 

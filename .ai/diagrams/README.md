@@ -4,12 +4,14 @@ This directory contains [LikeC4](https://likec4.dev/) diagrams that document the
 
 ## File Structure
 
-| File          | Description                                                                                                     |
-| ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `model.c4`    | **Base model.** Defines specification, actors, external systems, and Level 1-2 diagrams (Context & Containers). |
-| `server.c4`   | **Server components.** Level 3 details for LSP Server, Query Layer, Index, and Docs.                            |
-| `indexing.c4` | **Indexing lifecycle.** Indexer and Analyzer components with a dynamic view of the indexing process.            |
-| `requests.c4` | **Request flow.** Dynamic view showing how an LSP request (e.g., Go to Definition) flows through the system.    |
+| File               | Description                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `model.c4`         | **Base model.** Defines specification, actors, external systems, and Level 1-2 diagrams (Context & Containers). |
+| `server.c4`        | **Server components.** Level 3 details for LSP Server, Query Layer, Index, and Docs.                            |
+| `indexing.c4`      | **Indexing lifecycle.** Indexer and Analyzer components with a dynamic view of the indexing process.            |
+| `requests.c4`      | **Request flow.** Dynamic view showing how an LSP request (e.g., Go to Definition) flows through the system.    |
+| `notifications.c4` | **Notification flow.** Dynamic views for LSP notifications (didOpen, didChange, didSave, etc.).                  |
+| `inlay_hints.c4`   | **Inlay hints flow.** Dynamic views showing request flow, internal architecture, and on-demand type inference.   |
 
 ## C4 Levels
 
@@ -35,6 +37,38 @@ This directory contains [LikeC4](https://likec4.dev/) diagrams that document the
 5. **Phase 2**: Index references from project files
 6. Build completion trie
 7. Server is ready for requests
+
+### Inlay Hints Architecture
+
+The inlay hints implementation follows a clean, principled architecture within the `InlayHintsQuery` component:
+
+1. **LSP Request**: IDE sends `textDocument/inlayHint` with URI and range
+2. **Capability Handler** (thin): Delegates to query layer
+3. **Query Layer** (`InlayHintsQuery`):
+   - Infers return types for visible methods (on-demand)
+   - Parses AST via Prism
+   - Runs `InlayNodeCollector` (visitor) to collect relevant nodes
+   - Passes nodes to generators with context
+4. **Internal Components** (within `query/inlay_hints/`):
+   - `collector.rs`: Visitor that collects `InlayNode` instances
+     - `BlockEnd` (class/module/def end labels)
+     - `VariableWrite` (local, instance, class, global variables)
+     - `MethodDef` (method definitions with params)
+     - `ImplicitReturn` (implicit returns in methods)
+     - `ChainedCall` (method chains with line breaks)
+   - `nodes.rs`: Data structures representing collected AST nodes
+   - `generators.rs`: Convert nodes to hints with type inference
+     - `generate_structural_hints()` - end labels, implicit returns
+     - `generate_variable_type_hints()` - variable types from inference
+     - `generate_method_hints()` - return types, parameter types (YARD)
+5. **Response**: Convert to LSP `InlayHint` and return to IDE
+
+**Key Principles:**
+- **No ad-hoc processing**: Only uses AST nodes from visitor
+- **Clear separation**: Collector collects, generators generate
+- **On-demand computation**: Hints and types computed fresh on each request
+- **Range-based filtering**: Only processes nodes in requested range
+- **Lazy type inference**: Method return types inferred only for visible methods
 
 ## Viewing the Diagrams
 
