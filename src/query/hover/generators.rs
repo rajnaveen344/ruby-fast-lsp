@@ -119,7 +119,11 @@ fn get_type_from_type_query(
     name: &str,
     position: Position,
 ) -> Option<RubyType> {
-    let type_query = TypeQuery::new(context.index.clone(), context.uri, context.content.as_bytes());
+    let type_query = TypeQuery::new(
+        context.index.clone(),
+        context.uri,
+        context.content.as_bytes(),
+    );
     type_query.get_local_variable_type(name, position)
 }
 
@@ -208,13 +212,7 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
     }
 
     // For method calls, resolve receiver type and infer return type
-    let receiver_type = resolve_receiver_type(
-        receiver,
-        namespace,
-        *scope_id,
-        *position,
-        context,
-    );
+    let receiver_type = resolve_receiver_type(receiver, namespace, *scope_id, *position, context);
 
     // Use return type inference
     let mut index = context.index.lock();
@@ -235,41 +233,29 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
 }
 
 /// Generate hover info for a variable (instance, class, or global).
-pub fn generate_variable_hover(
-    node: &HoverNode,
-    context: &HoverContext,
-) -> Option<HoverInfo> {
+pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
     let (name, matcher): (&str, fn(&EntryKind) -> Option<(&str, &RubyType)>) = match node {
-        HoverNode::InstanceVariable { name } => (
-            name.as_str(),
-            |kind| {
-                if let EntryKind::InstanceVariable(data) = kind {
-                    Some((&data.name, &data.r#type))
-                } else {
-                    None
-                }
-            },
-        ),
-        HoverNode::ClassVariable { name } => (
-            name.as_str(),
-            |kind| {
-                if let EntryKind::ClassVariable(data) = kind {
-                    Some((&data.name, &data.r#type))
-                } else {
-                    None
-                }
-            },
-        ),
-        HoverNode::GlobalVariable { name } => (
-            name.as_str(),
-            |kind| {
-                if let EntryKind::GlobalVariable(data) = kind {
-                    Some((&data.name, &data.r#type))
-                } else {
-                    None
-                }
-            },
-        ),
+        HoverNode::InstanceVariable { name } => (name.as_str(), |kind| {
+            if let EntryKind::InstanceVariable(data) = kind {
+                Some((&data.name, &data.r#type))
+            } else {
+                None
+            }
+        }),
+        HoverNode::ClassVariable { name } => (name.as_str(), |kind| {
+            if let EntryKind::ClassVariable(data) = kind {
+                Some((&data.name, &data.r#type))
+            } else {
+                None
+            }
+        }),
+        HoverNode::GlobalVariable { name } => (name.as_str(), |kind| {
+            if let EntryKind::GlobalVariable(data) = kind {
+                Some((&data.name, &data.r#type))
+            } else {
+                None
+            }
+        }),
         _ => return None,
     };
 
@@ -341,15 +327,19 @@ fn generate_method_definition_hover(
             // Try on-demand inference
             if let Some(pos) = data.return_type_position {
                 let owner_fqn = data.owner.clone();
-                let entry_id_opt = index.get_entry_ids_for_uri(context.uri).into_iter().find(|eid| {
-                    if let Some(e) = index.get_entry(*eid) {
-                        if let EntryKind::Method(d) = &e.kind {
-                            return d.name.to_string() == method_name
-                                && d.return_type_position == Some(pos);
-                        }
-                    }
-                    false
-                });
+                let entry_id_opt =
+                    index
+                        .get_entry_ids_for_uri(context.uri)
+                        .into_iter()
+                        .find(|eid| {
+                            if let Some(e) = index.get_entry(*eid) {
+                                if let EntryKind::Method(d) = &e.kind {
+                                    return d.name.to_string() == method_name
+                                        && d.return_type_position == Some(pos);
+                                }
+                            }
+                            false
+                        });
 
                 if let Some(entry_id) = entry_id_opt {
                     drop(index); // Release lock before parsing
@@ -358,7 +348,9 @@ fn generate_method_definition_hover(
                     let parse_result = ruby_prism::parse(context.content.as_bytes());
                     let node = parse_result.node();
 
-                    if let Some(def_node) = crate::utils::ast::find_def_node_at_line(&node, pos.line, context.content) {
+                    if let Some(def_node) =
+                        crate::utils::ast::find_def_node_at_line(&node, pos.line, context.content)
+                    {
                         let mut index = context.index.lock();
                         if let Some(inferred_ty) = infer_return_type_for_node(
                             &mut index,
@@ -419,7 +411,11 @@ fn resolve_receiver_type(
         }
         MethodReceiver::LocalVariable(name) => {
             // Use TypeQuery for local variable type
-            let type_query = TypeQuery::new(context.index.clone(), context.uri, context.content.as_bytes());
+            let type_query = TypeQuery::new(
+                context.index.clone(),
+                context.uri,
+                context.content.as_bytes(),
+            );
 
             // Try TypeQuery first
             if let Some(t) = type_query.get_local_variable_type(name, position) {
@@ -515,13 +511,8 @@ fn resolve_receiver_type(
                 }
             }
 
-            let inner_type = resolve_receiver_type(
-                inner_receiver,
-                namespace,
-                scope_id,
-                position,
-                context,
-            );
+            let inner_type =
+                resolve_receiver_type(inner_receiver, namespace, scope_id, position, context);
 
             if inner_type == RubyType::Unknown {
                 return RubyType::Unknown;

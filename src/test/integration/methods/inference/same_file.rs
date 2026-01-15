@@ -64,47 +64,6 @@ end
     .await;
 }
 
-/// Test inference from same-file method call with YARD
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_infer_from_method_call_with_yard() {
-    check(
-        r#"
-class Foo
-  # @return [String]
-  def name
-    "foo"
-  end
-
-  def get_na<type label="String">me
-    name
-  end
-end
-"#,
-    )
-    .await;
-}
-
-/// Test inference from same-file method call without YARD (recursive inference)
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_infer_from_method_call_no_yard() {
-    check(
-        r#"
-class Foo
-  def inner
-    "hello"
-  end
-
-  def out<type label="String">er
-    inner
-  end
-end
-"#,
-    )
-    .await;
-}
-
 /// Test inference analyzes body, not YARD annotation
 #[tokio::test]
 async fn test_infer_body_not_yard() {
@@ -114,30 +73,6 @@ class Foo
   # @return [CustomType]
   def val<type label="String">ue
     "actually a string"
-  end
-end
-"#,
-    )
-    .await;
-}
-
-/// Test inference through multiple same-file method calls
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_infer_chained_same_file() {
-    check(
-        r#"
-class Foo
-  def level_1
-    "deep"
-  end
-
-  def level_2
-    level_1
-  end
-
-  def level<type label="String">_3
-    level_2
   end
 end
 "#,

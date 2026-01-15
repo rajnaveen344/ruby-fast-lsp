@@ -8,69 +8,6 @@
 
 use crate::test::harness::*;
 
-/// Test case from first image: variable set to false, then conditionally to true.
-/// The return type should be (FalseClass | TrueClass) or equivalently bool.
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_boolean_variable_modified_in_if_branch() {
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    check(
-        r#"
-def is_limit_reached?<hint label=" -> (FalseClass | TrueClass)">
-  limit_reached = false
-  if some_condition
-    limit_reached = true
-  end
-  limit_reached
-end
-"#,
-    )
-    .await;
-}
-
-/// Simpler version: explicit return of the modified variable.
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_boolean_variable_explicit_return() {
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    check(
-        r#"
-def check_flag?<hint label=" -> (FalseClass | TrueClass)">
-  flag = false
-  if true
-    flag = true
-  end
-  return flag
-end
-"#,
-    )
-    .await;
-}
-
-/// Test with if/else where both branches modify the variable.
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_boolean_variable_modified_in_both_branches() {
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    check(
-        r#"
-def get_status<hint label=" -> (FalseClass | TrueClass)">
-  result = false
-  if condition
-    result = true
-  else
-    result = false
-  end
-  result
-end
-"#,
-    )
-    .await;
-}
-
 /// Test that simple true return works correctly.
 #[tokio::test]
 async fn test_simple_true_return() {
@@ -101,25 +38,6 @@ end
     .await;
 }
 
-/// Test array variable return type (from second image).
-/// When returning an array that was built up, should show Array<Type>.
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_array_variable_return() {
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    check(
-        r#"
-def get_dates<hint label=" -> Array<?>">
-  dates = []
-  dates << "2024-01-01"
-  dates
-end
-"#,
-    )
-    .await;
-}
-
 // ============================================================================
 // Goto Definition on Array Methods with Inferred Receiver Type
 // ============================================================================
@@ -142,53 +60,6 @@ end
 def collect_items
   items = []
   items <<$0 "hello"
-end
-"#,
-    )
-    .await;
-}
-
-/// This test simulates the real-world scenario from shipping_label_machine.rb
-/// Multiple classes define <<, but only Array#<< should be found because
-/// the receiver `available_pickup_dates` is assigned from an array literal.
-#[tokio::test]
-#[ignore = "Requires CFG-based return type inference"]
-async fn test_goto_array_shovel_with_multiple_definitions() {
-    let _ = env_logger::builder().is_test(true).try_init();
-
-    check(
-        r#"
-class Array
-  <def>def <<(item)
-    # Array's shovel operator
-  end</def>
-end
-
-class CSV
-  def <<(row)
-    # CSV's shovel operator
-  end
-end
-
-class IO
-  def <<(obj)
-    # IO's shovel operator
-  end
-end
-
-class String
-  def <<(other)
-    # String's shovel operator
-  end
-end
-
-def next_available_pickup_dates(country_code)
-  available_pickup_dates = []
-
-  current_time = Time.now
-  available_pickup_dates <<$0 current_time
-
-  available_pickup_dates
 end
 "#,
     )

@@ -195,11 +195,7 @@ impl<'a> TypeQuery<'a> {
     }
 
     /// Get local variable type hints from document.lvars
-    fn get_local_var_hints(
-        &self,
-        document: &RubyDocument,
-        range: &Range,
-    ) -> Vec<TypeHint> {
+    fn get_local_var_hints(&self, document: &RubyDocument, range: &Range) -> Vec<TypeHint> {
         let mut hints = Vec::new();
         let content_str = std::str::from_utf8(self.content).unwrap_or("");
 

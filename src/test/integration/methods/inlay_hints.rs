@@ -34,16 +34,14 @@ end
     .await;
 }
 
-/// Method without YARD has no return type hints.
+/// Method without YARD/RBS infers return type from body when possible.
 #[tokio::test]
-async fn no_yard_no_method_hints() {
-    // We can't use <hint none> here because the method itself generates hints
-    // (def greet generates a method hint). We just verify no -> hints.
-    // For now, keep this as a documentation test that YARD is required for return types.
+async fn no_yard_infers_from_literal() {
+    // Even without YARD, TypeTracker infers String from the literal.
     check(
         r#"
 class Greeter
-  def greet
+  def greet<hint label=" -> String">
     "hello"
   end
 end

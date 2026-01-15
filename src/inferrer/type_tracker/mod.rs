@@ -330,7 +330,8 @@ impl<'a> TypeTracker<'a> {
         // Merge the two branches
         // Combine snapshots from both branches
         self.snapshots = then_snapshots;
-        self.snapshots.extend(else_snapshots.iter().skip(snapshots_before).cloned());
+        self.snapshots
+            .extend(else_snapshots.iter().skip(snapshots_before).cloned());
 
         // Merge environments
         self.vars = then_env;
@@ -414,7 +415,8 @@ impl<'a> TypeTracker<'a> {
         // Merge all other branches
         for i in 1..branch_envs.len() {
             self.merge_env(&branch_envs[i], false);
-            self.snapshots.extend(all_snapshots[i].iter().skip(snapshots_before).cloned());
+            self.snapshots
+                .extend(all_snapshots[i].iter().skip(snapshots_before).cloned());
         }
 
         // If there's no else clause, variables might be undefined
@@ -544,7 +546,8 @@ impl<'a> TypeTracker<'a> {
 
         // Merge the two branches
         self.snapshots = then_snapshots;
-        self.snapshots.extend(else_snapshots.iter().skip(snapshots_before).cloned());
+        self.snapshots
+            .extend(else_snapshots.iter().skip(snapshots_before).cloned());
 
         // Merge environments
         self.vars = then_env;
@@ -622,7 +625,8 @@ impl<'a> TypeTracker<'a> {
         if method_name == "new" {
             if let Some(receiver) = call.receiver() {
                 if let Some(const_read) = receiver.as_constant_read_node() {
-                    let class_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+                    let class_name =
+                        String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                     if let Ok(constant) = RubyConstant::new(&class_name) {
                         let fqn = FullyQualifiedName::Constant(vec![constant]);
                         return RubyType::Class(fqn);
@@ -670,10 +674,8 @@ impl<'a> TypeTracker<'a> {
                 return self.infer_expression(&args_list[0]);
             } else {
                 // Multiple return values become an array
-                let types: Vec<RubyType> = args_list
-                    .iter()
-                    .map(|a| self.infer_expression(a))
-                    .collect();
+                let types: Vec<RubyType> =
+                    args_list.iter().map(|a| self.infer_expression(a)).collect();
                 return RubyType::Array(types);
             }
         }

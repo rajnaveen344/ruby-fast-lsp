@@ -440,9 +440,8 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
             let call_end_position = self.document.offset_to_position(call_end_offset);
 
             if self.is_in_range(&call_end_position) {
-                self.collected.push(InlayNode::ChainedCall {
-                    call_end_position,
-                });
+                self.collected
+                    .push(InlayNode::ChainedCall { call_end_position });
             }
         }
 

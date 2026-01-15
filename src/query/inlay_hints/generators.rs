@@ -96,13 +96,7 @@ pub fn generate_variable_type_hints(
                 continue;
             }
 
-            let ruby_type = infer_variable_type(
-                *kind,
-                name,
-                context,
-                document,
-                name_end_position,
-            );
+            let ruby_type = infer_variable_type(*kind, name, context, document, name_end_position);
 
             let label = match &ruby_type {
                 Some(ty) if *ty != RubyType::Unknown => format!(": {}", ty),
@@ -160,21 +154,20 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                             data.yard_doc
                                 .as_ref()
                                 .and_then(|doc| doc.format_return_type())
-                        });
+                        })
+                        .unwrap_or_else(|| "?".to_string());
 
-                    if let Some(type_str) = return_type_str {
-                        hints.push(InlayHintData {
-                            position: *return_type_position,
-                            label: format!(" -> {}", type_str),
-                            kind: InlayHintKind::MethodReturn,
-                            tooltip: data
-                                .yard_doc
-                                .as_ref()
-                                .and_then(|doc| doc.get_return_description().cloned()),
-                            padding_left: false,
-                            padding_right: false,
-                        });
-                    }
+                    hints.push(InlayHintData {
+                        position: *return_type_position,
+                        label: format!(" -> {}", return_type_str),
+                        kind: InlayHintKind::MethodReturn,
+                        tooltip: data
+                            .yard_doc
+                            .as_ref()
+                            .and_then(|doc| doc.get_return_description().cloned()),
+                        padding_left: false,
+                        padding_right: false,
+                    });
 
                     // Parameter type hints from YARD
                     if let Some(yard_doc) = &data.yard_doc {
@@ -269,14 +262,10 @@ fn infer_variable_type(
                             // Fallback: if no assignment matched by position, try snapshots
                             if entry.location.range.end == *position {
                                 let snapshots = document.get_type_snapshots();
-                                let offset = crate::utils::position_to_offset(
-                                    context.content,
-                                    *position,
-                                );
+                                let offset =
+                                    crate::utils::position_to_offset(context.content, *position);
                                 if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
-                                    snapshots,
-                                    offset,
-                                    &name,
+                                    snapshots, offset, &name,
                                 ) {
                                     if ty != RubyType::Unknown {
                                         return Some(ty);

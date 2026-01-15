@@ -146,13 +146,12 @@ impl IndexQuery {
                 if let Some(doc_arc) = &self.doc {
                     let doc = doc_arc.read();
                     let snapshots = doc.get_type_snapshots();
-                    if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
-                        snapshots,
-                        offset,
-                        name,
-                    ) {
+                    if let Some(ty) =
+                        crate::inferrer::type_tracker::get_type_at_offset(snapshots, offset, name)
+                    {
                         ty
-                    } else if let Some(ty) = self.infer_type_from_constructor_assignment(content, name)
+                    } else if let Some(ty) =
+                        self.infer_type_from_constructor_assignment(content, name)
                     {
                         ty
                     } else {

@@ -327,7 +327,6 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     );
 }
 
-
 fn print_stats(server: &RubyLanguageServer) {
     let index = server.index.lock();
 

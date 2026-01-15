@@ -173,11 +173,8 @@ impl FileProcessor {
                 let mut all_snapshots = Vec::new();
 
                 // First, track top-level statements (outside methods)
-                let mut top_level_tracker = TypeTracker::new(
-                    content.as_bytes(),
-                    self.index.clone(),
-                    uri,
-                );
+                let mut top_level_tracker =
+                    TypeTracker::new(content.as_bytes(), self.index.clone(), uri);
                 top_level_tracker.track_program(&program);
                 all_snapshots.extend(top_level_tracker.snapshots().iter().cloned());
 
@@ -369,4 +366,3 @@ impl FileProcessor {
         self.index_references(&uri, &content)
     }
 }
-

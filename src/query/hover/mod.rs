@@ -13,8 +13,8 @@
 pub mod generators;
 pub mod nodes;
 
-pub use generators::HoverInfo;
 use generators::HoverContext;
+pub use generators::HoverInfo;
 use nodes::HoverNode;
 
 use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
@@ -44,7 +44,8 @@ impl IndexQuery {
         let identifier = identifier_opt?;
 
         // Step 2: Convert Identifier to HoverNode (simpler representation)
-        let node = identifier_to_hover_node(identifier, identifier_type, namespace, scope_id, position)?;
+        let node =
+            identifier_to_hover_node(identifier, identifier_type, namespace, scope_id, position)?;
 
         // Step 3: Create context for generators
         let context = HoverContext {
@@ -59,20 +60,14 @@ impl IndexQuery {
             HoverNode::LocalVariable { .. } => {
                 generators::generate_local_variable_hover(&node, &context)
             }
-            HoverNode::Constant { .. } => {
-                generators::generate_constant_hover(&node, &context)
-            }
-            HoverNode::Method { .. } => {
-                generators::generate_method_hover(&node, &context)
-            }
+            HoverNode::Constant { .. } => generators::generate_constant_hover(&node, &context),
+            HoverNode::Method { .. } => generators::generate_method_hover(&node, &context),
             HoverNode::InstanceVariable { .. }
             | HoverNode::ClassVariable { .. }
             | HoverNode::GlobalVariable { .. } => {
                 generators::generate_variable_hover(&node, &context)
             }
-            HoverNode::YardType { .. } => {
-                generators::generate_yard_type_hover(&node)
-            }
+            HoverNode::YardType { .. } => generators::generate_yard_type_hover(&node),
         }
     }
 }
@@ -121,9 +116,7 @@ fn identifier_to_hover_node(
             })
         }
 
-        Identifier::RubyInstanceVariable { name, .. } => {
-            Some(HoverNode::InstanceVariable { name })
-        }
+        Identifier::RubyInstanceVariable { name, .. } => Some(HoverNode::InstanceVariable { name }),
 
         Identifier::RubyClassVariable { name, .. } => Some(HoverNode::ClassVariable { name }),
 

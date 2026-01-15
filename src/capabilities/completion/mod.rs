@@ -233,8 +233,13 @@ pub async fn find_completion_at_position(
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
-        let receiver_type =
-            get_receiver_type_from_snapshots(server, &uri, &document.content, position, &partial_name);
+        let receiver_type = get_receiver_type_from_snapshots(
+            server,
+            &uri,
+            &document.content,
+            position,
+            &partial_name,
+        );
 
         if let Some(receiver_type) = receiver_type {
             // Determine if this is a class method call (receiver is a constant)

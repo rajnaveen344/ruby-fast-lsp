@@ -49,13 +49,7 @@ impl IndexQuery {
             identifier,
         );
 
-        self.find_definitions_for_identifier(
-            &identifier,
-            &ancestors,
-            position,
-            uri,
-            content,
-        )
+        self.find_definitions_for_identifier(&identifier, &ancestors, position, uri, content)
     }
 
     /// Find definitions for a local variable using document.lvars (file-local storage)
@@ -154,11 +148,7 @@ impl IndexQuery {
                 namespace: _,
                 receiver,
                 iden,
-            } => {
-                self.find_method_definitions(
-                    receiver, iden, ancestors, uri, position, content,
-                )
-            }
+            } => self.find_method_definitions(receiver, iden, ancestors, uri, position, content),
             Identifier::RubyInstanceVariable { name, .. } => {
                 self.find_instance_variable_definitions(name)
             }
