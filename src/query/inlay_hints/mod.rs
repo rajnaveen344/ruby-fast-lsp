@@ -44,6 +44,7 @@ use crate::inferrer::cfg::TypeNarrowingEngine;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::query::IndexQuery;
 use crate::types::ruby_document::RubyDocument;
+use crate::utils::ast::find_def_node_at_line;
 use tower_lsp::lsp_types::{Range, Url};
 
 impl IndexQuery {
@@ -208,63 +209,6 @@ impl IndexQuery {
         let index = self.index.lock();
         crate::query::infer_type_from_assignment(content, name, &index)
     }
-}
-
-/// Helper to find DefNode at line.
-fn find_def_node_at_line<'a>(
-    node: &ruby_prism::Node<'a>,
-    target_line: u32,
-    content: &str,
-) -> Option<ruby_prism::DefNode<'a>> {
-    // Try to match DefNode
-    if let Some(def_node) = node.as_def_node() {
-        let offset = def_node.location().start_offset();
-        // Calculate line from byte offset (count newlines before this offset)
-        let line = content.as_bytes()[..offset]
-            .iter()
-            .filter(|&&b| b == b'\n')
-            .count() as u32;
-        if line == target_line {
-            return Some(def_node);
-        }
-    }
-
-    // Recurse into child nodes (Program, Class, Module, Statements)
-    if let Some(program) = node.as_program_node() {
-        return find_in_statements(&program.statements(), target_line, content);
-    }
-    if let Some(class_node) = node.as_class_node() {
-        if let Some(body) = class_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                return find_in_statements(&stmts, target_line, content);
-            }
-        }
-    }
-    if let Some(module_node) = node.as_module_node() {
-        if let Some(body) = module_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                return find_in_statements(&stmts, target_line, content);
-            }
-        }
-    }
-    if let Some(stmts) = node.as_statements_node() {
-        return find_in_statements(&stmts, target_line, content);
-    }
-
-    None
-}
-
-fn find_in_statements<'a>(
-    stmts: &ruby_prism::StatementsNode<'a>,
-    target_line: u32,
-    content: &str,
-) -> Option<ruby_prism::DefNode<'a>> {
-    for stmt in stmts.body().iter() {
-        if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-            return Some(found);
-        }
-    }
-    None
 }
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
+use crate::utils::ast::find_def_node_at_line;
 use ruby_prism::*;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::Url;
@@ -66,8 +67,9 @@ pub fn infer_method_return_type(
         if let Some(content) = load_content_for_inference(index, file_id, file_contents) {
             let parse_result = ruby_prism::parse(&content);
             let node = parse_result.node();
+            let content_str = std::str::from_utf8(&content).unwrap();
 
-            if let Some(def_node) = find_def_node_at_line(&node, line, &content) {
+            if let Some(def_node) = find_def_node_at_line(&node, line, content_str) {
                 let owner_fqn = FullyQualifiedName::Constant(method_fqn.namespace_parts());
                 let mut ctx = InferenceContext {
                     index,
@@ -1232,74 +1234,6 @@ fn extract_write_value<'a>(node: &Node<'a>) -> Option<Node<'a>> {
 }
 
 /// Find a DefNode at the given line in the AST.
-fn find_def_node_at_line<'a>(
-    node: &ruby_prism::Node<'a>,
-    target_line: u32,
-    content: &[u8],
-) -> Option<ruby_prism::DefNode<'a>> {
-    if let Some(def_node) = node.as_def_node() {
-        let offset = def_node.location().start_offset();
-        let line = content[..offset].iter().filter(|&&b| b == b'\n').count() as u32;
-        if line == target_line {
-            return Some(def_node);
-        }
-    }
-
-    // Recurse into child nodes
-    if let Some(program) = node.as_program_node() {
-        for stmt in program.statements().body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    if let Some(class_node) = node.as_class_node() {
-        if let Some(body) = class_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(module_node) = node.as_module_node() {
-        if let Some(body) = module_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(stmts) = node.as_statements_node() {
-        for stmt in stmts.body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    if let Some(sclass) = node.as_singleton_class_node() {
-        if let Some(body) = sclass.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
 
 // ============================================================================
 // Legacy API - ReturnTypeInferrer struct (for backward compatibility)
@@ -1651,7 +1585,7 @@ end
         let ast = parse_result.node();
 
         // Line 1 (0-indexed) should have the def
-        let def_node = find_def_node_at_line(&ast, 1, source.as_bytes());
+        let def_node = find_def_node_at_line(&ast, 1, source);
         assert!(def_node.is_some(), "Should find def node at line 1");
 
         let def = def_node.unwrap();

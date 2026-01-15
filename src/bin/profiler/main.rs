@@ -27,6 +27,7 @@ use ruby_fast_lsp::capabilities::indexing;
 use ruby_fast_lsp::inferrer::return_type::infer_return_type_for_node;
 use ruby_fast_lsp::inferrer::RubyType;
 use ruby_fast_lsp::server::RubyLanguageServer;
+use ruby_fast_lsp::utils::ast::find_def_node_at_line;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -301,10 +302,11 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
         // Parse file once
         let parse_result = ruby_prism::parse(&file_content);
         let node = parse_result.node();
+        let file_content_str = std::str::from_utf8(&file_content).unwrap();
 
         // Infer each method in this file
         for (entry_id, line) in methods {
-            if let Some(def_node) = find_def_node_at_line(&node, line, &file_content) {
+            if let Some(def_node) = find_def_node_at_line(&node, line, file_content_str) {
                 let mut index = server.index.lock();
                 if let Some(inferred_ty) =
                     infer_return_type_for_node(&mut index, &file_content, &def_node, None, None)
@@ -325,74 +327,6 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     );
 }
 
-fn find_def_node_at_line<'a>(
-    node: &ruby_prism::Node<'a>,
-    target_line: u32,
-    content: &[u8],
-) -> Option<ruby_prism::DefNode<'a>> {
-    if let Some(def_node) = node.as_def_node() {
-        let offset = def_node.location().start_offset();
-        let line = content[..offset].iter().filter(|&&b| b == b'\n').count() as u32;
-        if line == target_line {
-            return Some(def_node);
-        }
-    }
-
-    // Recurse into child nodes
-    if let Some(program) = node.as_program_node() {
-        for stmt in program.statements().body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    if let Some(class_node) = node.as_class_node() {
-        if let Some(body) = class_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(module_node) = node.as_module_node() {
-        if let Some(body) = module_node.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(stmts) = node.as_statements_node() {
-        for stmt in stmts.body().iter() {
-            if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                return Some(found);
-            }
-        }
-    }
-
-    if let Some(sclass) = node.as_singleton_class_node() {
-        if let Some(body) = sclass.body() {
-            if let Some(stmts) = body.as_statements_node() {
-                for stmt in stmts.body().iter() {
-                    if let Some(found) = find_def_node_at_line(&stmt, target_line, content) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
 
 fn print_stats(server: &RubyLanguageServer) {
     let index = server.index.lock();
