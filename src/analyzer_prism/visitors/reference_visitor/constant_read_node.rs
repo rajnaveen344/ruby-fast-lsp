@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 use ruby_prism::ConstantReadNode;
 
 use crate::indexer::index::UnresolvedEntry;
@@ -12,7 +12,7 @@ impl ReferenceVisitor {
         let constant = match RubyConstant::new(&name) {
             Ok(c) => c,
             Err(_) => {
-                debug!("Skipping invalid constant name: {}", name);
+                trace!("Skipping invalid constant name: {}", name);
                 return;
             }
         };

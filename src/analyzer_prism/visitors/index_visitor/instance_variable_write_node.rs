@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{trace, error};
 use ruby_prism::{
     InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
     InstanceVariableTargetNode, InstanceVariableWriteNode, Node,
@@ -18,7 +18,7 @@ impl IndexVisitor {
         value_node: Option<&Node>,
     ) {
         let variable_name = String::from_utf8_lossy(name).to_string();
-        debug!("Processing instance variable: {}", variable_name);
+        trace!("Processing instance variable: {}", variable_name);
 
         // Validate instance variable name
         if !variable_name.starts_with('@') {
@@ -44,7 +44,7 @@ impl IndexVisitor {
         // Instance variables are associated with the class/module, not with methods
         let fqn = FullyQualifiedName::instance_variable(variable_name.clone()).unwrap();
 
-        debug!(
+        trace!(
             "Adding instance variable entry: {:?} with type: {:?}",
             fqn, inferred_type
         );
@@ -63,7 +63,7 @@ impl IndexVisitor {
 
         if let Ok(entry) = entry {
             self.add_entry(entry);
-            debug!(
+            trace!(
                 "Added instance variable entry: {} -> {:?}",
                 variable_name, inferred_type
             );

@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{error, trace};
 use ruby_prism::ConstantWriteNode;
 
 use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
@@ -9,7 +9,7 @@ use super::IndexVisitor;
 impl IndexVisitor {
     pub fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {
         let constant_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        debug!("Visiting constant write node: {}", constant_name);
+        trace!("Visiting constant write node: {}", constant_name);
 
         // Create a RubyConstant from the name
         let constant = match RubyConstant::new(&constant_name) {
@@ -42,6 +42,7 @@ impl IndexVisitor {
 
         // Add the entry to the index
         if let Ok(entry) = entry_result {
+            trace!("Added constant write node entry: {}", constant_name);
             self.add_entry(entry);
         } else {
             error!("Error creating entry for constant: {}", constant_name);

@@ -32,6 +32,7 @@ impl RubyFastLspConfig {
     /// Apply log level from configuration
     pub fn apply_log_level(&self) {
         let level = match self.log_level.as_str() {
+            "trace" => log::LevelFilter::Trace,
             "debug" => log::LevelFilter::Debug,
             "info" => log::LevelFilter::Info,
             _ => log::LevelFilter::Info,

@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{trace, error};
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
     LocalVariableTargetNode, LocalVariableWriteNode, Location, Node,
@@ -92,7 +92,7 @@ impl IndexVisitor {
             // This is a performance optimization - file-local data should not bloat the global index
             self.document
                 .add_local_var_entry(current_scope, entry.clone());
-            debug!(
+            trace!(
                 "Added local variable entry with type: {:?} -> {:?}",
                 variable_name, inferred_type
             );

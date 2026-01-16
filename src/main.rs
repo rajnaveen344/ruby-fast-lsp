@@ -7,9 +7,9 @@ use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize the logger with debug level enabled (actual filtering is done via log::set_max_level)
+    // Initialize the logger with trace level enabled (actual filtering is done via log::set_max_level)
     // This allows runtime log level changes without restarting the server
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
     // Start with info level - can be changed at runtime via configuration
     log::set_max_level(log::LevelFilter::Info);

@@ -38,7 +38,7 @@ impl MethodResolver {
 
     /// Create a MethodResolver with namespace context for resolving 'self'
     pub fn with_namespace(index: Index<Unlocked>, namespace: Vec<RubyConstant>) -> Self {
-        log::debug!(
+        log::trace!(
             "MethodResolver::with_namespace called with: {:?}",
             namespace
         );
@@ -220,7 +220,7 @@ impl MethodResolver {
 
         // Get receiver type
         let receiver_type = self.resolve_receiver_type(call_node.receiver())?;
-        log::debug!(
+        log::trace!(
             "resolve_call_type: method={}, receiver_type={:?}",
             method_name,
             receiver_type
@@ -228,7 +228,7 @@ impl MethodResolver {
 
         // Look up method and get its return type
         let result = self.lookup_method_return_type(&receiver_type, &method_name);
-        log::debug!("resolve_call_type: result={:?}", result);
+        log::trace!("resolve_call_type: result={:?}", result);
         result
     }
 
@@ -259,18 +259,18 @@ impl MethodResolver {
         // Handle self - resolve to current class if we have namespace context
         let is_self = receiver.as_self_node().is_some();
         if is_self {
-            log::debug!(
+            log::trace!(
                 "Resolving self receiver with namespace context: {:?}",
                 self.current_namespace
             );
             if !self.current_namespace.is_empty() {
                 // Self is an instance of the current class/module
                 let fqn = FullyQualifiedName::Constant(self.current_namespace.clone());
-                log::debug!("Self resolved to: {:?}", fqn);
+                log::trace!("Self resolved to: {:?}", fqn);
                 return Some(RubyType::Class(fqn));
             }
             // No namespace context, fall back to Unknown
-            log::debug!("Self has no namespace context, returning Unknown");
+            log::trace!("Self has no namespace context, returning Unknown");
             return Some(RubyType::Unknown);
         }
 
@@ -482,7 +482,7 @@ impl MethodResolver {
         is_singleton: bool,
     ) -> Option<RubyType> {
         let class_name = class_name?;
-        log::debug!(
+        log::trace!(
             "Looking up RBS method: {}{}{}",
             class_name,
             if is_singleton { "." } else { "#" },
@@ -493,20 +493,20 @@ impl MethodResolver {
 
     /// Look up a local variable's type from the index
     fn lookup_local_variable_type(&self, var_name: &str) -> Option<RubyType> {
-        log::debug!("Looking up local variable type for: {}", var_name);
+        log::trace!("Looking up local variable type for: {}", var_name);
         let index = self.index.lock();
 
         // Search through all definitions for local variables with matching name
         for (fqn, entries) in index.definitions() {
             if let FullyQualifiedName::LocalVariable(name, _) = fqn {
                 if name == var_name {
-                    log::debug!("Found local variable {} in index", var_name);
+                    log::trace!("Found local variable {} in index", var_name);
                     for entry in entries {
                         if let EntryKind::LocalVariable(data) = &entry.kind {
                             if data.name == var_name {
                                 // TODO: Use position to find correct assignment from range
                                 if let Some(last_assignment) = data.assignments.last() {
-                                    log::debug!(
+                                    log::trace!(
                                         "Variable {} has type: {:?}",
                                         var_name,
                                         last_assignment.r#type
@@ -520,7 +520,7 @@ impl MethodResolver {
             }
         }
 
-        log::debug!("Local variable {} not found in index", var_name);
+        log::trace!("Local variable {} not found in index", var_name);
         None
     }
 

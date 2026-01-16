@@ -8,7 +8,7 @@ use crate::capabilities::{
     inlay_hints, namespace_tree, references, semantic_tokens, type_hierarchy, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
-use log::{debug, info};
+use log::{debug, info, trace};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
@@ -27,7 +27,7 @@ pub async fn handle_goto_definition(
 
     match definition {
         Some(locations) => {
-            debug!("Returning {} goto definition locations", locations.len());
+            trace!("Returning {} goto definition locations", locations.len());
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {

@@ -14,7 +14,8 @@
       "Bash(done)",
       "Bash(pkill:*)",
       "Bash(git stash:*)",
-      "Bash(cargo fmt:*)"
+      "Bash(cargo fmt:*)",
+      "Bash(grep:*)"
     ]
   }
 }

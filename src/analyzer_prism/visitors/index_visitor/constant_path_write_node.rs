@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{trace, error};
 use ruby_prism::ConstantPathWriteNode;
 
 use crate::analyzer_prism::utils;
@@ -21,7 +21,7 @@ impl IndexVisitor {
             }
         };
 
-        debug!("Visiting constant path write node: {}", constant_name);
+        trace!("Visiting constant path write node: {}", constant_name);
 
         // Create a RubyConstant from the name
         let constant = match RubyConstant::new(&constant_name) {
@@ -63,7 +63,7 @@ impl IndexVisitor {
             // NOTE: `inferred_type` is not defined in this context.
             // The instruction provided a snippet that included it, but to maintain
             // syntactical correctness and avoid unrelated edits, it's omitted here.
-            // debug!("Added constant path entry: {} -> {:?}", fqn, inferred_type);
+            // trace!("Added constant path entry: {} -> {:?}", fqn, inferred_type);
         } else {
             error!("Error creating entry for constant path: {}", constant_name);
         }

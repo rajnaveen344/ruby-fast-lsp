@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 use ruby_prism::ConstantPathNode;
 
 use crate::analyzer_prism::utils::collect_namespaces;
@@ -84,7 +84,7 @@ impl ReferenceVisitor {
                 .prism_location_to_lsp_location(&node.location());
             let namespace_context: Vec<String> =
                 current_namespace.iter().map(|c| c.to_string()).collect();
-            debug!(
+            trace!(
                 "Adding unresolved constant path: {} in context {:?}",
                 name, namespace_context
             );

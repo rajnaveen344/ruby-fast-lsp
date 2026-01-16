@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{trace, error};
 use ruby_prism::{
     GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode, GlobalVariableOrWriteNode,
     GlobalVariableTargetNode, GlobalVariableWriteNode, Node,
@@ -18,7 +18,7 @@ impl IndexVisitor {
         value_node: Option<&Node>,
     ) {
         let variable_name = String::from_utf8_lossy(name).to_string();
-        debug!("Processing global variable: {}", variable_name);
+        trace!("Processing global variable: {}", variable_name);
 
         // Validate global variable name
         if !variable_name.starts_with('$') {
@@ -50,7 +50,7 @@ impl IndexVisitor {
             }
         };
 
-        debug!(
+        trace!(
             "Adding global variable entry: {:?} with type: {:?}",
             fqn, inferred_type
         );
@@ -69,7 +69,7 @@ impl IndexVisitor {
 
         if let Ok(entry) = entry {
             self.add_entry(entry);
-            debug!(
+            trace!(
                 "Added global variable entry: {} -> {:?}",
                 variable_name, inferred_type
             );

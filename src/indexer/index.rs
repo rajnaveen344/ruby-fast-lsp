@@ -190,6 +190,16 @@ impl RubyIndex {
             }
         }
 
+        // Log the ancestor chain for debugging method resolution
+        let method_type = if is_class_method { "class" } else { "instance" };
+        let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
+        debug!(
+            "[Ancestor Chain] {} ({} method): {}",
+            fqn,
+            method_type,
+            chain_str.join(" → ")
+        );
+
         chain
     }
 

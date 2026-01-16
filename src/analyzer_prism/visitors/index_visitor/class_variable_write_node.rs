@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{trace, error};
 use ruby_prism::{
     ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
     ClassVariableTargetNode, ClassVariableWriteNode, Node,
@@ -40,7 +40,7 @@ impl IndexVisitor {
         // Class variables are associated with the class/module, not with methods
         let fqn = FullyQualifiedName::class_variable(variable_name.clone()).unwrap();
 
-        debug!(
+        trace!(
             "Adding class variable entry: {:?} with type: {:?}",
             fqn, inferred_type
         );
@@ -59,7 +59,7 @@ impl IndexVisitor {
 
         if let Ok(entry) = entry {
             self.add_entry(entry);
-            debug!(
+            trace!(
                 "Added class variable entry: {} -> {:?}",
                 variable_name, inferred_type
             );

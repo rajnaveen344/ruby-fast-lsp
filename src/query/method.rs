@@ -14,7 +14,7 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::position_to_offset;
-use log::debug;
+use log::{debug, trace};
 use std::collections::HashSet;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
@@ -76,7 +76,7 @@ impl IndexQuery {
                 if let Some(doc_arc) = &self.doc {
                     let doc = doc_arc.read();
                     if let Some(receiver_type) = doc.get_var_type(receiver_offset, name) {
-                        debug!("Found receiver type for '{}': {:?}", name, receiver_type);
+                        trace!("Found receiver type for '{}': {:?}", name, receiver_type);
                         return self.search_by_name_filtered(method, receiver_type);
                     }
                 }
@@ -85,7 +85,7 @@ impl IndexQuery {
                 if let Some(receiver_type) =
                     self.infer_type_from_constructor_assignment(content, name)
                 {
-                    debug!("Found constructor type for '{}': {:?}", name, receiver_type);
+                    trace!("Found constructor type for '{}': {:?}", name, receiver_type);
                     return self.search_by_name_filtered(method, &receiver_type);
                 }
                 // Final fallback
@@ -103,7 +103,7 @@ impl IndexQuery {
                     content,
                 );
                 if let Some(ty) = receiver_type {
-                    debug!(
+                    trace!(
                         "Found method call receiver type for '{}.{}': {:?}",
                         inner_receiver_to_string(inner_receiver),
                         method_name,
@@ -472,11 +472,17 @@ impl IndexQuery {
             let method_fqn =
                 FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
             if let Some(entries) = index.get(&method_fqn) {
-                found_locations.extend(
-                    entries
-                        .iter()
-                        .filter_map(|e| index.to_lsp_location(&e.location)),
-                );
+                let locations: Vec<Location> = entries
+                    .iter()
+                    .filter_map(|e| index.to_lsp_location(&e.location))
+                    .collect();
+                if !locations.is_empty() {
+                    debug!(
+                        "[Method Found] {}#{} found in ancestor: {}",
+                        receiver_fqn, method, module_fqn
+                    );
+                }
+                found_locations.extend(locations);
             }
         }
 
@@ -511,11 +517,17 @@ impl IndexQuery {
             let method_fqn =
                 FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
             if let Some(entries) = index.get(&method_fqn) {
-                found_locations.extend(
-                    entries
-                        .iter()
-                        .filter_map(|e| index.to_lsp_location(&e.location)),
-                );
+                let locations: Vec<Location> = entries
+                    .iter()
+                    .filter_map(|e| index.to_lsp_location(&e.location))
+                    .collect();
+                if !locations.is_empty() {
+                    debug!(
+                        "[Method Found] {}#{} found via including class: {}",
+                        receiver_fqn, method, module_fqn
+                    );
+                }
+                found_locations.extend(locations);
             }
         }
         deduplicate_locations(found_locations)

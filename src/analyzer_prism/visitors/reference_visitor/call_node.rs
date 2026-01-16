@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 use ruby_prism::{CallNode, Node};
 
 use crate::{
@@ -34,7 +34,7 @@ impl ReferenceVisitor {
 
         // Skip method names that don't follow Ruby method naming conventions
         if !RubyMethod::is_valid_ruby_method_name(&method_name) {
-            debug!("Skipping method call with invalid name: {}", method_name);
+            trace!("Skipping method call with invalid name: {}", method_name);
             return;
         }
 
@@ -68,14 +68,14 @@ impl ReferenceVisitor {
         let method = match RubyMethod::new(&method_name, method_kind) {
             Ok(method) => method,
             Err(err) => {
-                debug!("Failed to create RubyMethod for '{}': {}", method_name, err);
+                trace!("Failed to create RubyMethod for '{}': {}", method_name, err);
                 return;
             }
         };
 
         let method_fqn = FullyQualifiedName::method(target_namespace.clone(), method);
 
-        debug!(
+        trace!(
             "Adding method call reference: {} at {:?}",
             method_fqn.to_string(),
             call_location
@@ -97,7 +97,7 @@ impl ReferenceVisitor {
                         &target_namespace,
                         method_kind,
                     ) {
-                        debug!("Adding unresolved method call: {}", method_name);
+                        trace!("Adding unresolved method call: {}", method_name);
                         index.add_unresolved_entry(
                             self.document.uri.clone(),
                             UnresolvedEntry::method(method_name.clone(), None, message_location),
@@ -112,7 +112,7 @@ impl ReferenceVisitor {
                         &target_namespace,
                         method_kind,
                     ) {
-                        debug!(
+                        trace!(
                             "Adding unresolved method call: {}.{}",
                             receiver_name, method_name
                         );

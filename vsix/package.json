@@ -98,12 +98,13 @@
         },
         "rubyFastLsp.logLevel": {
           "type": "string",
-          "enum": ["info", "debug"],
+          "enum": ["info", "debug", "trace"],
           "default": "info",
-          "description": "Log level for the LSP server. 'debug' shows detailed logging, 'info' shows only important messages.",
+          "description": "Log level for the LSP server output.",
           "enumDescriptions": [
-            "Show only important messages (recommended for normal use)",
-            "Show detailed debug information (useful for troubleshooting)"
+            "Normal operation - indexing progress and errors only (recommended)",
+            "Troubleshooting - feature diagnostics, cache operations, timing",
+            "Development - per-node operations, very verbose (not for normal use)"
           ]
         }
       }
