@@ -5,6 +5,7 @@
 //! - Document analysis for local variables
 //! - YARD parser for type comments
 
+use log::{debug, info};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::query::IndexQuery;
@@ -16,6 +17,9 @@ pub async fn find_definition_at_position(
     uri: Url,
     position: Position,
 ) -> Option<Vec<Location>> {
+    info!("Test info - find_definition_at_position");
+    debug!("Test debug - find_definition_at_position");
+
     // Get document content and Arc
     let (content, doc_arc) = {
         let doc_guard = server.docs.lock();

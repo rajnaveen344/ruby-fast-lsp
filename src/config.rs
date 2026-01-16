@@ -12,6 +12,9 @@ pub struct RubyFastLspConfig {
 
     #[serde(rename = "codeLens.modules.enabled")]
     pub code_lens_modules_enabled: Option<bool>,
+
+    #[serde(rename = "logLevel")]
+    pub log_level: String,
 }
 
 impl Default for RubyFastLspConfig {
@@ -20,11 +23,23 @@ impl Default for RubyFastLspConfig {
             ruby_version: "auto".to_string(),
             extension_path: None,
             code_lens_modules_enabled: Some(true),
+            log_level: "info".to_string(),
         }
     }
 }
 
 impl RubyFastLspConfig {
+    /// Apply log level from configuration
+    pub fn apply_log_level(&self) {
+        let level = match self.log_level.as_str() {
+            "debug" => log::LevelFilter::Debug,
+            "info" => log::LevelFilter::Info,
+            _ => log::LevelFilter::Info,
+        };
+        log::set_max_level(level);
+        log::info!("Log level set to: {}", self.log_level);
+    }
+
     /// Parse Ruby version from configuration
     pub fn get_ruby_version(&self) -> Option<(u8, u8)> {
         if self.ruby_version == "auto" {

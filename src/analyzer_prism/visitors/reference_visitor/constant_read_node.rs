@@ -37,7 +37,6 @@ impl ReferenceVisitor {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                debug!("Adding reference: {}", fqn);
                 index.add_reference(fqn, location);
                 return;
             }
@@ -50,10 +49,6 @@ impl ReferenceVisitor {
                 .prism_location_to_lsp_location(&node.location());
             let namespace_context: Vec<String> =
                 current_namespace.iter().map(|c| c.to_string()).collect();
-            debug!(
-                "Adding unresolved constant: {} in context {:?}",
-                name, namespace_context
-            );
             index.add_unresolved_entry(
                 self.document.uri.clone(),
                 UnresolvedEntry::constant_with_context(name.clone(), namespace_context, location),

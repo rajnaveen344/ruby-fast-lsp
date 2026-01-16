@@ -295,7 +295,8 @@ function activate(context) {
                         settings: {
                             rubyFastLsp: {
                                 rubyVersion: newConfig.get('rubyVersion', 'auto'),
-                                stubsPath: newConfig.get('stubsPath', '')
+                                stubsPath: newConfig.get('stubsPath', ''),
+                                logLevel: newConfig.get('logLevel', 'info')
                             }
                         }
                     });

@@ -95,6 +95,16 @@
           "type": "string",
           "default": "",
           "description": "Custom path to Ruby stubs directory. Leave empty to use bundled stubs."
+        },
+        "rubyFastLsp.logLevel": {
+          "type": "string",
+          "enum": ["info", "debug"],
+          "default": "info",
+          "description": "Log level for the LSP server. 'debug' shows detailed logging, 'info' shows only important messages.",
+          "enumDescriptions": [
+            "Show only important messages (recommended for normal use)",
+            "Show detailed debug information (useful for troubleshooting)"
+          ]
         }
       }
     },

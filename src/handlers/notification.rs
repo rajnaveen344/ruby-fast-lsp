@@ -253,6 +253,10 @@ pub async fn handle_did_change_configuration(
                 serde_json::from_value::<RubyFastLspConfig>(ruby_fast_lsp_settings.clone())
             {
                 info!("Updated configuration: {:?}", config);
+
+                // Apply log level immediately (works without restart)
+                config.apply_log_level();
+
                 *server.config.lock() = config.clone();
 
                 let ruby_version = if let Some(version) = config.get_ruby_version() {

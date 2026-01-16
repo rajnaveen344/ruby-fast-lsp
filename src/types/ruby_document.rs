@@ -1,4 +1,3 @@
-use log::debug;
 use ruby_prism::Location as PrismLocation;
 use std::{
     cmp,
@@ -192,7 +191,6 @@ impl RubyDocument {
     }
 
     pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
-        debug!("Adding local variable entry with scope id: {:?}", scope_id);
         self.lvars.entry(scope_id).or_default().push(entry);
     }
 

@@ -7,8 +7,12 @@ use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize the logger
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize the logger with debug level enabled (actual filtering is done via log::set_max_level)
+    // This allows runtime log level changes without restarting the server
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+
+    // Start with info level - can be changed at runtime via configuration
+    log::set_max_level(log::LevelFilter::Info);
 
     info!("Starting Ruby Fast LSP server");
 
