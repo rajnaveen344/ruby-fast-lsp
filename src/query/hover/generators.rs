@@ -16,7 +16,7 @@ use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use crate::utils::position_to_offset;
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Context for hover generation (provides access to necessary data).
 pub struct HoverContext<'a> {
@@ -71,26 +71,128 @@ pub fn generate_local_variable_hover(
         _ => return None,
     };
 
-    // Try multiple type resolution strategies
-    let from_lvar = get_type_from_document_lvar(context, name, *position, *scope_id);
+    // Try multiple type resolution strategies (excluding Unknown)
+    let from_lvar = get_type_from_document_lvar(context, name, *position, *scope_id, false);
     let from_query = from_lvar.or_else(|| get_type_from_type_query(context, name, *position));
     let resolved_type = from_query.or_else(|| get_type_from_document(context, name, *position));
 
     match resolved_type {
         Some(t) => Some(HoverInfo::text(t.to_string())),
-        None => Some(HoverInfo::text(name.to_string())),
+        None => {
+            // If no known type found, check if there's an Unknown type stored
+            // and display it as "?" for consistency with inlay hints
+            let has_unknown =
+                get_type_from_document_lvar(context, name, *position, *scope_id, true).is_some();
+            if has_unknown {
+                Some(HoverInfo::text("?".to_string()))
+            } else {
+                Some(HoverInfo::text(name.to_string()))
+            }
+        }
     }
 }
 
 /// Get type from document's local variable tracking.
+/// If `include_unknown` is false, Unknown types are filtered out to allow fallback strategies.
+/// If `include_unknown` is true, Unknown types are returned (for checking if variable exists).
+///
+/// This function handles Ruby's closure semantics correctly:
+/// - Blocks CAN access variables from enclosing scopes (soft boundary)
+/// - Methods/Classes/Modules CANNOT access outer local vars (hard boundary)
+///
+/// We find the enclosing method and only search for variables within that method's scope.
 fn get_type_from_document_lvar(
     context: &HoverContext,
     name: &str,
     position: Position,
     scope_id: LVScopeId,
+    include_unknown: bool,
 ) -> Option<RubyType> {
     let doc_arc = context.document?;
     let doc = doc_arc.read();
+
+    // First, try the exact scope_id
+    if let Some(result) = find_var_in_scope(&doc, name, position, scope_id, include_unknown) {
+        return Some(result);
+    }
+
+    // Find the enclosing method's range - this is the hard scope boundary.
+    // Variables outside this method are not accessible (Ruby's scoping rules).
+    let enclosing_method_range = find_enclosing_method_range(context, position);
+
+    // Search all scopes for the variable, but respect hard scope boundaries:
+    // Only consider variables that are within the same method (or at method level if in a block)
+    let all_lvars = doc.get_all_lvars();
+    for (_other_scope_id, entries) in all_lvars {
+        for entry in entries.iter().rev() {
+            if let crate::indexer::entry::entry_kind::EntryKind::LocalVariable(data) = &entry.kind {
+                if &data.name == name && entry.location.range.start.line <= position.line {
+                    // Check if this variable is within the same hard scope boundary
+                    let var_line = entry.location.range.start.line;
+
+                    // If we're inside a method, only accept variables also inside that method
+                    if let Some(ref method_range) = enclosing_method_range {
+                        if var_line < method_range.start.line || var_line > method_range.end.line {
+                            // Variable is outside our enclosing method - skip it
+                            continue;
+                        }
+                    }
+
+                    if let Some(assignment) = data
+                        .assignments
+                        .iter()
+                        .filter(|a| a.range.start.line <= position.line)
+                        .last()
+                    {
+                        if include_unknown || assignment.r#type != RubyType::Unknown {
+                            return Some(assignment.r#type.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Find the range of the enclosing method for a position.
+/// Returns None if not inside a method (e.g., at class/module level or top-level).
+fn find_enclosing_method_range(context: &HoverContext, position: Position) -> Option<Range> {
+    let index = context.index.lock();
+    let entries = index.file_entries(context.uri);
+
+    // Find the smallest method that contains this position
+    let mut best_match: Option<Range> = None;
+
+    for entry in &entries {
+        if let EntryKind::Method(_) = &entry.kind {
+            let range = &entry.location.range;
+            if position.line >= range.start.line && position.line <= range.end.line {
+                // This method contains the position
+                // Prefer the smallest (most specific) method
+                if best_match.is_none()
+                    || (range.end.line - range.start.line)
+                        < (best_match.as_ref().unwrap().end.line
+                            - best_match.as_ref().unwrap().start.line)
+                {
+                    best_match = Some(range.clone());
+                }
+            }
+        }
+    }
+
+    best_match
+}
+
+/// Helper to find a variable in a specific scope.
+fn find_var_in_scope(
+    doc: &RubyDocument,
+    name: &str,
+    position: Position,
+    scope_id: LVScopeId,
+    include_unknown: bool,
+) -> Option<RubyType> {
     let entries = doc.get_local_var_entries(scope_id)?;
 
     for entry in entries.iter().rev() {
@@ -102,7 +204,7 @@ fn get_type_from_document_lvar(
                     .filter(|a| a.range.start.line <= position.line)
                     .last()
                 {
-                    if assignment.r#type != RubyType::Unknown {
+                    if include_unknown || assignment.r#type != RubyType::Unknown {
                         return Some(assignment.r#type.clone());
                     }
                 }

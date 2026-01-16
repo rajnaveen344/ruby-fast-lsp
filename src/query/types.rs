@@ -14,6 +14,7 @@ use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
+use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::{Node, Visit};
 use tower_lsp::lsp_types::{Position, Range, Url};
 
@@ -732,9 +733,35 @@ pub fn infer_type_from_assignment(
         var_name: &'a str,
         best_type: Option<RubyType>,
         index: &'a RubyIndex,
+        /// Current namespace stack (for resolving implicit self calls)
+        namespace: Vec<String>,
     }
 
     impl<'a> Visit<'a> for AssignmentFinder<'a> {
+        fn visit_class_node(&mut self, node: &ruby_prism::ClassNode<'a>) {
+            // Track class namespace
+            let name = extract_constant_name(&node.constant_path());
+            if let Some(name) = name {
+                self.namespace.push(name);
+                ruby_prism::visit_class_node(self, node);
+                self.namespace.pop();
+            } else {
+                ruby_prism::visit_class_node(self, node);
+            }
+        }
+
+        fn visit_module_node(&mut self, node: &ruby_prism::ModuleNode<'a>) {
+            // Track module namespace
+            let name = extract_constant_name(&node.constant_path());
+            if let Some(name) = name {
+                self.namespace.push(name);
+                ruby_prism::visit_module_node(self, node);
+                self.namespace.pop();
+            } else {
+                ruby_prism::visit_module_node(self, node);
+            }
+        }
+
         fn visit_local_variable_write_node(
             &mut self,
             node: &ruby_prism::LocalVariableWriteNode<'a>,
@@ -742,7 +769,7 @@ pub fn infer_type_from_assignment(
             let name = String::from_utf8_lossy(node.name().as_slice());
             if name == self.var_name {
                 let val = node.value();
-                self.best_type = infer_value_type(&val, self.index);
+                self.best_type = infer_value_type_with_context(&val, self.index, &self.namespace);
             }
             ruby_prism::visit_local_variable_write_node(self, node);
         }
@@ -752,13 +779,32 @@ pub fn infer_type_from_assignment(
         var_name,
         best_type: None,
         index,
+        namespace: Vec::new(),
     };
     finder.visit(&root);
 
     finder.best_type
 }
 
-fn infer_value_type<'a>(node: &Node<'a>, index: &RubyIndex) -> Option<RubyType> {
+/// Extract constant name from a constant path or constant read node.
+fn extract_constant_name<'a>(node: &ruby_prism::Node<'a>) -> Option<String> {
+    if let Some(const_read) = node.as_constant_read_node() {
+        return Some(String::from_utf8_lossy(const_read.name().as_slice()).to_string());
+    }
+    if let Some(const_path) = node.as_constant_path_node() {
+        return const_path
+            .name()
+            .map(|n| String::from_utf8_lossy(n.as_slice()).to_string());
+    }
+    None
+}
+
+/// Infer the type of a value expression with namespace context for implicit self calls.
+fn infer_value_type_with_context<'a>(
+    node: &Node<'a>,
+    index: &RubyIndex,
+    namespace: &[String],
+) -> Option<RubyType> {
     let literal_analyzer = LiteralAnalyzer::new();
 
     // 1. Literals
@@ -788,10 +834,21 @@ fn infer_value_type<'a>(node: &Node<'a>, index: &RubyIndex) -> Option<RubyType> 
         let method_name = String::from_utf8_lossy(call_node.name().as_slice()).to_string();
 
         let receiver_type = if let Some(receiver) = call_node.receiver() {
-            infer_value_type(&receiver, index)
+            infer_value_type_with_context(&receiver, index, namespace)
         } else {
-            // Implicit self - assume Unknown for context-free fallback
-            return None;
+            // Implicit self - use current class/module context
+            if namespace.is_empty() {
+                return None;
+            }
+            // Build FQN from namespace
+            let parts: Vec<RubyConstant> = namespace
+                .iter()
+                .filter_map(|s| RubyConstant::new(s).ok())
+                .collect();
+            if parts.is_empty() {
+                return None;
+            }
+            Some(RubyType::Class(FullyQualifiedName::Constant(parts)))
         };
 
         if let Some(recv_type) = receiver_type {
@@ -800,6 +857,12 @@ fn infer_value_type<'a>(node: &Node<'a>, index: &RubyIndex) -> Option<RubyType> 
     }
 
     None
+}
+
+#[allow(dead_code)]
+fn infer_value_type<'a>(node: &Node<'a>, index: &RubyIndex) -> Option<RubyType> {
+    // Delegate to context-aware version with empty namespace
+    infer_value_type_with_context(node, index, &[])
 }
 
 fn flatten_constant_path<'a>(node: &ruby_prism::ConstantPathNode<'a>) -> Option<String> {
