@@ -187,11 +187,10 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
         // Check for return type mismatch with RBS
         if !yard_doc.returns.is_empty() {
             if let EntryKind::Method(data) = &entry.kind {
-                // Get owner class/module name
-                if let crate::types::fully_qualified_name::FullyQualifiedName::Constant(parts) =
-                    &data.owner
-                {
-                    let class_name = parts
+                // Get owner class/module name (handles both Namespace and Constant variants)
+                let owner_parts = data.owner.namespace_parts();
+                if !owner_parts.is_empty() {
+                    let class_name = owner_parts
                         .iter()
                         .map(|c| c.to_string())
                         .collect::<Vec<_>>()

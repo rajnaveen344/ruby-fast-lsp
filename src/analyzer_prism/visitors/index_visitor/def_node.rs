@@ -109,8 +109,9 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
-        // Owner FQN uses Constant variant for consistent lookups
-        let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
+        // Owner FQN uses Namespace variant with kind to distinguish instance vs singleton methods
+        let owner_fqn =
+            FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
 
         // Convert YARD types to RubyType for type inference
         let (yard_return_type, param_types) = if let Some(ref doc) = yard_doc {

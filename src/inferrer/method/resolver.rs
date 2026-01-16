@@ -130,14 +130,23 @@ impl MethodResolver {
             };
 
             // Build the list of all FQNs to search (owner + ancestors)
+            // Use Namespace variant with kind to properly filter instance vs singleton methods
             let mut all_fqns_to_search: Vec<FullyQualifiedName> = Vec::new();
-            all_fqns_to_search.push(owner_fqn.clone());
 
-            // Add ancestor chain
+            // Add owner with the appropriate namespace kind
+            let owner_with_kind =
+                FullyQualifiedName::namespace_with_kind(owner_fqn.namespace_parts(), namespace_kind);
+            all_fqns_to_search.push(owner_with_kind);
+
+            // Add ancestor chain - ancestors also need namespace kind for proper filtering
             let ancestors = index.get_ancestor_chain(&owner_fqn, namespace_kind);
             for ancestor in ancestors {
-                if !all_fqns_to_search.contains(&ancestor) {
-                    all_fqns_to_search.push(ancestor);
+                let ancestor_with_kind = FullyQualifiedName::namespace_with_kind(
+                    ancestor.namespace_parts(),
+                    namespace_kind,
+                );
+                if !all_fqns_to_search.contains(&ancestor_with_kind) {
+                    all_fqns_to_search.push(ancestor_with_kind);
                 }
             }
 
@@ -145,14 +154,23 @@ impl MethodResolver {
             if is_module {
                 let including_classes = index.get_including_classes(&owner_fqn);
                 for class_fqn in including_classes {
-                    if !all_fqns_to_search.contains(&class_fqn) {
-                        all_fqns_to_search.push(class_fqn.clone());
+                    let class_with_kind = FullyQualifiedName::namespace_with_kind(
+                        class_fqn.namespace_parts(),
+                        namespace_kind,
+                    );
+                    if !all_fqns_to_search.contains(&class_with_kind) {
+                        all_fqns_to_search.push(class_with_kind);
                     }
                     // Also add ancestors of including classes
-                    let class_ancestors = index.get_ancestor_chain(&class_fqn, NamespaceKind::Instance);
+                    let class_ancestors =
+                        index.get_ancestor_chain(&class_fqn, NamespaceKind::Instance);
                     for ancestor in class_ancestors {
-                        if !all_fqns_to_search.contains(&ancestor) {
-                            all_fqns_to_search.push(ancestor);
+                        let ancestor_with_kind = FullyQualifiedName::namespace_with_kind(
+                            ancestor.namespace_parts(),
+                            namespace_kind,
+                        );
+                        if !all_fqns_to_search.contains(&ancestor_with_kind) {
+                            all_fqns_to_search.push(ancestor_with_kind);
                         }
                     }
                 }

@@ -267,6 +267,9 @@ impl IndexQuery {
             return self.search_by_name(method);
         }
 
+        // Determine expected namespace kind from receiver type
+        let expected_kind = get_namespace_kind_for_type(receiver_type);
+
         let index = self.index.lock();
         let mut filtered_locations = Vec::new();
 
@@ -276,6 +279,18 @@ impl IndexQuery {
                     Some(f) => f,
                     None => continue,
                 };
+
+                // Check namespace kind matches (instance vs singleton method)
+                if let EntryKind::Method(data) = &entry.kind {
+                    if let Some(expected) = expected_kind {
+                        if let Some(method_kind) = data.owner.namespace_kind() {
+                            if method_kind != expected {
+                                continue; // Skip methods with wrong namespace kind
+                            }
+                        }
+                    }
+                }
+
                 let method_class = fqn.namespace_parts();
                 if !method_class.is_empty() {
                     let class_name = method_class
@@ -472,12 +487,30 @@ impl IndexQuery {
         // The method to search for (methods are now kind-agnostic)
         let search_method = method.clone();
 
+        let receiver_parts = receiver_fqn.namespace_parts();
         for module_fqn in &modules_to_search {
             let method_fqn =
                 FullyQualifiedName::method(module_fqn.namespace_parts(), search_method.clone());
             if let Some(entries) = index.get(&method_fqn) {
                 let locations: Vec<Location> = entries
                     .iter()
+                    .filter(|e| {
+                        // Filter by namespace kind, but only for methods defined directly
+                        // on the receiver class. Methods from ancestors/modules are valid
+                        // based on the ancestor chain already determining access pattern.
+                        // (e.g., module instance methods become singleton methods via extend)
+                        if let EntryKind::Method(data) = &e.kind {
+                            if let Some(owner_kind) = data.owner.namespace_kind() {
+                                // Only filter if the method is defined on the receiver class
+                                let owner_parts = data.owner.namespace_parts();
+                                if owner_parts == receiver_parts {
+                                    return owner_kind == kind;
+                                }
+                            }
+                        }
+                        // Methods from other namespaces or without kind info are included
+                        true
+                    })
                     .filter_map(|e| index.to_lsp_location(&e.location))
                     .collect();
                 if !locations.is_empty() {
@@ -742,5 +775,24 @@ fn get_type_names(ty: &RubyType) -> Vec<String> {
         RubyType::Hash(_, _) => vec!["Hash".to_string()],
         RubyType::Union(types) => types.iter().flat_map(get_type_names).collect(),
         RubyType::Unknown => vec![],
+    }
+}
+
+/// Determine the expected namespace kind from a receiver type.
+/// - ClassReference/ModuleReference -> Singleton (class methods)
+/// - Class/Module (instance) -> Instance (instance methods)
+fn get_namespace_kind_for_type(ty: &RubyType) -> Option<NamespaceKind> {
+    match ty {
+        // Class/Module instances -> instance methods
+        RubyType::Class(_) | RubyType::Module(_) => Some(NamespaceKind::Instance),
+        // Class/Module references (the class itself) -> singleton/class methods
+        RubyType::ClassReference(_) | RubyType::ModuleReference(_) => {
+            Some(NamespaceKind::Singleton)
+        }
+        // Built-in types are instances
+        RubyType::Array(_) | RubyType::Hash(_, _) => Some(NamespaceKind::Instance),
+        // For unions, return None to not filter (could be mixed)
+        RubyType::Union(_) => None,
+        RubyType::Unknown => None,
     }
 }

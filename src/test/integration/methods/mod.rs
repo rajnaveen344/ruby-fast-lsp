@@ -11,6 +11,7 @@ mod inference;
 mod method_chaining;
 pub mod mixin_ambiguity;
 pub mod mixin_goto;
+mod namespace_kind;
 mod references;
 mod refinements;
 mod return_type_checks;
