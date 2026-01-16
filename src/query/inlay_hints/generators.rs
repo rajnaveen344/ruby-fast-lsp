@@ -145,16 +145,11 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
 
             if let Some(entry) = method_entry {
                 if let EntryKind::Method(data) = &entry.kind {
-                    // Return type hint
+                    // Return type hint - always present (Unknown displays as "?")
                     let return_type_str = data
                         .return_type
                         .as_ref()
                         .map(|rt| rt.to_string())
-                        .or_else(|| {
-                            data.yard_doc
-                                .as_ref()
-                                .and_then(|doc| doc.format_return_type())
-                        })
                         .unwrap_or_else(|| "?".to_string());
 
                     hints.push(InlayHintData {

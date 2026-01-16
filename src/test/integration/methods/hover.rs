@@ -134,3 +134,90 @@ product<hover label="Product"> = Builder.new.build
     )
     .await;
 }
+
+/// Test hover on chained method calls shows correct types at each step.
+#[tokio::test]
+async fn test_hover_chained_method_calls() {
+    check(
+        r#"
+class User
+  # @return [Profile]
+  def profile
+    Profile.new
+  end
+end
+
+class Profile
+  # @return [String]
+  def name
+    "John"
+  end
+end
+
+user = User.new
+user.profile<hover label="Profile">.name<hover label="String">
+"#,
+    )
+    .await;
+}
+
+/// Test hover on array method calls (RBS types).
+#[tokio::test]
+async fn test_hover_array_methods() {
+    check(
+        r#"
+arr = [1, 2, 3]
+arr.length<hover label="Integer">
+"#,
+    )
+    .await;
+}
+
+/// Test hover on hash method calls (RBS types).
+#[tokio::test]
+async fn test_hover_hash_methods() {
+    check(
+        r#"
+hash = { a: 1 }
+hash.keys<hover label="Array">
+"#,
+    )
+    .await;
+}
+
+/// Test hover on method call with implicit self (inside class).
+#[tokio::test]
+async fn test_hover_implicit_self_method_call() {
+    check(
+        r#"
+class Calculator
+  # @return [Integer]
+  def add(a, b)
+    a + b
+  end
+
+  def compute
+    add<hover label="Integer">(1, 2)
+  end
+end
+"#,
+    )
+    .await;
+}
+
+/// Test hover on method call returns Unknown when chain breaks.
+#[tokio::test]
+async fn test_hover_chain_unknown_propagation() {
+    check(
+        r#"
+class Foo
+  def unknown_method
+    bar  # bar is undefined, returns unknown
+  end
+end
+
+x = Foo.new.unknown_method<hover label="def unknown_method">
+"#,
+    )
+    .await;
+}

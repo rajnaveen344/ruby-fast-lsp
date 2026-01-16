@@ -66,8 +66,8 @@ class Calculator
     x.calculate
   end
 
-  # Expressions with operators also show "?" (method resolution incomplete)
-  def add<hint label=" -> ?">
+  # Expressions with operators are now resolved via RBS method lookups
+  def add<hint label=" -> Integer">
     1 + 2
   end
 end

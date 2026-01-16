@@ -59,6 +59,27 @@ impl MethodResolver {
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
+        // Handle Unknown type - propagate it
+        if *receiver_type == RubyType::Unknown {
+            return None;
+        }
+
+        // Handle Union types - try each type and collect results
+        if let RubyType::Union(types) = receiver_type {
+            let mut return_types = Vec::new();
+            for ty in types {
+                if let Some(rt) = Self::resolve_method_return_type(index, ty, method_name) {
+                    if !return_types.contains(&rt) {
+                        return_types.push(rt);
+                    }
+                }
+            }
+            if return_types.is_empty() {
+                return None;
+            }
+            return Some(RubyType::union(return_types));
+        }
+
         // Handle class reference calling .new
         if method_name == "new" {
             if let RubyType::ClassReference(fqn) = receiver_type {
@@ -82,6 +103,21 @@ impl MethodResolver {
             RubyType::ClassReference(fqn) => (Some(fqn.clone()), false),
             RubyType::Module(fqn) => (Some(fqn.clone()), true),
             RubyType::ModuleReference(fqn) => (Some(fqn.clone()), true),
+            // Handle Array and Hash types - they're classes in RBS
+            RubyType::Array(_) => (
+                Some(FullyQualifiedName::Constant(vec![RubyConstant::new(
+                    "Array",
+                )
+                .ok()?])),
+                false,
+            ),
+            RubyType::Hash(_, _) => (
+                Some(FullyQualifiedName::Constant(vec![RubyConstant::new(
+                    "Hash",
+                )
+                .ok()?])),
+                false,
+            ),
             _ => (None, false),
         };
 
@@ -152,7 +188,8 @@ impl MethodResolver {
         get_rbs_method_return_type_as_ruby_type(class_name.as_deref()?, method_name, is_singleton)
     }
 
-    /// Static helper to get class name for RBS lookup
+    /// Static helper to get class name for RBS lookup.
+    /// For union types, returns None since resolve_method_return_type handles them specially.
     fn get_class_name_for_rbs_static(ruby_type: &RubyType) -> Option<String> {
         match ruby_type {
             RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
@@ -171,6 +208,7 @@ impl MethodResolver {
             }
             RubyType::Array(_) => Some("Array".to_string()),
             RubyType::Hash(_, _) => Some("Hash".to_string()),
+            // Union types are handled at the top of resolve_method_return_type
             RubyType::Union(_) => None,
             RubyType::Unknown => None,
         }

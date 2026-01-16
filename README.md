@@ -6,20 +6,22 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 
 ### Core Features
 
-| **Syntax Highlighting** | ✅     | Full semantic token-based highlighting                        |
-| **Workspace Indexing**  | ✅     | Project files, stdlib stubs, gem dependencies                 |
-| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods         |
-| **Find References**     | ✅     | Classes, modules, constants, local variables, methods         |
-| **Code Completion**     | ✅     | Variables, constants, classes, modules, snippets              |
-| **Document Symbols**    | ✅     | Nested hierarchy with visibility info                         |
-| **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                         |
-| **Type Hierarchy**      | ✅     | Explore superclasses and subclasses                           |
-| **Hover**               | ✅     | Quick info for symbols                                        |
-| **Inlay Hints**         | ✅     | End keyword hints for blocks                                  |
-| **Code Folding**        | ✅     | Classes, modules, methods, control flow                       |
-| **Diagnostics**         | ✅     | Syntax errors, warnings, unresolved constants/methods         |
-| **Code Lens**           | ✅     | Module mixin usage counts                                     |
-| **Formatting**          | ✅     | On-type formatting (auto-end) and basic formatting            |
+| **Feature**             | Status | Description                                           |
+| ----------------------- | ------ | ----------------------------------------------------- |
+| **Syntax Highlighting** | ✅     | Full semantic token-based highlighting                |
+| **Workspace Indexing**  | ✅     | Project files, stdlib stubs, gem dependencies         |
+| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods |
+| **Find References**     | ✅     | Classes, modules, constants, local variables, methods |
+| **Code Completion**     | ✅     | Variables, constants, classes, modules, snippets      |
+| **Document Symbols**    | ✅     | Nested hierarchy with visibility info                 |
+| **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                 |
+| **Type Hierarchy**      | ✅     | Explore superclasses and subclasses                   |
+| **Hover**               | ✅     | Quick info for symbols                                |
+| **Inlay Hints**         | ✅     | End keyword hints for blocks                          |
+| **Code Folding**        | ✅     | Classes, modules, methods, control flow               |
+| **Diagnostics**         | ✅     | Syntax errors, warnings, unresolved constants/methods |
+| **Code Lens**           | ✅     | Module mixin usage counts                             |
+| **Formatting**          | ✅     | On-type formatting (auto-end) and basic formatting    |
 
 ### Navigation Details
 

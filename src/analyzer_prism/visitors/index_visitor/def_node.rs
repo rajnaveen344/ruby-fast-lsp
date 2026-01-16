@@ -2,6 +2,7 @@ use log::warn;
 use ruby_prism::*;
 
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::inferrer::type_tracker::TypeTracker;
 use crate::{
     indexer::entry::{
         entry_kind::{EntryKind, MethodParamInfo, ParamKind},
@@ -160,10 +161,21 @@ impl IndexVisitor {
             )
         };
 
-        // Prioritize RBS over YARD
-        // NOTE: Inferred return types are computed in a post-processing step after all methods
-        // are indexed, to handle forward references (e.g., method A calling method B that comes later in the file).
-        let return_type = rbs_return_type.or(yard_return_type);
+        // Prioritize: RBS > YARD > TypeTracker inference
+        // Always store the inferred type - Unknown displays as "?" in hints
+        let return_type = rbs_return_type.or(yard_return_type).or_else(|| {
+            // Infer return type from method body using TypeTracker
+            let mut tracker = TypeTracker::new(
+                self.document.content.as_bytes(),
+                self.index.clone(),
+                &self.document.uri,
+            );
+            // Set the current class context for self resolution
+            if !namespace_parts.is_empty() {
+                tracker.set_current_class(Some(owner_fqn.clone()));
+            }
+            Some(tracker.track_method(node))
+        });
 
         let entry = {
             let mut index = self.index.lock();
