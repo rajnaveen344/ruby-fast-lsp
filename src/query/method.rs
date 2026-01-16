@@ -6,7 +6,7 @@
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::MethodKind;
+use crate::indexer::entry::NamespaceKind;
 use crate::indexer::index::RubyIndex;
 use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::ruby::RubyType;
@@ -211,11 +211,8 @@ impl IndexQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let receiver_fqn = FullyQualifiedName::Constant(ns.to_vec());
-        if is_constant_receiver(method) {
-            self.search_direct_references(&receiver_fqn, method)
-        } else {
-            self.search_by_name(method)
-        }
+        // When called with a constant receiver (e.g., Foo.bar), search for singleton methods
+        self.search_direct_references(&receiver_fqn, method, NamespaceKind::Singleton)
     }
 
     fn find_method_without_receiver(
@@ -225,12 +222,12 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
         let mut visited = HashSet::new();
-        let method_kind = method.get_kind();
 
+        // Try instance methods first (most common case for bare method calls)
         if let Some(locations) = self.search_in_ancestor_chain_with_visited(
             &receiver_fqn,
             method,
-            method_kind,
+            NamespaceKind::Instance,
             &mut visited,
         ) {
             return Some(locations);
@@ -239,27 +236,20 @@ impl IndexQuery {
         if let Some(including_classes) = self.search_in_sibling_modules_with_visited(
             &receiver_fqn,
             method,
-            method_kind,
+            NamespaceKind::Instance,
             &mut visited,
         ) {
             return Some(including_classes);
         }
 
-        // Fallback: try opposite kind (e.g., class method calls in class body
-        // can fallback to instance methods from Object/Kernel)
-        let opposite_kind = match method_kind {
-            MethodKind::Class => MethodKind::Instance,
-            MethodKind::Instance => MethodKind::Class,
-        };
-
-        // Use a fresh visited set for opposite kind search since we're searching
-        // a different method chain (class methods vs instance methods)
-        let mut opposite_visited = HashSet::new();
+        // Fallback: try singleton methods (e.g., class method calls in class body
+        // can fallback to singleton methods from Object/Kernel)
+        let mut singleton_visited = HashSet::new();
         if let Some(locations) = self.search_in_ancestor_chain_with_visited(
             &receiver_fqn,
             method,
-            opposite_kind,
-            &mut opposite_visited,
+            NamespaceKind::Singleton,
+            &mut singleton_visited,
         ) {
             return Some(locations);
         }
@@ -410,11 +400,11 @@ impl IndexQuery {
         &self,
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
+        kind: NamespaceKind,
     ) -> Option<Vec<Location>> {
         let mut found_locations = Vec::new();
         let mut visited = HashSet::new();
 
-        let kind = method.get_kind();
         if let Some(locations) =
             self.search_in_ancestor_chain_with_visited(receiver_fqn, method, kind, &mut visited)
         {
@@ -432,7 +422,7 @@ impl IndexQuery {
         &self,
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        kind: MethodKind,
+        kind: NamespaceKind,
         visited: &mut HashSet<FullyQualifiedName>,
     ) -> Option<Vec<Location>> {
         if visited.contains(receiver_fqn) {
@@ -458,7 +448,7 @@ impl IndexQuery {
         index: &RubyIndex,
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        kind: MethodKind,
+        kind: NamespaceKind,
     ) -> Vec<Location> {
         let mut found_locations = Vec::new();
 
@@ -479,8 +469,8 @@ impl IndexQuery {
             }
         }
 
-        // Create a method with the correct kind for this search
-        let search_method = RubyMethod::new(&method.get_name(), kind).unwrap();
+        // The method to search for (methods are now kind-agnostic)
+        let search_method = method.clone();
 
         for module_fqn in &modules_to_search {
             let method_fqn =
@@ -554,7 +544,7 @@ impl IndexQuery {
         let mut included_modules = Vec::new();
         let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-        let ancestor_chain = index.get_ancestor_chain(class_fqn, MethodKind::Instance);
+        let ancestor_chain = index.get_ancestor_chain(class_fqn, NamespaceKind::Instance);
 
         for ancestor_fqn in &ancestor_chain {
             if let Some(entries) = index.get(ancestor_fqn) {
@@ -662,7 +652,7 @@ impl IndexQuery {
         }
         modules_to_search.insert(fqn.clone());
 
-        let ancestor_chain = index.get_ancestor_chain(fqn, MethodKind::Instance);
+        let ancestor_chain = index.get_ancestor_chain(fqn, NamespaceKind::Instance);
         for ancestor_fqn in &ancestor_chain {
             if !modules_to_search.contains(ancestor_fqn) {
                 modules_to_search.insert(ancestor_fqn.clone());
@@ -679,7 +669,7 @@ impl IndexQuery {
         &self,
         class_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        kind: MethodKind,
+        kind: NamespaceKind,
         visited: &mut HashSet<FullyQualifiedName>,
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
@@ -728,10 +718,6 @@ fn inner_receiver_to_string(receiver: &MethodReceiver) -> String {
         ),
         MethodReceiver::Expression => "<expr>".to_string(),
     }
-}
-
-fn is_constant_receiver(method: &RubyMethod) -> bool {
-    method.get_kind() == MethodKind::Class
 }
 
 fn deduplicate_locations(locations: Vec<Location>) -> Vec<Location> {

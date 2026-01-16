@@ -6,7 +6,7 @@ use crate::inferrer::type_tracker::TypeTracker;
 use crate::{
     indexer::entry::{
         entry_kind::{EntryKind, MethodParamInfo, ParamKind},
-        MethodKind, MethodOrigin, MethodVisibility,
+        MethodOrigin, MethodVisibility, NamespaceKind,
     },
     inferrer::return_type::infer_return_values_for_node,
 };
@@ -23,16 +23,16 @@ impl IndexVisitor {
         let method_name_bytes = method_name_id.as_slice();
         let method_name_str = String::from_utf8_lossy(method_name_bytes);
 
-        // Determine method kind based on receiver and scope. Only support:
+        // Determine namespace kind based on receiver and scope. Only support:
         //   * `def self.foo`            (receiver: self)
         //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
         // Otherwise skip indexing.
-        let mut method_kind = MethodKind::Instance;
+        let mut namespace_kind = NamespaceKind::Instance;
         let mut skip_method = false;
 
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
             } else if let Some(read_node) = receiver.as_constant_read_node() {
                 let recv_name = String::from_utf8_lossy(read_node.name().as_slice()).to_string();
                 // Current namespace last element (if any) should match receiver constant
@@ -40,7 +40,7 @@ impl IndexVisitor {
                 let last_ns = ns_stack.last();
                 if let Some(last) = last_ns {
                     if last.to_string() == recv_name {
-                        method_kind = MethodKind::Class;
+                        namespace_kind = NamespaceKind::Singleton;
                     } else {
                         skip_method = true;
                     }
@@ -53,7 +53,7 @@ impl IndexVisitor {
                 skip_method = true;
             }
         } else if self.scope_tracker.in_singleton() {
-            method_kind = MethodKind::Class;
+            namespace_kind = NamespaceKind::Singleton;
         }
 
         if skip_method {
@@ -67,10 +67,12 @@ impl IndexVisitor {
             return;
         }
 
-        let mut method = RubyMethod::new(method_name_str.as_ref(), method_kind).unwrap();
+        let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
+        let mut actual_namespace_kind = namespace_kind;
 
         if method.get_name() == "initialize" {
-            method = RubyMethod::new("new", MethodKind::Class).unwrap();
+            method = RubyMethod::new("new").unwrap();
+            actual_namespace_kind = NamespaceKind::Singleton;
         }
 
         let name_location = node.name_loc();
@@ -107,6 +109,7 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
+        // Owner FQN uses Constant variant for consistent lookups
         let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
 
         // Convert YARD types to RubyType for type inference
@@ -152,7 +155,7 @@ impl IndexVisitor {
                 .map(|c| c.to_string())
                 .collect::<Vec<_>>()
                 .join("::");
-            let is_singleton = method_kind == MethodKind::Class;
+            let is_singleton = actual_namespace_kind == NamespaceKind::Singleton;
 
             crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
                 &class_name,
@@ -163,6 +166,8 @@ impl IndexVisitor {
 
         // Prioritize: RBS > YARD > TypeTracker inference
         // Always store the inferred type - Unknown displays as "?" in hints
+        // For owner_fqn in inference, use instance namespace for proper class resolution
+        let instance_owner_fqn = FullyQualifiedName::namespace(namespace_parts.clone());
         let return_type = rbs_return_type.or(yard_return_type).or_else(|| {
             // Infer return type from method body using TypeTracker
             let mut tracker = TypeTracker::new(
@@ -172,7 +177,7 @@ impl IndexVisitor {
             );
             // Set the current class context for self resolution
             if !namespace_parts.is_empty() {
-                tracker.set_current_class(Some(owner_fqn.clone()));
+                tracker.set_current_class(Some(instance_owner_fqn.clone()));
             }
             Some(tracker.track_method(node))
         });
@@ -212,7 +217,7 @@ impl IndexVisitor {
                     &mut index,
                     self.document.content.as_bytes(),
                     node,
-                    Some(owner_fqn.clone()),
+                    Some(instance_owner_fqn.clone()),
                     Some(&file_contents_map),
                 )
             };
@@ -252,9 +257,9 @@ impl IndexVisitor {
         };
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        let scope_kind = match method_kind {
-            MethodKind::Class => LVScopeKind::ClassMethod,
-            MethodKind::Instance => LVScopeKind::InstanceMethod,
+        let scope_kind = match namespace_kind {
+            NamespaceKind::Singleton => LVScopeKind::ClassMethod,
+            NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));

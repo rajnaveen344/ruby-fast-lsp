@@ -388,7 +388,7 @@ fn entry_kind_to_symbol_kind(kind: &crate::indexer::entry::entry_kind::EntryKind
 /// Extract display name from FullyQualifiedName
 fn extract_display_name(fqn: &FullyQualifiedName) -> String {
     match fqn {
-        FullyQualifiedName::Constant(parts) => {
+        FullyQualifiedName::Namespace(parts, _) | FullyQualifiedName::Constant(parts) => {
             parts.last().map(|c| c.to_string()).unwrap_or_default()
         }
         FullyQualifiedName::Method(_, method) => method.get_name(),
@@ -402,7 +402,7 @@ fn extract_display_name(fqn: &FullyQualifiedName) -> String {
 /// Extract container name from FullyQualifiedName
 fn extract_container_name(fqn: &FullyQualifiedName) -> Option<String> {
     match fqn {
-        FullyQualifiedName::Constant(parts) => {
+        FullyQualifiedName::Namespace(parts, _) | FullyQualifiedName::Constant(parts) => {
             if parts.len() > 1 {
                 let container_parts: Vec<String> = parts[..parts.len() - 1]
                     .iter()

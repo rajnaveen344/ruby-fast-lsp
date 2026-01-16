@@ -18,15 +18,15 @@ impl IndexVisitor {
             return;
         };
 
-        // Determine method kind based on scope (like def_node)
-        let method_kind = if self.scope_tracker.in_singleton() {
-            crate::indexer::entry::MethodKind::Class
+        // Determine namespace kind based on scope (like def_node)
+        let namespace_kind = if self.scope_tracker.in_singleton() {
+            crate::indexer::entry::NamespaceKind::Singleton
         } else {
-            crate::indexer::entry::MethodKind::Instance
+            crate::indexer::entry::NamespaceKind::Instance
         };
 
         let namespace_parts = self.scope_tracker.get_ns_stack();
-        let owner_fqn = FullyQualifiedName::Constant(namespace_parts.clone());
+        let owner_fqn = FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), namespace_kind);
 
         for arg in arguments.arguments().iter() {
             let (name, location) = if let Some(sym_node) = arg.as_symbol_node() {
@@ -51,7 +51,6 @@ impl IndexVisitor {
             if is_reader {
                 self.create_attr_method_entry(
                     &name,
-                    method_kind,
                     &namespace_parts,
                     &owner_fqn,
                     compact_location.clone(),
@@ -62,7 +61,6 @@ impl IndexVisitor {
                 let sorted_name = format!("{}=", name);
                 self.create_attr_method_entry(
                     &sorted_name,
-                    method_kind,
                     &namespace_parts,
                     &owner_fqn,
                     compact_location.clone(),
@@ -74,7 +72,6 @@ impl IndexVisitor {
     fn create_attr_method_entry(
         &mut self,
         name: &str,
-        kind: crate::indexer::entry::MethodKind,
         namespace: &Vec<crate::types::ruby_namespace::RubyConstant>,
         owner_fqn: &FullyQualifiedName,
         location: crate::types::compact_location::CompactLocation,
@@ -82,7 +79,7 @@ impl IndexVisitor {
         use crate::indexer::entry::{EntryBuilder, EntryKind, MethodOrigin, MethodVisibility};
         use crate::types::ruby_method::RubyMethod;
 
-        let method = RubyMethod::new(name, kind).unwrap();
+        let method = RubyMethod::new(name).unwrap();
         let fqn = FullyQualifiedName::method(namespace.clone(), method.clone());
 
         let entry = {

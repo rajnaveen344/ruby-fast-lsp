@@ -9,7 +9,7 @@
 use ruby_prism::*;
 
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::MethodKind;
+use crate::indexer::entry::NamespaceKind;
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
@@ -123,10 +123,10 @@ impl MethodResolver {
 
         // Try to look up in Ruby index first (for user-defined methods)
         if let Some(owner_fqn) = owner_fqn {
-            let method_kind = if is_singleton {
-                MethodKind::Class
+            let namespace_kind = if is_singleton {
+                NamespaceKind::Singleton
             } else {
-                MethodKind::Instance
+                NamespaceKind::Instance
             };
 
             // Build the list of all FQNs to search (owner + ancestors)
@@ -134,7 +134,7 @@ impl MethodResolver {
             all_fqns_to_search.push(owner_fqn.clone());
 
             // Add ancestor chain
-            let ancestors = index.get_ancestor_chain(&owner_fqn, method_kind);
+            let ancestors = index.get_ancestor_chain(&owner_fqn, namespace_kind);
             for ancestor in ancestors {
                 if !all_fqns_to_search.contains(&ancestor) {
                     all_fqns_to_search.push(ancestor);
@@ -149,7 +149,7 @@ impl MethodResolver {
                         all_fqns_to_search.push(class_fqn.clone());
                     }
                     // Also add ancestors of including classes
-                    let class_ancestors = index.get_ancestor_chain(&class_fqn, MethodKind::Instance);
+                    let class_ancestors = index.get_ancestor_chain(&class_fqn, NamespaceKind::Instance);
                     for ancestor in class_ancestors {
                         if !all_fqns_to_search.contains(&ancestor) {
                             all_fqns_to_search.push(ancestor);
@@ -161,7 +161,7 @@ impl MethodResolver {
             // Search for method in all FQNs and collect return types
             let mut found_return_types = Vec::new();
 
-            if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
+            if let Ok(ruby_method) = RubyMethod::new(method_name) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
                         if let EntryKind::Method(data) = &entry.kind {
@@ -370,31 +370,40 @@ impl MethodResolver {
 
         // Try to look up in Ruby index first (for user-defined methods)
         if let Some(owner_fqn) = owner_fqn {
-            // Determine method kind based on receiver
-            let method_kind = if is_singleton {
-                MethodKind::Class
+            // Determine namespace kind based on receiver
+            let namespace_kind = if is_singleton {
+                NamespaceKind::Singleton
             } else {
-                MethodKind::Instance
+                NamespaceKind::Instance
             };
 
             // Look up the method in the index
             let index = self.index.lock();
 
             // Get the ancestor chain for this class/module
-            let ancestors = index.get_ancestor_chain(&owner_fqn, method_kind);
+            let ancestors = index.get_ancestor_chain(&owner_fqn, namespace_kind);
 
             // Search through the ancestor chain for the method
             let mut found_return_types = Vec::new();
 
-            if let Ok(ruby_method) = RubyMethod::new(method_name, method_kind) {
+            if let Ok(ruby_method) = RubyMethod::new(method_name) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     // Find method that belongs to any class in the ancestor chain
                     for entry in entries {
                         if let EntryKind::Method(data) = &entry.kind {
                             let owner = &data.owner;
                             let return_type = &data.return_type;
+                            // Check if owner matches what we're looking for
+                            let owner_kind = owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
+                            if owner_kind != namespace_kind {
+                                continue;
+                            }
                             // Check if owner is in ancestor chain
-                            if *owner == owner_fqn || ancestors.contains(owner) {
+                            let owner_parts = owner.namespace_parts();
+                            let owner_fqn_parts = owner_fqn.namespace_parts();
+                            let owner_matches = owner_parts == owner_fqn_parts
+                                || ancestors.iter().any(|a| a.namespace_parts() == owner_parts);
+                            if owner_matches {
                                 if let Some(rt) = return_type {
                                     found_return_types.push(rt.clone());
                                 } else {
@@ -411,20 +420,29 @@ impl MethodResolver {
                 return Some(RubyType::union(found_return_types));
             }
 
-            // Try instance method if class method not found (and vice versa)
-            let alt_kind = match method_kind {
-                MethodKind::Class => MethodKind::Instance,
-                MethodKind::Instance => MethodKind::Class,
+            // Try with opposite namespace kind if not found
+            let alt_kind = match namespace_kind {
+                NamespaceKind::Singleton => NamespaceKind::Instance,
+                NamespaceKind::Instance => NamespaceKind::Singleton,
             };
 
-            if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {
+            if let Ok(ruby_method) = RubyMethod::new(method_name) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
                     for entry in entries {
                         if let EntryKind::Method(data) = &entry.kind {
                             let owner = &data.owner;
                             let return_type = &data.return_type;
+                            // Check if owner matches the alternate kind
+                            let owner_kind = owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
+                            if owner_kind != alt_kind {
+                                continue;
+                            }
                             // Check if owner is in ancestor chain
-                            if *owner == owner_fqn || ancestors.contains(owner) {
+                            let owner_parts = owner.namespace_parts();
+                            let owner_fqn_parts = owner_fqn.namespace_parts();
+                            let owner_matches = owner_parts == owner_fqn_parts
+                                || ancestors.iter().any(|a| a.namespace_parts() == owner_parts);
+                            if owner_matches {
                                 if let Some(rt) = return_type {
                                     found_return_types.push(rt.clone());
                                 } else {
@@ -549,7 +567,7 @@ impl MethodResolver {
 mod tests {
     use super::*;
     use crate::indexer::entry::entry_builder::EntryBuilder;
-    use crate::indexer::entry::{MethodKind, MethodOrigin, MethodVisibility};
+    use crate::indexer::entry::{MethodOrigin, MethodVisibility};
     use parking_lot::Mutex;
     use std::sync::Arc;
     use tower_lsp::lsp_types::{Location, Position, Range, Url};
@@ -611,11 +629,11 @@ mod tests {
         let method_entry = EntryBuilder::new()
             .fqn(FullyQualifiedName::method(
                 vec![RubyConstant::new("User").unwrap()],
-                RubyMethod::new("name", MethodKind::Instance).unwrap(),
+                RubyMethod::new("name").unwrap(),
             ))
             .location(create_test_location())
             .kind(EntryKind::new_method(
-                RubyMethod::new("name", MethodKind::Instance).unwrap(),
+                RubyMethod::new("name").unwrap(),
                 vec![],
                 user_fqn.clone(),
                 MethodVisibility::Public,
@@ -654,11 +672,11 @@ mod tests {
         let method_entry = EntryBuilder::new()
             .fqn(FullyQualifiedName::method(
                 vec![RubyConstant::new("User").unwrap()],
-                RubyMethod::new("find", MethodKind::Class).unwrap(),
+                RubyMethod::new("find").unwrap(),
             ))
             .location(create_test_location())
             .kind(EntryKind::new_method(
-                RubyMethod::new("find", MethodKind::Class).unwrap(),
+                RubyMethod::new("find").unwrap(),
                 vec![],
                 user_fqn.clone(),
                 MethodVisibility::Public,
@@ -713,11 +731,11 @@ mod tests {
         let method_entry = EntryBuilder::new()
             .fqn(FullyQualifiedName::method(
                 vec![RubyConstant::new("User").unwrap()],
-                RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
+                RubyMethod::new("unknown_return").unwrap(),
             ))
             .location(create_test_location())
             .kind(EntryKind::new_method(
-                RubyMethod::new("unknown_return", MethodKind::Instance).unwrap(),
+                RubyMethod::new("unknown_return").unwrap(),
                 vec![],
                 user_fqn.clone(),
                 MethodVisibility::Public,

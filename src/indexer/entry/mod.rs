@@ -55,17 +55,23 @@ impl Entry {
 }
 
 // ============================================================================
-// Method Types
+// Namespace Types
 // ============================================================================
 
-/// Distinguishes between instance and class methods
+/// Distinguishes between instance namespace and singleton namespace
+/// In Ruby, all methods are instance methods - they differ in which namespace they belong to:
+/// - Instance namespace: Regular class/module (Foo)
+/// - Singleton namespace: The singleton class (#<Class:Foo>)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum MethodKind {
-    /// Instance method called on objects: `obj.method`
+pub enum NamespaceKind {
+    /// Instance namespace: methods defined on the regular class
     Instance,
-    /// Class method called on the class: `MyClass.method`
-    Class,
+    /// Singleton namespace: methods defined on the singleton class (class methods)
+    Singleton,
 }
+
+// Alias for backward compatibility during migration
+pub type MethodKind = NamespaceKind;
 
 /// How a method was obtained (directly defined or inherited/mixed in)
 #[derive(Debug, Clone, PartialEq)]

@@ -198,9 +198,10 @@ pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic
                         .join("::");
 
                     let method_name = data.name.get_name();
+                    // Determine if singleton from owner namespace kind
                     let is_singleton = matches!(
-                        data.name.get_kind(),
-                        crate::indexer::entry::MethodKind::Class
+                        data.owner.namespace_kind(),
+                        Some(crate::indexer::entry::NamespaceKind::Singleton)
                     );
 
                     if let Some(rbs_type) =

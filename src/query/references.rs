@@ -3,7 +3,7 @@
 //! Consolidates reference logic from `capabilities/references.rs`.
 
 use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
-use crate::indexer::entry::{EntryKind, MethodKind};
+use crate::indexer::entry::{EntryKind, NamespaceKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -210,7 +210,8 @@ impl IndexQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let mut all_references = Vec::new();
-        let kind = method.get_kind();
+        // When searching with a constant receiver (e.g., Foo.bar), use singleton namespace
+        let kind = NamespaceKind::Singleton;
 
         if let Some(refs) = self.find_method_refs_in_ancestor_chain(receiver_fqn, method, kind) {
             all_references.extend(refs);
@@ -230,7 +231,8 @@ impl IndexQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let mut all_references = Vec::new();
-        let method_kind = method.get_kind();
+        // Try instance methods first for bare method calls
+        let method_kind = NamespaceKind::Instance;
 
         if let Some(refs) =
             self.find_method_refs_in_ancestor_chain(context_fqn, method, method_kind)
@@ -257,7 +259,7 @@ impl IndexQuery {
         &self,
         context_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        kind: MethodKind,
+        kind: NamespaceKind,
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
@@ -297,7 +299,7 @@ impl IndexQuery {
         &self,
         module_fqn: &FullyQualifiedName,
         method: &RubyMethod,
-        kind: MethodKind,
+        kind: NamespaceKind,
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();

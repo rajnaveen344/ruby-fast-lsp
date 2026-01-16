@@ -3,7 +3,7 @@ use ruby_prism::DefNode;
 
 use crate::{
     analyzer_prism::{Identifier, MethodReceiver},
-    indexer::entry::MethodKind,
+    indexer::entry::NamespaceKind,
     types::{
         ruby_method::RubyMethod,
         scope::{LVScope, LVScopeKind},
@@ -18,20 +18,20 @@ impl IdentifierVisitor {
             return;
         }
 
-        let mut method_kind = MethodKind::Instance;
+        let mut namespace_kind = NamespaceKind::Instance;
 
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
             } else if receiver.as_constant_path_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
             } else if receiver.as_constant_read_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
             }
         }
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method = RubyMethod::new(name.as_str(), method_kind);
+        let method = RubyMethod::new(name.as_str());
 
         if method.is_err() {
             warn!("Invalid method name: {}", name);
@@ -48,9 +48,9 @@ impl IdentifierVisitor {
 
         let method = method.unwrap();
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        let scope_kind = match method_kind {
-            MethodKind::Class => LVScopeKind::ClassMethod,
-            MethodKind::Instance => LVScopeKind::InstanceMethod,
+        let scope_kind = match namespace_kind {
+            NamespaceKind::Singleton => LVScopeKind::ClassMethod,
+            NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));

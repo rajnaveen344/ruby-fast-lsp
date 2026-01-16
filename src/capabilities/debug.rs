@@ -216,8 +216,13 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                     let ret = data.return_type.as_ref().map(|t| t.to_string());
                                     let params: Vec<String> =
                                         data.params.iter().map(|p| p.name.clone()).collect();
+                                    // Get kind from owner namespace
+                                    let kind = data
+                                        .owner
+                                        .namespace_kind()
+                                        .unwrap_or(crate::indexer::entry::NamespaceKind::Instance);
                                     (
-                                        format!("Method({:?})", data.name.get_kind()),
+                                        format!("Method({:?})", kind),
                                         Some(vis),
                                         ret,
                                         if params.is_empty() {
@@ -504,9 +509,14 @@ pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> Met
             if let Some(fqn) = index.get_fqn(entry.fqn_id) {
                 if let FullyQualifiedName::Method(ns, method) = fqn {
                     if *ns == namespace {
+                        // Get kind from owner namespace
+                        let kind = data
+                            .owner
+                            .namespace_kind()
+                            .unwrap_or(crate::indexer::entry::NamespaceKind::Instance);
                         methods.push(MethodEntry {
                             name: method.to_string(),
-                            kind: format!("{:?}", method.get_kind()),
+                            kind: format!("{:?}", kind),
                             visibility: format!("{:?}", data.visibility),
                             return_type: data.return_type.as_ref().map(|t| t.to_string()),
                         });
@@ -535,11 +545,7 @@ fn parse_fqn(fqn_str: &str) -> Option<FullyQualifiedName> {
         let method_name = &fqn_str[hash_pos + 1..];
 
         let namespace = parse_namespace(namespace_str)?;
-        let method = crate::types::ruby_method::RubyMethod::new(
-            method_name,
-            crate::indexer::entry::MethodKind::Instance,
-        )
-        .ok()?;
+        let method = crate::types::ruby_method::RubyMethod::new(method_name).ok()?;
 
         Some(FullyQualifiedName::Method(namespace, method))
     } else if let Some(dot_pos) = fqn_str.rfind('.') {
@@ -556,11 +562,7 @@ fn parse_fqn(fqn_str: &str) -> Option<FullyQualifiedName> {
                 .unwrap_or(false)
         {
             let namespace = parse_namespace(before_dot)?;
-            let method = crate::types::ruby_method::RubyMethod::new(
-                after_dot,
-                crate::indexer::entry::MethodKind::Class,
-            )
-            .ok()?;
+            let method = crate::types::ruby_method::RubyMethod::new(after_dot).ok()?;
             Some(FullyQualifiedName::Method(namespace, method))
         } else {
             // Just a namespace

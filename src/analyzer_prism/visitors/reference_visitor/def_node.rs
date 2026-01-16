@@ -1,7 +1,7 @@
 use log::warn;
 use ruby_prism::DefNode;
 
-use crate::indexer::entry::MethodKind;
+use crate::indexer::entry::NamespaceKind;
 use crate::types::{
     ruby_method::RubyMethod,
     scope::{LVScope, LVScopeKind},
@@ -20,18 +20,18 @@ impl ReferenceVisitor {
         };
         let scope_id = self.document.position_to_offset(body_loc.range.start);
 
-        let mut method_kind = MethodKind::Instance;
+        let mut namespace_kind = NamespaceKind::Instance;
         let mut scope_kind = LVScopeKind::InstanceMethod;
 
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
                 scope_kind = LVScopeKind::ClassMethod;
             } else if receiver.as_constant_path_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
                 scope_kind = LVScopeKind::ClassMethod;
             } else if receiver.as_constant_read_node().is_some() {
-                method_kind = MethodKind::Class;
+                namespace_kind = NamespaceKind::Singleton;
                 scope_kind = LVScopeKind::ClassMethod;
             }
         }
@@ -40,7 +40,10 @@ impl ReferenceVisitor {
             .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method = RubyMethod::new(name.as_str(), method_kind);
+        let method = RubyMethod::new(name.as_str());
+
+        // Mark namespace_kind as intentionally unused for now
+        let _ = namespace_kind;
 
         if method.is_err() {
             warn!("Skipping invalid method name: {}", name);

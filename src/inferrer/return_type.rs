@@ -18,7 +18,7 @@
 
 #![allow(dead_code)]
 
-use crate::indexer::entry::{entry_kind::EntryKind, MethodKind};
+use crate::indexer::entry::{entry_kind::EntryKind, NamespaceKind};
 use crate::indexer::index::{FileId, RubyIndex};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
@@ -215,10 +215,10 @@ pub fn infer_method_call(
         _ => return None,
     };
 
-    let ruby_method = RubyMethod::new(method_name, MethodKind::Instance).ok()?;
+    let ruby_method = RubyMethod::new(method_name).ok()?;
 
     // Search for method in the receiver's ancestor chain (MRO)
-    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn, MethodKind::Instance);
+    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn, NamespaceKind::Instance);
 
     for ancestor in &ancestor_chain {
         let method_fqn =
@@ -479,13 +479,13 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
-        // Create appropriate method kind
-        let method_kind = if is_class_method {
-            MethodKind::Class
+        // Create appropriate namespace kind
+        let namespace_kind = if is_class_method {
+            NamespaceKind::Singleton
         } else {
-            MethodKind::Instance
+            NamespaceKind::Instance
         };
-        let ruby_method = RubyMethod::new(&method_name, method_kind).ok()?;
+        let ruby_method = RubyMethod::new(&method_name).ok()?;
 
         // 2. Get the receiver's FQN for MRO lookup
         let receiver_fqn = match &recv_type {
@@ -496,7 +496,7 @@ impl<'a> InferenceContext<'a> {
 
         // 3. Search for method in the receiver's ancestor chain (MRO)
         // This follows Ruby's method resolution order: self -> prepends -> includes -> superclass
-        let ancestor_chain = self.index.get_ancestor_chain(&receiver_fqn, MethodKind::Instance);
+        let ancestor_chain = self.index.get_ancestor_chain(&receiver_fqn, namespace_kind);
 
         for ancestor in &ancestor_chain {
             let method_fqn =
@@ -565,7 +565,7 @@ impl<'a> InferenceContext<'a> {
 
         for includer_fqn in includers {
             // Get the includer's full MRO
-            let mro = self.index.get_ancestor_chain(&includer_fqn, MethodKind::Instance);
+            let mro = self.index.get_ancestor_chain(&includer_fqn, NamespaceKind::Instance);
 
             // Search for the method in the includer's MRO
             for ancestor in &mro {

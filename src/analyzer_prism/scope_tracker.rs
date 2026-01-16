@@ -1,7 +1,7 @@
 use tower_lsp::lsp_types::{Location as LspLocation, Range};
 
 use crate::{
-    indexer::entry::MethodKind,
+    indexer::entry::NamespaceKind,
     types::{
         ruby_document::RubyDocument,
         ruby_namespace::RubyConstant,
@@ -118,21 +118,21 @@ impl ScopeTracker {
     }
 
     /// Returns the current method context based on the local variable scope stack.
-    /// This helps determine whether bare method calls should be treated as instance or class methods.
-    pub fn current_method_context(&self) -> Option<MethodKind> {
+    /// This helps determine whether bare method calls should be treated as instance or singleton methods.
+    pub fn current_method_context(&self) -> Option<NamespaceKind> {
         // Look for the most recent method scope in the LV stack
         for scope in self.lv_stack.iter().rev() {
             match scope.kind() {
-                LVScopeKind::InstanceMethod => return Some(MethodKind::Instance),
-                LVScopeKind::ClassMethod => return Some(MethodKind::Class),
+                LVScopeKind::InstanceMethod => return Some(NamespaceKind::Instance),
+                LVScopeKind::ClassMethod => return Some(NamespaceKind::Singleton),
                 LVScopeKind::Constant => break, // Hard scope boundary
                 _ => continue,
             }
         }
 
-        // If we're in a singleton context, default to class methods
+        // If we're in a singleton context, default to singleton methods
         if self.in_singleton() {
-            return Some(MethodKind::Class);
+            return Some(NamespaceKind::Singleton);
         }
 
         None

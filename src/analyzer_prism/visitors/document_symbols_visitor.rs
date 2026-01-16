@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::SymbolKind;
 use crate::{
     analyzer_prism::scope_tracker::ScopeTracker,
     capabilities::document_symbols::RubySymbolContext,
-    indexer::entry::{MethodKind, MethodVisibility},
+    indexer::entry::{MethodVisibility, NamespaceKind},
     types::ruby_document::RubyDocument,
 };
 
@@ -133,7 +133,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         name: String,
         kind: SymbolKind,
         location: &ruby_prism::Location,
-        method_kind: Option<MethodKind>,
+        namespace_kind: Option<NamespaceKind>,
     ) -> RubySymbolContext {
         let range = self.document.prism_location_to_lsp_range(location);
 
@@ -144,7 +144,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             range,
             selection_range: range,
             visibility: Some(self.current_visibility()),
-            method_kind,
+            namespace_kind,
             children: Vec::new(),
         }
     }
@@ -270,16 +270,16 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
     fn process_def_node_entry(&mut self, node: &DefNode) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method_kind = if node.receiver().is_some() {
-            Some(MethodKind::Class)
+        let namespace_kind = if node.receiver().is_some() {
+            Some(NamespaceKind::Singleton)
         } else if self.scope_tracker.in_singleton() {
-            Some(MethodKind::Class)
+            Some(NamespaceKind::Singleton)
         } else {
-            Some(MethodKind::Instance)
+            Some(NamespaceKind::Instance)
         };
 
         // Create and add symbol - this will automatically find the current parent
-        let symbol = self.create_symbol(name, SymbolKind::METHOD, &node.location(), method_kind);
+        let symbol = self.create_symbol(name, SymbolKind::METHOD, &node.location(), namespace_kind);
         let _symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Push method scope
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(symbol.name, "MyClass");
         assert_eq!(symbol.kind, SymbolKind::CLASS);
         assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
-        assert_eq!(symbol.method_kind, None);
+        assert_eq!(symbol.namespace_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(symbol.name, "MyModule");
         assert_eq!(symbol.kind, SymbolKind::MODULE);
         assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
-        assert_eq!(symbol.method_kind, None);
+        assert_eq!(symbol.namespace_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(symbol.name, "my_method");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
         assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
-        assert_eq!(symbol.method_kind, Some(MethodKind::Instance));
+        assert_eq!(symbol.namespace_kind, Some(NamespaceKind::Instance));
         assert!(symbol.children.is_empty());
     }
 
@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(symbol.name, "class_method");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
         assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
-        assert_eq!(symbol.method_kind, Some(MethodKind::Class));
+        assert_eq!(symbol.namespace_kind, Some(NamespaceKind::Singleton));
         assert!(symbol.children.is_empty());
     }
 
@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(symbol.name, "MY_CONSTANT");
         assert_eq!(symbol.kind, SymbolKind::CONSTANT);
         assert_eq!(symbol.visibility, Some(MethodVisibility::Public));
-        assert_eq!(symbol.method_kind, None);
+        assert_eq!(symbol.namespace_kind, None);
         assert!(symbol.children.is_empty());
     }
 
@@ -489,12 +489,15 @@ end
             .find(|s| s.name == "instance_method")
             .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(
+            instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
+        );
 
         // Check class method
         let class_method = symbols.iter().find(|s| s.name == "class_method").unwrap();
         assert_eq!(class_method.kind, SymbolKind::METHOD);
-        assert_eq!(class_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(class_method.namespace_kind, Some(NamespaceKind::Singleton));
 
         // Check module
         let module_symbol = symbols.iter().find(|s| s.name == "MyModule").unwrap();
@@ -648,7 +651,7 @@ end
         let symbol = &symbols[0];
         assert_eq!(symbol.name, "method_with_params");
         assert_eq!(symbol.kind, SymbolKind::METHOD);
-        assert_eq!(symbol.method_kind, Some(MethodKind::Instance));
+        assert_eq!(symbol.namespace_kind, Some(NamespaceKind::Instance));
     }
 
     #[test]
@@ -684,7 +687,10 @@ end
             .find(|s| s.name == "singleton_method")
             .unwrap();
         assert_eq!(singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(
+            singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
+        );
     }
 
     #[test]
@@ -714,18 +720,18 @@ end
         // Should find hello method inside singleton class - should be class method
         let hello_method = symbols.iter().find(|s| s.name == "hello").unwrap();
         assert_eq!(hello_method.kind, SymbolKind::METHOD);
-        assert_eq!(hello_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(hello_method.namespace_kind, Some(NamespaceKind::Singleton));
 
         // Should find helloa method - should be instance method with private visibility
         let helloa_method = symbols.iter().find(|s| s.name == "helloa").unwrap();
         assert_eq!(helloa_method.kind, SymbolKind::METHOD);
-        assert_eq!(helloa_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(helloa_method.namespace_kind, Some(NamespaceKind::Instance));
         assert_eq!(helloa_method.visibility, Some(MethodVisibility::Private));
 
         // Should find hellob method with self receiver - should be class method
         let hellob_method = symbols.iter().find(|s| s.name == "hellob").unwrap();
         assert_eq!(hellob_method.kind, SymbolKind::METHOD);
-        assert_eq!(hellob_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(hellob_method.namespace_kind, Some(NamespaceKind::Singleton));
     }
 
     #[test]
@@ -781,7 +787,10 @@ end
             .find(|s| s.name == "public_singleton_method")
             .unwrap();
         assert_eq!(public_singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(public_singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(
+            public_singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
+        );
         assert_eq!(
             public_singleton_method.visibility,
             Some(MethodVisibility::Public)
@@ -794,8 +803,8 @@ end
             .unwrap();
         assert_eq!(protected_singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            protected_singleton_method.method_kind,
-            Some(MethodKind::Class)
+            protected_singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
         );
         assert_eq!(
             protected_singleton_method.visibility,
@@ -809,8 +818,8 @@ end
             .unwrap();
         assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            private_singleton_method.method_kind,
-            Some(MethodKind::Class)
+            private_singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
         );
         assert_eq!(
             private_singleton_method.visibility,
@@ -824,8 +833,8 @@ end
             .unwrap();
         assert_eq!(another_public_singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            another_public_singleton_method.method_kind,
-            Some(MethodKind::Class)
+            another_public_singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
         );
         assert_eq!(
             another_public_singleton_method.visibility,
@@ -838,7 +847,10 @@ end
             .find(|s| s.name == "instance_method")
             .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(
+            instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
+        );
         assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
 
         // Should find class_method_with_self - should be class method with public visibility
@@ -847,7 +859,10 @@ end
             .find(|s| s.name == "class_method_with_self")
             .unwrap();
         assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
-        assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
+        assert_eq!(
+            class_method_with_self.namespace_kind,
+            Some(NamespaceKind::Singleton)
+        );
         assert_eq!(
             class_method_with_self.visibility,
             Some(MethodVisibility::Public)
@@ -860,8 +875,8 @@ end
             .unwrap();
         assert_eq!(protected_instance_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            protected_instance_method.method_kind,
-            Some(MethodKind::Instance)
+            protected_instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
         );
         assert_eq!(
             protected_instance_method.visibility,
@@ -875,8 +890,8 @@ end
             .unwrap();
         assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            private_instance_method.method_kind,
-            Some(MethodKind::Instance)
+            private_instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
         );
         assert_eq!(
             private_instance_method.visibility,
@@ -922,7 +937,10 @@ end
             .find(|s| s.name == "singleton_method")
             .unwrap();
         assert_eq!(singleton_method.kind, SymbolKind::METHOD);
-        assert_eq!(singleton_method.method_kind, Some(MethodKind::Class));
+        assert_eq!(
+            singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
+        );
         assert_eq!(singleton_method.visibility, Some(MethodVisibility::Public));
 
         // Should find private_singleton_method - should be class method with private visibility
@@ -932,8 +950,8 @@ end
             .unwrap();
         assert_eq!(private_singleton_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            private_singleton_method.method_kind,
-            Some(MethodKind::Class)
+            private_singleton_method.namespace_kind,
+            Some(NamespaceKind::Singleton)
         );
         assert_eq!(
             private_singleton_method.visibility,
@@ -946,7 +964,10 @@ end
             .find(|s| s.name == "instance_method")
             .unwrap();
         assert_eq!(instance_method.kind, SymbolKind::METHOD);
-        assert_eq!(instance_method.method_kind, Some(MethodKind::Instance));
+        assert_eq!(
+            instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
+        );
         assert_eq!(instance_method.visibility, Some(MethodVisibility::Public));
 
         // Should find class_method_with_self - should be class method with public visibility
@@ -955,7 +976,10 @@ end
             .find(|s| s.name == "class_method_with_self")
             .unwrap();
         assert_eq!(class_method_with_self.kind, SymbolKind::METHOD);
-        assert_eq!(class_method_with_self.method_kind, Some(MethodKind::Class));
+        assert_eq!(
+            class_method_with_self.namespace_kind,
+            Some(NamespaceKind::Singleton)
+        );
         assert_eq!(
             class_method_with_self.visibility,
             Some(MethodVisibility::Public)
@@ -968,8 +992,8 @@ end
             .unwrap();
         assert_eq!(private_instance_method.kind, SymbolKind::METHOD);
         assert_eq!(
-            private_instance_method.method_kind,
-            Some(MethodKind::Instance)
+            private_instance_method.namespace_kind,
+            Some(NamespaceKind::Instance)
         );
         assert_eq!(
             private_instance_method.visibility,

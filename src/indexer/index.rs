@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Location, Url};
 
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::{Entry, MethodKind, MixinRef, MixinType};
+use crate::indexer::entry::{Entry, MixinRef, MixinType, NamespaceKind};
 use crate::indexer::graph::Graph;
 use crate::indexer::interner::Interner;
 use crate::indexer::prefix_tree::PrefixTree;
@@ -157,7 +157,7 @@ impl RubyIndex {
     pub fn get_ancestor_chain(
         &self,
         fqn: &FullyQualifiedName,
-        kind: MethodKind,
+        kind: NamespaceKind,
     ) -> Vec<FullyQualifiedName> {
         // Get the FqnId for this FQN
         let Some(fqn_id) = self.get_fqn_id(fqn) else {
@@ -166,8 +166,8 @@ impl RubyIndex {
         };
 
         // Use the inheritance graph for traversal
-        let is_class_method = kind == MethodKind::Class;
-        let fqn_ids = if is_class_method {
+        let is_singleton = kind == NamespaceKind::Singleton;
+        let fqn_ids = if is_singleton {
             self.graph.singleton_lookup_chain(fqn_id)
         } else {
             self.graph.method_lookup_chain(fqn_id)
@@ -192,7 +192,11 @@ impl RubyIndex {
         }
 
         // Log the ancestor chain for debugging method resolution
-        let method_type = if is_class_method { "class" } else { "instance" };
+        let method_type = if is_singleton {
+            "singleton"
+        } else {
+            "instance"
+        };
         let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
         debug!(
             "[Ancestor Chain] {} ({} method): {}",

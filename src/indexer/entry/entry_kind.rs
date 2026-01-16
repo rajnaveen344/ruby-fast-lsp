@@ -14,7 +14,7 @@ use crate::types::{
 };
 use crate::yard::YardMethodDoc;
 
-use super::{ConstVisibility, MethodKind, MethodOrigin, MethodVisibility};
+use super::{ConstVisibility, MethodOrigin, MethodVisibility, NamespaceKind};
 
 // ============================================================================
 // Method Parameter Info
@@ -301,9 +301,10 @@ impl Display for EntryKind {
             EntryKind::Class(_) => write!(f, "Class"),
             EntryKind::Module(_) => write!(f, "Module"),
             EntryKind::Method(data) => {
-                let kind_str = match data.name.get_kind() {
-                    MethodKind::Instance => " (Instance)",
-                    MethodKind::Class => " (Class)",
+                // Determine kind from the owner namespace
+                let kind_str = match data.owner.namespace_kind() {
+                    Some(NamespaceKind::Singleton) => " (Singleton)",
+                    _ => " (Instance)",
                 };
                 write!(f, "Method{}: {}", kind_str, data.name)
             }

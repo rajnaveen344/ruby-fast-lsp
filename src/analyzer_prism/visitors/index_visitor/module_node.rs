@@ -39,7 +39,7 @@ impl IndexVisitor {
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Constant));
 
-        let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+        let fqn = FullyQualifiedName::Constant(self.scope_tracker.get_ns_stack());
 
         let entry_result = {
             let mut index = self.index.lock();

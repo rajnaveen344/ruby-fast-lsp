@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer},
-    indexer::entry::MethodKind,
+    indexer::entry::NamespaceKind,
     server::RubyLanguageServer,
 };
 
@@ -243,11 +243,16 @@ pub async fn find_completion_at_position(
         );
 
         if let Some(receiver_type) = receiver_type {
-            // Extract MethodKind from the identifier
-            let kind = if let Some(Identifier::RubyMethod { iden, .. }) = &partial_name {
-                iden.get_kind()
+            // Determine namespace kind from the receiver
+            // Constant receivers (Foo.bar) use singleton methods
+            // Variable/expression receivers (obj.bar) use instance methods
+            let kind = if let Some(Identifier::RubyMethod { receiver, .. }) = &partial_name {
+                match receiver {
+                    MethodReceiver::Constant(_) => NamespaceKind::Singleton,
+                    _ => NamespaceKind::Instance,
+                }
             } else {
-                MethodKind::Instance // Default fallback
+                NamespaceKind::Instance // Default fallback
             };
 
             let method_completions = method::find_method_completions(

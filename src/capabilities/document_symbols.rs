@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::visitors::document_symbols_visitor::DocumentSymbolsVisitor,
-    indexer::entry::{MethodKind, MethodVisibility},
+    indexer::entry::{MethodVisibility, NamespaceKind},
     server::RubyLanguageServer,
 };
 
@@ -99,11 +99,12 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
     }
 
     // Add visibility information only for instance methods
-    // Class methods don't follow the same visibility rules in Ruby
+    // Singleton methods (class methods) don't follow the same visibility rules in Ruby
     if let Some(visibility) = &ruby_symbol.visibility {
-        let is_class_method = matches!(ruby_symbol.method_kind, Some(MethodKind::Class));
+        let is_singleton_method =
+            matches!(ruby_symbol.namespace_kind, Some(NamespaceKind::Singleton));
 
-        if !is_class_method {
+        if !is_singleton_method {
             match visibility {
                 MethodVisibility::Private => detail_parts.push("private".to_string()),
                 MethodVisibility::Protected => detail_parts.push("protected".to_string()),
@@ -121,11 +122,11 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
         }
     }
 
-    // Add method kind information
-    if let Some(method_kind) = &ruby_symbol.method_kind {
-        match method_kind {
-            MethodKind::Class => detail_parts.push("class method".to_string()),
-            MethodKind::Instance => detail_parts.push("instance method".to_string()),
+    // Add namespace kind information (instance vs singleton/class method)
+    if let Some(namespace_kind) = &ruby_symbol.namespace_kind {
+        match namespace_kind {
+            NamespaceKind::Singleton => detail_parts.push("class method".to_string()),
+            NamespaceKind::Instance => detail_parts.push("instance method".to_string()),
         }
     }
 
@@ -153,8 +154,8 @@ pub struct RubySymbolContext {
     pub children: Vec<RubySymbolContext>,
     /// Symbol visibility (public, private, protected)
     pub visibility: Option<MethodVisibility>,
-    /// Whether it's a class method vs instance method
-    pub method_kind: Option<MethodKind>,
+    /// Whether it's a singleton method (class method) vs instance method
+    pub namespace_kind: Option<NamespaceKind>,
 }
 
 #[cfg(test)]
@@ -186,7 +187,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Private),
-            method_kind: Some(MethodKind::Instance),
+            namespace_kind: Some(NamespaceKind::Instance),
         };
 
         let doc_symbol = convert_to_document_symbol(private_method);
@@ -205,7 +206,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Protected),
-            method_kind: Some(MethodKind::Class),
+            namespace_kind: Some(NamespaceKind::Singleton),
         };
 
         let doc_symbol = convert_to_document_symbol(class_method);
@@ -221,7 +222,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Public),
-            method_kind: Some(MethodKind::Instance),
+            namespace_kind: Some(NamespaceKind::Instance),
         };
 
         let doc_symbol = convert_to_document_symbol(public_method);
@@ -240,7 +241,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Protected),
-            method_kind: Some(MethodKind::Instance),
+            namespace_kind: Some(NamespaceKind::Instance),
         };
 
         let doc_symbol = convert_to_document_symbol(protected_instance_method);
@@ -261,7 +262,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Private),
-            method_kind: Some(MethodKind::Instance),
+            namespace_kind: Some(NamespaceKind::Instance),
         };
 
         let doc_symbol = convert_to_document_symbol(method_with_detail);
@@ -282,7 +283,7 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: None,
-            method_kind: None,
+            namespace_kind: None,
         };
 
         let doc_symbol = convert_to_document_symbol(class_symbol);
@@ -291,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn test_document_symbol_instance_method_kind() {
+    fn test_document_symbol_instance_namespace_kind() {
         let method_instance = RubySymbolContext {
             name: "instance_method".to_string(),
             kind: SymbolKind::METHOD,
@@ -300,11 +301,14 @@ mod tests {
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Private),
-            method_kind: Some(MethodKind::Instance),
+            namespace_kind: Some(NamespaceKind::Instance),
         };
 
         let doc_symbol = convert_to_document_symbol(method_instance);
         assert_eq!(doc_symbol.name, "instance_method");
-        assert_eq!(doc_symbol.detail, Some("private • instance method".to_string()));
+        assert_eq!(
+            doc_symbol.detail,
+            Some("private • instance method".to_string())
+        );
     }
 }

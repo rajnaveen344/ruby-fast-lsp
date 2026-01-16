@@ -3,7 +3,7 @@ use ruby_prism::{CallNode, Node};
 
 use crate::{
     analyzer_prism::utils,
-    indexer::{entry::MethodKind, index::UnresolvedEntry},
+    indexer::{entry::NamespaceKind, index::UnresolvedEntry},
     inferrer::r#type::ruby::RubyType,
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
@@ -51,8 +51,8 @@ impl ReferenceVisitor {
 
         let current_namespace = self.scope_tracker.get_ns_stack();
 
-        // Determine the target namespace, method kind, and receiver info based on receiver
-        let (target_namespace, method_kind, receiver_info) = match node.receiver() {
+        // Determine the target namespace, namespace kind, and receiver info based on receiver
+        let (target_namespace, namespace_kind, receiver_info) = match node.receiver() {
             Some(receiver_node) => {
                 let result =
                     self.handle_receiver_node_with_info(&receiver_node, &current_namespace);
@@ -65,7 +65,7 @@ impl ReferenceVisitor {
         };
 
         // Create the method, handling potential validation errors gracefully
-        let method = match RubyMethod::new(&method_name, method_kind) {
+        let method = match RubyMethod::new(&method_name) {
             Ok(method) => method,
             Err(err) => {
                 trace!("Failed to create RubyMethod for '{}': {}", method_name, err);
@@ -95,7 +95,7 @@ impl ReferenceVisitor {
                         &index,
                         &method_name,
                         &target_namespace,
-                        method_kind,
+                        namespace_kind,
                     ) {
                         trace!("Adding unresolved method call: {}", method_name);
                         index.add_unresolved_entry(
@@ -110,7 +110,7 @@ impl ReferenceVisitor {
                         &index,
                         &method_name,
                         &target_namespace,
-                        method_kind,
+                        namespace_kind,
                     ) {
                         trace!(
                             "Adding unresolved method call: {}.{}",
@@ -142,10 +142,10 @@ impl ReferenceVisitor {
         index: &crate::indexer::index::RubyIndex,
         method_name: &str,
         target_namespace: &[RubyConstant],
-        method_kind: MethodKind,
+        _namespace_kind: NamespaceKind,
     ) -> bool {
         // Create a method to check
-        let method = match RubyMethod::new(method_name, method_kind) {
+        let method = match RubyMethod::new(method_name) {
             Ok(m) => m,
             Err(_) => return true, // If we can't create the method, assume it exists
         };
@@ -155,19 +155,8 @@ impl ReferenceVisitor {
             return true;
         }
 
-        // Also check with opposite kind for flexibility (class vs instance)
-        let opposite_kind = match method_kind {
-            MethodKind::Class => MethodKind::Instance,
-            MethodKind::Instance => MethodKind::Class,
-        };
-        if let Ok(opposite_method) = RubyMethod::new(method_name, opposite_kind) {
-            if index.contains_method(&opposite_method) {
-                return true;
-            }
-        }
-
         // Check the specific FQN
-        let method_fqn = FullyQualifiedName::method(target_namespace.to_vec(), method);
+        let method_fqn = FullyQualifiedName::method(target_namespace.to_vec(), method.clone());
         if index.contains_fqn(&method_fqn) {
             return true;
         }
@@ -182,7 +171,7 @@ impl ReferenceVisitor {
         // Check parent namespaces for inherited methods
         let mut ancestors = target_namespace.to_vec();
         while !ancestors.is_empty() {
-            if let Ok(m) = RubyMethod::new(method_name, method_kind) {
+            if let Ok(m) = RubyMethod::new(method_name) {
                 let fqn = FullyQualifiedName::method(ancestors.clone(), m);
                 if index.contains_fqn(&fqn) {
                     return true;
@@ -198,9 +187,9 @@ impl ReferenceVisitor {
     fn handle_no_receiver(
         &self,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind) {
-        // Determine method kind based on current method context
-        let method_kind = match self.scope_tracker.current_method_context() {
+    ) -> (Vec<RubyConstant>, NamespaceKind) {
+        // Determine namespace kind based on current method context
+        let namespace_kind = match self.scope_tracker.current_method_context() {
             Some(context_kind) => {
                 // We're inside a method definition, use the same kind for bare calls
                 context_kind
@@ -209,16 +198,16 @@ impl ReferenceVisitor {
                 // We're not inside a method definition (e.g., class body, top-level)
                 // Check if we're in a singleton context
                 if self.scope_tracker.in_singleton() {
-                    MethodKind::Class
+                    NamespaceKind::Singleton
                 } else {
                     // Default to instance method for most cases
                     // This covers class body and top-level calls
-                    MethodKind::Instance
+                    NamespaceKind::Instance
                 }
             }
         };
 
-        (current_namespace.clone(), method_kind)
+        (current_namespace.clone(), namespace_kind)
     }
 
     /// Handle method calls with a receiver node (returns receiver info for diagnostics)
@@ -226,7 +215,7 @@ impl ReferenceVisitor {
         &self,
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind, ReceiverInfo) {
+    ) -> (Vec<RubyConstant>, NamespaceKind, ReceiverInfo) {
         if receiver_node.as_self_node().is_some() {
             let (ns, kind) = self.handle_self_receiver(current_namespace);
             (ns, kind, ReceiverInfo::SelfReceiver)
@@ -303,9 +292,9 @@ impl ReferenceVisitor {
     fn handle_self_receiver(
         &self,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind) {
         // Self receiver - method is in current namespace
-        (current_namespace.clone(), MethodKind::Instance)
+        (current_namespace.clone(), NamespaceKind::Instance)
     }
 
     /// Handle method calls with constant read receiver (e.g., `Class.method`)
@@ -313,15 +302,15 @@ impl ReferenceVisitor {
         &self,
         constant_read: &ruby_prism::ConstantReadNode,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind) {
         let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
         if let Ok(constant) = RubyConstant::new(&name) {
             let mut receiver_namespace = current_namespace.clone();
             receiver_namespace.push(constant);
-            (receiver_namespace, MethodKind::Class)
+            (receiver_namespace, NamespaceKind::Singleton)
         } else {
             // Fallback to instance method if constant parsing fails
-            (current_namespace.clone(), MethodKind::Instance)
+            (current_namespace.clone(), NamespaceKind::Instance)
         }
     }
 
@@ -331,7 +320,7 @@ impl ReferenceVisitor {
         _constant_path: &ruby_prism::ConstantPathNode,
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind) {
         // Use the centralized constant resolution utility
         let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
         let index_guard = self.index.lock();
@@ -339,7 +328,7 @@ impl ReferenceVisitor {
             utils::resolve_constant_fqn(&index_guard, receiver_node, &current_fqn)
         {
             if let FullyQualifiedName::Constant(parts) = resolved_fqn {
-                return (parts, MethodKind::Class);
+                return (parts, NamespaceKind::Singleton);
             }
         }
 
@@ -353,10 +342,10 @@ impl ReferenceVisitor {
             } else {
                 self.resolve_relative_constant_path(&mixin_ref.parts, current_namespace)
             };
-            (final_namespace, MethodKind::Class)
+            (final_namespace, NamespaceKind::Singleton)
         } else {
             // Fallback to instance method if constant path resolution fails
-            (current_namespace.clone(), MethodKind::Instance)
+            (current_namespace.clone(), NamespaceKind::Instance)
         }
     }
 
@@ -364,9 +353,9 @@ impl ReferenceVisitor {
     fn handle_expression_receiver(
         &self,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, MethodKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind) {
         // Expression receiver - use current namespace
-        (current_namespace.clone(), MethodKind::Instance)
+        (current_namespace.clone(), NamespaceKind::Instance)
     }
 
     /// Resolve relative constant paths by checking namespace hierarchy

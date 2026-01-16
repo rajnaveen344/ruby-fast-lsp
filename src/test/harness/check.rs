@@ -511,7 +511,6 @@ async fn run_type_check(
                         // Build method FQN from namespace + method name
                         let method_fqn = crate::types::ruby_method::RubyMethod::new(
                             &iden.to_string(),
-                            crate::indexer::entry::MethodKind::Instance,
                         )
                         .ok()
                         .map(|m| {
