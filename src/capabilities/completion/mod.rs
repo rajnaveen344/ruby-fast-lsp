@@ -381,16 +381,11 @@ fn get_receiver_type_from_snapshots(
             },
         );
 
-        // Get type from document snapshots
+        // Get type from document variable tracking
         if let Some(doc_arc) = server.docs.lock().get(uri) {
             let doc = doc_arc.read();
-            let snapshots = doc.get_type_snapshots();
-            if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
-                snapshots,
-                receiver_offset,
-                receiver_text,
-            ) {
-                return Some(ty);
+            if let Some(ty) = doc.get_var_type(receiver_offset, receiver_text) {
+                return Some(ty.clone());
             }
         }
 

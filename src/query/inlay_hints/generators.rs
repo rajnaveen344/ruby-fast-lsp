@@ -259,16 +259,13 @@ fn infer_variable_type(
                                 }
                             }
 
-                            // Fallback: if no assignment matched by position, try snapshots
+                            // Fallback: if no assignment matched by position, try document var types
                             if entry.location.range.end == *position {
-                                let snapshots = document.get_type_snapshots();
                                 let offset =
                                     crate::utils::position_to_offset(context.content, *position);
-                                if let Some(ty) = crate::inferrer::type_tracker::get_type_at_offset(
-                                    snapshots, offset, &name,
-                                ) {
-                                    if ty != RubyType::Unknown {
-                                        return Some(ty);
+                                if let Some(ty) = document.get_var_type(offset, name) {
+                                    if *ty != RubyType::Unknown {
+                                        return Some(ty.clone());
                                     }
                                 }
                             }

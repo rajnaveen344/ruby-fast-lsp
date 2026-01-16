@@ -72,17 +72,12 @@ impl IndexQuery {
                     position_to_offset(content, position)
                 };
 
-                // Try type snapshots from document
+                // Try variable type from document
                 if let Some(doc_arc) = &self.doc {
                     let doc = doc_arc.read();
-                    let snapshots = doc.get_type_snapshots();
-                    if let Some(receiver_type) = crate::inferrer::type_tracker::get_type_at_offset(
-                        snapshots,
-                        receiver_offset,
-                        name,
-                    ) {
+                    if let Some(receiver_type) = doc.get_var_type(receiver_offset, name) {
                         debug!("Found receiver type for '{}': {:?}", name, receiver_type);
-                        return self.search_by_name_filtered(method, &receiver_type);
+                        return self.search_by_name_filtered(method, receiver_type);
                     }
                 }
 
@@ -142,14 +137,11 @@ impl IndexQuery {
             | MethodReceiver::GlobalVariable(name) => {
                 let offset = position_to_offset(content, position);
 
-                // Try type snapshots from document
+                // Try variable type from document
                 if let Some(doc_arc) = &self.doc {
                     let doc = doc_arc.read();
-                    let snapshots = doc.get_type_snapshots();
-                    if let Some(ty) =
-                        crate::inferrer::type_tracker::get_type_at_offset(snapshots, offset, name)
-                    {
-                        ty
+                    if let Some(ty) = doc.get_var_type(offset, name) {
+                        ty.clone()
                     } else if let Some(ty) =
                         self.infer_type_from_constructor_assignment(content, name)
                     {

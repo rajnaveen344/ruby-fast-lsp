@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, 
 
 use crate::{
     indexer::entry::{Entry, EntryKind},
-    inferrer::{type_tracker::TypeSnapshot, RubyType},
+    inferrer::RubyType,
     types::scope::LVScopeId,
 };
 
@@ -38,8 +38,9 @@ pub struct RubyDocument {
     /// Comments in the document (start_offset, end_offset)
     comments: Vec<(usize, usize)>,
 
-    /// Type snapshots for local variables (from TypeTracker)
-    type_snapshots: Vec<TypeSnapshot>,
+    /// Variable types at each offset (simple BTreeMap for easy queries)
+    /// Key = offset where state was recorded, Value = variables and their types at that point
+    var_types: BTreeMap<usize, HashMap<String, RubyType>>,
 }
 
 impl RubyDocument {
@@ -56,7 +57,7 @@ impl RubyDocument {
             lvars: BTreeMap::new(),
             lvar_references: HashMap::new(),
             comments,
-            type_snapshots: Vec::new(),
+            var_types: BTreeMap::new(),
         };
         doc.compute_line_offsets();
         doc
@@ -82,7 +83,7 @@ impl RubyDocument {
         self.version = version;
         self.lvars.clear();
         self.lvar_references.clear();
-        self.type_snapshots.clear();
+        self.var_types.clear();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }
@@ -204,14 +205,39 @@ impl RubyDocument {
         &self.lvars
     }
 
-    /// Set type snapshots for the document
-    pub fn set_type_snapshots(&mut self, snapshots: Vec<TypeSnapshot>) {
-        self.type_snapshots = snapshots;
+    /// Get the type of a variable at a specific offset
+    /// Uses BTreeMap range query to find the most recent state before/at the offset
+    pub fn get_var_type(&self, offset: usize, var_name: &str) -> Option<&RubyType> {
+        self.var_types
+            .range(..=offset)
+            .next_back()
+            .and_then(|(_, vars)| vars.get(var_name))
     }
 
-    /// Get type snapshots for the document
-    pub fn get_type_snapshots(&self) -> &[TypeSnapshot] {
-        &self.type_snapshots
+    /// Get all variables and their types at a specific offset
+    pub fn get_vars_at(&self, offset: usize) -> Option<&HashMap<String, RubyType>> {
+        self.var_types
+            .range(..=offset)
+            .next_back()
+            .map(|(_, vars)| vars)
+    }
+
+    /// Record variable state at an offset (called during indexing)
+    pub fn set_var_type(&mut self, offset: usize, var_name: String, ty: RubyType) {
+        self.var_types
+            .entry(offset)
+            .or_default()
+            .insert(var_name, ty);
+    }
+
+    /// Record complete variable state at an offset (called during indexing)
+    pub fn set_vars_at(&mut self, offset: usize, vars: HashMap<String, RubyType>) {
+        self.var_types.insert(offset, vars);
+    }
+
+    /// Clear all variable type information
+    pub fn clear_var_types(&mut self) {
+        self.var_types.clear();
     }
 
     /// Check if a local variable with the given name exists in any of the provided scope IDs

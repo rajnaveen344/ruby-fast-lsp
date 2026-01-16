@@ -17,42 +17,8 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use ruby_prism::*;
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use tower_lsp::lsp_types::Url;
-
-/// Type snapshot valid for a specific offset range in the source code.
-///
-/// Each snapshot represents the type state of all variables within a specific
-/// byte range. Snapshots are created after each statement and at control flow
-/// merge points.
-#[derive(Debug, Clone)]
-pub struct TypeSnapshot {
-    /// Start of range (inclusive)
-    pub start_offset: usize,
-
-    /// End of range (exclusive)
-    pub end_offset: usize,
-
-    /// Variable types valid in this range
-    pub variables: HashMap<String, RubyType>,
-}
-
-impl TypeSnapshot {
-    /// Create a new type snapshot for the given range
-    pub fn new(start_offset: usize, end_offset: usize) -> Self {
-        Self {
-            start_offset,
-            end_offset,
-            variables: HashMap::new(),
-        }
-    }
-
-    /// Check if this snapshot contains the given offset
-    pub fn contains(&self, offset: usize) -> bool {
-        self.start_offset <= offset && offset < self.end_offset
-    }
-}
 
 /// Simple forward type tracker with control flow merging.
 ///
@@ -63,9 +29,9 @@ pub struct TypeTracker<'a> {
     /// Current type environment (variable name → type)
     vars: HashMap<String, RubyType>,
 
-    /// Snapshots at each statement (for queries)
-    /// Sorted by start_offset for binary search
-    snapshots: Vec<TypeSnapshot>,
+    /// Variable types at each offset (for queries)
+    /// Key = offset where state was recorded, Value = all variables and their types
+    var_types: BTreeMap<usize, HashMap<String, RubyType>>,
 
     /// Source code (for offset calculations)
     #[allow(dead_code)]
@@ -84,9 +50,6 @@ pub struct TypeTracker<'a> {
     /// Max loop iterations (to prevent infinite loops)
     max_loop_iterations: usize,
 
-    /// Track the last snapshot end offset to determine range starts
-    last_snapshot_end: usize,
-
     /// Current class/module context for resolving implicit self
     current_class: Option<FullyQualifiedName>,
 }
@@ -96,13 +59,12 @@ impl<'a> TypeTracker<'a> {
     pub fn new(source: &'a [u8], index: Index<Unlocked>, uri: &'a Url) -> Self {
         Self {
             vars: HashMap::new(),
-            snapshots: Vec::new(),
+            var_types: BTreeMap::new(),
             source,
             literal_analyzer: LiteralAnalyzer::new(),
             index,
             uri,
             max_loop_iterations: 10,
-            last_snapshot_end: 0,
             current_class: None,
         }
     }
@@ -112,20 +74,17 @@ impl<'a> TypeTracker<'a> {
         self.current_class = fqn;
     }
 
-    /// Get all snapshots (for storing in RubyDocument)
-    pub fn snapshots(&self) -> &[TypeSnapshot] {
-        &self.snapshots
+    /// Get variable types map (for storing in RubyDocument)
+    pub fn into_var_types(self) -> BTreeMap<usize, HashMap<String, RubyType>> {
+        self.var_types
     }
 
-    /// Take snapshot for range [start, end)
-    ///
-    /// Creates a new snapshot capturing the current variable types for the
-    /// specified byte offset range.
-    fn snapshot(&mut self, start_offset: usize, end_offset: usize) {
-        let mut snapshot = TypeSnapshot::new(start_offset, end_offset);
-        snapshot.variables = self.vars.clone();
-        self.snapshots.push(snapshot);
-        self.last_snapshot_end = end_offset;
+    /// Record current variable state at an offset
+    fn record_state(&mut self, offset: usize) {
+        // Only record if there are variables to track
+        if !self.vars.is_empty() {
+            self.var_types.insert(offset, self.vars.clone());
+        }
     }
 
     /// Track a method definition and return its inferred return type
@@ -155,12 +114,10 @@ impl<'a> TypeTracker<'a> {
             RubyType::nil_class()
         };
 
-        // Final snapshot for any remaining code
+        // Record final state at method end
         if let Some(body) = method.body() {
             let end_offset = body.location().end_offset();
-            if self.last_snapshot_end < end_offset {
-                self.snapshot(self.last_snapshot_end, end_offset);
-            }
+            self.record_state(end_offset);
         }
 
         return_type
@@ -226,28 +183,14 @@ impl<'a> TypeTracker<'a> {
     /// Track a sequence of statements and return last expression type
     fn track_statements(&mut self, stmts: &StatementsNode) -> RubyType {
         let mut last_type = RubyType::nil_class();
-        let stmts_vec: Vec<_> = stmts.body().iter().collect();
 
-        for (i, stmt) in stmts_vec.iter().enumerate() {
+        for stmt in stmts.body().iter() {
             // Process the statement (this updates self.vars)
             last_type = self.track_node(&stmt);
+
+            // Record state after each statement
             let stmt_end = stmt.location().end_offset();
-
-            // Determine the range for this snapshot
-            // The snapshot represents the type state AFTER this statement
-            // The range should be from the end of this statement to the start of the next
-            let snapshot_start = stmt_end;
-            let snapshot_end = if i + 1 < stmts_vec.len() {
-                stmts_vec[i + 1].location().start_offset()
-            } else {
-                // Last statement: snapshot extends to the end of the statements block
-                stmts.location().end_offset()
-            };
-
-            // Create snapshot with the post-execution state
-            if snapshot_end > snapshot_start {
-                self.snapshot(snapshot_start, snapshot_end);
-            }
+            self.record_state(stmt_end);
         }
 
         last_type
@@ -282,7 +225,6 @@ impl<'a> TypeTracker<'a> {
 
         // Save the current environment before branching
         let env_before = self.vars.clone();
-        let snapshots_before = self.snapshots.len();
 
         // Track the then branch
         let then_type = if let Some(statements) = if_node.statements() {
@@ -293,11 +235,9 @@ impl<'a> TypeTracker<'a> {
 
         // Save then branch state
         let then_env = self.vars.clone();
-        let then_snapshots = self.snapshots.clone();
 
         // Reset to pre-branch state for else branch
         self.vars = env_before.clone();
-        self.snapshots.truncate(snapshots_before);
 
         // Track the else branch
         let else_type = if let Some(subsequent) = if_node.subsequent() {
@@ -325,15 +265,8 @@ impl<'a> TypeTracker<'a> {
 
         // Save else branch state
         let else_env = self.vars.clone();
-        let else_snapshots = self.snapshots.clone();
 
-        // Merge the two branches
-        // Combine snapshots from both branches
-        self.snapshots = then_snapshots;
-        self.snapshots
-            .extend(else_snapshots.iter().skip(snapshots_before).cloned());
-
-        // Merge environments
+        // Merge environments (var_types already has entries from both branches)
         self.vars = then_env;
         self.merge_env(&else_env, if_node.subsequent().is_none());
 
@@ -353,18 +286,15 @@ impl<'a> TypeTracker<'a> {
 
         // Save the current environment before branching
         let env_before = self.vars.clone();
-        let snapshots_before = self.snapshots.len();
 
         // Track all when branches and collect their environments
         let mut branch_envs = Vec::new();
         let mut branch_types = Vec::new();
-        let mut all_snapshots = Vec::new();
 
         for condition in case_node.conditions().iter() {
             if let Some(when_node) = condition.as_when_node() {
                 // Reset to pre-branch state for this when clause
                 self.vars = env_before.clone();
-                self.snapshots.truncate(snapshots_before);
 
                 // Track this when branch
                 let branch_type = if let Some(statements) = when_node.statements() {
@@ -376,7 +306,6 @@ impl<'a> TypeTracker<'a> {
                 // Save this branch's state
                 branch_envs.push(self.vars.clone());
                 branch_types.push(branch_type);
-                all_snapshots.push(self.snapshots.clone());
             }
         }
 
@@ -385,7 +314,6 @@ impl<'a> TypeTracker<'a> {
         if has_else {
             // Reset to pre-branch state for else
             self.vars = env_before.clone();
-            self.snapshots.truncate(snapshots_before);
 
             let else_type = if let Some(else_clause) = case_node.else_clause() {
                 if let Some(statements) = else_clause.statements() {
@@ -399,7 +327,6 @@ impl<'a> TypeTracker<'a> {
 
             branch_envs.push(self.vars.clone());
             branch_types.push(else_type);
-            all_snapshots.push(self.snapshots.clone());
         }
 
         // Merge all branches
@@ -410,13 +337,10 @@ impl<'a> TypeTracker<'a> {
 
         // Start with the first branch
         self.vars = branch_envs[0].clone();
-        self.snapshots = all_snapshots[0].clone();
 
         // Merge all other branches
         for i in 1..branch_envs.len() {
             self.merge_env(&branch_envs[i], false);
-            self.snapshots
-                .extend(all_snapshots[i].iter().skip(snapshots_before).cloned());
         }
 
         // If there's no else clause, variables might be undefined
@@ -443,7 +367,6 @@ impl<'a> TypeTracker<'a> {
 
         // Save pre-loop state
         let env_before = self.vars.clone();
-        let snapshots_before = self.snapshots.len();
 
         // Iterate loop body a limited number of times
         let mut last_type = RubyType::nil_class();
@@ -451,22 +374,14 @@ impl<'a> TypeTracker<'a> {
             if let Some(statements) = while_node.statements() {
                 last_type = self.track_node(&statements.as_node());
             }
-
-            // Check if types have stabilized (optimization: could compare vars)
-            // For simplicity, just run max iterations
         }
 
         // Save post-loop state
         let loop_env = self.vars.clone();
-        let loop_snapshots = self.snapshots.clone();
 
         // Merge with pre-loop state (loop might not execute at all)
         self.vars = env_before.clone();
-        self.snapshots.truncate(snapshots_before);
         self.merge_env(&loop_env, true); // true = loop might not run
-
-        // Restore snapshots from loop execution
-        self.snapshots = loop_snapshots;
 
         last_type
     }
@@ -479,7 +394,6 @@ impl<'a> TypeTracker<'a> {
 
         // Save pre-loop state
         let env_before = self.vars.clone();
-        let snapshots_before = self.snapshots.len();
 
         // Iterate loop body a limited number of times
         let mut last_type = RubyType::nil_class();
@@ -491,15 +405,10 @@ impl<'a> TypeTracker<'a> {
 
         // Save post-loop state
         let loop_env = self.vars.clone();
-        let loop_snapshots = self.snapshots.clone();
 
         // Merge with pre-loop state (loop might not execute at all)
         self.vars = env_before.clone();
-        self.snapshots.truncate(snapshots_before);
         self.merge_env(&loop_env, true); // true = loop might not run
-
-        // Restore snapshots from loop execution
-        self.snapshots = loop_snapshots;
 
         last_type
     }
@@ -512,7 +421,6 @@ impl<'a> TypeTracker<'a> {
 
         // Save the current environment before branching
         let env_before = self.vars.clone();
-        let snapshots_before = self.snapshots.len();
 
         // Track the then branch (executes when predicate is false)
         let then_type = if let Some(statements) = unless_node.statements() {
@@ -523,11 +431,9 @@ impl<'a> TypeTracker<'a> {
 
         // Save then branch state
         let then_env = self.vars.clone();
-        let then_snapshots = self.snapshots.clone();
 
         // Reset to pre-branch state for else branch
         self.vars = env_before.clone();
-        self.snapshots.truncate(snapshots_before);
 
         // Track the else branch
         let else_type = if let Some(else_clause) = unless_node.else_clause() {
@@ -542,14 +448,8 @@ impl<'a> TypeTracker<'a> {
 
         // Save else branch state
         let else_env = self.vars.clone();
-        let else_snapshots = self.snapshots.clone();
 
-        // Merge the two branches
-        self.snapshots = then_snapshots;
-        self.snapshots
-            .extend(else_snapshots.iter().skip(snapshots_before).cloned());
-
-        // Merge environments
+        // Merge environments (var_types already has entries from both branches)
         self.vars = then_env;
         self.merge_env(&else_env, unless_node.else_clause().is_none());
 
@@ -769,41 +669,16 @@ impl<'a> TypeTracker<'a> {
     }
 }
 
-/// Query snapshots for type at a specific offset
-///
-/// Uses binary search to efficiently find the snapshot containing the offset.
-/// Snapshots are end-inclusive for boundary cases (start <= offset <= end).
-pub fn get_type_at_offset(
-    snapshots: &[TypeSnapshot],
+/// Helper to get type at offset from var_types BTreeMap
+pub fn get_var_type_at(
+    var_types: &BTreeMap<usize, HashMap<String, RubyType>>,
     offset: usize,
     var_name: &str,
 ) -> Option<RubyType> {
-    // First, try exact match - find snapshot containing offset
-    let exact_match = snapshots
-        .binary_search_by(|snapshot| {
-            if snapshot.end_offset < offset {
-                Ordering::Less
-            } else if snapshot.start_offset > offset {
-                Ordering::Greater
-            } else {
-                Ordering::Equal // Found: start <= offset <= end
-            }
-        })
-        .ok()
-        .and_then(|idx| snapshots[idx].variables.get(var_name).cloned());
-
-    if exact_match.is_some() {
-        return exact_match;
-    }
-
-    // Fallback: Find the last snapshot where start_offset <= offset
-    // This handles cases where we're querying beyond the last snapshot's end_offset
-    // (e.g., using a variable later in the code after it was assigned)
-    snapshots
-        .iter()
-        .rev()
-        .find(|s| s.start_offset <= offset)
-        .and_then(|s| s.variables.get(var_name).cloned())
+    var_types
+        .range(..=offset)
+        .next_back()
+        .and_then(|(_, vars)| vars.get(var_name).cloned())
 }
 
 #[cfg(test)]
@@ -820,66 +695,6 @@ mod tests {
         let index = Index::new(Arc::new(Mutex::new(RubyIndex::new())));
         let tracker = TypeTracker::new(source.as_bytes(), index.clone(), uri);
         (tracker, index)
-    }
-
-    #[test]
-    fn test_snapshot_contains_offset() {
-        let snapshot = TypeSnapshot::new(10, 20);
-        assert!(snapshot.contains(10)); // Start inclusive
-        assert!(snapshot.contains(15)); // Middle
-        assert!(!snapshot.contains(20)); // End exclusive
-        assert!(!snapshot.contains(5)); // Before
-        assert!(!snapshot.contains(25)); // After
-    }
-
-    #[test]
-    fn test_get_type_at_offset() {
-        let snapshots = vec![
-            TypeSnapshot {
-                start_offset: 0,
-                end_offset: 10,
-                variables: HashMap::new(),
-            },
-            TypeSnapshot {
-                start_offset: 10,
-                end_offset: 20,
-                variables: vec![("x".to_string(), RubyType::integer())]
-                    .into_iter()
-                    .collect(),
-            },
-            TypeSnapshot {
-                start_offset: 20,
-                end_offset: 30,
-                variables: vec![("x".to_string(), RubyType::string())]
-                    .into_iter()
-                    .collect(),
-            },
-        ];
-
-        // Query before any assignments
-        assert_eq!(get_type_at_offset(&snapshots, 5, "x"), None);
-
-        // Query in first range with x: Integer
-        assert_eq!(
-            get_type_at_offset(&snapshots, 15, "x"),
-            Some(RubyType::integer())
-        );
-
-        // Query in second range with x: String
-        assert_eq!(
-            get_type_at_offset(&snapshots, 25, "x"),
-            Some(RubyType::string())
-        );
-
-        // Query at exact boundaries
-        assert_eq!(
-            get_type_at_offset(&snapshots, 10, "x"),
-            Some(RubyType::integer())
-        );
-        assert_eq!(
-            get_type_at_offset(&snapshots, 20, "x"),
-            Some(RubyType::string())
-        );
     }
 
     #[test]
@@ -912,16 +727,16 @@ mod tests {
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
+        let var_types = tracker.into_var_types();
 
-        // Check that snapshots were created
-        let snapshots = tracker.snapshots();
-        assert!(snapshots.len() > 0);
+        // Check that var_types were recorded
+        assert!(!var_types.is_empty());
 
         // Find the assignment offset (after "x = 5")
         let assignment_end_offset = source.find("x = 5").unwrap() + "x = 5".len();
 
         // Query type after assignment
-        let x_type = get_type_at_offset(snapshots, assignment_end_offset, "x");
+        let x_type = get_var_type_at(&var_types, assignment_end_offset, "x");
         assert_eq!(x_type, Some(RubyType::integer()));
     }
 
@@ -938,15 +753,14 @@ mod tests {
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // Find offset after both assignments
         let second_assignment_end = source.find("y = \"hello\"").unwrap() + "y = \"hello\"".len();
 
         // Both variables should be in the environment
-        let x_type = get_type_at_offset(snapshots, second_assignment_end, "x");
-        let y_type = get_type_at_offset(snapshots, second_assignment_end, "y");
+        let x_type = get_var_type_at(&var_types, second_assignment_end, "x");
+        let y_type = get_var_type_at(&var_types, second_assignment_end, "y");
 
         assert_eq!(x_type, Some(RubyType::integer()));
         assert_eq!(y_type, Some(RubyType::string()));
@@ -965,17 +779,16 @@ mod tests {
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After first assignment, should be Integer
         let first_assignment_end = source.find("x = 5").unwrap() + "x = 5".len();
-        let x_type_1 = get_type_at_offset(snapshots, first_assignment_end, "x");
+        let x_type_1 = get_var_type_at(&var_types, first_assignment_end, "x");
         assert_eq!(x_type_1, Some(RubyType::integer()));
 
         // After second assignment, should be String
         let second_assignment_end = source.find("x = \"hello\"").unwrap() + "x = \"hello\"".len();
-        let x_type_2 = get_type_at_offset(snapshots, second_assignment_end, "x");
+        let x_type_2 = get_var_type_at(&var_types, second_assignment_end, "x");
         assert_eq!(x_type_2, Some(RubyType::string()));
     }
 
@@ -999,12 +812,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the if statement, x should be Integer | String
         let after_if = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_if, "x");
+        let x_type = get_var_type_at(&var_types, after_if, "x");
 
         // Should be a union type containing both Integer and String
         assert!(x_type.is_some());
@@ -1030,12 +842,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the if statement, x should be Integer | NilClass (might not be defined)
         let after_if = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_if, "x");
+        let x_type = get_var_type_at(&var_types, after_if, "x");
 
         // Should be a union type containing Integer and NilClass
         assert!(x_type.is_some());
@@ -1063,12 +874,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the unless statement, x should be Integer | String
         let after_unless = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_unless, "x");
+        let x_type = get_var_type_at(&var_types, after_unless, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
@@ -1097,12 +907,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the if/elsif/else, x should be a union of all three types
         let after_if = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_if, "x");
+        let x_type = get_var_type_at(&var_types, after_if, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
@@ -1132,12 +941,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the case statement, x should be Integer | String | Float
         let after_case = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_case, "x");
+        let x_type = get_var_type_at(&var_types, after_case, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
@@ -1165,12 +973,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the case statement, x should be Integer | String | NilClass
         let after_case = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_case, "x");
+        let x_type = get_var_type_at(&var_types, after_case, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
@@ -1196,12 +1003,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the case statement, x should be Integer | NilClass
         let after_case = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_case, "x");
+        let x_type = get_var_type_at(&var_types, after_case, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
@@ -1227,12 +1033,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the while loop, x should be Integer (0 or 5)
         let after_while = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_while, "x");
+        let x_type = get_var_type_at(&var_types, after_while, "x");
 
         assert!(x_type.is_some());
         // Type should still be Integer (union of Integer | Integer = Integer)
@@ -1257,12 +1062,11 @@ end"#;
         let def_node = stmts.body().iter().next().unwrap().as_def_node().unwrap();
 
         tracker.track_method(&def_node);
-
-        let snapshots = tracker.snapshots();
+        let var_types = tracker.into_var_types();
 
         // After the until loop, x should be Integer | String
         let after_until = source.find("end\n  x").unwrap() + "end".len();
-        let x_type = get_type_at_offset(snapshots, after_until, "x");
+        let x_type = get_var_type_at(&var_types, after_until, "x");
 
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();

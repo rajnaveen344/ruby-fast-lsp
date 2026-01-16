@@ -9,7 +9,6 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::return_type::infer_return_type_for_node;
-use crate::inferrer::type_tracker::get_type_at_offset;
 use crate::query::TypeQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
@@ -75,7 +74,7 @@ pub fn generate_local_variable_hover(
     // Try multiple type resolution strategies
     let from_lvar = get_type_from_document_lvar(context, name, *position, *scope_id);
     let from_query = from_lvar.or_else(|| get_type_from_type_query(context, name, *position));
-    let resolved_type = from_query.or_else(|| get_type_from_snapshots(context, name, *position));
+    let resolved_type = from_query.or_else(|| get_type_from_document(context, name, *position));
 
     match resolved_type {
         Some(t) => Some(HoverInfo::text(t.to_string())),
@@ -127,17 +126,16 @@ fn get_type_from_type_query(
     type_query.get_local_variable_type(name, position)
 }
 
-/// Get type from type snapshots in document.
-fn get_type_from_snapshots(
+/// Get type from variable tracking in document.
+fn get_type_from_document(
     context: &HoverContext,
     name: &str,
     position: Position,
 ) -> Option<RubyType> {
     let doc_arc = context.document?;
     let doc = doc_arc.read();
-    let snapshots = doc.get_type_snapshots();
     let offset = position_to_offset(context.content, position);
-    get_type_at_offset(snapshots, offset, name)
+    doc.get_var_type(offset, name).cloned()
 }
 
 /// Generate hover info for a constant (class/module).
@@ -448,7 +446,7 @@ fn resolve_receiver_type(
             }
 
             // Try type snapshots
-            if let Some(t) = get_type_from_snapshots(context, name, position) {
+            if let Some(t) = get_type_from_document(context, name, position) {
                 return t;
             }
 
