@@ -3,7 +3,7 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::EntryKind;
+use crate::indexer::entry::{EntryKind, MethodKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
@@ -215,7 +215,7 @@ impl IndexQuery {
 
         // First, look for methods in the current class/module ancestry
         let context_fqn = FullyQualifiedName::from(ancestors.to_vec());
-        let ancestor_chain = index.get_ancestor_chain(&context_fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(&context_fqn, MethodKind::Instance);
 
         for ancestor_fqn in &ancestor_chain {
             if let Some(entries) = index.get_methods_by_name(method_name) {

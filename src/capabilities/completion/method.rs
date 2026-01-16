@@ -19,10 +19,11 @@ pub fn find_method_completions(
     index: &Index<Unlocked>,
     receiver_type: &RubyType,
     partial_method: &str,
-    is_class_method: bool,
+    kind: MethodKind,
 ) -> Vec<CompletionItem> {
     let mut completions = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
+    let is_class_method = kind == MethodKind::Class;
 
     // Get the class name for lookups
     let class_names = get_class_names_for_type(receiver_type);
@@ -47,7 +48,7 @@ pub fn find_method_completions(
 
         // Get methods from Ruby index (user-defined types) including ancestor chain
         let index_methods =
-            get_index_methods_with_ancestors(index, class_name, partial_method, is_class_method);
+            get_index_methods_with_ancestors(index, class_name, partial_method, kind);
         for (method_name, return_type, params) in index_methods {
             if seen_methods.contains(&method_name) {
                 continue;
@@ -129,7 +130,7 @@ fn get_index_methods_with_ancestors(
     index: &Index<Unlocked>,
     class_name: &str,
     partial_method: &str,
-    is_class_method: bool,
+    kind: MethodKind,
 ) -> Vec<(String, Option<RubyType>, Vec<String>)> {
     let index = index.lock();
     let mut methods = Vec::new();
@@ -140,7 +141,7 @@ fn get_index_methods_with_ancestors(
 
     // Get the ancestor chain for the class
     let ancestors = if let Ok(fqn) = &class_fqn {
-        index.get_ancestor_chain(fqn, is_class_method)
+        index.get_ancestor_chain(fqn, kind)
     } else {
         vec![]
     };
@@ -166,12 +167,6 @@ fn get_index_methods_with_ancestors(
         }
     }
 
-    let method_kind = if is_class_method {
-        MethodKind::Class
-    } else {
-        MethodKind::Instance
-    };
-
     // Search through methods_by_name
     for (ruby_method, entries) in index.methods_by_name() {
         // Check if method name matches partial
@@ -186,7 +181,7 @@ fn get_index_methods_with_ancestors(
         }
 
         // Check method kind
-        if ruby_method.get_kind() != method_kind {
+        if ruby_method.get_kind() != kind {
             continue;
         }
 
@@ -307,7 +302,7 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "", false);
+        let completions = find_method_completions(&index, &string_type, "", MethodKind::Instance);
 
         // Should have methods from RBS
         assert!(!completions.is_empty(), "Should have string methods");
@@ -329,7 +324,7 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "up", false);
+        let completions = find_method_completions(&index, &string_type, "up", MethodKind::Instance);
 
         // Should only have methods starting with "up"
         for completion in &completions {
@@ -346,7 +341,7 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "length", false);
+        let completions = find_method_completions(&index, &string_type, "length", MethodKind::Instance);
 
         // Find the length method
         let length_completion = completions.iter().find(|c| c.label == "length");
@@ -368,7 +363,7 @@ mod tests {
         // Create a union type: String | Integer
         let union_type = RubyType::union(vec![RubyType::string(), RubyType::integer()]);
 
-        let completions = find_method_completions(&index, &union_type, "", false);
+        let completions = find_method_completions(&index, &union_type, "", MethodKind::Instance);
 
         let method_names: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
 

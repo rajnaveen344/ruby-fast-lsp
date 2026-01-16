@@ -16,7 +16,9 @@
       "Bash(git stash:*)",
       "Bash(cargo fmt:*)",
       "Bash(grep:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(git grep:*)",
+      "WebSearch"
     ]
   }
 }

@@ -1,9 +1,12 @@
 use tower_lsp::lsp_types::{Location as LspLocation, Range};
 
-use crate::types::{
-    ruby_document::RubyDocument,
-    ruby_namespace::RubyConstant,
-    scope::{LVScope, LVScopeKind, LVScopeStack},
+use crate::{
+    indexer::entry::MethodKind,
+    types::{
+        ruby_document::RubyDocument,
+        ruby_namespace::RubyConstant,
+        scope::{LVScope, LVScopeKind, LVScopeStack},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -116,10 +119,7 @@ impl ScopeTracker {
 
     /// Returns the current method context based on the local variable scope stack.
     /// This helps determine whether bare method calls should be treated as instance or class methods.
-    pub fn current_method_context(&self) -> Option<crate::indexer::entry::MethodKind> {
-        use crate::indexer::entry::MethodKind;
-        use crate::types::scope::LVScopeKind;
-
+    pub fn current_method_context(&self) -> Option<MethodKind> {
         // Look for the most recent method scope in the LV stack
         for scope in self.lv_stack.iter().rev() {
             match scope.kind() {

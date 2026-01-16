@@ -155,12 +155,14 @@ impl ReferenceVisitor {
             return true;
         }
 
-        // Also check with Unknown kind for flexibility
-        if method_kind != MethodKind::Unknown {
-            if let Ok(unknown_method) = RubyMethod::new(method_name, MethodKind::Unknown) {
-                if index.contains_method(&unknown_method) {
-                    return true;
-                }
+        // Also check with opposite kind for flexibility (class vs instance)
+        let opposite_kind = match method_kind {
+            MethodKind::Class => MethodKind::Instance,
+            MethodKind::Instance => MethodKind::Class,
+        };
+        if let Ok(opposite_method) = RubyMethod::new(method_name, opposite_kind) {
+            if index.contains_method(&opposite_method) {
+                return true;
             }
         }
 
@@ -318,7 +320,8 @@ impl ReferenceVisitor {
             receiver_namespace.push(constant);
             (receiver_namespace, MethodKind::Class)
         } else {
-            (current_namespace.clone(), MethodKind::Unknown)
+            // Fallback to instance method if constant parsing fails
+            (current_namespace.clone(), MethodKind::Instance)
         }
     }
 
@@ -352,7 +355,8 @@ impl ReferenceVisitor {
             };
             (final_namespace, MethodKind::Class)
         } else {
-            (current_namespace.clone(), MethodKind::Unknown)
+            // Fallback to instance method if constant path resolution fails
+            (current_namespace.clone(), MethodKind::Instance)
         }
     }
 

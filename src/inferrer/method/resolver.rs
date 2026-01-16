@@ -134,7 +134,7 @@ impl MethodResolver {
             all_fqns_to_search.push(owner_fqn.clone());
 
             // Add ancestor chain
-            let ancestors = index.get_ancestor_chain(&owner_fqn, is_singleton);
+            let ancestors = index.get_ancestor_chain(&owner_fqn, method_kind);
             for ancestor in ancestors {
                 if !all_fqns_to_search.contains(&ancestor) {
                     all_fqns_to_search.push(ancestor);
@@ -149,7 +149,7 @@ impl MethodResolver {
                         all_fqns_to_search.push(class_fqn.clone());
                     }
                     // Also add ancestors of including classes
-                    let class_ancestors = index.get_ancestor_chain(&class_fqn, false);
+                    let class_ancestors = index.get_ancestor_chain(&class_fqn, MethodKind::Instance);
                     for ancestor in class_ancestors {
                         if !all_fqns_to_search.contains(&ancestor) {
                             all_fqns_to_search.push(ancestor);
@@ -381,7 +381,7 @@ impl MethodResolver {
             let index = self.index.lock();
 
             // Get the ancestor chain for this class/module
-            let ancestors = index.get_ancestor_chain(&owner_fqn, is_singleton);
+            let ancestors = index.get_ancestor_chain(&owner_fqn, method_kind);
 
             // Search through the ancestor chain for the method
             let mut found_return_types = Vec::new();
@@ -415,9 +415,6 @@ impl MethodResolver {
             let alt_kind = match method_kind {
                 MethodKind::Class => MethodKind::Instance,
                 MethodKind::Instance => MethodKind::Class,
-                MethodKind::Unknown => {
-                    return self.lookup_rbs_method(class_name.as_deref(), method_name, is_singleton)
-                }
             };
 
             if let Ok(ruby_method) = RubyMethod::new(method_name, alt_kind) {

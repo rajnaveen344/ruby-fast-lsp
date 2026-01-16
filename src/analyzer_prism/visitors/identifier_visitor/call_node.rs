@@ -89,7 +89,9 @@ impl IdentifierVisitor {
                 // Determine receiver and method kind
                 let (receiver, method_kind) = if let Some(receiver_node) = node.receiver() {
                     if receiver_node.as_self_node().is_some() {
-                        (MethodReceiver::SelfReceiver, MethodKind::Instance)
+                        // Use context from scope tracker for self receiver
+                        let kind = self.infer_method_kind_from_context();
+                        (MethodReceiver::SelfReceiver, kind)
                     } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
                         let name =
                             String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
@@ -145,7 +147,9 @@ impl IdentifierVisitor {
                         (MethodReceiver::Expression, MethodKind::Instance)
                     }
                 } else {
-                    (MethodReceiver::None, MethodKind::Instance)
+                    // No receiver - use context from scope tracker
+                    let kind = self.infer_method_kind_from_context();
+                    (MethodReceiver::None, kind)
                 };
 
                 let method = RubyMethod::new(&method_name, method_kind).unwrap();
@@ -160,6 +164,26 @@ impl IdentifierVisitor {
                     self.scope_tracker.get_ns_stack(),
                     self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
                 );
+            }
+        }
+    }
+
+    /// Determines the MethodKind for a call with no explicit class receiver.
+    /// Uses scope context to distinguish between:
+    /// - Instance method calls (in instance methods or at top-level)
+    /// - Class method calls (in class body)
+    fn infer_method_kind_from_context(&self) -> MethodKind {
+        match self.scope_tracker.current_method_context() {
+            Some(kind) => kind,
+            None => {
+                // At top level or class body
+                // If namespace is empty, we're at top level -> instance method
+                // If namespace has content, we're in class body -> class method
+                if self.scope_tracker.get_ns_stack().is_empty() {
+                    MethodKind::Instance
+                } else {
+                    MethodKind::Class
+                }
             }
         }
     }

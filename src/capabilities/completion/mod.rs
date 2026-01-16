@@ -13,6 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer},
+    indexer::entry::MethodKind,
     server::RubyLanguageServer,
 };
 
@@ -242,20 +243,18 @@ pub async fn find_completion_at_position(
         );
 
         if let Some(receiver_type) = receiver_type {
-            // Determine if this is a class method call (receiver is a constant)
-            let is_class_method = matches!(
-                &partial_name,
-                Some(Identifier::RubyMethod {
-                    receiver: MethodReceiver::Constant(_),
-                    ..
-                })
-            );
+            // Extract MethodKind from the identifier
+            let kind = if let Some(Identifier::RubyMethod { iden, .. }) = &partial_name {
+                iden.get_kind()
+            } else {
+                MethodKind::Instance // Default fallback
+            };
 
             let method_completions = method::find_method_completions(
                 &server.index,
                 &receiver_type,
                 &partial_string,
-                is_class_method,
+                kind,
             );
             completions.extend(method_completions);
         }

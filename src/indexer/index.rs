@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Location, Url};
 
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::{Entry, MixinRef, MixinType};
+use crate::indexer::entry::{Entry, MethodKind, MixinRef, MixinType};
 use crate::indexer::graph::Graph;
 use crate::indexer::interner::Interner;
 use crate::indexer::prefix_tree::PrefixTree;
@@ -157,7 +157,7 @@ impl RubyIndex {
     pub fn get_ancestor_chain(
         &self,
         fqn: &FullyQualifiedName,
-        is_class_method: bool,
+        kind: MethodKind,
     ) -> Vec<FullyQualifiedName> {
         // Get the FqnId for this FQN
         let Some(fqn_id) = self.get_fqn_id(fqn) else {
@@ -166,6 +166,7 @@ impl RubyIndex {
         };
 
         // Use the inheritance graph for traversal
+        let is_class_method = kind == MethodKind::Class;
         let fqn_ids = if is_class_method {
             self.graph.singleton_lookup_chain(fqn_id)
         } else {

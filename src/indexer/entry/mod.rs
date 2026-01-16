@@ -65,8 +65,6 @@ pub enum MethodKind {
     Instance,
     /// Class method called on the class: `MyClass.method`
     Class,
-    /// Unknown kind - search for both
-    Unknown,
 }
 
 /// How a method was obtained (directly defined or inherited/mixed in)

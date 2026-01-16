@@ -126,9 +126,6 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
         match method_kind {
             MethodKind::Class => detail_parts.push("class method".to_string()),
             MethodKind::Instance => detail_parts.push("instance method".to_string()),
-            MethodKind::Unknown => {
-                // Don't add any method kind info for unknown methods
-            }
         }
     }
 
@@ -294,20 +291,20 @@ mod tests {
     }
 
     #[test]
-    fn test_document_symbol_unknown_method_kind() {
-        let method_unknown = RubySymbolContext {
-            name: "unknown_method".to_string(),
+    fn test_document_symbol_instance_method_kind() {
+        let method_instance = RubySymbolContext {
+            name: "instance_method".to_string(),
             kind: SymbolKind::METHOD,
             detail: None,
             range: create_test_range(),
             selection_range: create_test_range(),
             children: vec![],
             visibility: Some(MethodVisibility::Private),
-            method_kind: Some(MethodKind::Unknown),
+            method_kind: Some(MethodKind::Instance),
         };
 
-        let doc_symbol = convert_to_document_symbol(method_unknown);
-        assert_eq!(doc_symbol.name, "unknown_method");
-        assert_eq!(doc_symbol.detail, Some("private".to_string()));
+        let doc_symbol = convert_to_document_symbol(method_instance);
+        assert_eq!(doc_symbol.name, "instance_method");
+        assert_eq!(doc_symbol.detail, Some("private • instance method".to_string()));
     }
 }

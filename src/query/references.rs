@@ -210,17 +210,10 @@ impl IndexQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let mut all_references = Vec::new();
-        let kinds_to_check = if method.get_kind() == MethodKind::Unknown {
-            vec![MethodKind::Instance, MethodKind::Class]
-        } else {
-            vec![method.get_kind()]
-        };
+        let kind = method.get_kind();
 
-        for kind in kinds_to_check {
-            if let Some(refs) = self.find_method_refs_in_ancestor_chain(receiver_fqn, method, kind)
-            {
-                all_references.extend(refs);
-            }
+        if let Some(refs) = self.find_method_refs_in_ancestor_chain(receiver_fqn, method, kind) {
+            all_references.extend(refs);
         }
 
         if all_references.is_empty() {
@@ -268,8 +261,7 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
-        let is_class_method = kind == MethodKind::Class;
-        let ancestor_chain = index.get_ancestor_chain(context_fqn, is_class_method);
+        let ancestor_chain = index.get_ancestor_chain(context_fqn, kind);
 
         for ancestor_fqn in ancestor_chain {
             let method_fqn =
@@ -310,10 +302,9 @@ impl IndexQuery {
         let index = self.index.lock();
         let mut all_references = Vec::new();
         let including_classes = index.get_including_classes(module_fqn);
-        let is_class_method = kind == MethodKind::Class;
 
         for including_class_fqn in including_classes {
-            let ancestor_chain = index.get_ancestor_chain(&including_class_fqn, is_class_method);
+            let ancestor_chain = index.get_ancestor_chain(&including_class_fqn, kind);
             for ancestor_fqn in ancestor_chain {
                 let method_fqn =
                     FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());

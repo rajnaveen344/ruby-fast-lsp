@@ -51,7 +51,6 @@ impl IdentifierVisitor {
         let scope_kind = match method_kind {
             MethodKind::Class => LVScopeKind::ClassMethod,
             MethodKind::Instance => LVScopeKind::InstanceMethod,
-            MethodKind::Unknown => LVScopeKind::InstanceMethod, // Default to instance method
         };
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));

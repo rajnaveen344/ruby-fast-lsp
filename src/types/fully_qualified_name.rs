@@ -310,7 +310,6 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::Method(_, method) => match method.get_kind() {
                 MethodKind::Instance => write!(f, "{namespace}#{method}"),
                 MethodKind::Class => write!(f, "{namespace}.{method}"),
-                MethodKind::Unknown => write!(f, "{namespace}?{method}"),
             },
             FullyQualifiedName::LocalVariable(name, _) => write!(f, "{}", name),
             FullyQualifiedName::InstanceVariable(name) => write!(f, "{}", name),

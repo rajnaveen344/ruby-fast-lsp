@@ -245,6 +245,25 @@ impl IndexQuery {
             return Some(including_classes);
         }
 
+        // Fallback: try opposite kind (e.g., class method calls in class body
+        // can fallback to instance methods from Object/Kernel)
+        let opposite_kind = match method_kind {
+            MethodKind::Class => MethodKind::Instance,
+            MethodKind::Instance => MethodKind::Class,
+        };
+
+        // Use a fresh visited set for opposite kind search since we're searching
+        // a different method chain (class methods vs instance methods)
+        let mut opposite_visited = HashSet::new();
+        if let Some(locations) = self.search_in_ancestor_chain_with_visited(
+            &receiver_fqn,
+            method,
+            opposite_kind,
+            &mut opposite_visited,
+        ) {
+            return Some(locations);
+        }
+
         None
     }
 
@@ -395,18 +414,11 @@ impl IndexQuery {
         let mut found_locations = Vec::new();
         let mut visited = HashSet::new();
 
-        let kinds_to_check = if method.get_kind() == MethodKind::Unknown {
-            vec![MethodKind::Instance, MethodKind::Class]
-        } else {
-            vec![method.get_kind()]
-        };
-
-        for kind in kinds_to_check {
-            if let Some(locations) =
-                self.search_in_ancestor_chain_with_visited(receiver_fqn, method, kind, &mut visited)
-            {
-                found_locations.extend(locations);
-            }
+        let kind = method.get_kind();
+        if let Some(locations) =
+            self.search_in_ancestor_chain_with_visited(receiver_fqn, method, kind, &mut visited)
+        {
+            found_locations.extend(locations);
         }
 
         if found_locations.is_empty() {
@@ -449,12 +461,11 @@ impl IndexQuery {
         kind: MethodKind,
     ) -> Vec<Location> {
         let mut found_locations = Vec::new();
-        let is_class_method = kind == MethodKind::Class;
 
         let mut modules_to_search = HashSet::new();
         modules_to_search.insert(receiver_fqn.clone());
 
-        let ancestor_chain = index.get_ancestor_chain(receiver_fqn, is_class_method);
+        let ancestor_chain = index.get_ancestor_chain(receiver_fqn, kind);
 
         for ancestor_fqn in &ancestor_chain {
             modules_to_search.insert(ancestor_fqn.clone());
@@ -468,9 +479,12 @@ impl IndexQuery {
             }
         }
 
+        // Create a method with the correct kind for this search
+        let search_method = RubyMethod::new(&method.get_name(), kind).unwrap();
+
         for module_fqn in &modules_to_search {
             let method_fqn =
-                FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
+                FullyQualifiedName::method(module_fqn.namespace_parts(), search_method.clone());
             if let Some(entries) = index.get(&method_fqn) {
                 let locations: Vec<Location> = entries
                     .iter()
@@ -540,7 +554,7 @@ impl IndexQuery {
         let mut included_modules = Vec::new();
         let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-        let ancestor_chain = index.get_ancestor_chain(class_fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(class_fqn, MethodKind::Instance);
 
         for ancestor_fqn in &ancestor_chain {
             if let Some(entries) = index.get(ancestor_fqn) {
@@ -648,7 +662,7 @@ impl IndexQuery {
         }
         modules_to_search.insert(fqn.clone());
 
-        let ancestor_chain = index.get_ancestor_chain(fqn, false);
+        let ancestor_chain = index.get_ancestor_chain(fqn, MethodKind::Instance);
         for ancestor_fqn in &ancestor_chain {
             if !modules_to_search.contains(ancestor_fqn) {
                 modules_to_search.insert(ancestor_fqn.clone());
@@ -717,7 +731,7 @@ fn inner_receiver_to_string(receiver: &MethodReceiver) -> String {
 }
 
 fn is_constant_receiver(method: &RubyMethod) -> bool {
-    method.get_kind() == MethodKind::Class || method.get_kind() == MethodKind::Unknown
+    method.get_kind() == MethodKind::Class
 }
 
 fn deduplicate_locations(locations: Vec<Location>) -> Vec<Location> {

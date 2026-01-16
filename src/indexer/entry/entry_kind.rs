@@ -304,7 +304,6 @@ impl Display for EntryKind {
                 let kind_str = match data.name.get_kind() {
                     MethodKind::Instance => " (Instance)",
                     MethodKind::Class => " (Class)",
-                    MethodKind::Unknown => " (Unknown)",
                 };
                 write!(f, "Method{}: {}", kind_str, data.name)
             }
