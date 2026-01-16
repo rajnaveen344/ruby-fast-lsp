@@ -1,12 +1,15 @@
+//! Inlay hints for variables with Unknown type.
+//!
+//! Unknown types display as ": ?" to indicate type couldn't be inferred.
+
 use crate::test::harness::check;
 
+/// Variable from unknown method shows ": ?"
 #[tokio::test]
-async fn unknown_method_assignment() {
+async fn unknown_method_result() {
     check(
         r#"
 def foo
-  # We assign an unknown method result to a variable
-  # It should show : ? because we don't know the type
   x<hint label=": ?"> = some_unknown_method
 end
 "#,
@@ -14,13 +17,13 @@ end
     .await;
 }
 
+/// Variable assigned from another unknown variable
 #[tokio::test]
 async fn variable_to_variable_unknown() {
     check(
         r#"
 def foo
   x = unknown_thing
-  # y should inherit unknown from x and also show : ?
   y<hint label=": ?"> = x
 end
 "#,

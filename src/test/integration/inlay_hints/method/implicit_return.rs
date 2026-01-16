@@ -1,11 +1,12 @@
-//! Tests for implicit return inlay hints.
+//! Inlay hints for implicit return statements.
+//!
+//! Shows "return" before values that are implicitly returned.
 
 use crate::test::harness::check;
 
+/// Implicit return in if/else branches
 #[tokio::test]
-async fn test_implicit_return_hint_placement() {
-    // Current behavior: hint is placed before 'if'
-    // <hint label="return"> checks for the presence of the hint at that position.
+async fn if_else_branches() {
     check(
         r#"
 class A
@@ -20,7 +21,11 @@ end
 "#,
     )
     .await;
+}
 
+/// Implicit return in case/when branches
+#[tokio::test]
+async fn case_when_branches() {
     check(
         r#"
 class B

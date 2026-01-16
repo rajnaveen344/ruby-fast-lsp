@@ -1,13 +1,13 @@
 //! Integration tests for methods.
+//!
+//! Note: hover and inlay_hints tests have been moved to:
+//! - src/test/integration/hover/
+//! - src/test/integration/inlay_hints/
 
 mod attrs;
 mod branch_variable_return;
 mod goto;
-mod hover;
 mod inference;
-mod inlay_hints;
-mod inlay_hints_implicit_return;
-mod inlay_hints_inferred;
 mod method_chaining;
 pub mod mixin_ambiguity;
 pub mod mixin_goto;

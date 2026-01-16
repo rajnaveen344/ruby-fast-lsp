@@ -1,9 +1,10 @@
-//! Hover tests for modules.
+//! Hover tests for module constants.
 
 use crate::test::harness::check;
 
+/// Hover on module definition shows "module ModuleName"
 #[tokio::test]
-async fn test_hover_module_definition() {
+async fn module_definition() {
     check(
         r#"
 module MyModule<hover label="module MyModule">
@@ -13,8 +14,9 @@ end
     .await;
 }
 
+/// Hover on module reference shows "module ModuleName"
 #[tokio::test]
-async fn test_hover_module_reference() {
+async fn module_reference() {
     check(
         r#"
 module Foo; end

@@ -1,6 +1,7 @@
-//! Integration tests for classes and modules.
+//! Integration tests for classes.
+//!
+//! Note: hover tests have been moved to src/test/integration/hover/
 
 mod goto;
-mod hover;
 mod references;
 mod type_hierarchy;
