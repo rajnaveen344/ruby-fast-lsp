@@ -1,6 +1,6 @@
 # 🎯 Method Goto Definition
 
-How the LSP resolves method definitions, including Ruby's `include`, `prepend`, and `extend`.
+How the LSP resolves method definitions using Ruby's method resolution order (MRO), including support for `include`, `prepend`, and `extend`.
 
 ---
 
@@ -8,36 +8,21 @@ How the LSP resolves method definitions, including Ruby's `include`, `prepend`, 
 
 **→ Read [goto_definition_guide.md](./goto_definition_guide.md)**
 
-This single comprehensive guide covers:
+This comprehensive guide covers:
 - ✅ Quick reference (include/prepend/extend rules)
-- ✅ How the LSP implements resolution
-- ✅ Step-by-step traversal examples
-- ✅ Truth tables and priority rules
-- ✅ Implementation details
-- ✅ Common patterns and gotchas
-
----
-
-## 🧪 Examples
-
-**→ See [examples/](./examples/)**
-
-Runnable Ruby code demonstrating:
-- Nested module hierarchies
-- Shared modules with multiple includers
-- All metaprogramming scenarios
-
-```bash
-ruby examples/metaprogramming_examples.rb
-```
+- ✅ Current implementation architecture
+- ✅ Namespace-based method resolution
+- ✅ Singleton class handling
+- ✅ Ancestor chain lookup
+- ✅ Priority rules and common patterns
 
 ---
 
 ## 🚀 Quick Start
 
 1. Read [goto_definition_guide.md](./goto_definition_guide.md) for complete understanding
-2. Run [examples/metaprogramming_examples.rb](./examples/metaprogramming_examples.rb) to see it in action
-3. Check actual implementation in `src/query/method.rs`
+2. Check implementation in `src/query/method.rs` and `src/indexer/index.rs`
+3. Review integration tests in `src/test/integration/methods/`
 
 ---
 
@@ -46,17 +31,36 @@ ruby examples/metaprogramming_examples.rb
 ```
 include M  → 📦 Instance methods AFTER class
 prepend M  → ⚡ Instance methods BEFORE class
-extend M   → 🔧 Class methods (singleton)
+extend M   → 🔧 Singleton methods (class methods)
 
 Priority: ⚡ prepend > 🎯 class > 📦 include > 🔗 superclass
 ```
 
 ---
 
-## 🔍 Key Insight
+## 🔍 Key Architecture
 
-**The LSP uses TWO different strategies:**
-- **Class context**: Search UP the inheritance chain (first match)
-- **Module context**: Search DOWN to including classes (all matches)
+**Namespace-Based Resolution:**
+- Each class/module exists as **TWO** namespace FQNs:
+  - `Namespace(Foo, Instance)` - for instance method lookup
+  - `Namespace(Foo, Singleton)` - for class method lookup
+- Methods are indexed under their owner namespace with kind
+- Ancestor chains are computed per namespace kind
 
-See the guide for full details.
+**Benefits:**
+- Type-safe distinction between instance and singleton methods
+- Efficient O(1) FQN lookup
+- Matches Ruby's internal object model
+
+---
+
+## 🎯 Method Resolution
+
+The LSP resolves methods by:
+
+1. **Determine context namespace** - Instance or Singleton
+2. **Build search space** - Get ancestor chain for that namespace
+3. **Search hierarchy** - Walk ancestors in MRO order
+4. **Return first match** - Ruby semantics (first definition wins)
+
+See the guide for detailed implementation.

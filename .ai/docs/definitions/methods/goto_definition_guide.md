@@ -1,6 +1,6 @@
 # 🎯 Method Goto Definition Guide
 
-Complete guide to understanding how the LSP resolves method definitions, including Ruby's `include`, `prepend`, and `extend`.
+Complete guide to how the LSP resolves method definitions using Ruby's method resolution order (MRO), including support for `include`, `prepend`, and `extend`.
 
 ---
 
@@ -11,7 +11,7 @@ Complete guide to understanding how the LSP resolves method definitions, includi
 ```
 include M  → 📦 Instance methods AFTER class   → obj.m ✅  Class.m ❌
 prepend M  → ⚡ Instance methods BEFORE class  → obj.m ✅  Class.m ❌
-extend M   → 🔧 Class methods (singleton)      → obj.m ❌  Class.m ✅
+extend M   → 🔧 Singleton methods              → obj.m ❌  Class.m ✅
 ```
 
 ### Priority Rules
@@ -31,7 +31,75 @@ Lookup: [Prepends] → [Class] → [Includes] → [Superclass] → [Object] → 
 
 ---
 
-## 🔍 How the LSP Resolves Methods
+## 🏗️ Architecture Overview
+
+### Namespace-Based FQN System
+
+The LSP uses a namespace-based approach where each class/module is represented as **two separate entries**:
+
+```rust
+// Instance namespace - for instance method lookup
+Namespace(vec![RubyConstant("Foo")], NamespaceKind::Instance)
+
+// Singleton namespace - for class method lookup
+Namespace(vec![RubyConstant("Foo")], NamespaceKind::Singleton)
+```
+
+**Why Two Entries?**
+
+This matches Ruby's internal object model where:
+- Instance methods belong to the class itself (`Foo`)
+- Class methods belong to the singleton class (`#<Class:Foo>`)
+
+### FQN Display Format
+
+```rust
+// Instance namespace
+Foo::Bar  // Namespace(["Foo", "Bar"], Instance)
+
+// Singleton namespace
+#<Class:Foo::Bar>  // Namespace(["Foo", "Bar"], Singleton)
+
+// Methods (all use # since they're instance methods of their namespace)
+Foo::Bar#method_name  // Method(["Foo", "Bar"], RubyMethod("method_name"))
+```
+
+### Indexing Strategy
+
+During file indexing, the LSP creates:
+
+1. **Two namespace entries per class/module**:
+   ```rust
+   // For: class Foo; end
+   Namespace(["Foo"], Instance)   → Entry { kind: Class, ... }
+   Namespace(["Foo"], Singleton)  → Entry { kind: Class, ... }
+   ```
+
+2. **Methods indexed under owner namespace**:
+   ```rust
+   // For: def bar; end (instance method)
+   Method(["Foo"], "bar")
+   // Stored with owner: Namespace(["Foo"], Instance)
+
+   // For: def self.bar; end (class method)
+   Method(["Foo"], "bar")
+   // Stored with owner: Namespace(["Foo"], Singleton)
+   ```
+
+3. **Inheritance relationships** stored in `InheritanceGraph`:
+   ```rust
+   struct InheritanceGraph {
+       superclass: HashMap<FqnId, FqnId>,
+       includes: HashMap<FqnId, Vec<FqnId>>,
+       prepends: HashMap<FqnId, Vec<FqnId>>,
+       extends: HashMap<FqnId, Vec<FqnId>>,
+       includers: HashMap<FqnId, Vec<FqnId>>,  // Reverse index
+   }
+   ```
+
+---
+
+## 🔍 How Method Resolution Works
 
 ### Entry Point
 
@@ -40,360 +108,421 @@ src/capabilities/definitions.rs:find_definition_at_position()
   ↓
 src/query/definition.rs:find_definitions_at_position()
   ↓
-src/query/method.rs:find_method_definitions()
+src/query/definition.rs:find_method_definitions()
+  ↓
+src/query/method.rs (resolution logic)
 ```
 
-### Resolution Strategy
-
-The LSP uses **two different strategies** based on context:
-
-#### 1️⃣ Class Context (Search UP)
+### Resolution Flow
 
 ```rust
-// src/query/method.rs:445-490
-search_method_in_class_hierarchy_static()
-```
+fn find_method_definitions(
+    receiver: &MethodReceiver,
+    method_name: &str,
+    ancestors: &[RubyConstant],
+    // ...
+) -> Option<Vec<Location>> {
+    // 1. Determine namespace kind from receiver
+    let namespace_kind = match receiver {
+        MethodReceiver::SelfReceiver => {
+            // self.foo or Foo.bar → Singleton
+            NamespaceKind::Singleton
+        }
+        MethodReceiver::Implicit | MethodReceiver::InstanceReceiver(..) => {
+            // foo or obj.foo → Instance
+            NamespaceKind::Instance
+        }
+    };
 
-**Used when**: Inside a class calling a method
-**Strategy**: Walk up the inheritance chain + includes
-**Returns**: First match
+    // 2. Build namespace FQN with appropriate kind
+    let receiver_fqn = FullyQualifiedName::namespace_with_kind(
+        receiver_namespace_parts,
+        namespace_kind
+    );
 
-```
-MyClass
-  ↓ Check: MyClass itself
-  ↓ Check: Includes (reverse order)
-  ↓ Check: Superclass
-  ↓ Check: Superclass includes
-  ↓ Check: Object → Kernel → BasicObject
-```
+    // 3. Get ancestor chain (automatically uses correct chain based on kind)
+    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn);
 
-#### 2️⃣ Module Context (Search DOWN)
+    // 4. Search for method in ancestor chain
+    for ancestor_fqn in ancestor_chain {
+        let method_fqn = FullyQualifiedName::method(
+            ancestor_fqn.namespace_parts(),
+            method
+        );
 
-```rust
-// src/query/method.rs:492-534
-search_method_in_including_classes_static()
-```
-
-**Used when**: Inside a module calling a method
-**Strategy**: Find all classes that include this module
-**Returns**: ALL matches (multiple implementations)
-
-```
-SharedModule
-  ↓ Check: Module itself
-  ↓ Find: WHO includes me?
-    → ClassA (check its hierarchy)
-    → ClassB (check its hierarchy)
-    → ClassC (check its hierarchy)
-  ↓ Returns: All implementations
-```
-
-### Critical Decision Point
-
-```rust
-// src/query/method.rs:419-443
-if is_class_context_static(&index, receiver_fqn) {
-    // CLASS: Search UP
-    search_method_in_class_hierarchy_static(...)
-} else {
-    // MODULE: Search DOWN
-    search_method_in_including_classes_static(...)
+        if let Some(entries) = index.get(&method_fqn) {
+            return Some(to_locations(entries));  // First match wins
+        }
+    }
 }
 ```
 
+### Ancestor Chain Computation
+
+```rust
+// src/indexer/index.rs
+pub fn get_ancestor_chain(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+    // Extract namespace kind from FQN
+    let kind = fqn.namespace_kind().unwrap_or(NamespaceKind::Instance);
+
+    // Get the FqnId for lookup
+    let Some(fqn_id) = self.get_fqn_id(fqn) else {
+        return vec![];
+    };
+
+    // Dispatch to appropriate chain based on namespace kind
+    let fqn_ids = match kind {
+        NamespaceKind::Singleton => {
+            // Singleton chain: #<Class:Foo> → #<Class:Object> → #<Class:BasicObject>
+            self.graph.singleton_lookup_chain(fqn_id)
+        }
+        NamespaceKind::Instance => {
+            // Instance chain: Foo → Object → BasicObject
+            self.graph.method_lookup_chain(fqn_id)
+        }
+    };
+
+    // Convert FqnIds back to FullyQualifiedNames
+    fqn_ids.into_iter()
+        .filter_map(|id| self.get_fqn(id).cloned())
+        .collect()
+}
+```
+
+**Key Points:**
+- Single `get_ancestor_chain()` method - kind is embedded in the FQN
+- Returns different chains for Instance vs Singleton namespaces
+- Chains are pre-computed during indexing for O(1) lookup
+
 ---
 
-## 🎬 Traversal Examples
+## 🎬 Resolution Examples
 
-### Example 1: Class with Include
+### Example 1: Instance Method Call
 
 ```ruby
-module M
-  def helper
-    "M"
+class Foo
+  def bar
+    baz  # Resolve this
+  end
+
+  def baz
+    "found"
+  end
+end
+```
+
+**Resolution:**
+```
+1. Determine kind: NamespaceKind::Instance (implicit receiver)
+2. Build FQN: Namespace(["Foo"], Instance)
+3. Get ancestor chain: [Namespace(["Foo"], Instance), Namespace(["Object"], Instance), ...]
+4. Search for Method(["Foo"], "baz") → ✅ FOUND
+```
+
+### Example 2: Class Method Call
+
+```ruby
+class Foo
+  def self.create
+    validate  # Resolve this
+  end
+
+  def self.validate
+    "found"
+  end
+end
+```
+
+**Resolution:**
+```
+1. Determine kind: NamespaceKind::Singleton (inside class method)
+2. Build FQN: Namespace(["Foo"], Singleton)
+3. Get ancestor chain: [Namespace(["Foo"], Singleton), Namespace(["Object"], Singleton), ...]
+4. Search for Method(["Foo"], "validate") → ✅ FOUND (in singleton namespace)
+```
+
+### Example 3: Include Module
+
+```ruby
+module Helper
+  def util_method
+    "helper"
   end
 end
 
 class MyClass
-  include M
+  include Helper
 
   def test
-    helper  # <-- Goto definition here
+    util_method  # Resolve this
   end
 end
 ```
 
-**Traversal:**
-
+**Resolution:**
 ```
-START: MyClass (class context)
-  ↓
-1. Check MyClass#helper → NOT FOUND
-2. Check M#helper → ✅ FOUND
-
-Result: M#helper at line 2
+1. Determine kind: NamespaceKind::Instance
+2. Build FQN: Namespace(["MyClass"], Instance)
+3. Get ancestor chain:
+   - Namespace(["MyClass"], Instance)
+   - Namespace(["Helper"], Instance)  ← include adds to chain!
+   - Namespace(["Object"], Instance)
+4. Search ancestors:
+   - Check Method(["MyClass"], "util_method") → Not found
+   - Check Method(["Helper"], "util_method") → ✅ FOUND
 ```
 
----
-
-### Example 2: Class with Prepend
+### Example 4: Prepend Module
 
 ```ruby
-module M
-  def helper
-    "M"
+module Logging
+  def save
+    puts "logging"
+    super
   end
 end
 
-class MyClass
-  prepend M
+class User
+  prepend Logging
 
-  def helper
-    "MyClass"
-  end
-
-  def test
-    helper  # <-- What gets called?
+  def save
+    "original"
   end
 end
 ```
 
-**Traversal:**
-
+**Ancestor Chain:**
 ```
-START: MyClass (class context)
-  ↓
-Lookup order: M → MyClass → Object...
-  ↓
-1. Check M#helper → ✅ FOUND (prepend wins!)
-
-Result: M#helper (not MyClass#helper)
+User.new.save calls:
+  [Namespace(["Logging"], Instance),     ← prepend comes FIRST
+   Namespace(["User"], Instance),
+   Namespace(["Object"], Instance),
+   ...]
 ```
 
----
+**Resolution:**
+```
+1. Check Method(["Logging"], "save") → ✅ FOUND (prepend wins!)
+```
 
-### Example 3: Module Calling Method in Multiple Classes
+### Example 5: Extend Module
 
 ```ruby
-module SharedModule
-  def process
-    helper_method  # <-- Goto definition
+module Findable
+  def find(id)
+    "found"
   end
 end
 
-class ClassA
-  include SharedModule
-  def helper_method; "A"; end
+class User
+  extend Findable
 end
 
-class ClassB
-  include SharedModule
-  def helper_method; "B"; end
-end
+# User.find(1) - how does this resolve?
 ```
 
-**Traversal:**
-
+**Resolution:**
 ```
-START: SharedModule (module context)
-  ↓
-1. Check SharedModule#helper_method → NOT FOUND
-2. Find classes that include SharedModule:
-   - index.get_including_classes(SharedModule)
-   - Returns: [ClassA, ClassB]
-3. Search in ClassA hierarchy → ClassA#helper_method ✅
-4. Search in ClassB hierarchy → ClassB#helper_method ✅
-
-Result: BOTH implementations (line 8 and line 13)
+1. Receiver: User (constant) → NamespaceKind::Singleton
+2. Build FQN: Namespace(["User"], Singleton)
+3. Get ancestor chain:
+   - Namespace(["User"], Singleton)
+   - Namespace(["Findable"], Instance)  ← extend adds module's instance methods!
+4. Check Method(["Findable"], "find") → ✅ FOUND
 ```
 
-**Key**: Module context returns **all possible implementations**!
+**Note:** `extend` adds the module's **instance** methods to the receiver's **singleton** class.
 
 ---
 
-### Example 4: Nested Includes
-
-```ruby
-module A
-  def a_method; end
-end
-
-module B
-  include A
-  def b_method; end
-end
-
-class MyClass
-  include B
-
-  def test
-    a_method  # <-- How does this resolve?
-  end
-end
-```
-
-**Traversal:**
-
-```
-START: MyClass
-  ↓
-Search space built by collect_all_searchable_modules_static():
-  {MyClass, B, A, Object, Kernel, BasicObject}
-  ↓
-1. Check MyClass#a_method → NOT FOUND
-2. Check B#a_method → NOT FOUND
-3. Check A#a_method → ✅ FOUND
-
-Result: A#a_method (through transitive include)
-```
-
----
-
-## 📊 Truth Table: Priority Rules
-
-### Class Method vs Include
-
-| Code                                                       | Result | Winner                 |
-| ---------------------------------------------------------- | ------ | ---------------------- |
-| `class C`<br>`  include M`<br>`  def m; "C"; end`<br>`end` | `"C"`  | 🎯 Class beats include |
-| `class C`<br>`  prepend M`<br>`  def m; "C"; end`<br>`end` | `"M"`  | ⚡ Prepend beats class  |
-
-### Multiple Includes
-
-| Code                                                 | Result               | Reason               |
-| ---------------------------------------------------- | -------------------- | -------------------- |
-| `class C`<br>`  include M`<br>`  include N`<br>`end` | N's method           | 📌 Last include wins |
-| `class C`<br>`  prepend M`<br>`  prepend N`<br>`end` | Check `C.ancestors`! | ⚡ Prepends reverse   |
-
-**To check**: `C.ancestors # => [N, M, C, ...]` (last prepend is first in chain)
-
-### Mix of All Three
-
-```ruby
-module M; def m; "M"; end; end
-module N; def m; "N"; end; end
-module P; def m; "P"; end; end
-
-class C
-  include M
-  prepend N
-  include P
-  def m; "C"; end
-end
-
-C.new.m  # Result?
-```
-
-**Lookup**: `N → C → P → M → Object...`
-**Result**: `"N"` (prepend always first)
-
----
-
-## 🏗️ Implementation Details
+## 📊 Implementation Details
 
 ### Data Structures
+
+#### FullyQualifiedName Enum
+
+```rust
+pub enum FullyQualifiedName {
+    /// Namespace (class/module) with kind
+    Namespace(Vec<RubyConstant>, NamespaceKind),
+
+    /// Value constant (not a class/module)
+    Constant(Vec<RubyConstant>),
+
+    /// Method (just namespace + name, no kind)
+    Method(Vec<RubyConstant>, RubyMethod),
+
+    // Variables...
+}
+
+pub enum NamespaceKind {
+    Instance,   // Regular namespace
+    Singleton,  // Singleton class
+}
+```
 
 #### InheritanceGraph
 
 ```rust
-// src/indexer/inheritance_graph.rs
 pub struct InheritanceGraph {
-    superclass: HashMap<FqnId, FqnId>,           // Class → Superclass
-    includes: HashMap<FqnId, Vec<FqnId>>,        // includes tracking
-    prepends: HashMap<FqnId, Vec<FqnId>>,        // prepends tracking
-    extends: HashMap<FqnId, Vec<FqnId>>,         // extends tracking
-    includers: HashMap<FqnId, Vec<FqnId>>,       // Reverse: Module → Classes
+    // Direct relationships
+    superclass: HashMap<FqnId, FqnId>,
+    includes: HashMap<FqnId, Vec<FqnId>>,
+    prepends: HashMap<FqnId, Vec<FqnId>>,
+    extends: HashMap<FqnId, Vec<FqnId>>,
+
+    // Reverse index for module → classes lookup
+    includers: HashMap<FqnId, Vec<FqnId>>,
 }
 ```
 
-#### Index
+### Key Methods
+
+#### Method Lookup Chain
 
 ```rust
-// FQN-based HashMap for O(1) lookup
-HashMap<FullyQualifiedName, Vec<Entry>>
+// src/indexer/inheritance_graph.rs
 
-// Examples:
-"MyClass::MyModule#method_name" → Entry { location, ... }
-"MyClass" → Entry { kind: Class, includes: [...], ... }
-```
+/// Instance method lookup chain (include/prepend/superclass)
+pub fn method_lookup_chain(&self, fqn_id: FqnId) -> Vec<FqnId> {
+    let mut chain = Vec::new();
+    let mut visited = HashSet::new();
 
-### Key Functions
+    self.collect_mro(fqn_id, &mut chain, &mut visited);
+    chain
+}
 
-#### 1. Building the Search Space
+/// Singleton method lookup chain (extend/superclass singleton)
+pub fn singleton_lookup_chain(&self, fqn_id: FqnId) -> Vec<FqnId> {
+    let mut chain = Vec::new();
+    let mut visited = HashSet::new();
 
-```rust
-fn search_method_in_class_hierarchy_static() {
-    let mut modules_to_search = HashSet::new();
-
-    // Add class itself
-    modules_to_search.insert(receiver_fqn);
-
-    // Get ancestor chain (superclass → Object → BasicObject)
-    let ancestor_chain = index.get_ancestor_chain(receiver_fqn, is_class_method);
-
-    // For each ancestor, get its mixins
-    for ancestor in ancestor_chain {
-        let included_modules = get_included_modules_static(index, ancestor);
-
-        // Recursively collect all searchable modules
-        for module in included_modules {
-            collect_all_searchable_modules_static(index, module, &mut modules_to_search);
+    // Add singleton's extends
+    if let Some(extends) = self.extends.get(&fqn_id) {
+        for ext_id in extends.iter().rev() {
+            self.collect_mro(*ext_id, &mut chain, &mut visited);
         }
     }
 
-    // Search for method in all collected modules
-    for module in modules_to_search {
-        let method_fqn = FullyQualifiedName::method(module, method_name);
-        if let Some(entries) = index.get(&method_fqn) {
-            return Some(entries); // First match wins
+    // Add the singleton class itself
+    if visited.insert(fqn_id) {
+        chain.push(fqn_id);
+    }
+
+    // Walk up singleton class chain
+    let mut current = fqn_id;
+    while let Some(&parent_id) = self.superclass.get(&current) {
+        if !visited.insert(parent_id) {
+            break;  // Cycle detected
+        }
+        chain.push(parent_id);
+        current = parent_id;
+    }
+
+    chain
+}
+
+/// Collect method resolution order (prepends → self → includes → superclass)
+fn collect_mro(&self, fqn_id: FqnId, chain: &mut Vec<FqnId>, visited: &mut HashSet<FqnId>) {
+    // 1. Add prepends (in reverse order)
+    if let Some(prepends) = self.prepends.get(&fqn_id) {
+        for prepend_id in prepends.iter().rev() {
+            self.collect_mro(*prepend_id, chain, visited);
         }
     }
+
+    // 2. Add self
+    if visited.insert(fqn_id) {
+        chain.push(fqn_id);
+    }
+
+    // 3. Add includes (in reverse order)
+    if let Some(includes) = self.includes.get(&fqn_id) {
+        for include_id in includes.iter().rev() {
+            self.collect_mro(*include_id, chain, visited);
+        }
+    }
+
+    // 4. Add superclass
+    if let Some(&superclass_id) = self.superclass.get(&fqn_id) {
+        self.collect_mro(superclass_id, chain, visited);
+    }
 }
 ```
 
-#### 2. Processing Mixins
+#### Creating Namespace Entries
 
 ```rust
-fn process_entry_mixins_static(...) {
-    // CRITICAL: Process in Ruby's order!
+// src/analyzer_prism/visitors/index_visitor/class_node.rs
 
-    // 1. Prepends (reverse order for correct priority)
-    Self::process_mixins_static(prepends, reverse_order = true);
+pub fn process_class_node_entry(&mut self, node: &ClassNode) {
+    let namespace_parts = /* ... build from node ... */;
 
-    // 2. Includes
-    Self::process_mixins_static(includes, reverse_order = false);
+    // Create BOTH Instance and Singleton namespace entries
+    let instance_fqn = FullyQualifiedName::namespace_with_kind(
+        namespace_parts.clone(),
+        NamespaceKind::Instance
+    );
 
-    // 3. Extends
-    Self::process_mixins_static(extends, reverse_order = false);
+    let singleton_fqn = FullyQualifiedName::namespace_with_kind(
+        namespace_parts.clone(),
+        NamespaceKind::Singleton
+    );
+
+    // Index both
+    self.index.add(instance_fqn, Entry { kind: EntryKind::Class, ... });
+    self.index.add(singleton_fqn, Entry { kind: EntryKind::Class, ... });
+
+    // Store inheritance relationships for both
+    if let Some(superclass) = node.superclass() {
+        self.index.graph.add_superclass(instance_fqn, superclass_fqn);
+        self.index.graph.add_superclass(singleton_fqn, superclass_singleton_fqn);
+    }
 }
 ```
 
-#### 3. Recursive Module Collection
+#### Indexing Methods
 
 ```rust
-fn collect_all_searchable_modules_static(
-    index: &RubyIndex,
-    fqn: &FullyQualifiedName,
-    modules_to_search: &mut HashSet<FullyQualifiedName>,
-) {
-    if modules_to_search.contains(fqn) {
-        return; // Prevent infinite loops
-    }
+// src/analyzer_prism/visitors/index_visitor/def_node.rs
 
-    modules_to_search.insert(fqn.clone());
+pub fn process_def_node_entry(&mut self, node: &DefNode) {
+    let method_name = /* ... */;
+    let namespace_parts = self.scope_tracker.get_ns_stack();
 
-    // Get this module's ancestor chain
-    let ancestor_chain = index.get_ancestor_chain(fqn, false);
-    for ancestor in ancestor_chain {
-        modules_to_search.insert(ancestor);
-    }
+    // Determine which namespace owns this method
+    let owner_kind = if let Some(receiver) = node.receiver() {
+        if receiver.as_self_node().is_some() {
+            NamespaceKind::Singleton  // def self.foo
+        } else {
+            NamespaceKind::Instance   // def obj.foo
+        }
+    } else if self.scope_tracker.in_singleton() {
+        NamespaceKind::Singleton      // class << self; def foo
+    } else {
+        NamespaceKind::Instance       // def foo
+    };
 
-    // Get this module's includes
-    let included_modules = get_included_modules_static(index, fqn);
-    for module in included_modules {
-        // Recursive call
-        collect_all_searchable_modules_static(index, module, modules_to_search);
-    }
+    // Create method FQN (no kind - just namespace + name)
+    let method_fqn = FullyQualifiedName::method(
+        namespace_parts.clone(),
+        RubyMethod::new(method_name)?
+    );
+
+    // Store with owner namespace that has the kind
+    let owner_fqn = FullyQualifiedName::namespace_with_kind(
+        namespace_parts,
+        owner_kind
+    );
+
+    self.index.add(method_fqn, Entry {
+        kind: EntryKind::Method(MethodData {
+            owner: owner_fqn,
+            return_type: /* infer */,
+        }),
+        location,
+    });
 }
 ```
 
@@ -401,7 +530,9 @@ fn collect_all_searchable_modules_static(
 
 ## 💡 Common Patterns
 
-### 📦 Shared Behavior (include)
+### Instance Methods (include)
+
+**Use:** Add shared behavior that the class can override
 
 ```ruby
 module Taggable
@@ -410,13 +541,14 @@ module Taggable
   end
 end
 
-class Article; include Taggable; end
-class Video; include Taggable; end
+class Article
+  include Taggable  # Article#add_tag available
+end
 ```
 
-**Use**: Add instance methods that class can override
+### Decorator Pattern (prepend)
 
-### 🎁 Decorator (prepend)
+**Use:** Wrap existing methods with additional behavior
 
 ```ruby
 module Timestamped
@@ -427,14 +559,16 @@ module Timestamped
 end
 
 class User
-  prepend Timestamped
-  def save; ...; end
+  prepend Timestamped  # Timestamped#save wraps User#save
+  def save
+    # original implementation
+  end
 end
 ```
 
-**Use**: Wrap existing methods with additional behavior
+### Class Methods (extend)
 
-### 🔧 Class Methods (extend)
+**Use:** Add class-level utilities
 
 ```ruby
 module Findable
@@ -444,34 +578,9 @@ module Findable
 end
 
 class User
-  extend Findable  # User.find_by_name
+  extend Findable  # User.find_by_name available
 end
 ```
-
-**Use**: Add class-level utilities
-
-### 🎨 Both Instance and Class Methods
-
-```ruby
-module Sortable
-  def self.included(base)
-    base.extend(ClassMethods)
-  end
-
-  module ClassMethods
-    def sorted; ...; end
-  end
-
-  def sort_key; ...; end
-end
-
-class User
-  include Sortable
-  # Now has: User.sorted AND user.sort_key
-end
-```
-
-**Use**: Rails ActiveSupport::Concern pattern
 
 ---
 
@@ -487,68 +596,43 @@ end
 ❌ Assuming `prepend M; prepend N` → M first
 ✅ Actually: `N → M → Class` (reverse!)
 
-### 3. super Without Target
-
-❌ Using `super` when nothing to call
-✅ Check `.ancestors` or use `defined?(super)`
-
-### 4. Module Class Methods Don't Transfer
+### 3. Module Class Methods Don't Transfer
 
 ❌ Expecting `module M; def self.foo; end; end` to transfer via include
-✅ Only instance methods transfer
-
----
-
-## 🧪 Testing
-
-### Check Lookup Order
-
-```ruby
-MyClass.ancestors
-# => [Prepends, MyClass, Includes, Superclass, Object, Kernel, BasicObject]
-```
-
-### Find Method Owner
-
-```ruby
-MyClass.instance_method(:method_name).owner
-# => MyModule (or MyClass, etc.)
-```
-
-### Run Examples
-
-```bash
-ruby examples/metaprogramming_examples.rb
-```
-
----
-
-## 🎯 Decision Guide
-
-| I want to...         | Use             | When                |
-| -------------------- | --------------- | ------------------- |
-| Add instance methods | `include M`     | Shared behavior     |
-| Add class methods    | `extend M`      | Class utilities     |
-| Wrap methods         | `prepend M`     | Decorators          |
-| Provide defaults     | `include M`     | Class can override  |
-| Force override       | `prepend M`     | Can't be overridden |
-| Add to one object    | `obj.extend(M)` | Singleton           |
+✅ Only instance methods transfer - use `extend` or `included` hook
 
 ---
 
 ## 📌 Key Takeaways
 
-1. **Two search strategies**: Class context (UP) vs Module context (DOWN)
-2. **Priority order**: Prepend > Class > Include > Superclass
-3. **Recursive collection**: Modules can include modules (transitive)
-4. **FQN-based index**: O(1) lookup using fully qualified names
-5. **Pre-computed graph**: InheritanceGraph built during indexing
-6. **Visitor set**: Prevents infinite loops in circular includes
+1. **Namespace-based indexing**: Each class/module creates TWO namespace entries (Instance and Singleton)
+2. **Kind embedded in FQN**: `get_ancestor_chain()` automatically dispatches based on `NamespaceKind`
+3. **Methods are namespace-agnostic**: Method FQN has no kind - owner namespace determines instance vs class method
+4. **Pre-computed chains**: Inheritance graph computed during indexing for O(1) lookup
+5. **MRO order**: Prepend → Self → Include → Superclass (matches Ruby semantics)
+6. **Cycle prevention**: `visited` set prevents infinite loops in circular relationships
+
+---
+
+## 🧪 Testing
+
+Run integration tests to verify method resolution:
+
+```bash
+cargo test --test integration methods
+```
+
+Key test files:
+- `src/test/integration/methods/definition.rs`
+- `src/test/integration/methods/include_prepend.rs`
+- `src/test/integration/methods/singleton.rs`
 
 ---
 
 ## 📚 See Also
 
-- **examples/**: Runnable Ruby code demonstrating all scenarios
-- **src/query/method.rs**: Full implementation
-- **src/indexer/inheritance_graph.rs**: Graph data structure
+- **src/query/method.rs**: Method resolution implementation
+- **src/indexer/index.rs**: Ancestor chain computation
+- **src/indexer/inheritance_graph.rs**: Graph data structure and MRO
+- **src/analyzer_prism/visitors/index_visitor/**: Indexing logic
+- **src/test/integration/methods/**: Comprehensive test suite
