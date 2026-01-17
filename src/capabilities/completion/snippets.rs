@@ -1114,7 +1114,7 @@ mod tests {
         let analyzer =
             RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content.to_string());
         let position = Position::new(1, 5); // Position at last char of "each" in "a.each"
-        let (identifier, _, _, _) = analyzer.get_identifier(position);
+        let (identifier, _, _, _, _) = analyzer.get_identifier(position);
 
         let context = RubySnippets::determine_context(&identifier);
         match context {
@@ -1136,7 +1136,7 @@ mod tests {
         let analyzer2 =
             RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content2.to_string());
         let position2 = Position::new(0, 3); // Position at last char of "each"
-        let (identifier2, _, _, _) = analyzer2.get_identifier(position2);
+        let (identifier2, _, _, _, _) = analyzer2.get_identifier(position2);
 
         let context2 = RubySnippets::determine_context(&identifier2);
         assert!(
@@ -1155,7 +1155,7 @@ mod tests {
         let analyzer =
             RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content.to_string());
         let position = Position::new(1, 5); // Position at last char of "each" in "a.each"
-        let (identifier, _, _, _) = analyzer.get_identifier(position);
+        let (identifier, _, _, _, _) = analyzer.get_identifier(position);
 
         let context = RubySnippets::determine_context(&identifier);
         let completions = RubySnippets::get_matching_snippets_with_context("each", context);
@@ -1189,7 +1189,7 @@ mod tests {
         let analyzer2 =
             RubyPrismAnalyzer::new(Url::parse("file:///test.rb").unwrap(), content2.to_string());
         let position2 = Position::new(0, 3); // Position at last char of "each"
-        let (identifier2, _, _, _) = analyzer2.get_identifier(position2);
+        let (identifier2, _, _, _, _) = analyzer2.get_identifier(position2);
 
         let context2 = RubySnippets::determine_context(&identifier2);
         let completions2 = RubySnippets::get_matching_snippets_with_context("each", context2);

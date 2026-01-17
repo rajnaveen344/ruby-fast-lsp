@@ -58,7 +58,7 @@ pub async fn find_completion_at_position(
         .nth(position.line as usize)
         .unwrap_or("");
 
-    let (partial_name, _, _, lv_stack_at_pos) = analyzer.get_identifier(position);
+    let (partial_name, _, _, lv_stack_at_pos, _namespace_kind) = analyzer.get_identifier(position);
 
     // Check if we're in a :: (scope resolution) context
     let is_scope_resolution_context = if is_trigger_character && trigger_character == Some(":") {

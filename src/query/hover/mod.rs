@@ -38,7 +38,7 @@ impl IndexQuery {
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, identifier_type, namespace, scope_id) =
+        let (identifier_opt, identifier_type, namespace, scope_id, _namespace_kind) =
             analyzer.get_identifier(position);
 
         let identifier = identifier_opt?;

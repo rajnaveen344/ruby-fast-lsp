@@ -3,7 +3,7 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::EntryKind;
+use crate::indexer::entry::{EntryKind, NamespaceKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
@@ -33,7 +33,8 @@ impl IndexQuery {
         }
 
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier, _, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier, _, ancestors, _scope_stack, namespace_kind) =
+            analyzer.get_identifier(position);
 
         let identifier = match identifier {
             Some(id) => id,
@@ -49,7 +50,7 @@ impl IndexQuery {
             identifier,
         );
 
-        self.find_definitions_for_identifier(&identifier, &ancestors, position, uri, content)
+        self.find_definitions_for_identifier(&identifier, &ancestors, namespace_kind, position)
     }
 
     /// Find definitions for a local variable using document.lvars (file-local storage)
@@ -135,9 +136,8 @@ impl IndexQuery {
         &self,
         identifier: &Identifier,
         ancestors: &[RubyConstant],
+        namespace_kind: Option<NamespaceKind>,
         position: Position,
-        uri: &Url,
-        content: &str,
     ) -> Option<Vec<Location>> {
         match identifier {
             Identifier::RubyConstant { namespace: _, iden } => {
@@ -145,10 +145,10 @@ impl IndexQuery {
                 self.find_constant_definitions_by_path(iden, ancestors)
             }
             Identifier::RubyMethod {
-                namespace: _,
+                namespace,
                 receiver,
                 iden,
-            } => self.find_method_definitions(receiver, iden, ancestors, uri, position, content),
+            } => self.find_method_definitions(receiver, iden, namespace, namespace_kind, position),
             Identifier::RubyInstanceVariable { name, .. } => {
                 self.find_instance_variable_definitions(name)
             }

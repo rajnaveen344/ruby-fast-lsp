@@ -133,6 +133,11 @@ impl RubyIndex {
         self.fqns.get(id)
     }
 
+    /// Get a reference to the inheritance graph
+    pub fn get_graph(&self) -> &Graph {
+        &self.graph
+    }
+
     /// Get FqnId for a FullyQualifiedName
     /// Both Instance and Singleton namespaces exist as separate entries, so no normalization needed.
     pub fn get_fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {

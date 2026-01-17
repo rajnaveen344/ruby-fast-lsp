@@ -126,7 +126,7 @@ pub async fn handle_prepare_type_hierarchy(
 
     // Use analyzer to find identifier at position
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), content);
-    let (identifier, _, ancestors, _scope_id) = analyzer.get_identifier(position);
+    let (identifier, _, ancestors, _scope_id, _namespace_kind) = analyzer.get_identifier(position);
 
     let identifier = identifier?;
 

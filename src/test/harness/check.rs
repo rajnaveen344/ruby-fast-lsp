@@ -479,7 +479,7 @@ async fn run_type_check(
         let position = expected.range.start;
 
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, _, _ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, _, _ancestors, _scope_stack, _namespace_kind) = analyzer.get_identifier(position);
 
         let type_query = TypeQuery::new(server.index.clone(), uri, content.as_bytes());
 

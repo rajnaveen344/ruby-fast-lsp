@@ -225,7 +225,7 @@ impl ConstantCompletionEngine {
         partial_name: String,
     ) -> Vec<CompletionItem> {
         // Get scope context from analyzer
-        let (_, _, _, scope_stack) = analyzer.get_identifier(position);
+        let (_, _, _, scope_stack, _) = analyzer.get_identifier(position);
 
         // Create completion context
         let context = ConstantCompletionContext::new(position, scope_stack, partial_name);

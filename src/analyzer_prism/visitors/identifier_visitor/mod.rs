@@ -1,5 +1,6 @@
 use crate::{
     analyzer_prism::{scope_tracker::ScopeTracker, Identifier},
+    indexer::entry::NamespaceKind,
     types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeId},
 };
 
@@ -97,6 +98,7 @@ impl IdentifierVisitor {
         Option<IdentifierType>,
         Vec<RubyConstant>,
         LVScopeId,
+        Option<NamespaceKind>,
     ) {
         let ns_stack = match self.ns_stack_at_pos.len() {
             // If ns_stack_at_pos is empty because no identifier was found,
@@ -113,11 +115,15 @@ impl IdentifierVisitor {
                 .unwrap_or(0)
         });
 
+        // Determine namespace kind from current method context
+        let namespace_kind = self.scope_tracker.current_method_context();
+
         (
             self.identifier.clone(),
             self.identifier_type,
             ns_stack,
             lv_scope_id,
+            namespace_kind,
         )
     }
 }

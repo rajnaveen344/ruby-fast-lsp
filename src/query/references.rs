@@ -23,7 +23,7 @@ impl IndexQuery {
         content: &str,
     ) -> Option<Vec<Location>> {
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, _, ancestors, _scope_stack) = analyzer.get_identifier(position);
+        let (identifier_opt, _, ancestors, _scope_stack, _namespace_kind) = analyzer.get_identifier(position);
 
         let identifier = identifier_opt?;
 

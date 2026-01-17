@@ -195,6 +195,7 @@ impl RubyPrismAnalyzer {
         Option<IdentifierType>,
         Vec<RubyConstant>,
         LVScopeId,
+        Option<crate::indexer::entry::NamespaceKind>,
     ) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
@@ -222,7 +223,7 @@ mod tests {
         analyzer: &RubyPrismAnalyzer,
         position: Position,
     ) -> (Option<Identifier>, Vec<RubyConstant>, LVScopeId) {
-        let (identifier, _identifier_type, ns_stack, lv_scope_id) =
+        let (identifier, _identifier_type, ns_stack, lv_scope_id, _namespace_kind) =
             analyzer.get_identifier(position);
         (identifier, ns_stack, lv_scope_id)
     }
