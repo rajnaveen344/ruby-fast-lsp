@@ -218,7 +218,8 @@ pub fn infer_method_call(
     let ruby_method = RubyMethod::new(method_name).ok()?;
 
     // Search for method in the receiver's ancestor chain (MRO)
-    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn, NamespaceKind::Instance);
+    // Constant FQNs default to Instance namespace kind
+    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn);
 
     for ancestor in &ancestor_chain {
         let method_fqn =
@@ -496,7 +497,8 @@ impl<'a> InferenceContext<'a> {
 
         // 3. Search for method in the receiver's ancestor chain (MRO)
         // This follows Ruby's method resolution order: self -> prepends -> includes -> superclass
-        let ancestor_chain = self.index.get_ancestor_chain(&receiver_fqn, namespace_kind);
+        let receiver_ns = FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
+        let ancestor_chain = self.index.get_ancestor_chain(&receiver_ns);
 
         for ancestor in &ancestor_chain {
             let method_fqn =
@@ -564,8 +566,8 @@ impl<'a> InferenceContext<'a> {
         let includers = self.index.get_including_classes(module_fqn);
 
         for includer_fqn in includers {
-            // Get the includer's full MRO
-            let mro = self.index.get_ancestor_chain(&includer_fqn, NamespaceKind::Instance);
+            // Get the includer's full MRO (Constant FQNs default to Instance)
+            let mro = self.index.get_ancestor_chain(&includer_fqn);
 
             // Search for the method in the includer's MRO
             for ancestor in &mro {

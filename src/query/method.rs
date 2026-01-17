@@ -186,16 +186,14 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         if let Some(receiver_ns) = receiver {
             let index = self.index.lock();
-            let current_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+            let current_fqn = FullyQualifiedName::namespace(ancestors.to_vec());
             if let Some(resolved_fqn) =
                 resolve_constant_fqn_from_parts(&index, receiver_ns, false, &current_fqn)
             {
                 drop(index);
-                if let FullyQualifiedName::Constant(resolved_ns) = resolved_fqn {
-                    self.find_method_with_receiver(&resolved_ns, method)
-                } else {
-                    None
-                }
+                // Handle both Constant and Namespace variants (classes are now Namespace)
+                let resolved_ns = resolved_fqn.namespace_parts();
+                self.find_method_with_receiver(&resolved_ns, method)
             } else {
                 drop(index);
                 self.find_method_with_receiver(receiver_ns, method)
@@ -210,7 +208,8 @@ impl IndexQuery {
         ns: &[RubyConstant],
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
-        let receiver_fqn = FullyQualifiedName::Constant(ns.to_vec());
+        // Use singleton namespace for constant receiver (e.g., Foo.bar)
+        let receiver_fqn = FullyQualifiedName::singleton_namespace(ns.to_vec());
         // When called with a constant receiver (e.g., Foo.bar), search for singleton methods
         self.search_direct_references(&receiver_fqn, method, NamespaceKind::Singleton)
     }
@@ -220,7 +219,7 @@ impl IndexQuery {
         method: &RubyMethod,
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
-        let receiver_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+        let receiver_fqn = FullyQualifiedName::namespace(ancestors.to_vec());
         let mut visited = HashSet::new();
 
         // Try instance methods first (most common case for bare method calls)
@@ -465,65 +464,92 @@ impl IndexQuery {
         method: &RubyMethod,
         kind: NamespaceKind,
     ) -> Vec<Location> {
-        let mut found_locations = Vec::new();
-
-        let mut modules_to_search = HashSet::new();
-        modules_to_search.insert(receiver_fqn.clone());
-
-        let ancestor_chain = index.get_ancestor_chain(receiver_fqn, kind);
-
-        for ancestor_fqn in &ancestor_chain {
-            modules_to_search.insert(ancestor_fqn.clone());
-            let included_modules = Self::get_included_modules_static(index, ancestor_fqn);
-            for module_fqn in included_modules {
-                Self::collect_all_searchable_modules_static(
-                    index,
-                    &module_fqn,
-                    &mut modules_to_search,
-                );
-            }
-        }
-
-        // The method to search for (methods are now kind-agnostic)
-        let search_method = method.clone();
+        // Create Namespace FQN with kind for correct ancestor chain lookup
+        let receiver_ns =
+            FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), kind);
+        let ancestor_chain = index.get_ancestor_chain(&receiver_ns);
 
         let receiver_parts = receiver_fqn.namespace_parts();
-        for module_fqn in &modules_to_search {
-            let method_fqn =
-                FullyQualifiedName::method(module_fqn.namespace_parts(), search_method.clone());
-            if let Some(entries) = index.get(&method_fqn) {
-                let locations: Vec<Location> = entries
-                    .iter()
-                    .filter(|e| {
-                        // Filter by namespace kind, but only for methods defined directly
-                        // on the receiver class. Methods from ancestors/modules are valid
-                        // based on the ancestor chain already determining access pattern.
-                        // (e.g., module instance methods become singleton methods via extend)
-                        if let EntryKind::Method(data) = &e.kind {
-                            if let Some(owner_kind) = data.owner.namespace_kind() {
-                                // Only filter if the method is defined on the receiver class
-                                let owner_parts = data.owner.namespace_parts();
-                                if owner_parts == receiver_parts {
-                                    return owner_kind == kind;
-                                }
-                            }
-                        }
-                        // Methods from other namespaces or without kind info are included
-                        true
-                    })
-                    .filter_map(|e| index.to_lsp_location(&e.location))
-                    .collect();
-                if !locations.is_empty() {
+
+        // Iterate through ancestor chain in order - return early when method is found
+        // This implements proper method override resolution (child methods shadow parent methods)
+        for ancestor_fqn in &ancestor_chain {
+            // Search in the ancestor itself
+            if let Some(locations) = Self::search_method_in_module_static(
+                index,
+                ancestor_fqn,
+                method,
+                kind,
+                &receiver_parts,
+            ) {
+                debug!(
+                    "[Method Found] {}#{} found in ancestor: {}",
+                    receiver_fqn, method, ancestor_fqn
+                );
+                return locations;
+            }
+
+            // Search in included/prepended modules of this ancestor
+            let included_modules = Self::get_included_modules_static(index, ancestor_fqn);
+            for module_fqn in included_modules {
+                if let Some(locations) = Self::search_method_in_module_static(
+                    index,
+                    &module_fqn,
+                    method,
+                    kind,
+                    &receiver_parts,
+                ) {
                     debug!(
-                        "[Method Found] {}#{} found in ancestor: {}",
-                        receiver_fqn, method, module_fqn
+                        "[Method Found] {}#{} found in module: {} (included by {})",
+                        receiver_fqn, method, module_fqn, ancestor_fqn
                     );
+                    return locations;
                 }
-                found_locations.extend(locations);
             }
         }
 
-        deduplicate_locations(found_locations)
+        vec![]
+    }
+
+    /// Search for a method in a single module/class
+    fn search_method_in_module_static(
+        index: &RubyIndex,
+        module_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        kind: NamespaceKind,
+        receiver_parts: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        let method_fqn = FullyQualifiedName::method(module_fqn.namespace_parts(), method.clone());
+
+        if let Some(entries) = index.get(&method_fqn) {
+            let locations: Vec<Location> = entries
+                .iter()
+                .filter(|e| {
+                    // Filter by namespace kind, but only for methods defined directly
+                    // on the receiver class. Methods from ancestors/modules are valid
+                    // based on the ancestor chain already determining access pattern.
+                    // (e.g., module instance methods become singleton methods via extend)
+                    if let EntryKind::Method(data) = &e.kind {
+                        if let Some(owner_kind) = data.owner.namespace_kind() {
+                            // Only filter if the method is defined on the receiver class
+                            let owner_parts = data.owner.namespace_parts();
+                            if owner_parts == receiver_parts {
+                                return owner_kind == kind;
+                            }
+                        }
+                    }
+                    // Methods from other namespaces or without kind info are included
+                    true
+                })
+                .filter_map(|e| index.to_lsp_location(&e.location))
+                .collect();
+
+            if !locations.is_empty() {
+                return Some(locations);
+            }
+        }
+
+        None
     }
 
     fn search_method_in_including_classes_static(
@@ -577,7 +603,8 @@ impl IndexQuery {
         let mut included_modules = Vec::new();
         let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-        let ancestor_chain = index.get_ancestor_chain(class_fqn, NamespaceKind::Instance);
+        // Constant FQNs default to Instance namespace kind
+        let ancestor_chain = index.get_ancestor_chain(class_fqn);
 
         for ancestor_fqn in &ancestor_chain {
             if let Some(entries) = index.get(ancestor_fqn) {
@@ -685,7 +712,8 @@ impl IndexQuery {
         }
         modules_to_search.insert(fqn.clone());
 
-        let ancestor_chain = index.get_ancestor_chain(fqn, NamespaceKind::Instance);
+        // Constant FQNs default to Instance namespace kind
+        let ancestor_chain = index.get_ancestor_chain(fqn);
         for ancestor_fqn in &ancestor_chain {
             if !modules_to_search.contains(ancestor_fqn) {
                 modules_to_search.insert(ancestor_fqn.clone());

@@ -134,6 +134,7 @@ impl RubyIndex {
     }
 
     /// Get FqnId for a FullyQualifiedName
+    /// Both Instance and Singleton namespaces exist as separate entries, so no normalization needed.
     pub fn get_fqn_id(&self, fqn: &FullyQualifiedName) -> Option<FqnId> {
         self.fqns.get_id(fqn).copied()
     }
@@ -154,12 +155,15 @@ impl RubyIndex {
     ///
     /// The chain represents the method lookup order in Ruby's method resolution.
     /// This delegates to the InheritanceGraph for efficient traversal.
-    pub fn get_ancestor_chain(
-        &self,
-        fqn: &FullyQualifiedName,
-        kind: NamespaceKind,
-    ) -> Vec<FullyQualifiedName> {
-        // Get the FqnId for this FQN
+    ///
+    /// The namespace kind is extracted from the FQN:
+    /// - `Namespace(_, kind)` uses the embedded kind
+    /// - `Constant(_)` defaults to Instance (most common case)
+    pub fn get_ancestor_chain(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        // Extract namespace kind from FQN, defaulting to Instance for Constant variants
+        let kind = fqn.namespace_kind().unwrap_or(NamespaceKind::Instance);
+
+        // Get the FqnId for this FQN (get_fqn_id normalizes between Constant and Namespace)
         let Some(fqn_id) = self.get_fqn_id(fqn) else {
             // If FQN not in index, return just itself
             return vec![fqn.clone()];
@@ -183,8 +187,12 @@ impl RubyIndex {
         // This allows classes without explicit superclass to access top-level methods
         // (Ruby implicitly inherits from Object which can access top-level methods)
         // We add root even if it's not in the index, as methods may be defined at top-level
-        let root = FullyQualifiedName::Constant(Vec::new());
-        if !chain.contains(&root) && fqn.to_string() != "BasicObject" {
+        let root = FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance);
+        let root_constant = FullyQualifiedName::Constant(Vec::new());
+        if !chain.contains(&root)
+            && !chain.contains(&root_constant)
+            && fqn.to_string() != "BasicObject"
+        {
             // Only add root if we have a non-empty namespace (i.e., we're inside a class/module)
             if !fqn.namespace_parts().is_empty() {
                 chain.push(root);
@@ -772,7 +780,7 @@ impl RubyIndex {
         prepends: &[MixinRef],
         extends: &[MixinRef],
     ) {
-        // Process superclass
+        // Process superclass - add edges for both Instance and Singleton chains
         if let Some(superclass_ref) = superclass {
             if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
                 self,
@@ -780,8 +788,29 @@ impl RubyIndex {
                 superclass_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(parent_id) = self.fqns.get_id(&resolved_fqn).copied() {
+                let parent_parts = resolved_fqn.namespace_parts();
+
+                // Instance chain: Child (Instance) → Parent (Instance)
+                let parent_instance =
+                    FullyQualifiedName::Namespace(parent_parts.clone(), NamespaceKind::Instance);
+                if let Some(parent_id) = self.get_fqn_id(&parent_instance) {
                     self.graph.set_superclass(fqn_id, parent_id, file_id);
+                }
+
+                // Singleton chain: Child (Singleton) → Parent (Singleton)
+                // Find the singleton entry for the current class and add its superclass edge
+                let context_parts = context_fqn.namespace_parts();
+                let singleton_fqn =
+                    FullyQualifiedName::Namespace(context_parts, NamespaceKind::Singleton);
+                let parent_singleton =
+                    FullyQualifiedName::Namespace(parent_parts, NamespaceKind::Singleton);
+
+                if let (Some(singleton_id), Some(parent_singleton_id)) = (
+                    self.get_fqn_id(&singleton_fqn),
+                    self.get_fqn_id(&parent_singleton),
+                ) {
+                    self.graph
+                        .set_superclass(singleton_id, parent_singleton_id, file_id);
                 }
             }
         }
@@ -794,7 +823,7 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
+                if let Some(module_id) = self.get_fqn_id(&resolved_fqn) {
                     self.graph.add_include(fqn_id, module_id, file_id);
                 }
             }
@@ -808,13 +837,17 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
+                if let Some(module_id) = self.get_fqn_id(&resolved_fqn) {
                     self.graph.add_prepend(fqn_id, module_id, file_id);
                 }
             }
         }
 
-        // Process extends
+        // Process extends - add to Singleton namespace (extends add methods to singleton class)
+        // Find the singleton entry for the current class to add extend edges
+        let context_parts = context_fqn.namespace_parts();
+        let singleton_fqn = FullyQualifiedName::Namespace(context_parts, NamespaceKind::Singleton);
+
         for mixin_ref in extends {
             if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
                 self,
@@ -822,8 +855,12 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             ) {
-                if let Some(module_id) = self.fqns.get_id(&resolved_fqn).copied() {
-                    self.graph.add_extend(fqn_id, module_id, file_id);
+                // Extends resolve to Instance namespace modules (their instance methods become class methods)
+                if let (Some(singleton_id), Some(module_id)) = (
+                    self.get_fqn_id(&singleton_fqn),
+                    self.get_fqn_id(&resolved_fqn),
+                ) {
+                    self.graph.add_extend(singleton_id, module_id, file_id);
                 }
             }
         }
@@ -895,9 +932,9 @@ impl RubyIndex {
         &self,
         module_fqn: &FullyQualifiedName,
     ) -> Vec<FullyQualifiedName> {
-        // First try the graph
+        // First try the graph (get_fqn_id normalizes between Constant and Namespace)
         let mut includers: Vec<FullyQualifiedName> =
-            if let Some(fqn_id) = self.fqns.get_id(module_fqn).copied() {
+            if let Some(fqn_id) = self.get_fqn_id(module_fqn) {
                 self.graph
                     .mixers(fqn_id)
                     .iter()
@@ -931,7 +968,10 @@ impl RubyIndex {
                             mixin_ref.absolute,
                             fqn,
                         ) {
-                            if resolved == *module_fqn && !includers.contains(fqn) {
+                            // Compare namespace parts to handle Constant vs Namespace variants
+                            if resolved.namespace_parts() == module_fqn.namespace_parts()
+                                && !includers.contains(fqn)
+                            {
                                 includers.push(fqn.clone());
                                 break;
                             }
@@ -1027,8 +1067,19 @@ impl RubyIndex {
         let mixer_fqns = self.get_including_classes(module_fqn);
 
         for mixer_fqn in mixer_fqns {
-            // Find entries for this mixer
-            let Some(entries) = self.get(&mixer_fqn) else {
+            // Determine which FQN to look up for mixin data:
+            // - For Singleton mixers (from extends), look up the Instance entry for mixin refs
+            // - For Instance mixers (from include/prepend), use as-is
+            let lookup_fqn = match &mixer_fqn {
+                FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
+                    // Extends are tracked on Singleton, but mixin refs are stored on Instance
+                    FullyQualifiedName::Namespace(parts.clone(), NamespaceKind::Instance)
+                }
+                _ => mixer_fqn.clone(),
+            };
+
+            // Find entries for this mixer (use Instance entry for mixin data)
+            let Some(entries) = self.get(&lookup_fqn) else {
                 continue;
             };
 
@@ -1058,13 +1109,14 @@ impl RubyIndex {
                         self,
                         &mixin_ref.parts,
                         mixin_ref.absolute,
-                        &mixer_fqn,
+                        &lookup_fqn,
                     ) {
-                        if resolved_fqn == *module_fqn {
+                        // Compare namespace parts to handle Constant vs Namespace variants
+                        if resolved_fqn.namespace_parts() == module_fqn.namespace_parts() {
                             // Convert CompactLocation to Location
                             if let Some(location) = self.to_lsp_location(&mixin_ref.location) {
                                 usages.push(MixinUsage {
-                                    user_fqn: mixer_fqn.clone(),
+                                    user_fqn: lookup_fqn.clone(),
                                     mixin_type,
                                     location,
                                 });

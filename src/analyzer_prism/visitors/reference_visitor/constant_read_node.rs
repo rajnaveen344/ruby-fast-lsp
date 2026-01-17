@@ -30,14 +30,25 @@ impl ReferenceVisitor {
         for depth in (0..=ns_len).rev() {
             // Build namespace: current_namespace[0..depth] + constant
             let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
-            combined_ns.push(constant);
+            combined_ns.push(constant.clone());
 
-            let fqn = FullyQualifiedName::namespace(combined_ns);
-            if index.contains_fqn(&fqn) {
+            // Try as Namespace first (for class/module definitions)
+            let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+            if index.contains_fqn(&namespace_fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                index.add_reference(fqn, location);
+                index.add_reference(namespace_fqn, location);
+                return;
+            }
+
+            // Then try as Constant (for value constants like VALUE = 42)
+            let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+            if index.contains_fqn(&constant_fqn) {
+                let location = self
+                    .document
+                    .prism_location_to_lsp_location(&node.location());
+                index.add_reference(constant_fqn, location);
                 return;
             }
         }

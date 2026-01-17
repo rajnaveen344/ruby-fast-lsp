@@ -24,7 +24,8 @@ impl IndexVisitor {
         // First get the current flattened namespace, then add the new constant
         let mut namespace = self.scope_tracker.get_ns_stack();
         namespace.push(constant);
-        let fqn = FullyQualifiedName::namespace(namespace);
+        // Value constants use Constant variant, not Namespace
+        let fqn = FullyQualifiedName::constant(namespace);
 
         // Create an Entry with EntryKind::Constant
         // Create an Entry with EntryKind::Constant

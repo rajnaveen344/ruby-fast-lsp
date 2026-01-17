@@ -2,7 +2,7 @@ use log::error;
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
-use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind, MixinRef};
+use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind, MixinRef, NamespaceKind};
 use crate::types::compact_location::CompactLocation;
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
@@ -22,31 +22,48 @@ impl IndexVisitor {
         // Setup local variable scope
         let scope_id = self.document.position_to_offset(body_loc.range.start);
         self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Constant));
+            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), LVScopeKind::Constant));
 
-        let fqn = FullyQualifiedName::Constant(self.scope_tracker.get_ns_stack());
+        let ns_stack = self.scope_tracker.get_ns_stack();
+        let location = self.document.prism_location_to_lsp_location(&node.location());
 
-        let entry_result = {
+        // Create Instance namespace entry (the class itself)
+        let instance_fqn = FullyQualifiedName::Namespace(ns_stack.clone(), NamespaceKind::Instance);
+        let instance_entry_result = {
             let mut index = self.index.lock();
             EntryBuilder::new()
-                .fqn(fqn)
-                .location(
-                    self.document
-                        .prism_location_to_lsp_location(&node.location()),
-                )
+                .fqn(instance_fqn)
+                .location(location.clone())
                 .kind(EntryKind::new_class(None))
                 .build(&mut index)
         };
 
-        if let Ok(mut entry) = entry_result {
+        if let Ok(mut entry) = instance_entry_result {
             // Set superclass using MixinRef for deferred resolution
             if let Some(superclass_ref) = self.create_superclass_mixin_ref(node) {
                 entry.set_superclass(superclass_ref);
             }
-
             self.add_entry(entry);
         } else {
-            error!("Error creating entry: {:?}", entry_result.err());
+            error!("Error creating instance entry: {:?}", instance_entry_result.err());
+        }
+
+        // Create Singleton namespace entry (the singleton class)
+        // Reuse Class kind - the FQN's NamespaceKind::Singleton distinguishes it
+        let singleton_fqn = FullyQualifiedName::Namespace(ns_stack, NamespaceKind::Singleton);
+        let singleton_entry_result = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(singleton_fqn)
+                .location(location)
+                .kind(EntryKind::new_class(None)) // No explicit superclass for singleton
+                .build(&mut index)
+        };
+
+        if let Ok(entry) = singleton_entry_result {
+            self.add_entry(entry);
+        } else {
+            error!("Error creating singleton entry: {:?}", singleton_entry_result.err());
         }
     }
 

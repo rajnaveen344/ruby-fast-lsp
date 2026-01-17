@@ -2,7 +2,7 @@ use log::error;
 use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
-use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind};
+use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind, NamespaceKind};
 use crate::types::scope::{LVScope, LVScopeKind};
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
@@ -39,26 +39,42 @@ impl IndexVisitor {
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Constant));
 
-        let fqn = FullyQualifiedName::Constant(self.scope_tracker.get_ns_stack());
+        let ns_stack = self.scope_tracker.get_ns_stack();
+        let location = self.document.prism_location_to_lsp_location(&node.location());
 
-        let entry_result = {
+        // Create Instance namespace entry (the module itself)
+        let instance_fqn = FullyQualifiedName::Namespace(ns_stack.clone(), NamespaceKind::Instance);
+        let instance_entry_result = {
             let mut index = self.index.lock();
             EntryBuilder::new()
-                .fqn(fqn.clone())
-                .location(
-                    self.document
-                        .prism_location_to_lsp_location(&node.location()),
-                )
+                .fqn(instance_fqn)
+                .location(location.clone())
                 .kind(EntryKind::new_module())
                 .build(&mut index)
         };
 
-        if let Err(e) = entry_result {
-            error!("Error creating entry: {}", e);
-            return;
+        if let Ok(entry) = instance_entry_result {
+            self.add_entry(entry);
+        } else {
+            error!("Error creating instance entry: {:?}", instance_entry_result.err());
         }
 
-        self.add_entry(entry_result.unwrap());
+        // Create Singleton namespace entry (the singleton class of the module)
+        let singleton_fqn = FullyQualifiedName::Namespace(ns_stack, NamespaceKind::Singleton);
+        let singleton_entry_result = {
+            let mut index = self.index.lock();
+            EntryBuilder::new()
+                .fqn(singleton_fqn)
+                .location(location)
+                .kind(EntryKind::new_module()) // Module's singleton is also module-like
+                .build(&mut index)
+        };
+
+        if let Ok(entry) = singleton_entry_result {
+            self.add_entry(entry);
+        } else {
+            error!("Error creating singleton entry: {:?}", singleton_entry_result.err());
+        }
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {

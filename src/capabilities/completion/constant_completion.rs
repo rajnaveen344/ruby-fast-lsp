@@ -256,13 +256,17 @@ impl ConstantCompletionEngine {
         index: &RubyIndex,
         context: &ConstantCompletionContext,
     ) -> Vec<ConstantCompletionItem> {
+        use crate::types::ruby_namespace::RubyConstant;
         let mut candidates = Vec::new();
-        let mut seen_fqns = std::collections::HashSet::new();
+        // Use namespace_parts for deduplication to handle Constant vs Namespace variants
+        let mut seen_parts: std::collections::HashSet<Vec<RubyConstant>> =
+            std::collections::HashSet::new();
 
         // Search through all definitions in the index
         for (fqn, entries) in index.definitions() {
-            // Skip if we've already processed this FQN
-            if seen_fqns.contains(fqn) {
+            // Skip if we've already processed this FQN (comparing namespace parts)
+            let parts = fqn.namespace_parts();
+            if seen_parts.contains(&parts) {
                 continue;
             }
 
@@ -309,7 +313,7 @@ impl ConstantCompletionEngine {
                     fqn.clone(),
                     context,
                 ));
-                seen_fqns.insert(fqn.clone());
+                seen_parts.insert(parts);
             }
         }
 

@@ -116,7 +116,7 @@ impl IndexVisitor {
                 if namespace.is_empty() {
                     return RubyType::Unknown;
                 }
-                let current_fqn = FullyQualifiedName::Constant(namespace.into());
+                let current_fqn = FullyQualifiedName::namespace(namespace.into());
                 RubyType::Class(current_fqn)
             };
 

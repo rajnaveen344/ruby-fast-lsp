@@ -37,9 +37,9 @@ pub enum FullyQualifiedName {
 impl FullyQualifiedName {
     /// Create a namespace FQN (class/module)
     /// Eg. Foo::Bar::Baz
-    /// NOTE: Currently uses Constant variant for backward compatibility
+    /// Classes and modules are stored as Namespace with Instance kind
     pub fn namespace(namespace: Vec<RubyConstant>) -> Self {
-        FullyQualifiedName::Constant(namespace)
+        FullyQualifiedName::Namespace(namespace, NamespaceKind::Instance)
     }
 
     /// Create a namespace with explicit kind
@@ -74,10 +74,10 @@ impl FullyQualifiedName {
     pub fn to_instance_namespace(&self) -> Option<Self> {
         match self {
             FullyQualifiedName::Namespace(parts, _) => {
-                Some(FullyQualifiedName::namespace(parts.clone()))
+                Some(FullyQualifiedName::Namespace(parts.clone(), NamespaceKind::Instance))
             }
             FullyQualifiedName::Constant(parts) => {
-                Some(FullyQualifiedName::namespace(parts.clone()))
+                Some(FullyQualifiedName::Namespace(parts.clone(), NamespaceKind::Instance))
             }
             _ => None,
         }
@@ -355,7 +355,9 @@ impl TryFrom<&str> for FullyQualifiedName {
             }
         }
 
-        Ok(FullyQualifiedName::namespace(constants))
+        // Use constant() for parsed strings - we can't distinguish classes from constants
+        // from just the name. The indexer will use namespace() for classes.
+        Ok(FullyQualifiedName::constant(constants))
     }
 }
 

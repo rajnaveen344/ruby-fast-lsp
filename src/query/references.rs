@@ -138,8 +138,16 @@ impl IndexQuery {
             Identifier::RubyConstant { namespace: _, iden } => {
                 let mut combined_ns = ancestors.to_vec();
                 combined_ns.extend(iden.clone());
-                let fqn = FullyQualifiedName::namespace(combined_ns);
-                self.find_constant_references(&fqn)
+
+                // Try as Namespace first (for class/module references)
+                let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+                if let Some(refs) = self.find_constant_references(&namespace_fqn) {
+                    return Some(refs);
+                }
+
+                // Then try as Constant (for value constant references like VALUE = 42)
+                let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+                self.find_constant_references(&constant_fqn)
             }
             Identifier::RubyMethod {
                 namespace: _,
@@ -263,7 +271,9 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
-        let ancestor_chain = index.get_ancestor_chain(context_fqn, kind);
+        // Create Namespace FQN with kind for correct ancestor chain lookup
+        let context_ns = FullyQualifiedName::namespace_with_kind(context_fqn.namespace_parts(), kind);
+        let ancestor_chain = index.get_ancestor_chain(&context_ns);
 
         for ancestor_fqn in ancestor_chain {
             let method_fqn =
@@ -306,7 +316,9 @@ impl IndexQuery {
         let including_classes = index.get_including_classes(module_fqn);
 
         for including_class_fqn in including_classes {
-            let ancestor_chain = index.get_ancestor_chain(&including_class_fqn, kind);
+            // Create Namespace FQN with kind for correct ancestor chain lookup
+            let class_ns = FullyQualifiedName::namespace_with_kind(including_class_fqn.namespace_parts(), kind);
+            let ancestor_chain = index.get_ancestor_chain(&class_ns);
             for ancestor_fqn in ancestor_chain {
                 let method_fqn =
                     FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());

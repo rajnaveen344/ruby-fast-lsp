@@ -138,12 +138,14 @@ fn get_index_methods_with_ancestors(
     let mut methods = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
 
-    // Try to find the FQN for the class
+    // Try to find the FQN for the class, with the appropriate namespace kind
     let class_fqn = FullyQualifiedName::try_from(class_name);
 
     // Get the ancestor chain for the class
     let ancestors = if let Ok(fqn) = &class_fqn {
-        index.get_ancestor_chain(fqn, kind)
+        // Convert to Namespace FQN with the appropriate kind for correct ancestor chain
+        let ns_fqn = FullyQualifiedName::namespace_with_kind(fqn.namespace_parts(), kind);
+        index.get_ancestor_chain(&ns_fqn)
     } else {
         vec![]
     };

@@ -3,7 +3,7 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::{EntryKind, NamespaceKind};
+use crate::indexer::entry::EntryKind;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
@@ -192,9 +192,24 @@ impl IndexQuery {
             return None;
         }
 
-        // Find definition
-        let fqn = FullyQualifiedName::Constant(namespace);
+        // Find definition - try Namespace first (classes/modules), then Constant
         let index = self.index.lock();
+
+        // Try as Namespace (for class/module definitions)
+        let namespace_fqn = FullyQualifiedName::namespace(namespace.clone());
+        if let Some(entries) = index.get(&namespace_fqn) {
+            let locations: Vec<Location> = entries
+                .iter()
+                .filter(|e| matches!(e.kind, EntryKind::Class(_) | EntryKind::Module(_)))
+                .filter_map(|e| index.to_lsp_location(&e.location))
+                .collect();
+            if !locations.is_empty() {
+                return Some(locations);
+            }
+        }
+
+        // Fallback to Constant (for value constants)
+        let fqn = FullyQualifiedName::Constant(namespace);
         index.get(&fqn).map(|entries| {
             entries
                 .iter()
@@ -214,8 +229,9 @@ impl IndexQuery {
         let index = self.index.lock();
 
         // First, look for methods in the current class/module ancestry
+        // Constant FQNs default to Instance namespace kind
         let context_fqn = FullyQualifiedName::from(ancestors.to_vec());
-        let ancestor_chain = index.get_ancestor_chain(&context_fqn, NamespaceKind::Instance);
+        let ancestor_chain = index.get_ancestor_chain(&context_fqn);
 
         for ancestor_fqn in &ancestor_chain {
             if let Some(entries) = index.get_methods_by_name(method_name) {
@@ -290,11 +306,17 @@ impl IndexQuery {
         loop {
             let mut probe_ns = current_context.clone();
             probe_ns.extend(constant_path.iter().cloned());
-            let probe_fqn = FullyQualifiedName::Constant(probe_ns);
 
-            // If found in index (and is a Class/Module/Constant?), return it
-            if index.get(&probe_fqn).is_some() {
-                return probe_fqn;
+            // Try as Namespace first (for class/module definitions)
+            let probe_namespace_fqn = FullyQualifiedName::namespace(probe_ns.clone());
+            if index.get(&probe_namespace_fqn).is_some() {
+                return probe_namespace_fqn;
+            }
+
+            // Then try as Constant (for value constants like A = 1)
+            let probe_constant_fqn = FullyQualifiedName::Constant(probe_ns);
+            if index.get(&probe_constant_fqn).is_some() {
+                return probe_constant_fqn;
             }
 
             if current_context.is_empty() {
@@ -304,7 +326,11 @@ impl IndexQuery {
         }
 
         // 2. Default to just the path (absolute/toplevel)
-        // This acts as the final fallback if not found in any scope (or if defined at toplevel but not indexed yet?)
+        // Try namespace first, then constant as fallback
+        let namespace_fqn = FullyQualifiedName::namespace(constant_path.to_vec());
+        if index.get(&namespace_fqn).is_some() {
+            return namespace_fqn;
+        }
         FullyQualifiedName::Constant(constant_path.to_vec())
     }
 

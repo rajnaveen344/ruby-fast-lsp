@@ -487,7 +487,8 @@ fn parse_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
         return None;
     }
 
-    Some(FullyQualifiedName::Constant(namespace))
+    // Return as Namespace FQN (classes/modules are stored as Namespace)
+    Some(FullyQualifiedName::namespace(namespace))
 }
 
 /// Resolve a constant to its FQN, searching through ancestor namespaces
@@ -504,17 +505,28 @@ fn resolve_constant_fqn(
         let mut combined_ns = search_namespaces.clone();
         combined_ns.extend(constant_parts.iter().cloned());
 
-        let search_fqn = FullyQualifiedName::Constant(combined_ns);
+        // Try as Namespace first (for class/module definitions)
+        let search_namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+        if index.get(&search_namespace_fqn).is_some() {
+            return Some(search_namespace_fqn);
+        }
 
-        if index.get(&search_fqn).is_some() {
-            return Some(search_fqn);
+        // Then try as Constant (for value constants)
+        let search_constant_fqn = FullyQualifiedName::Constant(combined_ns);
+        if index.get(&search_constant_fqn).is_some() {
+            return Some(search_constant_fqn);
         }
 
         // Pop the last namespace and try again
         search_namespaces.pop();
     }
 
-    // Try at root level
+    // Try at root level - Namespace first, then Constant
+    let root_namespace_fqn = FullyQualifiedName::namespace(constant_parts.to_vec());
+    if index.get(&root_namespace_fqn).is_some() {
+        return Some(root_namespace_fqn);
+    }
+
     let root_fqn = FullyQualifiedName::Constant(constant_parts.to_vec());
     if index.get(&root_fqn).is_some() {
         return Some(root_fqn);

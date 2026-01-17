@@ -136,10 +136,10 @@ impl MethodResolver {
             // Add owner with the appropriate namespace kind
             let owner_with_kind =
                 FullyQualifiedName::namespace_with_kind(owner_fqn.namespace_parts(), namespace_kind);
-            all_fqns_to_search.push(owner_with_kind);
+            all_fqns_to_search.push(owner_with_kind.clone());
 
-            // Add ancestor chain - ancestors also need namespace kind for proper filtering
-            let ancestors = index.get_ancestor_chain(&owner_fqn, namespace_kind);
+            // Add ancestor chain - kind is embedded in the FQN
+            let ancestors = index.get_ancestor_chain(&owner_with_kind);
             for ancestor in ancestors {
                 let ancestor_with_kind = FullyQualifiedName::namespace_with_kind(
                     ancestor.namespace_parts(),
@@ -161,9 +161,9 @@ impl MethodResolver {
                     if !all_fqns_to_search.contains(&class_with_kind) {
                         all_fqns_to_search.push(class_with_kind);
                     }
-                    // Also add ancestors of including classes
-                    let class_ancestors =
-                        index.get_ancestor_chain(&class_fqn, NamespaceKind::Instance);
+                    // Also add ancestors of including classes (instance lookup for included modules)
+                    let class_ns = FullyQualifiedName::namespace(class_fqn.namespace_parts());
+                    let class_ancestors = index.get_ancestor_chain(&class_ns);
                     for ancestor in class_ancestors {
                         let ancestor_with_kind = FullyQualifiedName::namespace_with_kind(
                             ancestor.namespace_parts(),
@@ -398,8 +398,9 @@ impl MethodResolver {
             // Look up the method in the index
             let index = self.index.lock();
 
-            // Get the ancestor chain for this class/module
-            let ancestors = index.get_ancestor_chain(&owner_fqn, namespace_kind);
+            // Get the ancestor chain for this class/module (with namespace kind embedded)
+            let owner_ns = FullyQualifiedName::namespace_with_kind(owner_fqn.namespace_parts(), namespace_kind);
+            let ancestors = index.get_ancestor_chain(&owner_ns);
 
             // Search through the ancestor chain for the method
             let mut found_return_types = Vec::new();

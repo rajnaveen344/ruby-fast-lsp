@@ -151,10 +151,8 @@ UserService.configure$0
 }
 
 /// Subclass can override parent's class method.
-/// NOTE: Currently returns both child and parent methods.
-/// TODO: Implement proper method override resolution to return only the most specific.
+/// Method override resolution returns the child's method (shadows parent).
 #[tokio::test]
-#[ignore = "Requires method override resolution - currently returns both child and parent"]
 async fn overridden_class_method() {
     check(
         r#"
@@ -382,6 +380,7 @@ end
 // ============================================================================
 
 /// module_function creates both instance and class method.
+/// When `module_function :helper` is called, it creates a singleton method on the module.
 #[tokio::test]
 async fn module_function_as_class_method() {
     check(

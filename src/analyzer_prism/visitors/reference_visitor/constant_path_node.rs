@@ -56,18 +56,30 @@ impl ReferenceVisitor {
             let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
             combined_ns.extend(namespaces.iter().cloned());
 
-            let fqn = FullyQualifiedName::namespace(combined_ns);
-
-            // Use contains_fqn instead of get() to avoid expensive Vec allocation for lookups
-            if index.contains_fqn(&fqn) {
+            // Try as Namespace first (for class/module definitions)
+            let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+            if index.contains_fqn(&namespace_fqn) {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
 
-                index.add_reference(fqn, location);
+                index.add_reference(namespace_fqn, location);
 
                 found_any = true;
                 // Once found, we stop searching up the ancestor chain
+                break;
+            }
+
+            // Then try as Constant (for value constants like BETA = 100)
+            let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+            if index.contains_fqn(&constant_fqn) {
+                let location = self
+                    .document
+                    .prism_location_to_lsp_location(&node.location());
+
+                index.add_reference(constant_fqn, location);
+
+                found_any = true;
                 break;
             }
         }

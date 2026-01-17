@@ -41,8 +41,8 @@ impl IndexVisitor {
         fqn_parts.extend(namespace_parts);
         fqn_parts.push(constant);
 
-        // Create a FullyQualifiedName using the combined namespace parts
-        let fqn = FullyQualifiedName::namespace(fqn_parts);
+        // Value constants use Constant variant, not Namespace
+        let fqn = FullyQualifiedName::constant(fqn_parts);
 
         // Create an Entry with EntryKind::Constant
         let entry = {

@@ -179,9 +179,16 @@ pub fn resolve_constant_fqn_from_parts(
 
     // Search through all candidate paths and return the first match
     for candidate_parts in search_paths {
-        let candidate_fqn = FullyQualifiedName::Constant(candidate_parts);
-        if index.contains_fqn(&candidate_fqn) {
-            return Some(candidate_fqn);
+        // Try as Namespace first (for class/module definitions)
+        let namespace_fqn = FullyQualifiedName::namespace(candidate_parts.clone());
+        if index.contains_fqn(&namespace_fqn) {
+            return Some(namespace_fqn);
+        }
+
+        // Then try as Constant (for value constants like A = 1)
+        let constant_fqn = FullyQualifiedName::Constant(candidate_parts);
+        if index.contains_fqn(&constant_fqn) {
+            return Some(constant_fqn);
         }
     }
 
