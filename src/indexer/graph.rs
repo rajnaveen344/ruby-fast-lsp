@@ -6,10 +6,11 @@
 //!
 //! ## Design
 //!
-//! - **Nodes**: One per class/module FQN
-//! - **Forward edges**: superclass, includes, prepends, extends (resolved FqnIds)
-//! - **Reverse edges**: children, included_by, prepended_by, extended_by
+//! - **Nodes**: Two per class (Instance + Singleton namespace), one per module
+//! - **Forward edges**: superclass, includes, prepends (resolved FqnIds)
+//! - **Reverse edges**: children, included_by, prepended_by
 //! - **Edge provenance**: `edges_by_file` tracks which file added each edge for O(E) removal
+//! - **Note**: "extend Foo" is modeled as Singleton node including Foo's Instance namespace
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +34,8 @@ pub enum EdgeType {
     Superclass,
     Include,
     Prepend,
-    Extend,
+    // Note: "Extend" is modeled as Include on the Singleton namespace
+    // extend Foo → Singleton node includes Foo's Instance namespace
 }
 
 /// Record of an edge for provenance tracking
@@ -50,6 +52,11 @@ pub struct EdgeRecord {
 // ============================================================================
 
 /// A node in the inheritance graph representing a class or module
+///
+/// With the "two nodes per class" model:
+/// - Instance namespace has includes/prepends/superclass for instance methods
+/// - Singleton namespace has includes/prepends/superclass for class methods
+/// - "extend Foo" is modeled as: Singleton node includes Foo's Instance namespace
 #[derive(Debug, Clone, Default)]
 pub struct GraphNode {
     pub kind: NodeKind,
@@ -58,13 +65,11 @@ pub struct GraphNode {
     pub superclass: Option<FqnId>,
     pub includes: Vec<FqnId>,
     pub prepends: Vec<FqnId>,
-    pub extends: Vec<FqnId>,
 
     // Reverse edges
     pub children: Vec<FqnId>,
     pub included_by: Vec<FqnId>,
     pub prepended_by: Vec<FqnId>,
-    pub extended_by: Vec<FqnId>,
 }
 
 impl GraphNode {
@@ -217,36 +222,8 @@ impl Graph {
             });
     }
 
-    /// Add an extend relationship
-    pub fn add_extend(&mut self, extender: FqnId, module: FqnId, file_id: FileId) {
-        // Ensure both nodes exist
-        self.nodes.entry(extender).or_default();
-        self.nodes.entry(module).or_default();
-
-        // Set forward edge
-        if let Some(node) = self.nodes.get_mut(&extender) {
-            if !node.extends.contains(&module) {
-                node.extends.push(module);
-            }
-        }
-
-        // Set reverse edge
-        if let Some(node) = self.nodes.get_mut(&module) {
-            if !node.extended_by.contains(&extender) {
-                node.extended_by.push(extender);
-            }
-        }
-
-        // Record provenance
-        self.edges_by_file
-            .entry(file_id)
-            .or_default()
-            .push(EdgeRecord {
-                source: extender,
-                target: module,
-                edge_type: EdgeType::Extend,
-            });
-    }
+    // Note: "extend Foo" is now modeled as Singleton node including Foo's Instance namespace.
+    // Callers should use add_include(singleton_fqn_id, module_instance_fqn_id, file_id).
 
     // ========================================================================
     // Incremental Updates
@@ -275,14 +252,6 @@ impl Graph {
                     }
                     if let Some(node) = self.nodes.get_mut(&edge.target) {
                         node.prepended_by.retain(|id| *id != edge.source);
-                    }
-                }
-                EdgeType::Extend => {
-                    if let Some(node) = self.nodes.get_mut(&edge.source) {
-                        node.extends.retain(|id| *id != edge.target);
-                    }
-                    if let Some(node) = self.nodes.get_mut(&edge.target) {
-                        node.extended_by.retain(|id| *id != edge.source);
                     }
                 }
                 EdgeType::Superclass => {
@@ -321,12 +290,6 @@ impl Graph {
                 }
             }
 
-            for module_id in &node.extends {
-                if let Some(module_node) = self.nodes.get_mut(module_id) {
-                    module_node.extended_by.retain(|id| *id != fqn_id);
-                }
-            }
-
             // Clean up forward edges on nodes that pointed to us
             for child_id in &node.children {
                 if let Some(child) = self.nodes.get_mut(child_id) {
@@ -347,12 +310,6 @@ impl Graph {
                     prepender.prepends.retain(|id| *id != fqn_id);
                 }
             }
-
-            for extender_id in &node.extended_by {
-                if let Some(extender) = self.nodes.get_mut(extender_id) {
-                    extender.extends.retain(|id| *id != fqn_id);
-                }
-            }
         }
     }
 
@@ -360,13 +317,20 @@ impl Graph {
     // Traversal - Method Resolution Order
     // ========================================================================
 
-    /// Build the Method Resolution Order for instance methods
+    /// Build the Method Resolution Order (MRO) for a namespace
     ///
-    /// Ruby's MRO for instance methods is:
+    /// With the "two nodes per class" model, this works identically for both:
+    /// - Instance methods: FQN is Instance namespace → traverses instance mixins/superclass
+    /// - Class methods: FQN is Singleton namespace → traverses singleton mixins/superclass
+    ///
+    /// Ruby's MRO traversal order:
     /// 1. Prepended modules (in reverse order of prepending)
-    /// 2. The class itself
+    /// 2. The class/module itself
     /// 3. Included modules (in reverse order of inclusion)
     /// 4. Superclass chain (recursively)
+    ///
+    /// Note: "extend Foo" is modeled as Singleton node includes Foo's Instance namespace,
+    /// so it appears in the Singleton node's includes (step 3).
     pub fn method_lookup_chain(&self, fqn_id: FqnId) -> Vec<FqnId> {
         let mut chain = Vec::new();
         let mut visited = HashSet::new();
@@ -374,29 +338,7 @@ impl Graph {
         chain
     }
 
-    /// Build the Method Resolution Order for class/singleton methods
-    ///
-    /// For class methods, we look at:
-    /// 1. Extended modules (these become class methods)
-    /// 2. The singleton class hierarchy
-    pub fn singleton_lookup_chain(&self, fqn_id: FqnId) -> Vec<FqnId> {
-        let mut chain = Vec::new();
-        let mut visited = HashSet::new();
-
-        // First add extended modules
-        if let Some(node) = self.nodes.get(&fqn_id) {
-            for module_id in node.extends.iter().rev() {
-                self.build_instance_mro(*module_id, &mut chain, &mut visited);
-            }
-        }
-
-        // Then add the instance method chain (for inherited class methods)
-        self.build_instance_mro(fqn_id, &mut chain, &mut visited);
-
-        chain
-    }
-
-    /// Get all classes/modules that include, prepend, or extend this module
+    /// Get all classes/modules that include or prepend this module
     pub fn mixers(&self, fqn_id: FqnId) -> Vec<FqnId> {
         let Some(node) = self.nodes.get(&fqn_id) else {
             return Vec::new();
@@ -405,7 +347,6 @@ impl Graph {
         let mut result = Vec::new();
         result.extend(node.included_by.iter().copied());
         result.extend(node.prepended_by.iter().copied());
-        result.extend(node.extended_by.iter().copied());
         result
     }
 
@@ -588,15 +529,14 @@ mod tests {
 
         let mut graph = Graph::new();
 
-        // M is included by C1, prepended by C2, extended by C3
+        // M is included by C1, prepended by C2
+        // Note: "extend" is now modeled as include on singleton node, not a separate edge type
         graph.add_include(ids[1], ids[0], file_id);
         graph.add_prepend(ids[2], ids[0], file_id);
-        graph.add_extend(ids[3], ids[0], file_id);
 
         let mixers = graph.mixers(ids[0]);
-        assert_eq!(mixers.len(), 3);
+        assert_eq!(mixers.len(), 2);
         assert!(mixers.contains(&ids[1]));
         assert!(mixers.contains(&ids[2]));
-        assert!(mixers.contains(&ids[3]));
     }
 }

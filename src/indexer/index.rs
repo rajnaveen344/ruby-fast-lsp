@@ -171,27 +171,14 @@ impl RubyIndex {
             fqn
         );
 
-        // Step 1: Extract namespace kind from the Namespace FQN
-        let kind = match fqn {
-            FullyQualifiedName::Namespace(_, k) => *k,
-            FullyQualifiedName::Constant(_)
-            | FullyQualifiedName::Method(_, _)
-            | FullyQualifiedName::LocalVariable(_, _)
-            | FullyQualifiedName::GlobalVariable(_)
-            | FullyQualifiedName::ClassVariable(_)
-            | FullyQualifiedName::InstanceVariable(_) => {
-                unreachable!("Invalid FQN variant: {}", fqn)
-            }
-        };
-
-        // Step 2: Special case for root namespace (top-level)
+        // Step 1: Special case for root namespace (top-level)
         // The root namespace (empty path) represents top-level Ruby code
         // It doesn't need to be indexed and has no ancestors
         if fqn.namespace_parts().is_empty() {
             return vec![fqn.clone()];
         }
 
-        // Step 3: Look up the FQN in the index to get its internal ID
+        // Step 2: Look up the FQN in the index to get its internal ID
         //
         // If the FQN is not in the index, we return a minimal chain:
         // [fqn, root_namespace] - the class itself + root for top-level method access.
@@ -221,29 +208,26 @@ impl RubyIndex {
             let root = FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance);
             return vec![fqn.clone(), root];
         };
-        
-        // Step 4: Get the ancestor chain based on namespace kind
-        // Match on kind to make it crystal clear which lookup chain we're using
-        let fqn_ids = match kind {
-            NamespaceKind::Instance => {
-                // Instance method lookup chain
-                // Order: prepends → self → includes → superclass → Object → Kernel → BasicObject
-                self.graph.method_lookup_chain(fqn_id)
-            }
-            NamespaceKind::Singleton => {
-                // Singleton (class) method lookup chain
-                // Order: extends → #<Class:Self> → #<Class:Superclass> → ...
-                self.graph.singleton_lookup_chain(fqn_id)
-            }
-        };
 
-        // Step 5: Convert internal FqnIds back to FullyQualifiedNames
+        // Step 3: Get the ancestor chain from the graph
+        //
+        // With the "two nodes per class" model, both Instance and Singleton nodes
+        // use the same traversal algorithm (prepends → self → includes → superclass).
+        //
+        // The FQN's namespace kind determines which node we're looking at:
+        // - Instance FQN → Instance node (has instance method mixins/superclass)
+        // - Singleton FQN → Singleton node (has class method mixins/superclass)
+        //
+        // "extend Foo" is modeled as: Singleton node includes Foo's Instance namespace.
+        let fqn_ids = self.graph.method_lookup_chain(fqn_id);
+
+        // Step 4: Convert internal FqnIds back to FullyQualifiedNames
         let mut chain: Vec<FullyQualifiedName> = fqn_ids
             .into_iter()
             .filter_map(|id| self.get_fqn(id).cloned())
             .collect();
 
-        // Step 6: Add root namespace as fallback for top-level method access
+        // Step 5: Add root namespace as fallback for top-level method access
         // Ruby allows classes to access top-level methods (defined outside any class/module)
         // Example: class Foo; puts "hi"; end  # puts is a top-level method
         let root = FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance);
@@ -257,16 +241,11 @@ impl RubyIndex {
             chain.push(root);
         }
 
-        // Step 7: Debug logging - show the computed ancestor chain
-        let method_type = match kind {
-            NamespaceKind::Instance => "instance",
-            NamespaceKind::Singleton => "singleton",
-        };
+        // Step 6: Debug logging - show the computed ancestor chain
         let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
         debug!(
-            "[Ancestor Chain] {} ({} method): {}",
+            "[Ancestor Chain] {}: {}",
             fqn,
-            method_type,
             chain_str.join(" → ")
         );
 
@@ -905,11 +884,13 @@ impl RubyIndex {
                 context_fqn,
             ) {
                 // Extends resolve to Instance namespace modules (their instance methods become class methods)
+                // In the "two nodes per class" model, "extend Foo" is:
+                //   Singleton node includes Foo's Instance namespace
                 if let (Some(singleton_id), Some(module_id)) = (
                     self.get_fqn_id(&singleton_fqn),
                     self.get_fqn_id(&resolved_fqn),
                 ) {
-                    self.graph.add_extend(singleton_id, module_id, file_id);
+                    self.graph.add_include(singleton_id, module_id, file_id);
                 }
             }
         }

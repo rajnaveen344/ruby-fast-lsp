@@ -456,16 +456,8 @@ pub async fn handle_subtypes(
         }
     }
 
-    // 4. Classes/modules that extend this module
-    for &extender_id in &node.extended_by {
-        if let Some(item) = fqn_id_to_type_hierarchy_item_with_relation(
-            &index,
-            extender_id,
-            RelationType::ExtendedBy,
-        ) {
-            subtypes.push(item);
-        }
-    }
+    // Note: "extend" relationships are now modeled as includes on Singleton nodes,
+    // so they're already covered by the included_by section above.
 
     info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
     Some(subtypes)
