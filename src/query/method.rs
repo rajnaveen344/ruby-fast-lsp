@@ -603,7 +603,7 @@ impl IndexQuery {
         let mut included_modules = Vec::new();
         let mut seen_modules = HashSet::<FullyQualifiedName>::new();
 
-        // Constant FQNs default to Instance namespace kind
+        // Get ancestor chain for this class/module (Namespace FQN with kind)
         let ancestor_chain = index.get_ancestor_chain(class_fqn);
 
         for ancestor_fqn in &ancestor_chain {
@@ -712,7 +712,7 @@ impl IndexQuery {
         }
         modules_to_search.insert(fqn.clone());
 
-        // Constant FQNs default to Instance namespace kind
+        // Get ancestor chain (Namespace FQN with embedded kind)
         let ancestor_chain = index.get_ancestor_chain(fqn);
         for ancestor_fqn in &ancestor_chain {
             if !modules_to_search.contains(ancestor_fqn) {

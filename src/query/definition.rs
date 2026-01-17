@@ -229,7 +229,7 @@ impl IndexQuery {
         let index = self.index.lock();
 
         // First, look for methods in the current class/module ancestry
-        // Constant FQNs default to Instance namespace kind
+        // Get ancestor chain (context_fqn is a Namespace FQN with Instance kind)
         let context_fqn = FullyQualifiedName::from(ancestors.to_vec());
         let ancestor_chain = index.get_ancestor_chain(&context_fqn);
 

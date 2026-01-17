@@ -221,6 +221,49 @@ fn find_references(pos: Position, include_declaration: bool) -> Vec<Location>
 
 ## Error Handling
 
+### CRITICAL: Fail Fast and Loudly (MANDATORY)
+
+**Never use `debug_assert!` - Use `assert!` and `panic!` instead.**
+
+Production correctness is more important than "graceful degradation" that hides bugs.
+
+```rust
+// ❌ NEVER DO THIS: Silent failure or wrong defaults
+let fqn_id = self.get_fqn_id(fqn).unwrap_or_default();
+
+// ❌ NEVER DO THIS: Debug-only checks
+debug_assert!(fqn.is_valid());  // WRONG! Production won't catch this
+
+// ✅ ALWAYS DO THIS: Crash loudly with clear message
+let fqn_id = self.get_fqn_id(fqn).expect(
+    "INVARIANT VIOLATED: FQN not in index. \
+     This is a bug - index the file first."
+);
+
+// ✅ ALWAYS DO THIS: Assert in production too
+assert!(fqn.is_valid(), "Invalid FQN: {}", fqn);
+```
+
+**Why**: Better to crash and fix the bug than silently produce wrong results that corrupt data or mislead users.
+
+### Clear Error Messages
+
+Every panic/assert must explain WHAT, WHY, and HOW:
+
+```rust
+// ✅ GOOD: Explains what, why, and how to fix
+assert!(
+    matches!(fqn, Namespace(_, _)),
+    "INVARIANT VIOLATED: get_ancestor_chain called with {}.\n\
+     Only Namespace FQNs have ancestors (not Constants/Methods).\n\
+     Fix: Check the FQN type before calling this function.",
+    fqn
+);
+
+// ❌ BAD: Vague message
+assert!(fqn.is_namespace(), "Invalid FQN");
+```
+
 ### Never Ignore Errors
 
 "Almost all catastrophic system failures result from incorrect handling of non-fatal errors explicitly signaled in software."
@@ -246,6 +289,21 @@ fn read_file(path: &Path) -> Result<String, IoError>
 
 // Option: Absence is normal/expected
 fn find_symbol(name: &str) -> Option<Symbol>
+```
+
+### No Assumptions or Guessing
+
+If data is missing or invalid, PANIC - don't guess:
+
+```rust
+// ❌ BAD: Assuming/guessing
+let kind = fqn.namespace_kind().unwrap_or(Instance);  // Guessing!
+
+// ✅ GOOD: Fail if wrong
+let kind = match fqn {
+    Namespace(_, k) => k,
+    All|Variants => panic!("Expected Namespace FQN, got: {}", fqn), // Never use wildcard for panic/unreachable
+};
 ```
 
 ---
@@ -348,6 +406,9 @@ let result = some_function(first_argument, second_argument, third_argument, four
 
 ## Checklist for Every Change
 
+- [ ] **NO `debug_assert!` - Use `assert!` instead** (CRITICAL)
+- [ ] **No `.unwrap_or_default()` or silent failures** (CRITICAL)
+- [ ] **Clear panic messages** explaining WHAT, WHY, HOW (CRITICAL)
 - [ ] No function exceeds 70 lines
 - [ ] At least 2 assertions per function
 - [ ] No recursion (explicit stacks instead)

@@ -156,54 +156,111 @@ impl RubyIndex {
     /// The chain represents the method lookup order in Ruby's method resolution.
     /// This delegates to the InheritanceGraph for efficient traversal.
     ///
-    /// The namespace kind is extracted from the FQN:
-    /// - `Namespace(_, kind)` uses the embedded kind
-    /// - `Constant(_)` defaults to Instance (most common case)
+    /// The namespace kind is extracted from the FQN.
+    /// Only Namespace FQNs are valid - classes and modules have ancestor chains.
+    /// Value constants (A = 1) do NOT have ancestor chains.
     pub fn get_ancestor_chain(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
-        // Extract namespace kind from FQN, defaulting to Instance for Constant variants
-        let kind = fqn.namespace_kind().unwrap_or(NamespaceKind::Instance);
+        // Precondition: Only Namespace FQNs have ancestor chains
+        // - Classes and modules have ancestors (prepend, include, superclass)
+        // - Value constants (A = 1) do NOT have ancestors
+        // - Methods and variables are not part of the inheritance hierarchy
+        assert!(
+            matches!(fqn, FullyQualifiedName::Namespace(_, _)),
+            "get_ancestor_chain called with invalid FQN variant: {}. \
+             Only Namespace FQNs (classes/modules) have ancestor chains.",
+            fqn
+        );
 
-        // Get the FqnId for this FQN (get_fqn_id normalizes between Constant and Namespace)
-        let Some(fqn_id) = self.get_fqn_id(fqn) else {
-            // If FQN not in index, return just itself
+        // Step 1: Extract namespace kind from the Namespace FQN
+        let kind = match fqn {
+            FullyQualifiedName::Namespace(_, k) => *k,
+            FullyQualifiedName::Constant(_)
+            | FullyQualifiedName::Method(_, _)
+            | FullyQualifiedName::LocalVariable(_, _)
+            | FullyQualifiedName::GlobalVariable(_)
+            | FullyQualifiedName::ClassVariable(_)
+            | FullyQualifiedName::InstanceVariable(_) => {
+                unreachable!("Invalid FQN variant: {}", fqn)
+            }
+        };
+
+        // Step 2: Special case for root namespace (top-level)
+        // The root namespace (empty path) represents top-level Ruby code
+        // It doesn't need to be indexed and has no ancestors
+        if fqn.namespace_parts().is_empty() {
             return vec![fqn.clone()];
+        }
+
+        // Step 3: Look up the FQN in the index to get its internal ID
+        //
+        // If the FQN is not in the index, we return a minimal chain:
+        // [fqn, root_namespace] - the class itself + root for top-level method access.
+        //
+        // This happens legitimately for:
+        // - Metaprogramming: Class.new, Object.const_set(:Foo, Class.new), etc.
+        // - Standard library classes: String, Array, Hash (unless RBS is indexed)
+        // - Gems that haven't been indexed yet
+        //
+        // IMPORTANT: This is NOT the same as "the class has no ancestors"!
+        // Every Ruby class except BasicObject has ancestors. We're explicitly
+        // signaling that we don't have the full ancestor information in our index.
+        //
+        // We still add root namespace so that top-level methods (like `puts`)
+        // are accessible from these unindexed classes.
+        //
+        // Callers should handle this by:
+        // - Trying RBS lookup for stdlib classes to get proper method definitions
+        // - Searching in the returned chain (self + root) as fallback
+        // - NOT assuming there are literally no other ancestors
+        let Some(fqn_id) = self.get_fqn_id(fqn) else {
+            debug!(
+                "[Ancestor Chain] {} not in index - returning self + root (metaprogramming/stdlib?)",
+                fqn
+            );
+            // Return: [self, root_namespace] for top-level method access
+            let root = FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance);
+            return vec![fqn.clone(), root];
+        };
+        
+        // Step 4: Get the ancestor chain based on namespace kind
+        // Match on kind to make it crystal clear which lookup chain we're using
+        let fqn_ids = match kind {
+            NamespaceKind::Instance => {
+                // Instance method lookup chain
+                // Order: prepends → self → includes → superclass → Object → Kernel → BasicObject
+                self.graph.method_lookup_chain(fqn_id)
+            }
+            NamespaceKind::Singleton => {
+                // Singleton (class) method lookup chain
+                // Order: extends → #<Class:Self> → #<Class:Superclass> → ...
+                self.graph.singleton_lookup_chain(fqn_id)
+            }
         };
 
-        // Use the inheritance graph for traversal
-        let is_singleton = kind == NamespaceKind::Singleton;
-        let fqn_ids = if is_singleton {
-            self.graph.singleton_lookup_chain(fqn_id)
-        } else {
-            self.graph.method_lookup_chain(fqn_id)
-        };
-
-        // Convert FqnIds back to FullyQualifiedNames
+        // Step 5: Convert internal FqnIds back to FullyQualifiedNames
         let mut chain: Vec<FullyQualifiedName> = fqn_ids
             .into_iter()
             .filter_map(|id| self.get_fqn(id).cloned())
             .collect();
 
-        // Add root namespace as fallback for implicit superclass
-        // This allows classes without explicit superclass to access top-level methods
-        // (Ruby implicitly inherits from Object which can access top-level methods)
-        // We add root even if it's not in the index, as methods may be defined at top-level
+        // Step 6: Add root namespace as fallback for top-level method access
+        // Ruby allows classes to access top-level methods (defined outside any class/module)
+        // Example: class Foo; puts "hi"; end  # puts is a top-level method
         let root = FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance);
         let root_constant = FullyQualifiedName::Constant(Vec::new());
-        if !chain.contains(&root)
+        let should_add_root = !chain.contains(&root)
             && !chain.contains(&root_constant)
             && fqn.to_string() != "BasicObject"
-        {
-            // Only add root if we have a non-empty namespace (i.e., we're inside a class/module)
-            if !fqn.namespace_parts().is_empty() {
-                chain.push(root);
-            }
+            && !fqn.namespace_parts().is_empty(); // Only add if we're inside a class/module
+
+        if should_add_root {
+            chain.push(root);
         }
 
-        // Log the ancestor chain for debugging method resolution
-        let method_type = if is_singleton {
-            "singleton"
-        } else {
-            "instance"
+        // Step 7: Debug logging - show the computed ancestor chain
+        let method_type = match kind {
+            NamespaceKind::Instance => "instance",
+            NamespaceKind::Singleton => "singleton",
         };
         let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
         debug!(
@@ -214,14 +271,6 @@ impl RubyIndex {
         );
 
         chain
-    }
-
-    /// Get entry IDs for a given RubyMethod key
-    pub fn get_method_ids(
-        &self,
-        method: &crate::types::ruby_method::RubyMethod,
-    ) -> Option<&Vec<EntryId>> {
-        self.by_method_name.get(method)
     }
 
     // ========================================================================
@@ -1227,5 +1276,91 @@ mod tests {
         assert_eq!(index.search_by_prefix("Test").len(), 2);
         assert_eq!(index.search_by_prefix("TestC").len(), 1);
         assert_eq!(index.search_by_prefix("NonExistent").len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "get_ancestor_chain called with invalid FQN variant")]
+    fn test_get_ancestor_chain_rejects_method_fqn() {
+        // TigerBeetle-style assertion: calling with Method FQN should panic
+        let index = RubyIndex::new();
+        let method_fqn = FullyQualifiedName::method(
+            vec![RubyConstant::try_from("Foo").unwrap()],
+            crate::types::ruby_method::RubyMethod::new("bar").unwrap(),
+        );
+
+        // This should panic - methods don't have ancestor chains
+        index.get_ancestor_chain(&method_fqn);
+    }
+
+    #[test]
+    #[should_panic(expected = "get_ancestor_chain called with invalid FQN variant")]
+    fn test_get_ancestor_chain_rejects_variable_fqn() {
+        // TigerBeetle-style assertion: calling with variable FQN should panic
+        let index = RubyIndex::new();
+        let var_fqn = FullyQualifiedName::instance_variable("@foo".to_string()).unwrap();
+
+        // This should panic - variables don't have ancestor chains
+        index.get_ancestor_chain(&var_fqn);
+    }
+
+    #[test]
+    fn test_get_ancestor_chain_accepts_namespace_fqn() {
+        // Valid: Namespace FQN should work IF the class exists in the index
+        let mut index = RubyIndex::new();
+        let uri = Url::parse("file://test.rb").unwrap();
+
+        // Create and index the class first
+        let entry = create_test_entry(&mut index, "Foo", &uri);
+        index.add_entry(entry);
+
+        // Now we can get its ancestor chain
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::try_from("Foo").unwrap()],
+            NamespaceKind::Instance,
+        );
+
+        // This should not panic - class exists in index
+        let chain = index.get_ancestor_chain(&namespace_fqn);
+        assert!(!chain.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "get_ancestor_chain called with invalid FQN variant")]
+    fn test_get_ancestor_chain_rejects_constant_fqn() {
+        // TigerBeetle-style assertion: value constants don't have ancestors
+        // Example: A = 1  (not a class/module, just a value)
+        let index = RubyIndex::new();
+        let constant_fqn =
+            FullyQualifiedName::constant(vec![RubyConstant::try_from("FOO").unwrap()]);
+
+        // This should panic - value constants like FOO = 42 don't have ancestors
+        // Only classes and modules have ancestors
+        index.get_ancestor_chain(&constant_fqn);
+    }
+
+    #[test]
+    fn test_get_ancestor_chain_returns_self_and_root_for_unindexed_class() {
+        // For unindexed classes (metaprogramming, stdlib, gems), we return:
+        // [fqn, root_namespace] - the class itself + root for top-level method access.
+        //
+        // This is NOT the same as "no ancestors" - every Ruby class has ancestors.
+        // We're explicitly signaling that we don't have the full ancestor information,
+        // but we still provide root namespace for top-level methods like `puts`.
+        let index = RubyIndex::new();
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::try_from("UnindexedClass").unwrap()],
+            NamespaceKind::Instance,
+        );
+
+        // Should return [fqn, root] (not panic, not empty vec)
+        let chain = index.get_ancestor_chain(&namespace_fqn);
+
+        assert_eq!(chain.len(), 2, "Should return two-element chain for unindexed class");
+        assert_eq!(chain[0], namespace_fqn, "First element should be the FQN itself");
+        assert_eq!(
+            chain[1],
+            FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance),
+            "Second element should be root namespace for top-level method access"
+        );
     }
 }

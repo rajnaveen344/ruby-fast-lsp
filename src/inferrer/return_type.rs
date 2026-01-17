@@ -215,11 +215,15 @@ pub fn infer_method_call(
         _ => return None,
     };
 
+    // Convert to Namespace FQN if it's a Constant FQN (classes stored as Constant in type system)
+    let receiver_namespace = receiver_fqn
+        .to_instance_namespace()
+        .unwrap_or(receiver_fqn.clone());
+
     let ruby_method = RubyMethod::new(method_name).ok()?;
 
     // Search for method in the receiver's ancestor chain (MRO)
-    // Constant FQNs default to Instance namespace kind
-    let ancestor_chain = index.get_ancestor_chain(&receiver_fqn);
+    let ancestor_chain = index.get_ancestor_chain(&receiver_namespace);
 
     for ancestor in &ancestor_chain {
         let method_fqn =
@@ -566,7 +570,7 @@ impl<'a> InferenceContext<'a> {
         let includers = self.index.get_including_classes(module_fqn);
 
         for includer_fqn in includers {
-            // Get the includer's full MRO (Constant FQNs default to Instance)
+            // Get the includer's full MRO (includer_fqn is a Namespace FQN)
             let mro = self.index.get_ancestor_chain(&includer_fqn);
 
             // Search for the method in the includer's MRO
