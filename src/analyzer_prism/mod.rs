@@ -195,7 +195,7 @@ impl RubyPrismAnalyzer {
         Option<IdentifierType>,
         Vec<RubyConstant>,
         LVScopeId,
-        Option<crate::indexer::entry::NamespaceKind>,
+        crate::indexer::entry::NamespaceKind,
     ) {
         let parse_result = ruby_prism::parse(self.code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling

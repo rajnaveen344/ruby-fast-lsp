@@ -175,19 +175,7 @@ impl IdentifierVisitor {
     /// - Instance namespace (in instance methods or at top-level)
     /// - Singleton namespace (in class body)
     fn infer_namespace_kind_from_context(&self) -> NamespaceKind {
-        match self.scope_tracker.current_method_context() {
-            Some(kind) => kind,
-            None => {
-                // At top level or class body
-                // If namespace is empty, we're at top level -> instance method
-                // If namespace has content, we're in class body -> singleton method
-                if self.scope_tracker.get_ns_stack().is_empty() {
-                    NamespaceKind::Instance
-                } else {
-                    NamespaceKind::Singleton
-                }
-            }
-        }
+        self.scope_tracker.current_method_context()
     }
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {

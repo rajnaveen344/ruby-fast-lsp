@@ -98,7 +98,7 @@ impl IdentifierVisitor {
         Option<IdentifierType>,
         Vec<RubyConstant>,
         LVScopeId,
-        Option<NamespaceKind>,
+        NamespaceKind,
     ) {
         let ns_stack = match self.ns_stack_at_pos.len() {
             // If ns_stack_at_pos is empty because no identifier was found,

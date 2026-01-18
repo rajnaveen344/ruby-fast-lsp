@@ -136,7 +136,7 @@ impl IndexQuery {
         &self,
         identifier: &Identifier,
         ancestors: &[RubyConstant],
-        namespace_kind: Option<NamespaceKind>,
+        namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<Vec<Location>> {
         match identifier {

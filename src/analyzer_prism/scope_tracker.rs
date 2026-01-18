@@ -119,12 +119,12 @@ impl ScopeTracker {
 
     /// Returns the current method context based on the local variable scope stack.
     /// This helps determine whether bare method calls should be treated as instance or singleton methods.
-    pub fn current_method_context(&self) -> Option<NamespaceKind> {
+    pub fn current_method_context(&self) -> NamespaceKind {
         // Look for the most recent method scope in the LV stack
         for scope in self.lv_stack.iter().rev() {
             match scope.kind() {
-                LVScopeKind::InstanceMethod => return Some(NamespaceKind::Instance),
-                LVScopeKind::ClassMethod => return Some(NamespaceKind::Singleton),
+                LVScopeKind::InstanceMethod => return NamespaceKind::Instance,
+                LVScopeKind::ClassMethod => return NamespaceKind::Singleton,
                 LVScopeKind::Constant => break, // Hard scope boundary
                 _ => continue,
             }
@@ -132,10 +132,18 @@ impl ScopeTracker {
 
         // If we're in a singleton context, default to singleton methods
         if self.in_singleton() {
-            return Some(NamespaceKind::Singleton);
+            return NamespaceKind::Singleton;
         }
 
-        None
+        // Class/module body (non-empty namespace) returns Singleton
+        // Bare calls in class body are class methods
+        if !self.get_ns_stack().is_empty() {
+            return NamespaceKind::Singleton;
+        }
+
+        // Top-level returns Instance
+        // Bare calls at top-level become Object instance methods
+        NamespaceKind::Instance
     }
 }
 

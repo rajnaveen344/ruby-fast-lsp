@@ -189,23 +189,7 @@ impl ReferenceVisitor {
         current_namespace: &Vec<RubyConstant>,
     ) -> (Vec<RubyConstant>, NamespaceKind) {
         // Determine namespace kind based on current method context
-        let namespace_kind = match self.scope_tracker.current_method_context() {
-            Some(context_kind) => {
-                // We're inside a method definition, use the same kind for bare calls
-                context_kind
-            }
-            None => {
-                // We're not inside a method definition (e.g., class body, top-level)
-                // Check if we're in a singleton context
-                if self.scope_tracker.in_singleton() {
-                    NamespaceKind::Singleton
-                } else {
-                    // Default to instance method for most cases
-                    // This covers class body and top-level calls
-                    NamespaceKind::Instance
-                }
-            }
-        };
+        let namespace_kind = self.scope_tracker.current_method_context();
 
         (current_namespace.clone(), namespace_kind)
     }
