@@ -6,8 +6,10 @@
 
 mod attrs;
 mod branch_variable_return;
+mod call_contexts;
 mod goto;
 mod inference;
+mod inheritance_graphs;
 mod method_chaining;
 pub mod mixin_ambiguity;
 pub mod mixin_goto;

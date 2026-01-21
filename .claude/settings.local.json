@@ -18,7 +18,8 @@
       "Bash(grep:*)",
       "Bash(tree:*)",
       "Bash(git grep:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(ruby:*)"
     ]
   }
 }
