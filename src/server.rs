@@ -229,6 +229,14 @@ impl RubyLanguageServer {
         request::handle_debug_inference_stats(self, params).await
     }
 
+    /// Handle `ruby-fast-lsp/debug/dumpGraph` - dump inheritance graph as JSON.
+    pub async fn handle_debug_dump_graph(
+        &self,
+        params: crate::capabilities::debug::DumpGraphParams,
+    ) -> LspResult<crate::capabilities::debug::DumpGraphResponse> {
+        request::handle_debug_dump_graph(self, params).await
+    }
+
     /// Invalidate namespace tree cache with debouncing (300ms delay)
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         let server = self.clone();

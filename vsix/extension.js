@@ -336,7 +336,32 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, showReferencesCommand);
+    // Register dumpGraph command for debugging inheritance graph
+    const dumpGraphCommand = vscode.commands.registerCommand('rubyFastLsp.dumpGraph', async () => {
+        if (!client || client.state !== 2) {
+            vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
+            return;
+        }
+
+        try {
+            outputChannel.appendLine('[Ruby Fast LSP] Requesting inheritance graph dump...');
+            const response = await client.sendRequest('ruby-fast-lsp/debug/dumpGraph', {});
+
+            // Create a new document with the JSON content
+            const doc = await vscode.workspace.openTextDocument({
+                content: JSON.stringify(response, null, 2),
+                language: 'json'
+            });
+            await vscode.window.showTextDocument(doc);
+
+            outputChannel.appendLine(`[Ruby Fast LSP] Graph dump complete: ${response.node_count} nodes`);
+        } catch (error) {
+            outputChannel.appendLine(`[Ruby Fast LSP] Failed to dump graph: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to dump inheritance graph: ${error.message}`);
+        }
+    });
+
+    context.subscriptions.push(treeView, refreshCommand, showReferencesCommand, dumpGraphCommand);
 
     // Start the client and initialize namespace tree when ready
     client.start().then(() => {

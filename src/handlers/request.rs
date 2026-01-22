@@ -216,6 +216,14 @@ pub async fn handle_debug_inference_stats(
     Ok(debug::handle_inference_stats(lang_server))
 }
 
+pub async fn handle_debug_dump_graph(
+    lang_server: &RubyLanguageServer,
+    params: debug::DumpGraphParams,
+) -> LspResult<debug::DumpGraphResponse> {
+    info!("Debug dumpGraph request received");
+    Ok(debug::handle_dump_graph(lang_server, params))
+}
+
 // ============================================================================
 // Type Hierarchy Handlers
 // ============================================================================

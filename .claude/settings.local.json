@@ -19,7 +19,9 @@
       "Bash(tree:*)",
       "Bash(git grep:*)",
       "WebSearch",
-      "Bash(ruby:*)"
+      "Bash(ruby:*)",
+      "Bash(cargo doc:*)",
+      "Bash(cargo tree:*)"
     ]
   }
 }

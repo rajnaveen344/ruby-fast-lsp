@@ -124,6 +124,10 @@
         "command": "rubyNamespaceTree.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "rubyFastLsp.dumpGraph",
+        "title": "Ruby Fast LSP: Dump Inheritance Graph"
       }
     ],
     "menus": {

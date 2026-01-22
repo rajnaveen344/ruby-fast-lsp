@@ -4,10 +4,13 @@
 //! `$/listCommands` protocol, allowing tools like `lsp-repl` to discover
 //! and execute debug commands.
 
+use std::collections::HashMap;
+
 use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::indexer::entry::entry_kind::EntryKind;
+use crate::indexer::entry::NamespaceKind;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
@@ -124,6 +127,50 @@ pub struct AncestorsResponse {
 }
 
 // ============================================================================
+// Dump Graph Types
+// ============================================================================
+
+/// Parameters for `ruby-fast-lsp/debug/dumpGraph`.
+/// Empty struct to satisfy tower-lsp custom method requirements.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DumpGraphParams {}
+
+/// A snapshot of a single node in the inheritance graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNodeSnapshot {
+    /// Node kind: "Class" or "Module"
+    pub kind: String,
+    /// Superclass FQN (for classes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superclass: Option<String>,
+    /// Included modules
+    pub includes: Vec<String>,
+    /// Prepended modules
+    pub prepends: Vec<String>,
+    /// Classes/modules that include this module
+    pub included_by: Vec<String>,
+    /// Classes/modules that prepend this module
+    pub prepended_by: Vec<String>,
+    /// Direct subclasses (for classes)
+    pub children: Vec<String>,
+    /// Method Resolution Order (pre-computed)
+    pub mro: Vec<String>,
+}
+
+/// Response from `ruby-fast-lsp/debug/dumpGraph`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpGraphResponse {
+    /// Format version for compatibility
+    pub version: String,
+    /// Unix timestamp (seconds since epoch)
+    pub timestamp: String,
+    /// Total number of nodes in the graph
+    pub node_count: usize,
+    /// All nodes indexed by FQN
+    pub nodes: HashMap<String, GraphNodeSnapshot>,
+}
+
+// ============================================================================
 // Handlers
 // ============================================================================
 
@@ -176,6 +223,12 @@ pub fn handle_list_commands() -> ListCommandsResponse {
             name: "inference-stats".to_string(),
             method: "ruby-fast-lsp/debug/inference-stats".to_string(),
             description: "Show type inference statistics and coverage".to_string(),
+            params: vec![],
+        },
+        CommandDefinition {
+            name: "dumpGraph".to_string(),
+            method: "ruby-fast-lsp/debug/dumpGraph".to_string(),
+            description: "Dump inheritance graph as JSON for debugging".to_string(),
             params: vec![],
         },
     ];
@@ -680,5 +733,80 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
         methods_without_return_type,
         inference_coverage_percent,
         top_files_by_method_count,
+    }
+}
+
+/// Handle `ruby-fast-lsp/debug/dumpGraph` - dump the inheritance graph as JSON.
+pub fn handle_dump_graph(server: &RubyLanguageServer, _params: DumpGraphParams) -> DumpGraphResponse {
+    debug!("[DEBUG] Dumping inheritance graph");
+
+    let index = server.index.lock();
+    let graph = index.get_graph();
+
+    let mut nodes = HashMap::new();
+
+    // Helper to convert FQN to jq-friendly key
+    // Instance: "A::B::C"
+    // Singleton: "#<Class:A::B::C>"
+    let fqn_to_key = |fqn: &FullyQualifiedName| -> String {
+        match fqn {
+            FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => {
+                parts.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("::")
+            }
+            FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
+                let name = parts.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("::");
+                format!("#<Class:{}>", name)
+            }
+            other => other.to_string(),
+        }
+    };
+
+    // Resolve FqnId to jq-friendly key
+    let resolve_key = |id| index.get_fqn(id).map(|f| fqn_to_key(f));
+
+    // Iterate through all definitions
+    for (fqn, _entries) in index.definitions() {
+        // Only process namespaces (classes/modules)
+        let FullyQualifiedName::Namespace(_, _) = fqn else {
+            continue;
+        };
+
+        let Some(fqn_id) = index.get_fqn_id(fqn) else {
+            continue;
+        };
+
+        let Some(node) = graph.get_node(fqn_id) else {
+            continue;
+        };
+
+        let key = fqn_to_key(fqn);
+
+        // Compute MRO using the graph's method_lookup_chain
+        let mro: Vec<String> = graph
+            .method_lookup_chain(fqn_id)
+            .iter()
+            .filter_map(|&id| resolve_key(id))
+            .collect();
+
+        nodes.insert(key, GraphNodeSnapshot {
+            kind: format!("{:?}", node.kind),
+            superclass: node.superclass.and_then(|id| resolve_key(id)),
+            includes: node.includes.iter().filter_map(|&id| resolve_key(id)).collect(),
+            prepends: node.prepends.iter().filter_map(|&id| resolve_key(id)).collect(),
+            included_by: node.included_by.iter().filter_map(|&id| resolve_key(id)).collect(),
+            prepended_by: node.prepended_by.iter().filter_map(|&id| resolve_key(id)).collect(),
+            children: node.children.iter().filter_map(|&id| resolve_key(id)).collect(),
+            mro,
+        });
+    }
+
+    DumpGraphResponse {
+        version: "1.0".to_string(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default(),
+        node_count: nodes.len(),
+        nodes,
     }
 }
