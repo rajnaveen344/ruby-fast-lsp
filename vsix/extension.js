@@ -115,8 +115,8 @@ class RubyIndexProvider {
                 }
             } else if (element.nodeType === 'mixinSection') {
                 // Return individual mixin items
-                const isSuperclass = element.mixinLabel === 'Superclass';
-                return element.mixins.map(m => this.buildMixinItem(m, isSuperclass));
+                const useClassIcon = element.mixinLabel === 'Superclass' || element.mixinLabel === 'Included By Classes';
+                return element.mixins.map(m => this.buildMixinItem(m, useClassIcon));
             } else if (element.nodeType === 'mixin') {
                 // Mixin items have no children
                 return [];
@@ -143,6 +143,11 @@ class RubyIndexProvider {
                 // Add singleton class as a child node (contains extends as includes)
                 if (ns.singleton_class) {
                     children.push(this.buildSingletonClassItem(ns.singleton_class));
+                }
+
+                // Add included_by_classes section for modules (classes that use this module)
+                if (ns.included_by_classes && ns.included_by_classes.length > 0) {
+                    children.push(this.buildMixinSectionItem('Included By Classes', 'references', ns.included_by_classes));
                 }
 
                 // Add nested namespace children
@@ -180,7 +185,8 @@ class RubyIndexProvider {
             const hasIncludes = ns.includes && ns.includes.length > 0;
             const hasPrepends = ns.prepends && ns.prepends.length > 0;
             const hasSingletonClass = ns.singleton_class != null;
-            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass;
+            const hasIncludedByClasses = ns.included_by_classes && ns.included_by_classes.length > 0;
+            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedByClasses;
             const hasAnyChildren = hasChildren || hasMixins;
 
             const item = new vscode.TreeItem(
@@ -201,6 +207,9 @@ class RubyIndexProvider {
             }
             if (hasSingletonClass && ns.singleton_class.includes) {
                 tooltip += `\nExtends: ${ns.singleton_class.includes.join(', ')}`;
+            }
+            if (hasIncludedByClasses) {
+                tooltip += `\nIncluded By Classes: ${ns.included_by_classes.join(', ')}`;
             }
 
             item.tooltip = tooltip;
@@ -281,12 +290,12 @@ class RubyIndexProvider {
         return item;
     }
 
-    buildMixinItem(name, isSuperclass = false) {
+    buildMixinItem(name, useClassIcon = false) {
         const item = new vscode.TreeItem(
             name,
             vscode.TreeItemCollapsibleState.None
         );
-        item.iconPath = new vscode.ThemeIcon(isSuperclass ? 'symbol-class' : 'symbol-interface');
+        item.iconPath = new vscode.ThemeIcon(useClassIcon ? 'symbol-class' : 'symbol-interface');
         item.nodeType = 'mixin';
         item.tooltip = name;
         return item;

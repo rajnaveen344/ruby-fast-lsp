@@ -1,13 +1,14 @@
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{Entry, MixinRef, NamespaceKind};
-use crate::indexer::index::RubyIndex;
+use crate::indexer::graph::{Graph, NodeKind};
+use crate::indexer::index::{FqnId, RubyIndex};
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +37,8 @@ pub struct NamespaceNode {
     pub prepends: Vec<String>,
     /// Singleton class node (for class methods, contains extends as includes)
     pub singleton_class: Option<Box<NamespaceNode>>,
+    /// Classes that ultimately include this module (for modules only)
+    pub included_by_classes: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -206,9 +209,21 @@ pub async fn handle_namespace_tree(
                 includes: resolved_extends, // extends become includes on singleton
                 prepends: Vec::new(),
                 singleton_class: None,
+                included_by_classes: Vec::new(),
             }))
         } else {
             None
+        };
+
+        // For modules, find all classes that ultimately include this module
+        let included_by_classes = if kind == "Module" {
+            if let Some(fqn_id) = index.get_fqn_id(fqn) {
+                find_including_classes(fqn_id, index.get_graph(), &index)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
         };
 
         let node = NamespaceNode {
@@ -221,6 +236,7 @@ pub async fn handle_namespace_tree(
             includes: resolved_includes,
             prepends: resolved_prepends,
             singleton_class,
+            included_by_classes,
         };
 
         namespace_map.insert(fqn_string, node);
@@ -416,4 +432,52 @@ fn build_children_iterative(
         children.sort_by(|a, b| a.name.cmp(&b.name));
         parent_node.children = children;
     }
+}
+
+/// Find all classes that ultimately include a module by traversing included_by/prepended_by edges.
+/// Uses BFS to traverse through intermediate modules until finding classes.
+fn find_including_classes(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> Vec<String> {
+    let mut classes = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    // Start from the module's direct includers
+    if let Some(node) = graph.get_node(start_id) {
+        for &id in node.included_by.iter().chain(node.prepended_by.iter()) {
+            if visited.insert(id) {
+                queue.push_back(id);
+            }
+        }
+    }
+
+    // BFS through the graph
+    while let Some(current_id) = queue.pop_front() {
+        let Some(current_node) = graph.get_node(current_id) else {
+            continue;
+        };
+
+        match current_node.kind {
+            NodeKind::Class => {
+                // Found a class - add it to results
+                if let Some(fqn) = index.get_fqn(current_id) {
+                    classes.push(fqn.to_string());
+                }
+            }
+            NodeKind::Module => {
+                // It's a module - continue traversing through its includers
+                for &id in current_node
+                    .included_by
+                    .iter()
+                    .chain(current_node.prepended_by.iter())
+                {
+                    if visited.insert(id) {
+                        queue.push_back(id);
+                    }
+                }
+            }
+        }
+    }
+
+    classes.sort();
+    classes
 }
