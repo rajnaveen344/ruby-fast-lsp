@@ -284,7 +284,7 @@ impl IndexQuery {
             }
 
             // Also check including classes
-            let including_classes = index.get_including_classes(&ancestor_fqn);
+            let including_classes = index.including_classes(&ancestor_fqn);
             for including_class_fqn in including_classes {
                 let inc_method_fqn = FullyQualifiedName::method(
                     including_class_fqn.namespace_parts(),
@@ -313,7 +313,7 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
-        let including_classes = index.get_including_classes(module_fqn);
+        let including_classes = index.including_classes(module_fqn);
 
         for including_class_fqn in including_classes {
             // Create Namespace FQN with kind for correct ancestor chain lookup

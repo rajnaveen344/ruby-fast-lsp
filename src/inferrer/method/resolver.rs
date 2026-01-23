@@ -152,7 +152,7 @@ impl MethodResolver {
 
             // For modules, also search through classes that include this module
             if is_module {
-                let including_classes = index.get_including_classes(&owner_fqn);
+                let including_classes = index.including_classes(&owner_fqn);
                 for class_fqn in including_classes {
                     let class_with_kind = FullyQualifiedName::namespace_with_kind(
                         class_fqn.namespace_parts(),

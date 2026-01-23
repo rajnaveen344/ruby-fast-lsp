@@ -50,10 +50,6 @@ impl IndexerProject {
         self.index_definitions_and_track_dependencies(&ruby_files, server, total_files)
             .await?;
 
-        // Resolve all mixin references now that all definitions are indexed
-        info!("Resolving mixin references");
-        server.index.lock().resolve_all_mixins();
-
         info!(
             "Project definitions indexing completed in {:?}. Found {} stdlib deps, {} gem deps",
             start_time.elapsed(),

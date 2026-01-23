@@ -567,7 +567,7 @@ impl<'a> InferenceContext<'a> {
         ruby_method: &RubyMethod,
     ) -> Option<RubyType> {
         // Get all classes/modules that include this module
-        let includers = self.index.get_including_classes(module_fqn);
+        let includers = self.index.including_classes(module_fqn);
 
         for includer_fqn in includers {
             // Get the includer's full MRO (includer_fqn is a Namespace FQN)

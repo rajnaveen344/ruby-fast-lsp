@@ -983,69 +983,6 @@ impl RubyIndex {
         }
     }
 
-    /// Get all classes/modules that include the given module
-    ///
-    /// Uses the inheritance graph for efficient lookup, but falls back to scanning
-    /// all entries if the graph doesn't have the information. This fallback is needed
-    /// because edges are only added when `resolve_all_mixins` or `resolve_mixins_for_uri`
-    /// is called, and during incremental indexing the module might be defined after
-    /// the class that includes it.
-    pub fn get_including_classes(
-        &self,
-        module_fqn: &FullyQualifiedName,
-    ) -> Vec<FullyQualifiedName> {
-        // First try the graph (get_fqn_id normalizes between Constant and Namespace)
-        let mut includers: Vec<FullyQualifiedName> =
-            if let Some(fqn_id) = self.get_fqn_id(module_fqn) {
-                self.graph
-                    .mixers(fqn_id)
-                    .iter()
-                    .filter_map(|&id| self.get_fqn(id).cloned())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-
-        // Fall back to scanning if graph is empty
-        // This handles the case where the module was indexed after the class
-        if includers.is_empty() {
-            for (fqn, entries) in &self.by_fqn {
-                for entry_id in entries.iter().rev() {
-                    let Some(entry) = self.entries.get(*entry_id) else {
-                        continue;
-                    };
-
-                    let (includes, extends, prepends) = match &entry.kind {
-                        EntryKind::Class(data) => (&data.includes, &data.extends, &data.prepends),
-                        EntryKind::Module(data) => (&data.includes, &data.extends, &data.prepends),
-                        _ => continue,
-                    };
-
-                    let all_mixins = includes.iter().chain(extends.iter()).chain(prepends.iter());
-
-                    for mixin_ref in all_mixins {
-                        if let Some(resolved) = utils::resolve_constant_fqn_from_parts(
-                            self,
-                            &mixin_ref.parts,
-                            mixin_ref.absolute,
-                            fqn,
-                        ) {
-                            // Compare namespace parts to handle Constant vs Namespace variants
-                            if resolved.namespace_parts() == module_fqn.namespace_parts()
-                                && !includers.contains(fqn)
-                            {
-                                includers.push(fqn.clone());
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        includers
-    }
-
     /// Get all classes that include this module (transitively through intermediate modules).
     ///
     /// Uses BFS to traverse included_by/prepended_by edges. When encountering a module,
@@ -1060,6 +997,22 @@ impl RubyIndex {
 
         self.graph
             .including_classes(fqn_id)
+            .into_iter()
+            .filter_map(|id| self.get_fqn(id).cloned())
+            .collect()
+    }
+
+    /// Get all classes/modules that directly include or prepend this module.
+    ///
+    /// Unlike `including_classes`, this returns direct mixers only (not transitive),
+    /// and includes both modules and classes.
+    pub fn mixers(&self, module_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        let Some(fqn_id) = self.get_fqn_id(module_fqn) else {
+            return Vec::new();
+        };
+
+        self.graph
+            .mixers(fqn_id)
             .into_iter()
             .filter_map(|id| self.get_fqn(id).cloned())
             .collect()
@@ -1092,8 +1045,8 @@ impl RubyIndex {
     pub fn get_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
         let mut usages = Vec::new();
 
-        // Get all classes/modules that include/prepend/extend this module
-        let mixer_fqns = self.get_including_classes(module_fqn);
+        // Get all classes/modules that directly include/prepend/extend this module
+        let mixer_fqns = self.mixers(module_fqn);
 
         for mixer_fqn in mixer_fqns {
             // Determine which FQN to look up for mixin data:
