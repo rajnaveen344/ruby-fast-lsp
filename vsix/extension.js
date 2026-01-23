@@ -113,16 +113,19 @@ class RubyIndexProvider {
                 if (response && response.namespaces) {
                     return this.buildTreeItems(response.namespaces);
                 }
+            } else if (element.nodeType === 'includedBySection') {
+                // Return individual class items (all includers are classes)
+                return element.includers.map(inc => this.buildIncluderItem(inc.name, inc.locations || []));
             } else if (element.nodeType === 'mixinSection') {
                 // Return individual mixin items
-                // mixins can be MixinInfo objects (with name and location) or strings (for included_by_classes)
-                const useClassIcon = element.mixinLabel === 'Superclass' || element.mixinLabel === 'Included By Classes';
+                // mixins are MixinInfo objects (with name and locations)
+                const useClassIcon = element.mixinLabel === 'Superclass';
                 return element.mixins.map(m => {
-                    // Handle both MixinInfo objects and plain strings
+                    // Handle MixinInfo objects
                     if (typeof m === 'object' && m.name) {
-                        return this.buildMixinItem(m.name, useClassIcon, m.location);
+                        return this.buildMixinItem(m.name, useClassIcon, m.locations || []);
                     } else {
-                        return this.buildMixinItem(m, useClassIcon, null);
+                        return this.buildMixinItem(m, useClassIcon, []);
                     }
                 });
             } else if (element.nodeType === 'mixin') {
@@ -153,9 +156,9 @@ class RubyIndexProvider {
                     children.push(this.buildSingletonClassItem(ns.singleton_class));
                 }
 
-                // Add included_by_classes section for modules (classes that use this module)
-                if (ns.included_by_classes && ns.included_by_classes.length > 0) {
-                    children.push(this.buildMixinSectionItem('Included By Classes', 'references', ns.included_by_classes));
+                // Add included_by section for modules (classes that include this module, directly or transitively)
+                if (ns.included_by && ns.included_by.length > 0) {
+                    children.push(this.buildIncludedBySectionItem('Included By Classes', 'references', ns.included_by));
                 }
 
                 // Add nested namespace children
@@ -194,8 +197,8 @@ class RubyIndexProvider {
             const hasIncludes = ns.includes && ns.includes.length > 0;
             const hasPrepends = ns.prepends && ns.prepends.length > 0;
             const hasSingletonClass = ns.singleton_class != null;
-            const hasIncludedByClasses = ns.included_by_classes && ns.included_by_classes.length > 0;
-            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedByClasses;
+            const hasIncludedBy = ns.included_by && ns.included_by.length > 0;
+            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedBy;
             const hasAnyChildren = hasChildren || hasMixins;
 
             const item = new vscode.TreeItem(
@@ -203,7 +206,13 @@ class RubyIndexProvider {
                 hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
             );
 
-            item.description = ns.kind;
+            // Show location count in description if multiple
+            const locations = ns.locations || [];
+            if (locations.length > 1) {
+                item.description = `${ns.kind} (${locations.length} locations)`;
+            } else {
+                item.description = ns.kind;
+            }
 
             // Store namespace data for building mixin children
             item.namespaceData = ns;
@@ -217,21 +226,30 @@ class RubyIndexProvider {
             }
 
             // Add location information for navigation
-            if (ns.location && ns.location.uri) {
+            if (locations.length === 1) {
+                // Single location - open directly
+                const loc = locations[0];
                 item.command = {
                     command: 'vscode.open',
                     title: 'Open',
                     arguments: [
-                        vscode.Uri.parse(ns.location.uri),
+                        vscode.Uri.parse(loc.uri),
                         {
                             selection: new vscode.Range(
-                                ns.location.line || 0,
-                                ns.location.character || 0,
-                                ns.location.line || 0,
-                                ns.location.character || 0
+                                loc.line || 0,
+                                loc.character || 0,
+                                loc.line || 0,
+                                loc.character || 0
                             )
                         }
                     ]
+                };
+            } else if (locations.length > 1) {
+                // Multiple locations - show picker
+                item.command = {
+                    command: 'rubyIndex.showLocations',
+                    title: 'Show Locations',
+                    arguments: [ns.fqn, locations]
                 };
             }
 
@@ -269,7 +287,7 @@ class RubyIndexProvider {
         return item;
     }
 
-    buildMixinItem(name, useClassIcon = false, location = null) {
+    buildMixinItem(name, useClassIcon = false, locations = []) {
         const item = new vscode.TreeItem(
             name,
             vscode.TreeItemCollapsibleState.None
@@ -277,26 +295,101 @@ class RubyIndexProvider {
         item.iconPath = new vscode.ThemeIcon(useClassIcon ? 'symbol-class' : 'symbol-interface');
         item.nodeType = 'mixin';
 
-        // If we have a call site location, use it directly for navigation
+        // Show location count if multiple
+        if (locations && locations.length > 1) {
+            item.description = `(${locations.length} locations)`;
+        }
+
+        // If we have call site locations, use them for navigation
         // Otherwise fall back to looking up the definition
-        if (location && location.uri) {
+        if (locations.length === 1) {
+            // Single location - open directly
+            const loc = locations[0];
             item.command = {
                 command: 'vscode.open',
                 title: 'Go to Call Site',
                 arguments: [
-                    vscode.Uri.parse(location.uri),
+                    vscode.Uri.parse(loc.uri),
                     {
                         selection: new vscode.Range(
-                            location.line || 0,
-                            location.character || 0,
-                            location.line || 0,
-                            location.character || 0
+                            loc.line || 0,
+                            loc.character || 0,
+                            loc.line || 0,
+                            loc.character || 0
                         )
                     }
                 ]
             };
+        } else if (locations.length > 1) {
+            // Multiple locations - use custom command to show picker
+            item.command = {
+                command: 'rubyIndex.showLocations',
+                title: 'Show Locations',
+                arguments: [name, locations]
+            };
         } else {
-            // Fall back to definition lookup (for items without call site location, like included_by_classes)
+            // Fall back to definition lookup (for items without call site location)
+            item.command = {
+                command: 'rubyIndex.gotoDefinition',
+                title: 'Go to Definition',
+                arguments: [name]
+            };
+        }
+        return item;
+    }
+
+    buildIncludedBySectionItem(label, icon, includers) {
+        const item = new vscode.TreeItem(
+            `${label} (${includers.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed
+        );
+        item.iconPath = new vscode.ThemeIcon(icon);
+        item.nodeType = 'includedBySection';
+        item.includers = includers;
+        return item;
+    }
+
+    buildIncluderItem(name, locations = []) {
+        const item = new vscode.TreeItem(
+            name,
+            vscode.TreeItemCollapsibleState.None
+        );
+        // All includers are classes (we traverse through modules to find classes)
+        item.iconPath = new vscode.ThemeIcon('symbol-class');
+
+        // Show location count if multiple
+        if (locations && locations.length > 1) {
+            item.description = `(${locations.length} locations)`;
+        }
+
+        item.nodeType = 'includer';
+
+        // Navigate to definition using locations
+        if (locations && locations.length === 1) {
+            const loc = locations[0];
+            item.command = {
+                command: 'vscode.open',
+                title: 'Go to Definition',
+                arguments: [
+                    vscode.Uri.parse(loc.uri),
+                    {
+                        selection: new vscode.Range(
+                            loc.line || 0,
+                            loc.character || 0,
+                            loc.line || 0,
+                            loc.character || 0
+                        )
+                    }
+                ]
+            };
+        } else if (locations && locations.length > 1) {
+            item.command = {
+                command: 'rubyIndex.showLocations',
+                title: 'Show Locations',
+                arguments: [name, locations]
+            };
+        } else {
+            // Fall back to lookup
             item.command = {
                 command: 'rubyIndex.gotoDefinition',
                 title: 'Go to Definition',
@@ -507,6 +600,41 @@ function activate(context) {
         }
     });
 
+    // Register show locations command for items with multiple definitions/call sites
+    const showLocationsCommand = vscode.commands.registerCommand('rubyIndex.showLocations', async (name, locations) => {
+        if (!locations || locations.length === 0) {
+            vscode.window.showWarningMessage(`No locations found for: ${name}`);
+            return;
+        }
+
+        // Build quick pick items with file path info
+        const items = locations.map((loc) => {
+            const uri = vscode.Uri.parse(loc.uri);
+            const fileName = path.basename(uri.fsPath);
+            const relativePath = vscode.workspace.asRelativePath(uri);
+            return {
+                label: `${fileName}:${(loc.line || 0) + 1}`,
+                description: relativePath,
+                detail: `Line ${(loc.line || 0) + 1}, Column ${(loc.character || 0) + 1}`,
+                location: loc
+            };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: `Select a location for "${name}" (${locations.length} found)`,
+            matchOnDescription: true
+        });
+
+        if (selected) {
+            const loc = selected.location;
+            const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(loc.uri));
+            const editor = await vscode.window.showTextDocument(doc);
+            const position = new vscode.Position(loc.line || 0, loc.character || 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }
+    });
+
     // Register wrapper command for showReferences to handle LSP JSON serialization
     const showReferencesCommand = vscode.commands.registerCommand('ruby-fast-lsp.showReferences',
         (uriStr, position, locations) => {
@@ -526,7 +654,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showReferencesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

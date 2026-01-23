@@ -27,8 +27,8 @@ pub struct NamespaceNode {
     pub kind: String,
     /// Child namespaces
     pub children: Vec<NamespaceNode>,
-    /// Location information
-    pub location: Option<LocationInfo>,
+    /// Location information (multiple if class/module is reopened in different files)
+    pub locations: Vec<LocationInfo>,
     /// Superclass (only for classes)
     pub superclass: Option<MixinInfo>,
     /// Included modules
@@ -37,8 +37,8 @@ pub struct NamespaceNode {
     pub prepends: Vec<MixinInfo>,
     /// Singleton class node (for class methods, contains extends as includes)
     pub singleton_class: Option<Box<NamespaceNode>>,
-    /// Classes that ultimately include this module (for modules only)
-    pub included_by_classes: Vec<String>,
+    /// Classes/modules that ultimately include this module (for modules only)
+    pub included_by: Vec<IncluderInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -48,13 +48,22 @@ pub struct LocationInfo {
     pub character: u32,
 }
 
-/// A mixin reference with its name and call site location
+/// A mixin reference with its name and call site locations
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MixinInfo {
     /// The resolved name of the mixin (e.g., "ActiveSupport::Concern")
     pub name: String,
-    /// Location of the include/prepend/extend call site
-    pub location: Option<LocationInfo>,
+    /// Locations of the include/prepend/extend call sites (may have multiple if class is reopened)
+    pub locations: Vec<LocationInfo>,
+}
+
+/// Information about a class that includes a module (directly or transitively)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IncluderInfo {
+    /// The fully qualified name of the class
+    pub name: String,
+    /// Definition locations (may have multiple if reopened)
+    pub locations: Vec<LocationInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,23 +169,25 @@ pub async fn handle_namespace_tree(
 
         let name = fqn.name().to_string();
 
-        let location = index
-            .get_file_url(first_entry.location.file_id)
-            .map(|uri| LocationInfo {
-                uri: uri.to_string(),
-                line: first_entry.location.range.start.line,
-                character: first_entry.location.range.start.character,
-            });
-
         let current_fqn = FullyQualifiedName::namespace(fqn.namespace_parts().clone());
 
-        // Merge all mixins from all entries for this FQN
+        // Collect all locations and mixins from all entries for this FQN
+        let mut locations = Vec::new();
         let mut all_includes = Vec::new();
         let mut all_prepends = Vec::new();
         let mut all_extends = Vec::new();
         let mut superclass = None;
 
         for entry in &entries {
+            // Collect location from each entry (class/module reopened in multiple files)
+            if let Some(uri) = index.get_file_url(entry.location.file_id) {
+                locations.push(LocationInfo {
+                    uri: uri.to_string(),
+                    line: entry.location.range.start.line,
+                    character: entry.location.range.start.character,
+                });
+            }
+
             match &entry.kind {
                 EntryKind::Class(data) => {
                     if superclass.is_none() {
@@ -197,7 +208,7 @@ pub async fn handle_namespace_tree(
 
         let resolved_superclass = superclass
             .as_ref()
-            .map(|s| resolve_mixin_cached(s, &index, &current_fqn, &mut mixin_cache));
+            .map(|s| resolve_single_mixin(s, &index, &current_fqn, &mut mixin_cache));
         let resolved_includes =
             resolve_mixins_cached(&all_includes, &index, &current_fqn, &mut mixin_cache);
         let resolved_prepends =
@@ -213,21 +224,21 @@ pub async fn handle_namespace_tree(
                 fqn: singleton_fqn,
                 kind: "Singleton".to_string(),
                 children: Vec::new(),
-                location: None,
+                locations: Vec::new(), // Singleton doesn't have its own location
                 superclass: None,
                 includes: resolved_extends, // extends become includes on singleton
                 prepends: Vec::new(),
                 singleton_class: None,
-                included_by_classes: Vec::new(),
+                included_by: Vec::new(),
             }))
         } else {
             None
         };
 
-        // For modules, find all classes that ultimately include this module
-        let included_by_classes = if kind == "Module" {
+        // For modules, find all classes/modules that include this module
+        let included_by = if kind == "Module" {
             if let Some(fqn_id) = index.get_fqn_id(fqn) {
-                find_including_classes(fqn_id, index.get_graph(), &index)
+                find_includers(fqn_id, index.get_graph(), &index)
             } else {
                 Vec::new()
             }
@@ -240,12 +251,12 @@ pub async fn handle_namespace_tree(
             fqn: fqn_string.clone(),
             kind,
             children: Vec::new(),
-            location,
+            locations,
             superclass: resolved_superclass,
             includes: resolved_includes,
             prepends: resolved_prepends,
             singleton_class,
-            included_by_classes,
+            included_by,
         };
 
         namespace_map.insert(fqn_string, node);
@@ -292,17 +303,17 @@ fn compute_index_hash(index: &RubyIndex) -> u64 {
     hasher.finish()
 }
 
-// Cached mixin resolution to avoid repeated lookups
-fn resolve_mixin_cached(
+// Cached mixin name resolution to avoid repeated lookups
+fn resolve_mixin_name_cached(
     mixin_ref: &MixinRef,
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
     cache: &mut HashMap<String, String>,
-) -> MixinInfo {
+) -> String {
     let mixin_str = format_mixin_ref(mixin_ref);
     let key = format!("{}-{}", mixin_str, current_fqn);
 
-    let name = if let Some(cached) = cache.get(&key) {
+    if let Some(cached) = cache.get(&key) {
         cached.clone()
     } else {
         let result = if let Some(resolved_fqn) =
@@ -314,18 +325,7 @@ fn resolve_mixin_cached(
         };
         cache.insert(key, result.clone());
         result
-    };
-
-    // Get call site location from the MixinRef
-    let location = index
-        .get_file_url(mixin_ref.location.file_id)
-        .map(|uri| LocationInfo {
-            uri: uri.to_string(),
-            line: mixin_ref.location.range.start.line,
-            character: mixin_ref.location.range.start.character,
-        });
-
-    MixinInfo { name, location }
+    }
 }
 
 // Helper function to format MixinRef as string
@@ -339,17 +339,65 @@ fn format_mixin_ref(mixin_ref: &MixinRef) -> String {
     format!("{}{}", prefix, parts.join("::"))
 }
 
-// Batch resolve mixins with caching
+// Batch resolve mixins with caching, grouping by resolved name
 fn resolve_mixins_cached(
     mixins: &[MixinRef],
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
     cache: &mut HashMap<String, String>,
 ) -> Vec<MixinInfo> {
-    mixins
-        .iter()
-        .map(|m| resolve_mixin_cached(m, index, current_fqn, cache))
-        .collect()
+    // Group mixins by their resolved name, collecting all locations
+    let mut grouped: HashMap<String, Vec<LocationInfo>> = HashMap::new();
+
+    for mixin_ref in mixins {
+        let name = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+
+        // Get call site location from the MixinRef
+        if let Some(uri) = index.get_file_url(mixin_ref.location.file_id) {
+            let location = LocationInfo {
+                uri: uri.to_string(),
+                line: mixin_ref.location.range.start.line,
+                character: mixin_ref.location.range.start.character,
+            };
+            grouped.entry(name).or_default().push(location);
+        } else {
+            // Ensure the name is in the map even if we can't get the location
+            grouped.entry(name).or_default();
+        }
+    }
+
+    // Convert to MixinInfo vec, maintaining order by first appearance
+    let mut result: Vec<MixinInfo> = grouped
+        .into_iter()
+        .map(|(name, locations)| MixinInfo { name, locations })
+        .collect();
+
+    // Sort by name for consistent ordering
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    result
+}
+
+// Resolve a single mixin (for superclass)
+fn resolve_single_mixin(
+    mixin_ref: &MixinRef,
+    index: &RubyIndex,
+    current_fqn: &FullyQualifiedName,
+    cache: &mut HashMap<String, String>,
+) -> MixinInfo {
+    let name = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+
+    let locations = index
+        .get_file_url(mixin_ref.location.file_id)
+        .map(|uri| {
+            vec![LocationInfo {
+                uri: uri.to_string(),
+                line: mixin_ref.location.range.start.line,
+                character: mixin_ref.location.range.start.character,
+            }]
+        })
+        .unwrap_or_default();
+
+    MixinInfo { name, locations }
 }
 
 // Tree building using iterative approach
@@ -454,9 +502,10 @@ fn build_children_iterative(
     }
 }
 
-/// Find all classes that ultimately include a module by traversing included_by/prepended_by edges.
+/// Find all classes that include this module by traversing included_by/prepended_by edges.
 /// Uses BFS to traverse through intermediate modules until finding classes.
-fn find_including_classes(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> Vec<String> {
+/// Returns only classes (not modules) with their definition locations.
+fn find_includers(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> Vec<IncluderInfo> {
     let mut classes = Vec::new();
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
@@ -478,9 +527,30 @@ fn find_including_classes(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> 
 
         match current_node.kind {
             NodeKind::Class => {
-                // Found a class - add it to results
+                // Found a class - add it to results with its locations
                 if let Some(fqn) = index.get_fqn(current_id) {
-                    classes.push(fqn.to_string());
+                    let locations = index
+                        .get(fqn)
+                        .map(|entries| {
+                            entries
+                                .iter()
+                                .filter_map(|entry| {
+                                    index.get_file_url(entry.location.file_id).map(|uri| {
+                                        LocationInfo {
+                                            uri: uri.to_string(),
+                                            line: entry.location.range.start.line,
+                                            character: entry.location.range.start.character,
+                                        }
+                                    })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    classes.push(IncluderInfo {
+                        name: fqn.to_string(),
+                        locations,
+                    });
                 }
             }
             NodeKind::Module => {
@@ -498,6 +568,6 @@ fn find_including_classes(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> 
         }
     }
 
-    classes.sort();
+    classes.sort_by(|a, b| a.name.cmp(&b.name));
     classes
 }

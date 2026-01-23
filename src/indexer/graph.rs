@@ -115,10 +115,13 @@ impl Graph {
         self.nodes.get_mut(&fqn_id)
     }
 
-    /// Ensure a node exists, creating it if necessary
+    /// Ensure a node exists with the correct kind.
+    /// If the node already exists (possibly created with default kind from edge operations),
+    /// update its kind to the specified value.
     pub fn ensure_node(&mut self, fqn_id: FqnId, kind: NodeKind) {
         self.nodes
             .entry(fqn_id)
+            .and_modify(|node| node.kind = kind)
             .or_insert_with(|| GraphNode::new(kind));
     }
 
