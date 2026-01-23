@@ -129,10 +129,20 @@
         "command": "rubyIndex.export",
         "title": "Export Index as JSON",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "rubyIndex.search",
+        "title": "Search Classes/Modules",
+        "icon": "$(search)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "rubyIndex.search",
+          "when": "view == rubyIndex",
+          "group": "navigation"
+        },
         {
           "command": "rubyIndex.refresh",
           "when": "view == rubyIndex",
@@ -144,7 +154,15 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "rubyIndex.search",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "view.rubyIndex.visible"
+      }
+    ]
   },
   "scripts": {
     "package": "vsce package"

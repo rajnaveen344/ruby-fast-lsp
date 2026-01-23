@@ -83,14 +83,110 @@ class RubyIndexProvider {
     constructor() {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+        // Cache for namespace data (used for search)
+        this._cachedNamespaces = [];
+        // Map from FQN to TreeItem (for reveal)
+        this._fqnToItem = new Map();
     }
 
     refresh() {
+        // Clear cache on refresh
+        this._cachedNamespaces = [];
+        this._fqnToItem.clear();
         this._onDidChangeTreeData.fire();
+    }
+
+    // Flatten all namespaces recursively for search
+    _flattenNamespaces(namespaces, result = []) {
+        for (const ns of namespaces) {
+            result.push(ns);
+            if (ns.children && ns.children.length > 0) {
+                this._flattenNamespaces(ns.children, result);
+            }
+        }
+        return result;
+    }
+
+    // Get all namespaces for search (uses cache)
+    getAllNamespaces() {
+        return this._cachedNamespaces;
+    }
+
+    // Get TreeItem by FQN (for reveal)
+    getItemByFqn(fqn) {
+        return this._fqnToItem.get(fqn);
     }
 
     getTreeItem(element) {
         return element;
+    }
+
+    // Required for TreeView.reveal() to work with nested items
+    getParent(element) {
+        if (!element || !element.namespaceData || element.nodeType !== 'namespace') {
+            return null;
+        }
+
+        const fqn = element.namespaceData.fqn;
+        if (!fqn || !fqn.includes('::')) {
+            return null; // Root level item
+        }
+
+        // Get parent FQN (e.g., "Foo::Bar::Baz" -> "Foo::Bar")
+        const parts = fqn.split('::');
+        parts.pop();
+        const parentFqn = parts.join('::');
+
+        // Return cached parent item if exists
+        let parentItem = this._fqnToItem.get(parentFqn);
+        if (parentItem) {
+            return parentItem;
+        }
+
+        // Build parent item from cached namespace data
+        const parentNs = this._cachedNamespaces.find(ns => ns.fqn === parentFqn);
+        if (parentNs) {
+            parentItem = this._buildSingleTreeItem(parentNs);
+            this._fqnToItem.set(parentFqn, parentItem);
+            return parentItem;
+        }
+
+        return null;
+    }
+
+    // Build a single tree item from namespace data (used by getParent)
+    _buildSingleTreeItem(ns) {
+        const hasChildren = ns.children && ns.children.length > 0;
+        const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
+        const hasIncludes = ns.includes && ns.includes.length > 0;
+        const hasPrepends = ns.prepends && ns.prepends.length > 0;
+        const hasSingletonClass = ns.singleton_class != null;
+        const hasIncludedBy = ns.included_by && ns.included_by.length > 0;
+        const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass || hasIncludedBy;
+        const hasAnyChildren = hasChildren || hasMixins;
+
+        const item = new vscode.TreeItem(
+            ns.name,
+            hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+        );
+
+        const locations = ns.locations || [];
+        if (locations.length > 1) {
+            item.description = `${ns.kind} (${locations.length} locations)`;
+        } else {
+            item.description = ns.kind;
+        }
+
+        item.namespaceData = ns;
+        item.nodeType = 'namespace';
+
+        if (ns.kind === 'Class') {
+            item.iconPath = new vscode.ThemeIcon('symbol-class');
+        } else if (ns.kind === 'Module') {
+            item.iconPath = new vscode.ThemeIcon('symbol-module');
+        }
+
+        return item;
     }
 
     async getChildren(element) {
@@ -111,6 +207,8 @@ class RubyIndexProvider {
                 });
 
                 if (response && response.namespaces) {
+                    // Cache flattened namespaces for search
+                    this._cachedNamespaces = this._flattenNamespaces(response.namespaces);
                     return this.buildTreeItems(response.namespaces);
                 }
             } else if (element.nodeType === 'includedBySection') {
@@ -252,6 +350,9 @@ class RubyIndexProvider {
                     arguments: [ns.fqn, locations]
                 };
             }
+
+            // Store in FQN map for reveal
+            this._fqnToItem.set(ns.fqn, item);
 
             return item;
         });
@@ -635,6 +736,77 @@ function activate(context) {
         }
     });
 
+    // Register search command to find and reveal namespaces in tree
+    const searchCommand = vscode.commands.registerCommand('rubyIndex.search', async () => {
+        if (!client || client.state !== 2) {
+            vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
+            return;
+        }
+
+        // Get all namespaces from cache
+        let namespaces = indexProvider.getAllNamespaces();
+
+        // If cache is empty, trigger a refresh and wait for data
+        if (namespaces.length === 0) {
+            // Fetch fresh data
+            try {
+                const response = await client.sendRequest('ruby/namespaceTree', {
+                    uri: vscode.window.activeTextEditor?.document.uri.toString() || ''
+                });
+                if (response && response.namespaces) {
+                    namespaces = indexProvider._flattenNamespaces(response.namespaces);
+                }
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to fetch namespaces: ${error.message}`);
+                return;
+            }
+        }
+
+        if (namespaces.length === 0) {
+            vscode.window.showInformationMessage('No namespaces found in the Ruby Index.');
+            return;
+        }
+
+        // Build QuickPick items from namespaces
+        const items = namespaces.map(ns => {
+            const icon = ns.kind === 'Class' ? '$(symbol-class)' : '$(symbol-module)';
+            return {
+                label: `${icon} ${ns.name}`,
+                description: ns.fqn !== ns.name ? ns.fqn : '',
+                detail: ns.kind,
+                fqn: ns.fqn,
+                namespaceData: ns
+            };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Search for a class or module...',
+            matchOnDescription: true,  // Match on FQN
+            matchOnDetail: false
+        });
+
+        if (selected) {
+            // Try to reveal the item in the tree
+            // First, ensure the tree has built the item
+            let item = indexProvider.getItemByFqn(selected.fqn);
+
+            if (!item) {
+                // Item not in cache yet (tree not expanded), build it
+                item = indexProvider._buildSingleTreeItem(selected.namespaceData);
+                indexProvider._fqnToItem.set(selected.fqn, item);
+            }
+
+            // Reveal the item in the tree (expand parents if needed)
+            try {
+                await treeView.reveal(item, { select: true, focus: true, expand: true });
+            } catch (error) {
+                outputChannel.appendLine(`[Ruby Index] Failed to reveal item: ${error.message}`);
+                // Fallback: just show a message
+                vscode.window.showInformationMessage(`Found: ${selected.fqn}`);
+            }
+        }
+    });
+
     // Register wrapper command for showReferences to handle LSP JSON serialization
     const showReferencesCommand = vscode.commands.registerCommand('ruby-fast-lsp.showReferences',
         (uriStr, position, locations) => {
@@ -654,7 +826,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, searchCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {
