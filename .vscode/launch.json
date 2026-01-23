@@ -13,6 +13,34 @@
         "${workspaceFolder}/vsix/**/*.js"
       ],
       "preLaunchTask": "package-extension"
+    },
+    {
+      "name": "Run Extension (Custom Project)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${input:projectPath}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vsix/**/*.js"
+      ],
+      "preLaunchTask": "package-extension"
+    },
+    {
+      "name": "Attach to LSP (lldb)",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${command:pickProcess}",
+      "sourceLanguages": ["rust"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "projectPath",
+      "type": "promptString",
+      "description": "Path to Ruby project to debug",
+      "default": "/path/to/your/ruby/project"
     }
   ]
 }

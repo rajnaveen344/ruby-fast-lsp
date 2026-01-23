@@ -112,8 +112,8 @@
     "views": {
       "explorer": [
         {
-          "id": "rubyNamespaceTree",
-          "name": "Ruby Namespace Tree",
+          "id": "rubyIndex",
+          "name": "Ruby Index",
           "visibility": "visible",
           "icon": "$(module)"
         }
@@ -121,20 +121,26 @@
     },
     "commands": [
       {
-        "command": "rubyNamespaceTree.refresh",
+        "command": "rubyIndex.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "rubyFastLsp.dumpGraph",
-        "title": "Ruby Fast LSP: Dump Inheritance Graph"
+        "command": "rubyIndex.export",
+        "title": "Export Index as JSON",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "rubyNamespaceTree.refresh",
-          "when": "view == rubyNamespaceTree",
+          "command": "rubyIndex.refresh",
+          "when": "view == rubyIndex",
+          "group": "navigation"
+        },
+        {
+          "command": "rubyIndex.export",
+          "when": "view == rubyIndex",
           "group": "navigation"
         }
       ]

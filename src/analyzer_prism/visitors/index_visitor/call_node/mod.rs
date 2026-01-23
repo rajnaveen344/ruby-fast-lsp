@@ -4,6 +4,7 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::MixinRef;
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_namespace::RubyConstant;
 
 use super::IndexVisitor;
 use crate::analyzer_prism::utils;
@@ -60,7 +61,7 @@ impl IndexVisitor {
             let target_fqn = if current_fqn.is_empty() {
                 // Top-level include/extend/prepend applies to Object
                 // Use namespace() to create Namespace variant for class lookup
-                if let Ok(constant) = crate::types::ruby_namespace::RubyConstant::new("Object") {
+                if let Ok(constant) = RubyConstant::new("Object") {
                     FullyQualifiedName::namespace(vec![constant])
                 } else {
                     return;
@@ -137,8 +138,7 @@ impl IndexVisitor {
         for arg in arguments.arguments().iter() {
             // module_function accepts symbol arguments like :helper
             if let Some(symbol) = arg.as_symbol_node() {
-                let method_name =
-                    String::from_utf8_lossy(symbol.unescaped().as_ref()).to_string();
+                let method_name = String::from_utf8_lossy(symbol.unescaped().as_ref()).to_string();
 
                 // Create RubyMethod for the method name
                 let method = match RubyMethod::new(&method_name) {
@@ -185,7 +185,8 @@ impl IndexVisitor {
                 });
 
                 // Create the singleton method FQN (same method name, but with singleton owner)
-                let method_fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
+                let method_fqn =
+                    FullyQualifiedName::method(namespace_parts.clone(), method.clone());
 
                 // Create the method entry
                 let entry = {
@@ -199,10 +200,10 @@ impl IndexVisitor {
                             owner.clone(),
                             MethodVisibility::Public,
                             MethodOrigin::Direct,
-                            None, // origin_visibility
-                            None, // yard_doc
-                            None, // return_type_position
-                            None, // return_type
+                            None,       // origin_visibility
+                            None,       // yard_doc
+                            None,       // return_type_position
+                            None,       // return_type
                             Vec::new(), // param_types
                         ))
                         .build(&mut index)

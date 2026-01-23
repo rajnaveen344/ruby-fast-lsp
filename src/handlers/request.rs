@@ -216,12 +216,12 @@ pub async fn handle_debug_inference_stats(
     Ok(debug::handle_inference_stats(lang_server))
 }
 
-pub async fn handle_debug_dump_graph(
+pub async fn handle_export_graph(
     lang_server: &RubyLanguageServer,
-    params: debug::DumpGraphParams,
-) -> LspResult<debug::DumpGraphResponse> {
-    info!("Debug dumpGraph request received");
-    Ok(debug::handle_dump_graph(lang_server, params))
+    params: debug::ExportGraphParams,
+) -> LspResult<debug::ExportGraphResponse> {
+    info!("Export graph request received");
+    Ok(debug::handle_export_graph(lang_server, params))
 }
 
 // ============================================================================

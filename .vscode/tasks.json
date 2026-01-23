@@ -14,6 +14,17 @@
         "panel": "new"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "cargo-build",
+      "type": "shell",
+      "command": "cargo build",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": ["$rustc"]
     }
   ]
 }

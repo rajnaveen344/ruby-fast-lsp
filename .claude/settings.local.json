@@ -21,7 +21,8 @@
       "WebSearch",
       "Bash(ruby:*)",
       "Bash(cargo doc:*)",
-      "Bash(cargo tree:*)"
+      "Bash(cargo tree:*)",
+      "Bash(./create_vsix.sh:*)"
     ]
   }
 }

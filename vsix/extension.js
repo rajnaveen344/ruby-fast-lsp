@@ -78,8 +78,8 @@ function extractZippedStubs(extensionPath) {
     }
 }
 
-// Ruby Namespace Tree Data Provider
-class RubyNamespaceTreeProvider {
+// Ruby Index Tree Data Provider
+class RubyIndexProvider {
     constructor() {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -113,12 +113,61 @@ class RubyNamespaceTreeProvider {
                 if (response && response.namespaces) {
                     return this.buildTreeItems(response.namespaces);
                 }
-            } else if (element.children) {
-                // Return children of the current element
-                return this.buildTreeItems(element.children);
+            } else if (element.nodeType === 'mixinSection') {
+                // Return individual mixin items
+                const isSuperclass = element.mixinLabel === 'Superclass';
+                return element.mixins.map(m => this.buildMixinItem(m, isSuperclass));
+            } else if (element.nodeType === 'mixin') {
+                // Mixin items have no children
+                return [];
+            } else if (element.nodeType === 'namespace' && element.namespaceData) {
+                // Build children: mixin sections + singleton class + nested namespaces
+                const ns = element.namespaceData;
+                const children = [];
+
+                // Add superclass section
+                if (ns.superclass && !ns.superclass.includes('(not found)')) {
+                    children.push(this.buildMixinSectionItem('Superclass', 'arrow-up', [ns.superclass]));
+                }
+
+                // Add includes section
+                if (ns.includes && ns.includes.length > 0) {
+                    children.push(this.buildMixinSectionItem('Includes', 'plug', ns.includes));
+                }
+
+                // Add prepends section
+                if (ns.prepends && ns.prepends.length > 0) {
+                    children.push(this.buildMixinSectionItem('Prepends', 'pinned', ns.prepends));
+                }
+
+                // Add singleton class as a child node (contains extends as includes)
+                if (ns.singleton_class) {
+                    children.push(this.buildSingletonClassItem(ns.singleton_class));
+                }
+
+                // Add nested namespace children
+                if (ns.children && ns.children.length > 0) {
+                    children.push(...this.buildTreeItems(ns.children));
+                }
+
+                return children;
+            } else if (element.nodeType === 'singleton' && element.namespaceData) {
+                // Build children for singleton class: its includes (which are the extends)
+                const ns = element.namespaceData;
+                const children = [];
+
+                if (ns.includes && ns.includes.length > 0) {
+                    children.push(this.buildMixinSectionItem('Includes', 'plug', ns.includes));
+                }
+
+                if (ns.prepends && ns.prepends.length > 0) {
+                    children.push(this.buildMixinSectionItem('Prepends', 'pinned', ns.prepends));
+                }
+
+                return children;
             }
         } catch (error) {
-            outputChannel.appendLine(`Ruby Fast LSP Namespace Tree Error: ${error.message}`);
+            outputChannel.appendLine(`Ruby Fast LSP Index Error: ${error.message}`);
         }
 
         return [];
@@ -127,9 +176,16 @@ class RubyNamespaceTreeProvider {
     buildTreeItems(namespaces) {
         return namespaces.map(ns => {
             const hasChildren = ns.children && ns.children.length > 0;
+            const hasSuperclass = ns.superclass && !ns.superclass.includes('(not found)');
+            const hasIncludes = ns.includes && ns.includes.length > 0;
+            const hasPrepends = ns.prepends && ns.prepends.length > 0;
+            const hasSingletonClass = ns.singleton_class != null;
+            const hasMixins = hasSuperclass || hasIncludes || hasPrepends || hasSingletonClass;
+            const hasAnyChildren = hasChildren || hasMixins;
+
             const item = new vscode.TreeItem(
                 ns.name,
-                hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+                hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
             );
 
             // Build detailed tooltip with mixin information
@@ -137,19 +193,22 @@ class RubyNamespaceTreeProvider {
             if (ns.superclass) {
                 tooltip += `\nSuperclass: ${ns.superclass}`;
             }
-            if (ns.includes && ns.includes.length > 0) {
+            if (hasIncludes) {
                 tooltip += `\nIncludes: ${ns.includes.join(', ')}`;
             }
-            if (ns.prepends && ns.prepends.length > 0) {
+            if (hasPrepends) {
                 tooltip += `\nPrepends: ${ns.prepends.join(', ')}`;
             }
-            if (ns.extends && ns.extends.length > 0) {
-                tooltip += `\nExtends: ${ns.extends.join(', ')}`;
+            if (hasSingletonClass && ns.singleton_class.includes) {
+                tooltip += `\nExtends: ${ns.singleton_class.includes.join(', ')}`;
             }
 
             item.tooltip = tooltip;
             item.description = ns.kind;
-            item.children = ns.children || [];
+
+            // Store namespace data for building mixin children
+            item.namespaceData = ns;
+            item.nodeType = 'namespace';
 
             // Set icon based on kind
             if (ns.kind === 'Class') {
@@ -159,7 +218,7 @@ class RubyNamespaceTreeProvider {
             }
 
             // Add location information for navigation
-            if (ns.location && ns.location.range && ns.location.range.start && ns.location.range.end) {
+            if (ns.location && ns.location.uri) {
                 item.command = {
                     command: 'vscode.open',
                     title: 'Open',
@@ -167,10 +226,10 @@ class RubyNamespaceTreeProvider {
                         vscode.Uri.parse(ns.location.uri),
                         {
                             selection: new vscode.Range(
-                                ns.location.range.start.line,
-                                ns.location.range.start.character,
-                                ns.location.range.end.line,
-                                ns.location.range.end.character
+                                ns.location.line || 0,
+                                ns.location.character || 0,
+                                ns.location.line || 0,
+                                ns.location.character || 0
                             )
                         }
                     ]
@@ -179,6 +238,58 @@ class RubyNamespaceTreeProvider {
 
             return item;
         });
+    }
+
+    buildSingletonClassItem(singletonClass) {
+        const hasIncludes = singletonClass.includes && singletonClass.includes.length > 0;
+        const hasPrepends = singletonClass.prepends && singletonClass.prepends.length > 0;
+        const hasChildren = hasIncludes || hasPrepends;
+
+        const item = new vscode.TreeItem(
+            singletonClass.name,
+            hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+        );
+
+        item.iconPath = new vscode.ThemeIcon('symbol-class');
+        item.description = 'Singleton';
+        item.nodeType = 'singleton';
+        item.namespaceData = singletonClass;
+
+        // Build tooltip
+        let tooltip = `Singleton: ${singletonClass.fqn}`;
+        if (hasIncludes) {
+            tooltip += `\nIncludes (extends): ${singletonClass.includes.join(', ')}`;
+        }
+        if (hasPrepends) {
+            tooltip += `\nPrepends: ${singletonClass.prepends.join(', ')}`;
+        }
+        item.tooltip = tooltip;
+
+        return item;
+    }
+
+    buildMixinSectionItem(label, icon, mixins) {
+        const item = new vscode.TreeItem(
+            `${label} (${mixins.length})`,
+            vscode.TreeItemCollapsibleState.Collapsed
+        );
+        item.iconPath = new vscode.ThemeIcon(icon);
+        item.nodeType = 'mixinSection';
+        item.mixins = mixins;
+        item.mixinLabel = label;
+        item.tooltip = mixins.join('\n');
+        return item;
+    }
+
+    buildMixinItem(name, isSuperclass = false) {
+        const item = new vscode.TreeItem(
+            name,
+            vscode.TreeItemCollapsibleState.None
+        );
+        item.iconPath = new vscode.ThemeIcon(isSuperclass ? 'symbol-class' : 'symbol-interface');
+        item.nodeType = 'mixin';
+        item.tooltip = name;
+        return item;
     }
 }
 
@@ -305,16 +416,44 @@ function activate(context) {
         })
     );
 
-    // Register Ruby Namespace Tree
-    const namespaceTreeProvider = new RubyNamespaceTreeProvider();
-    const treeView = vscode.window.createTreeView('rubyNamespaceTree', {
-        treeDataProvider: namespaceTreeProvider,
+    // Register Ruby Index Tree
+    const indexProvider = new RubyIndexProvider();
+    const treeView = vscode.window.createTreeView('rubyIndex', {
+        treeDataProvider: indexProvider,
         showCollapseAll: true
     });
 
     // Register refresh command
-    const refreshCommand = vscode.commands.registerCommand('rubyNamespaceTree.refresh', () => {
-        namespaceTreeProvider.refresh();
+    const refreshCommand = vscode.commands.registerCommand('rubyIndex.refresh', () => {
+        indexProvider.refresh();
+    });
+
+    // Register export command to download inheritance graph as JSON
+    const exportCommand = vscode.commands.registerCommand('rubyIndex.export', async () => {
+        if (!client || client.state !== 2) {
+            vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
+            return;
+        }
+
+        try {
+            outputChannel.appendLine('[Ruby Fast LSP] Exporting inheritance graph as JSON...');
+            const response = await client.sendRequest('ruby/exportGraph', {});
+
+            if (response && response.nodes) {
+                // Create a new document with the JSON content
+                const doc = await vscode.workspace.openTextDocument({
+                    content: JSON.stringify(response, null, 2),
+                    language: 'json'
+                });
+                await vscode.window.showTextDocument(doc);
+                outputChannel.appendLine(`[Ruby Fast LSP] Graph export complete: ${response.node_count} nodes`);
+            } else {
+                vscode.window.showWarningMessage('No graph data available to export.');
+            }
+        } catch (error) {
+            outputChannel.appendLine(`[Ruby Fast LSP] Failed to export graph: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to export graph: ${error.message}`);
+        }
     });
 
     // Register wrapper command for showReferences to handle LSP JSON serialization
@@ -336,59 +475,34 @@ function activate(context) {
         }
     );
 
-    // Register dumpGraph command for debugging inheritance graph
-    const dumpGraphCommand = vscode.commands.registerCommand('rubyFastLsp.dumpGraph', async () => {
-        if (!client || client.state !== 2) {
-            vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
-            return;
-        }
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, showReferencesCommand);
 
-        try {
-            outputChannel.appendLine('[Ruby Fast LSP] Requesting inheritance graph dump...');
-            const response = await client.sendRequest('ruby-fast-lsp/debug/dumpGraph', {});
-
-            // Create a new document with the JSON content
-            const doc = await vscode.workspace.openTextDocument({
-                content: JSON.stringify(response, null, 2),
-                language: 'json'
-            });
-            await vscode.window.showTextDocument(doc);
-
-            outputChannel.appendLine(`[Ruby Fast LSP] Graph dump complete: ${response.node_count} nodes`);
-        } catch (error) {
-            outputChannel.appendLine(`[Ruby Fast LSP] Failed to dump graph: ${error.message}`);
-            vscode.window.showErrorMessage(`Failed to dump inheritance graph: ${error.message}`);
-        }
-    });
-
-    context.subscriptions.push(treeView, refreshCommand, showReferencesCommand, dumpGraphCommand);
-
-    // Start the client and initialize namespace tree when ready
+    // Start the client and initialize index tree when ready
     client.start().then(() => {
-        // Auto-refresh namespace tree when client is ready
+        // Auto-refresh index tree when client is ready
         setTimeout(() => {
-            namespaceTreeProvider.refresh();
+            indexProvider.refresh();
         }, 1000); // Small delay to ensure everything is settled
     }).catch(error => {
-        outputChannel.appendLine(`[NAMESPACE_TREE_EXT] LSP client failed to start: ${error}`);
+        outputChannel.appendLine(`[Ruby Index] LSP client failed to start: ${error}`);
     });
 
     // Auto-refresh when active editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(() => {
             if (vscode.window.activeTextEditor?.document.languageId === 'ruby') {
-                namespaceTreeProvider.refresh();
+                indexProvider.refresh();
             }
         })
     );
 
-    // Auto-refresh namespace tree when Ruby files are saved or changed
+    // Auto-refresh index tree when Ruby files are saved or changed
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument((document) => {
             if (document.languageId === 'ruby') {
                 // Debounce the refresh to avoid excessive updates
                 setTimeout(() => {
-                    namespaceTreeProvider.refresh();
+                    indexProvider.refresh();
                 }, 500); // 500ms delay to match server-side debouncing
             }
         })
@@ -403,9 +517,9 @@ function activate(context) {
                 if (changeTimeout) {
                     clearTimeout(changeTimeout);
                 }
-                // Set new timeout for namespace tree refresh
+                // Set new timeout for index tree refresh
                 changeTimeout = setTimeout(() => {
-                    namespaceTreeProvider.refresh();
+                    indexProvider.refresh();
                 }, 1000); // 1 second delay for typing changes
             }
         })
@@ -416,7 +530,7 @@ function activate(context) {
         vscode.workspace.onDidOpenTextDocument((document) => {
             if (document.languageId === 'ruby') {
                 setTimeout(() => {
-                    namespaceTreeProvider.refresh();
+                    indexProvider.refresh();
                 }, 500);
             }
         })
@@ -426,7 +540,7 @@ function activate(context) {
         vscode.workspace.onDidCloseTextDocument((document) => {
             if (document.languageId === 'ruby') {
                 setTimeout(() => {
-                    namespaceTreeProvider.refresh();
+                    indexProvider.refresh();
                 }, 500);
             }
         })

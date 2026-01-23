@@ -1,6 +1,6 @@
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::{Entry, MixinRef};
+use crate::indexer::entry::{Entry, MixinRef, NamespaceKind};
 use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -22,7 +22,7 @@ pub struct NamespaceNode {
     pub name: String,
     /// The fully qualified name
     pub fqn: String,
-    /// Type: "class" or "module"
+    /// Type: "Class", "Module", or "Singleton"
     pub kind: String,
     /// Child namespaces
     pub children: Vec<NamespaceNode>,
@@ -34,8 +34,8 @@ pub struct NamespaceNode {
     pub includes: Vec<String>,
     /// Prepended modules
     pub prepends: Vec<String>,
-    /// Extended modules
-    pub extends: Vec<String>,
+    /// Singleton class node (for class methods, contains extends as includes)
+    pub singleton_class: Option<Box<NamespaceNode>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -87,8 +87,14 @@ pub async fn handle_namespace_tree(
 
     // Early filtering and deduplication: collect only project class/module entries
     // Group entries by FQN to avoid duplicate processing
+    // Skip singleton namespaces (#<Class:Foo>) - they represent the same class/module
     let mut fqn_to_entries: HashMap<&FullyQualifiedName, Vec<&Entry>> = HashMap::new();
     for (fqn, entries) in index.definitions() {
+        // Skip singleton namespaces - we only want instance namespaces in the tree
+        if fqn.namespace_kind() == Some(NamespaceKind::Singleton) {
+            continue;
+        }
+
         let mut project_entries_for_fqn = Vec::new();
         for entry in entries {
             // Get URL from file_id for project file check
@@ -177,14 +183,33 @@ pub async fn handle_namespace_tree(
             }
         }
 
-        let (resolved_superclass, resolved_includes, resolved_prepends, resolved_extends) = (
-            superclass
-                .as_ref()
-                .map(|s| resolve_mixin_cached(s, &index, &current_fqn, &mut mixin_cache)),
-            resolve_mixins_cached(&all_includes, &index, &current_fqn, &mut mixin_cache),
-            resolve_mixins_cached(&all_prepends, &index, &current_fqn, &mut mixin_cache),
-            resolve_mixins_cached(&all_extends, &index, &current_fqn, &mut mixin_cache),
-        );
+        let resolved_superclass = superclass
+            .as_ref()
+            .map(|s| resolve_mixin_cached(s, &index, &current_fqn, &mut mixin_cache));
+        let resolved_includes =
+            resolve_mixins_cached(&all_includes, &index, &current_fqn, &mut mixin_cache);
+        let resolved_prepends =
+            resolve_mixins_cached(&all_prepends, &index, &current_fqn, &mut mixin_cache);
+        let resolved_extends =
+            resolve_mixins_cached(&all_extends, &index, &current_fqn, &mut mixin_cache);
+
+        // Create singleton class node if there are extends (extends become includes on singleton)
+        let singleton_class = if !resolved_extends.is_empty() {
+            let singleton_fqn = format!("#<Class:{}>", fqn_string);
+            Some(Box::new(NamespaceNode {
+                name: singleton_fqn.clone(),
+                fqn: singleton_fqn,
+                kind: "Singleton".to_string(),
+                children: Vec::new(),
+                location: None,
+                superclass: None,
+                includes: resolved_extends, // extends become includes on singleton
+                prepends: Vec::new(),
+                singleton_class: None,
+            }))
+        } else {
+            None
+        };
 
         let node = NamespaceNode {
             name,
@@ -195,7 +220,7 @@ pub async fn handle_namespace_tree(
             superclass: resolved_superclass,
             includes: resolved_includes,
             prepends: resolved_prepends,
-            extends: resolved_extends,
+            singleton_class,
         };
 
         namespace_map.insert(fqn_string, node);

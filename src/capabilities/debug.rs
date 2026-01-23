@@ -127,13 +127,12 @@ pub struct AncestorsResponse {
 }
 
 // ============================================================================
-// Dump Graph Types
+// Export Graph Types
 // ============================================================================
 
-/// Parameters for `ruby-fast-lsp/debug/dumpGraph`.
-/// Empty struct to satisfy tower-lsp custom method requirements.
+/// Parameters for `ruby/exportGraph`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DumpGraphParams {}
+pub struct ExportGraphParams {}
 
 /// A snapshot of a single node in the inheritance graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,27 +142,23 @@ pub struct GraphNodeSnapshot {
     /// Superclass FQN (for classes)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub superclass: Option<String>,
-    /// Included modules
+    /// Included modules (resolved FQNs)
     pub includes: Vec<String>,
-    /// Prepended modules
+    /// Prepended modules (resolved FQNs)
     pub prepends: Vec<String>,
-    /// Classes/modules that include this module
+    /// Classes/modules that include this module (reverse edge)
     pub included_by: Vec<String>,
-    /// Classes/modules that prepend this module
+    /// Classes/modules that prepend this module (reverse edge)
     pub prepended_by: Vec<String>,
-    /// Direct subclasses (for classes)
+    /// Direct subclasses (reverse edge, for classes)
     pub children: Vec<String>,
-    /// Method Resolution Order (pre-computed)
+    /// Method Resolution Order (computed from graph)
     pub mro: Vec<String>,
 }
 
-/// Response from `ruby-fast-lsp/debug/dumpGraph`.
+/// Response from `ruby/exportGraph`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DumpGraphResponse {
-    /// Format version for compatibility
-    pub version: String,
-    /// Unix timestamp (seconds since epoch)
-    pub timestamp: String,
+pub struct ExportGraphResponse {
     /// Total number of nodes in the graph
     pub node_count: usize,
     /// All nodes indexed by FQN
@@ -223,12 +218,6 @@ pub fn handle_list_commands() -> ListCommandsResponse {
             name: "inference-stats".to_string(),
             method: "ruby-fast-lsp/debug/inference-stats".to_string(),
             description: "Show type inference statistics and coverage".to_string(),
-            params: vec![],
-        },
-        CommandDefinition {
-            name: "dumpGraph".to_string(),
-            method: "ruby-fast-lsp/debug/dumpGraph".to_string(),
-            description: "Dump inheritance graph as JSON for debugging".to_string(),
             params: vec![],
         },
     ];
@@ -736,32 +725,43 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
     }
 }
 
-/// Handle `ruby-fast-lsp/debug/dumpGraph` - dump the inheritance graph as JSON.
-pub fn handle_dump_graph(server: &RubyLanguageServer, _params: DumpGraphParams) -> DumpGraphResponse {
-    debug!("[DEBUG] Dumping inheritance graph");
+/// Handle `ruby/exportGraph` - export the inheritance graph as JSON.
+pub fn handle_export_graph(
+    server: &RubyLanguageServer,
+    _params: ExportGraphParams,
+) -> ExportGraphResponse {
+    debug!("[DEBUG] Exporting inheritance graph");
 
     let index = server.index.lock();
     let graph = index.get_graph();
 
     let mut nodes = HashMap::new();
 
-    // Helper to convert FQN to jq-friendly key
+    // Helper to convert FQN to a readable key
     // Instance: "A::B::C"
     // Singleton: "#<Class:A::B::C>"
     let fqn_to_key = |fqn: &FullyQualifiedName| -> String {
         match fqn {
             FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => {
-                parts.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("::")
+                parts
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::")
             }
             FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
-                let name = parts.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("::");
+                let name = parts
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::");
                 format!("#<Class:{}>", name)
             }
             other => other.to_string(),
         }
     };
 
-    // Resolve FqnId to jq-friendly key
+    // Resolve FqnId to readable key
     let resolve_key = |id| index.get_fqn(id).map(|f| fqn_to_key(f));
 
     // Iterate through all definitions
@@ -788,24 +788,42 @@ pub fn handle_dump_graph(server: &RubyLanguageServer, _params: DumpGraphParams) 
             .filter_map(|&id| resolve_key(id))
             .collect();
 
-        nodes.insert(key, GraphNodeSnapshot {
-            kind: format!("{:?}", node.kind),
-            superclass: node.superclass.and_then(|id| resolve_key(id)),
-            includes: node.includes.iter().filter_map(|&id| resolve_key(id)).collect(),
-            prepends: node.prepends.iter().filter_map(|&id| resolve_key(id)).collect(),
-            included_by: node.included_by.iter().filter_map(|&id| resolve_key(id)).collect(),
-            prepended_by: node.prepended_by.iter().filter_map(|&id| resolve_key(id)).collect(),
-            children: node.children.iter().filter_map(|&id| resolve_key(id)).collect(),
-            mro,
-        });
+        nodes.insert(
+            key,
+            GraphNodeSnapshot {
+                kind: format!("{:?}", node.kind),
+                superclass: node.superclass.and_then(|id| resolve_key(id)),
+                includes: node
+                    .includes
+                    .iter()
+                    .filter_map(|&id| resolve_key(id))
+                    .collect(),
+                prepends: node
+                    .prepends
+                    .iter()
+                    .filter_map(|&id| resolve_key(id))
+                    .collect(),
+                included_by: node
+                    .included_by
+                    .iter()
+                    .filter_map(|&id| resolve_key(id))
+                    .collect(),
+                prepended_by: node
+                    .prepended_by
+                    .iter()
+                    .filter_map(|&id| resolve_key(id))
+                    .collect(),
+                children: node
+                    .children
+                    .iter()
+                    .filter_map(|&id| resolve_key(id))
+                    .collect(),
+                mro,
+            },
+        );
     }
 
-    DumpGraphResponse {
-        version: "1.0".to_string(),
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
-            .unwrap_or_default(),
+    ExportGraphResponse {
         node_count: nodes.len(),
         nodes,
     }

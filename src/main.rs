@@ -52,8 +52,8 @@ async fn main() -> Result<()> {
         RubyLanguageServer::handle_debug_inference_stats,
     )
     .custom_method(
-        "ruby-fast-lsp/debug/dumpGraph",
-        RubyLanguageServer::handle_debug_dump_graph,
+        "ruby/exportGraph",
+        RubyLanguageServer::handle_export_graph,
     )
     .finish();
 
