@@ -14,6 +14,10 @@ use std::hash::{Hash, Hasher};
 pub struct NamespaceTreeParams {
     /// Optional workspace URI to filter results
     pub workspace_uri: Option<String>,
+    /// Whether to show external types (core Ruby, stdlib, gems) in mixins.
+    /// When false (default), only project-defined types are shown.
+    #[serde(default)]
+    pub show_external_types: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -73,14 +77,17 @@ pub struct NamespaceTreeResponse {
 
 pub async fn handle_namespace_tree(
     lang_server: &RubyLanguageServer,
-    _params: NamespaceTreeParams,
+    params: NamespaceTreeParams,
 ) -> NamespaceTreeResponse {
-    debug!("[NAMESPACE_TREE] Request received");
+    debug!(
+        "[NAMESPACE_TREE] Request received (show_external_types={})",
+        params.show_external_types
+    );
     let start_time = std::time::Instant::now();
 
-    // Check cache first
+    // Check cache first - include show_external_types in cache key
     let index = lang_server.index.lock();
-    let index_hash = compute_index_hash(&index);
+    let index_hash = compute_index_hash(&index, params.show_external_types);
     drop(index); // Release lock early
 
     {
@@ -105,9 +112,10 @@ pub async fn handle_namespace_tree(
         index.definitions_len()
     );
 
-    // Early filtering and deduplication: collect only project class/module entries
+    // Early filtering and deduplication: collect class/module entries
     // Group entries by FQN to avoid duplicate processing
     // Skip singleton namespaces (#<Class:Foo>) - they represent the same class/module
+    // When show_external_types is false, only include project files
     let mut fqn_to_entries: HashMap<&FullyQualifiedName, Vec<&Entry>> = HashMap::new();
     for (fqn, entries) in index.definitions() {
         // Skip singleton namespaces - we only want instance namespaces in the tree
@@ -115,30 +123,29 @@ pub async fn handle_namespace_tree(
             continue;
         }
 
-        let mut project_entries_for_fqn = Vec::new();
+        let mut filtered_entries_for_fqn = Vec::new();
         for entry in entries {
-            // Get URL from file_id for project file check
-            let Some(uri) = index.get_file_url(entry.location.file_id) else {
-                continue;
-            };
-            if !crate::utils::is_project_file(uri) {
+            // Filter by file source: skip external types unless show_external_types is true
+            let is_project = index.is_project_file(entry.location.file_id);
+            if !params.show_external_types && !is_project {
                 continue;
             }
             match &entry.kind {
                 EntryKind::Class(_) | EntryKind::Module(_) => {
-                    project_entries_for_fqn.push(entry);
+                    filtered_entries_for_fqn.push(entry);
                 }
                 _ => {}
             }
         }
-        if !project_entries_for_fqn.is_empty() {
-            fqn_to_entries.insert(fqn, project_entries_for_fqn);
+        if !filtered_entries_for_fqn.is_empty() {
+            fqn_to_entries.insert(fqn, filtered_entries_for_fqn);
         }
     }
 
     debug!(
-        "[NAMESPACE_TREE] Found {} unique project namespaces (filtered from {} total definitions)",
+        "[NAMESPACE_TREE] Found {} namespaces (show_external_types={}, filtered from {} total definitions)",
         fqn_to_entries.len(),
+        params.show_external_types,
         index.definitions_len()
     );
 
@@ -205,15 +212,36 @@ pub async fn handle_namespace_tree(
             }
         }
 
-        let resolved_superclass = superclass
-            .as_ref()
-            .map(|s| resolve_single_mixin(s, &index, &current_fqn, &mut mixin_cache));
-        let resolved_includes =
-            resolve_mixins_cached(&all_includes, &index, &current_fqn, &mut mixin_cache);
-        let resolved_prepends =
-            resolve_mixins_cached(&all_prepends, &index, &current_fqn, &mut mixin_cache);
-        let resolved_extends =
-            resolve_mixins_cached(&all_extends, &index, &current_fqn, &mut mixin_cache);
+        let resolved_superclass = superclass.as_ref().and_then(|s| {
+            resolve_single_mixin(
+                s,
+                &index,
+                &current_fqn,
+                &mut mixin_cache,
+                params.show_external_types,
+            )
+        });
+        let resolved_includes = resolve_mixins_cached(
+            &all_includes,
+            &index,
+            &current_fqn,
+            &mut mixin_cache,
+            params.show_external_types,
+        );
+        let resolved_prepends = resolve_mixins_cached(
+            &all_prepends,
+            &index,
+            &current_fqn,
+            &mut mixin_cache,
+            params.show_external_types,
+        );
+        let resolved_extends = resolve_mixins_cached(
+            &all_extends,
+            &index,
+            &current_fqn,
+            &mut mixin_cache,
+            params.show_external_types,
+        );
 
         // Create singleton class node if there are extends (extends become includes on singleton)
         let singleton_class = if !resolved_extends.is_empty() {
@@ -236,7 +264,7 @@ pub async fn handle_namespace_tree(
 
         // For modules, find all classes/modules that include this module
         let included_by = if kind == "Module" {
-            find_includers(fqn, &index)
+            find_includers(fqn, &index, params.show_external_types)
         } else {
             Vec::new()
         };
@@ -282,10 +310,11 @@ pub async fn handle_namespace_tree(
     response
 }
 
-// Compute a hash of the index for caching
-fn compute_index_hash(index: &RubyIndex) -> u64 {
+// Compute a hash of the index for caching (includes show_external_types setting)
+fn compute_index_hash(index: &RubyIndex, show_external_types: bool) -> u64 {
     let mut hasher = DefaultHasher::new();
     index.definitions_len().hash(&mut hasher);
+    show_external_types.hash(&mut hasher);
     // Hash a sample of FQN strings to detect changes
     let mut fqn_strings: Vec<String> = index
         .definitions()
@@ -298,29 +327,51 @@ fn compute_index_hash(index: &RubyIndex) -> u64 {
     hasher.finish()
 }
 
+/// Result of resolving a mixin reference
+#[derive(Clone)]
+struct ResolvedMixin {
+    /// The resolved name (FQN or formatted name with "(not found)")
+    name: String,
+    /// Whether this mixin is from a project file (not core/stdlib/gem)
+    is_project_type: bool,
+}
+
 // Cached mixin name resolution to avoid repeated lookups
 fn resolve_mixin_name_cached(
     mixin_ref: &MixinRef,
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
-    cache: &mut HashMap<String, String>,
-) -> String {
+    cache: &mut HashMap<String, ResolvedMixin>,
+) -> ResolvedMixin {
     let mixin_str = format_mixin_ref(mixin_ref);
     let key = format!("{}-{}", mixin_str, current_fqn);
 
     if let Some(cached) = cache.get(&key) {
-        cached.clone()
-    } else {
-        let result = if let Some(resolved_fqn) =
-            resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
-        {
-            resolved_fqn.to_string()
-        } else {
-            format!("{} (not found)", mixin_str)
-        };
-        cache.insert(key, result.clone());
-        result
+        return cached.clone();
     }
+
+    let result = if let Some(resolved_fqn) =
+        resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
+    {
+        // Check if this resolved FQN is from a project file using the index's file source tracking
+        let is_project_type = index.get(&resolved_fqn).is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| index.is_project_file(entry.location.file_id))
+        });
+        ResolvedMixin {
+            name: resolved_fqn.to_string(),
+            is_project_type,
+        }
+    } else {
+        ResolvedMixin {
+            name: format!("{} (not found)", mixin_str),
+            is_project_type: false,
+        }
+    };
+
+    cache.insert(key, result.clone());
+    result
 }
 
 // Helper function to format MixinRef as string
@@ -339,13 +390,19 @@ fn resolve_mixins_cached(
     mixins: &[MixinRef],
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
-    cache: &mut HashMap<String, String>,
+    cache: &mut HashMap<String, ResolvedMixin>,
+    show_external_types: bool,
 ) -> Vec<MixinInfo> {
     // Group mixins by their resolved name, collecting all locations
     let mut grouped: HashMap<String, Vec<LocationInfo>> = HashMap::new();
 
     for mixin_ref in mixins {
-        let name = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+        let resolved = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+
+        // Skip external types if not showing them
+        if !show_external_types && !resolved.is_project_type {
+            continue;
+        }
 
         // Get call site location from the MixinRef
         if let Some(uri) = index.get_file_url(mixin_ref.location.file_id) {
@@ -354,10 +411,10 @@ fn resolve_mixins_cached(
                 line: mixin_ref.location.range.start.line,
                 character: mixin_ref.location.range.start.character,
             };
-            grouped.entry(name).or_default().push(location);
+            grouped.entry(resolved.name).or_default().push(location);
         } else {
             // Ensure the name is in the map even if we can't get the location
-            grouped.entry(name).or_default();
+            grouped.entry(resolved.name).or_default();
         }
     }
 
@@ -373,13 +430,20 @@ fn resolve_mixins_cached(
 }
 
 // Resolve a single mixin (for superclass)
+// Returns None if the mixin is external and show_external_types is false
 fn resolve_single_mixin(
     mixin_ref: &MixinRef,
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
-    cache: &mut HashMap<String, String>,
-) -> MixinInfo {
-    let name = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+    cache: &mut HashMap<String, ResolvedMixin>,
+    show_external_types: bool,
+) -> Option<MixinInfo> {
+    let resolved = resolve_mixin_name_cached(mixin_ref, index, current_fqn, cache);
+
+    // Skip external types if not showing them
+    if !show_external_types && !resolved.is_project_type {
+        return None;
+    }
 
     let locations = index
         .get_file_url(mixin_ref.location.file_id)
@@ -392,7 +456,10 @@ fn resolve_single_mixin(
         })
         .unwrap_or_default();
 
-    MixinInfo { name, locations }
+    Some(MixinInfo {
+        name: resolved.name,
+        locations,
+    })
 }
 
 // Tree building using iterative approach
@@ -500,28 +567,40 @@ fn build_children_iterative(
 /// Find all classes that include this module by traversing included_by/prepended_by edges.
 /// Uses the index's `including_classes` method which does BFS through intermediate modules.
 /// Returns only classes (not modules) with their definition locations.
-fn find_includers(module_fqn: &FullyQualifiedName, index: &RubyIndex) -> Vec<IncluderInfo> {
+/// When `show_external_types` is false, only returns classes defined in project files.
+fn find_includers(
+    module_fqn: &FullyQualifiedName,
+    index: &RubyIndex,
+    show_external_types: bool,
+) -> Vec<IncluderInfo> {
     let mut classes: Vec<IncluderInfo> = index
         .including_classes(module_fqn)
         .into_iter()
         .filter_map(|class_fqn| {
-            let locations = index
-                .get(&class_fqn)
-                .map(|entries| {
-                    entries
-                        .iter()
-                        .filter_map(|entry| {
-                            index.get_file_url(entry.location.file_id).map(|uri| {
-                                LocationInfo {
-                                    uri: uri.to_string(),
-                                    line: entry.location.range.start.line,
-                                    character: entry.location.range.start.character,
-                                }
-                            })
+            let entries = index.get(&class_fqn)?;
+
+            // Check if this class is from a project file using the index's file source tracking
+            let is_project_class = entries
+                .iter()
+                .any(|entry| index.is_project_file(entry.location.file_id));
+
+            // Skip external types if not showing them
+            if !show_external_types && !is_project_class {
+                return None;
+            }
+
+            let locations = entries
+                .iter()
+                .filter_map(|entry| {
+                    index
+                        .get_file_url(entry.location.file_id)
+                        .map(|uri| LocationInfo {
+                            uri: uri.to_string(),
+                            line: entry.location.range.start.line,
+                            character: entry.location.range.start.character,
                         })
-                        .collect()
                 })
-                .unwrap_or_default();
+                .collect();
 
             Some(IncluderInfo {
                 name: class_fqn.to_string(),

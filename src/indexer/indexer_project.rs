@@ -1,5 +1,6 @@
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
+use crate::types::file_source::FileSource;
 use crate::utils;
 use anyhow::Result;
 use log::{info, warn};
@@ -98,6 +99,30 @@ impl IndexerProject {
         utils::collect_ruby_files(&self.workspace_root)
     }
 
+    /// Quick scan for dependencies without full indexing.
+    /// This reads project files and extracts require/gem statements to determine
+    /// which gems and stdlib modules are needed.
+    pub fn scan_for_dependencies(&self) {
+        info!("Scanning project files for dependencies...");
+        self.clear_dependencies();
+
+        let ruby_files = self.collect_project_files();
+        let required_stdlib = &self.required_stdlib;
+        let required_gems = &self.required_gems;
+
+        ruby_files.par_iter().for_each(|file_path| {
+            if let Ok(content) = std::fs::read_to_string(file_path) {
+                Self::extract_and_track_dependencies(&content, required_stdlib, required_gems);
+            }
+        });
+
+        info!(
+            "Dependency scan complete: {} stdlib modules, {} gems required",
+            required_stdlib.lock().len(),
+            required_gems.lock().len()
+        );
+    }
+
     /// Index definitions from files and track their dependencies (Parallelized with rayon)
     async fn index_definitions_and_track_dependencies(
         &self,
@@ -143,6 +168,24 @@ impl IndexerProject {
 
                 // Index Definitions
                 if let Ok(uri) = Url::from_file_path(file_path) {
+                    // Skip files that are already indexed (e.g., gem files)
+                    // This ensures gem/stdlib files don't get re-tagged as Project
+                    {
+                        let index = file_processor_ref.index().lock();
+                        if let Some(file_id) = index.get_file_id(&uri) {
+                            if index.get_file_source(file_id).is_some() {
+                                // Already indexed with a source, skip
+                                return;
+                            }
+                        }
+                    }
+
+                    // Register file as project source before indexing
+                    file_processor_ref
+                        .index()
+                        .lock()
+                        .register_file(&uri, FileSource::Project);
+
                     if let Err(e) = file_processor_ref.index_definitions(&uri, &content) {
                         warn!("Failed to index definitions {:?}: {}", file_path, e);
                     }

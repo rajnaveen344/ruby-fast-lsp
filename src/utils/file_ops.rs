@@ -55,25 +55,19 @@ pub fn collect_ruby_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Recursively collect Ruby files from a directory (internal helper)
+///
+/// Only skips `.git` directory. All other directories are traversed.
+/// File source (Project/Gem/Stdlib) is determined by the indexers based on
+/// discovered paths from tools (bundler, rubygems, ruby), not by exclusion patterns.
 fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
 
             if path.is_dir() {
-                // Skip common directories that don't contain indexable Ruby files
+                // Only skip .git - everything else is traversed
                 if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if !matches!(
-                        dir_name,
-                        ".git"
-                            | ".svn"
-                            | "node_modules"
-                            | "tmp"
-                            | "log"
-                            | "coverage"
-                            | ".bundle"
-                            | "vendor"
-                    ) {
+                    if dir_name != ".git" {
                         collect_ruby_files_recursive(&path, files);
                     }
                 }
@@ -88,26 +82,31 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 // Path Classification
 // ============================================================================
 
-/// Check if a URI belongs to a project file (not stdlib or gem)
+/// Check if a URI belongs to a project file (not stdlib, gem, or stubs)
 ///
-/// This function helps distinguish between project files and external dependencies
-/// by checking common stdlib and gem path patterns.
+/// **DEPRECATED**: This function uses path-based heuristics which are unreliable.
+/// Use `RubyIndex::is_project_file(file_id)` instead, which uses the deterministic
+/// file source tracking set by the indexers.
+///
+/// This function is kept for backward compatibility but should be phased out.
 pub fn is_project_file(uri: &Url) -> bool {
     if let Ok(file_path) = uri.to_file_path() {
         let path_str = file_path.to_string_lossy();
+
+        // Check for rubystubs (bundled with extension or system)
+        if path_str.contains("/rubystubs") {
+            return false;
+        }
 
         // Check if the file is in common stdlib or gem paths
         let is_stdlib_or_gem = path_str.contains("/ruby/")
             && (path_str.contains("/lib/ruby/")
                 || path_str.contains("/gems/")
-                || path_str.contains("/rubystubs")
                 || path_str.contains("/site_ruby/")
                 || path_str.contains("/vendor_ruby/"));
 
-        // If it's not in stdlib/gem paths, consider it a project file
         !is_stdlib_or_gem
     } else {
-        // If we can't convert to file path, assume it's a project file
         true
     }
 }

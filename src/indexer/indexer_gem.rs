@@ -4,10 +4,14 @@
 //! It supports both Bundler-based (Gemfile) and global gem discovery.
 
 use crate::indexer::coordinator::IndexingCoordinator;
+use crate::indexer::file_processor::FileProcessor;
+use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
+use crate::types::file_source::FileSource;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
-use log::{debug, info};
+use log::{debug, info, warn};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -36,12 +40,12 @@ pub struct GemInfo {
 
 /// Handles gem indexing for the Ruby Language Server.
 /// Manages gem discovery, prioritization, and selective indexing.
-#[derive(Debug)]
 pub struct IndexerGem {
     workspace_root: Option<PathBuf>,
     required_gems: HashSet<String>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
     gem_paths: Vec<PathBuf>,
+    file_processor: Option<FileProcessor>,
 }
 
 impl IndexerGem {
@@ -51,7 +55,13 @@ impl IndexerGem {
             required_gems: HashSet::new(),
             discovered_gems: HashMap::new(),
             gem_paths: Vec::new(),
+            file_processor: None,
         }
+    }
+
+    /// Set the file processor for indexing
+    pub fn set_file_processor(&mut self, index: Index<Unlocked>) {
+        self.file_processor = Some(FileProcessor::new(index));
     }
 
     // ========================================================================
@@ -117,11 +127,11 @@ impl IndexerGem {
 
             if let Some(gem_versions) = self.discovered_gems.get(gem_name) {
                 if let Some(gem_info) = self.select_preferred_version(gem_versions) {
-                    debug!(
+                    info!(
                         "Indexing required gem: {} v{}",
                         gem_info.name, gem_info.version
                     );
-                    indexed_files.extend(self.collect_gem_files(gem_info));
+                    indexed_files.extend(self.index_gem_files(gem_info));
                 }
             } else {
                 debug!("Required gem not found: {}", gem_name);
@@ -146,33 +156,51 @@ impl IndexerGem {
             .await;
 
             if let Some(gem_info) = self.select_preferred_version(gem_versions) {
-                debug!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
-                indexed_files.extend(self.collect_gem_files(gem_info));
+                info!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
+                indexed_files.extend(self.index_gem_files(gem_info));
             }
         }
 
         Ok(indexed_files)
     }
 
-    /// Collect all Ruby file URIs from a gem's lib paths
-    fn collect_gem_files(&self, gem_info: &GemInfo) -> Vec<Url> {
-        let mut files = Vec::new();
+    /// Index all Ruby files from a gem's lib paths
+    fn index_gem_files(&self, gem_info: &GemInfo) -> Vec<Url> {
+        let Some(processor) = &self.file_processor else {
+            warn!("No file processor set for gem indexer, skipping {}", gem_info.name);
+            return Vec::new();
+        };
+
+        let mut indexed_files = Vec::new();
 
         for lib_path in &gem_info.lib_paths {
             if lib_path.exists() && lib_path.is_dir() {
-                debug!("Collecting files from gem lib path: {:?}", lib_path);
+                debug!("Indexing files from gem lib path: {:?}", lib_path);
 
                 let ruby_files = utils::collect_ruby_files(lib_path);
 
-                for file_path in ruby_files {
-                    if let Ok(uri) = Url::from_file_path(&file_path) {
-                        files.push(uri);
+                ruby_files.par_iter().for_each(|file_path| {
+                    if let Ok(content) = std::fs::read_to_string(file_path) {
+                        if let Ok(uri) = Url::from_file_path(file_path) {
+                            // Register file as gem source before indexing
+                            processor.index().lock().register_file(&uri, FileSource::Gem);
+
+                            if let Err(e) = processor.index_definitions(&uri, &content) {
+                                warn!("Failed to index gem file {:?}: {}", file_path, e);
+                            }
+                        }
+                    }
+                });
+
+                for file_path in &ruby_files {
+                    if let Ok(uri) = Url::from_file_path(file_path) {
+                        indexed_files.push(uri);
                     }
                 }
             }
         }
 
-        files
+        indexed_files
     }
 
     // ========================================================================

@@ -202,8 +202,11 @@ class RubyIndexProvider {
         try {
             if (!element) {
                 // Root level - get namespace tree from LSP server
+                const config = vscode.workspace.getConfiguration('rubyFastLsp');
+                const showExternalTypes = config.get('showExternalTypes', false);
                 const response = await client.sendRequest('ruby/namespaceTree', {
-                    uri: vscode.window.activeTextEditor?.document.uri.toString() || ''
+                    uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
+                    show_external_types: showExternalTypes
                 });
 
                 if (response && response.namespaces) {
@@ -620,6 +623,11 @@ function activate(context) {
                         }
                     });
                 }
+
+                // Refresh tree if showExternalTypes changed
+                if (event.affectsConfiguration('rubyFastLsp.showExternalTypes')) {
+                    indexProvider.refresh();
+                }
             }
         })
     );
@@ -750,8 +758,11 @@ function activate(context) {
         if (namespaces.length === 0) {
             // Fetch fresh data
             try {
+                const config = vscode.workspace.getConfiguration('rubyFastLsp');
+                const showExternalTypes = config.get('showExternalTypes', false);
                 const response = await client.sendRequest('ruby/namespaceTree', {
-                    uri: vscode.window.activeTextEditor?.document.uri.toString() || ''
+                    uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
+                    show_external_types: showExternalTypes
                 });
                 if (response && response.namespaces) {
                     namespaces = indexProvider._flattenNamespaces(response.namespaces);
@@ -826,7 +837,21 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, searchCommand);
+    // Register toggle external types command
+    const toggleExternalTypesCommand = vscode.commands.registerCommand('rubyIndex.toggleExternalTypes', async () => {
+        const config = vscode.workspace.getConfiguration('rubyFastLsp');
+        const currentValue = config.get('showExternalTypes', false);
+        await config.update('showExternalTypes', !currentValue, vscode.ConfigurationTarget.Workspace);
+        const newValue = !currentValue;
+        vscode.window.showInformationMessage(
+            newValue
+                ? 'Ruby Index: Now showing external types (core, stdlib, gems)'
+                : 'Ruby Index: Now showing only project types'
+        );
+        indexProvider.refresh();
+    });
+
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, searchCommand, toggleExternalTypesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

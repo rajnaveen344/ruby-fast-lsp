@@ -17,6 +17,7 @@ use crate::indexer::graph::Graph;
 use crate::indexer::interner::Interner;
 use crate::indexer::prefix_tree::PrefixTree;
 use crate::types::compact_location::CompactLocation;
+use crate::types::file_source::FileSource;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 
@@ -57,6 +58,9 @@ pub struct RubyIndex {
     files: Interner<FileId, Url>,
     fqns: Interner<FqnId, FullyQualifiedName>,
 
+    // File source tracking (Project, Stub, Gem)
+    file_sources: HashMap<FileId, FileSource>,
+
     // Inheritance graph for method resolution order
     pub graph: Graph,
 
@@ -82,6 +86,9 @@ impl RubyIndex {
             files: Interner::new(),
             fqns: Interner::new(),
 
+            // File source tracking
+            file_sources: HashMap::new(),
+
             // Inheritance graph
             graph: Graph::new(),
 
@@ -96,8 +103,29 @@ impl RubyIndex {
     // ========================================================================
 
     /// Get or insert a URL, returning its FileId
+    /// Note: Use `register_file` to also set the file source.
     pub fn get_or_insert_file(&mut self, url: &Url) -> FileId {
         self.files.get_or_insert(url)
+    }
+
+    /// Register a file with its source type.
+    /// This should be used instead of `get_or_insert_file` when the source is known.
+    pub fn register_file(&mut self, url: &Url, source: FileSource) -> FileId {
+        let file_id = self.files.get_or_insert(url);
+        self.file_sources.insert(file_id, source);
+        file_id
+    }
+
+    /// Get the source type of a file
+    pub fn get_file_source(&self, file_id: FileId) -> Option<FileSource> {
+        self.file_sources.get(&file_id).copied()
+    }
+
+    /// Check if a file is a project file (not stub, gem, or stdlib)
+    pub fn is_project_file(&self, file_id: FileId) -> bool {
+        self.file_sources
+            .get(&file_id)
+            .is_some_and(|s| s.is_project())
     }
 
     /// Get URL for a FileId

@@ -99,17 +99,21 @@ impl IndexingCoordinator {
         self.setup_file_processor(server);
 
         // PHASE 1: Index all definitions first
+        // Order: scan deps → gems → stdlib → project (which skips already-indexed files)
         info!("Phase 1: Indexing all definitions");
         let phase1_start = Instant::now();
 
-        // Step 4: Index definitions from project files
-        self.index_project_definitions(server).await?;
+        // Step 4: Quick scan project files for dependencies (no indexing yet)
+        self.scan_project_dependencies();
 
-        // Step 5: Index definitions from Ruby standard library
+        // Step 5: Index definitions from gems (uses discovered required gems)
+        self.index_gems(server).await?;
+
+        // Step 6: Index definitions from Ruby standard library
         self.index_standard_library(server, &ruby_version).await?;
 
-        // Step 6: Index definitions from gems
-        self.index_gems(server).await?;
+        // Step 7: Index definitions from project files (skips files already indexed as Gem/Stdlib)
+        self.index_project_definitions(server).await?;
 
         // Step 7: Resolve all mixin references across all indexed files
         Self::send_progress_report(server, "Resolving mixins...".to_string(), 0, 0).await;
@@ -193,15 +197,31 @@ impl IndexingCoordinator {
         self.file_processor = Some(FileProcessor::new(server.index.clone()));
     }
 
-    /// Phase 1 Step 4: Index definitions from project files and track what libraries they need
-    async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        let mut project_indexer = IndexerProject::new(
+    /// Quick scan for dependencies without indexing.
+    /// Creates project indexer and scans for required gems/stdlib modules.
+    fn scan_project_dependencies(&mut self) {
+        // Create a temporary project indexer just for dependency scanning
+        // We'll create a proper one later for actual indexing
+        let temp_indexer = IndexerProject::new(
             self.workspace_root.clone(),
             self.file_processor.as_ref().unwrap().clone(),
         );
+        temp_indexer.scan_for_dependencies();
+        self.project_indexer = Some(temp_indexer);
+    }
 
-        project_indexer.index_project_definitions(server).await?;
-        self.project_indexer = Some(project_indexer);
+    /// Phase 1: Index definitions from project files (skips already-indexed files)
+    async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
+        if let Some(ref mut project_indexer) = self.project_indexer {
+            project_indexer.index_project_definitions(server).await?;
+        } else {
+            let mut project_indexer = IndexerProject::new(
+                self.workspace_root.clone(),
+                self.file_processor.as_ref().unwrap().clone(),
+            );
+            project_indexer.index_project_definitions(server).await?;
+            self.project_indexer = Some(project_indexer);
+        }
         Ok(())
     }
 
@@ -266,12 +286,12 @@ impl IndexingCoordinator {
         Ok(())
     }
 
-    /// Step 6: Index the gems (external libraries)
+    /// Index the gems (external libraries)
     async fn index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
         let required_gems = self.get_required_gems();
 
         let mut gem_indexer = IndexerGem::new(Some(self.workspace_root.clone()));
-
+        gem_indexer.set_file_processor(server.index.clone());
         gem_indexer.set_required_gems(required_gems.into_iter().collect());
         gem_indexer.index_gems(true, server).await?; // selective = true
         self.gem_indexer = Some(gem_indexer);
@@ -1055,20 +1075,23 @@ end
     }
 
     #[tokio::test]
-    async fn test_coordinator_vendor_directory_exclusion() {
+    async fn test_coordinator_collects_all_ruby_files() {
+        // Test that all Ruby files are collected, including vendor directories.
+        // File source (Project/Gem/Stdlib) is determined by indexers based on
+        // discovered paths from tools (bundler, rubygems), not by exclusion patterns.
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
-        // Create a vendor directory with Ruby files that should be excluded
+        // Create a vendor directory with Ruby files
         let vendor_dir = fixture.project_root().join("vendor");
         fs::create_dir_all(&vendor_dir).expect("Failed to create vendor directory");
 
         let vendor_bundle_dir = vendor_dir.join("bundle");
         fs::create_dir_all(&vendor_bundle_dir).expect("Failed to create vendor/bundle directory");
 
-        // Create a Ruby file in vendor that should be excluded
-        let vendor_ruby_file = vendor_dir.join("excluded_gem.rb");
-        fs::write(&vendor_ruby_file, "class ExcludedGem\nend")
+        // Create Ruby files in vendor
+        let vendor_ruby_file = vendor_dir.join("vendor_gem.rb");
+        fs::write(&vendor_ruby_file, "class VendorGem\nend")
             .expect("Failed to write vendor Ruby file");
 
         let vendor_bundle_ruby_file = vendor_bundle_dir.join("bundled_gem.rb");
@@ -1082,19 +1105,18 @@ end
         let mut collected_files: Vec<PathBuf> = Vec::new();
         coordinator.find_all_ruby_files_in_directory(fixture.project_root(), &mut collected_files);
 
-        // Verify that vendor files are excluded
+        // Verify that vendor files ARE collected (no exclusion)
         let vendor_files: Vec<_> = collected_files
             .iter()
             .filter(|path| path.to_string_lossy().contains("vendor"))
             .collect();
 
         assert!(
-            vendor_files.is_empty(),
-            "Vendor directory files should be excluded from indexing, but found: {:?}",
-            vendor_files
+            !vendor_files.is_empty(),
+            "Vendor directory files should be collected (source tagging handles categorization)"
         );
 
-        // Verify that non-vendor files are still collected
+        // Verify that non-vendor files are also collected
         let non_vendor_files: Vec<_> = collected_files
             .iter()
             .filter(|path| !path.to_string_lossy().contains("vendor"))
@@ -1102,7 +1124,7 @@ end
 
         assert!(
             !non_vendor_files.is_empty(),
-            "Non-vendor Ruby files should still be collected"
+            "Non-vendor Ruby files should also be collected"
         );
     }
 }
