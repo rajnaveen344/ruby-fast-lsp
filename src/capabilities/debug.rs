@@ -241,7 +241,19 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
 
     match fqn {
         Some(fqn) => {
-            let entries = index.get(&fqn);
+            // Try as parsed FQN first
+            let mut entries = index.get(&fqn);
+
+            // If not found and it's a Constant, also try as Namespace (class/module)
+            if entries.is_none() {
+                if let FullyQualifiedName::Constant(parts) = &fqn {
+                    let namespace_fqn = FullyQualifiedName::Namespace(
+                        parts.clone(),
+                        crate::indexer::entry::NamespaceKind::Instance,
+                    );
+                    entries = index.get(&namespace_fqn);
+                }
+            }
 
             match entries {
                 Some(entries) => {
@@ -331,17 +343,15 @@ pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> Looku
                                 EntryKind::Reference => ("Reference".to_string(), None, None, None),
                             };
 
-                            // Get location string
+                            // Get location string - return full URI for proper navigation
                             let location = index
                                 .get_file_url(entry.location.file_id)
                                 .map(|url| {
-                                    let path = url.path();
-                                    let file_name = path.split('/').last().unwrap_or(path);
                                     format!(
                                         "{}:{}:{}",
-                                        file_name,
-                                        entry.location.range.start.line + 1,
-                                        entry.location.range.start.character + 1
+                                        url.as_str(),
+                                        entry.location.range.start.line,
+                                        entry.location.range.start.character
                                     )
                                 })
                                 .unwrap_or_else(|| "unknown".to_string());

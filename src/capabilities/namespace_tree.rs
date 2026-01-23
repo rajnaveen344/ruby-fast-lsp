@@ -30,11 +30,11 @@ pub struct NamespaceNode {
     /// Location information
     pub location: Option<LocationInfo>,
     /// Superclass (only for classes)
-    pub superclass: Option<String>,
+    pub superclass: Option<MixinInfo>,
     /// Included modules
-    pub includes: Vec<String>,
+    pub includes: Vec<MixinInfo>,
     /// Prepended modules
-    pub prepends: Vec<String>,
+    pub prepends: Vec<MixinInfo>,
     /// Singleton class node (for class methods, contains extends as includes)
     pub singleton_class: Option<Box<NamespaceNode>>,
     /// Classes that ultimately include this module (for modules only)
@@ -46,6 +46,15 @@ pub struct LocationInfo {
     pub uri: String,
     pub line: u32,
     pub character: u32,
+}
+
+/// A mixin reference with its name and call site location
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MixinInfo {
+    /// The resolved name of the mixin (e.g., "ActiveSupport::Concern")
+    pub name: String,
+    /// Location of the include/prepend/extend call site
+    pub location: Option<LocationInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,23 +298,34 @@ fn resolve_mixin_cached(
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
     cache: &mut HashMap<String, String>,
-) -> String {
+) -> MixinInfo {
     let mixin_str = format_mixin_ref(mixin_ref);
     let key = format!("{}-{}", mixin_str, current_fqn);
-    if let Some(cached) = cache.get(&key) {
-        return cached.clone();
-    }
 
-    let result = if let Some(resolved_fqn) =
-        resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
-    {
-        resolved_fqn.to_string()
+    let name = if let Some(cached) = cache.get(&key) {
+        cached.clone()
     } else {
-        format!("{} (not found)", mixin_str)
+        let result = if let Some(resolved_fqn) =
+            resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, current_fqn)
+        {
+            resolved_fqn.to_string()
+        } else {
+            format!("{} (not found)", mixin_str)
+        };
+        cache.insert(key, result.clone());
+        result
     };
 
-    cache.insert(key, result.clone());
-    result
+    // Get call site location from the MixinRef
+    let location = index
+        .get_file_url(mixin_ref.location.file_id)
+        .map(|uri| LocationInfo {
+            uri: uri.to_string(),
+            line: mixin_ref.location.range.start.line,
+            character: mixin_ref.location.range.start.character,
+        });
+
+    MixinInfo { name, location }
 }
 
 // Helper function to format MixinRef as string
@@ -325,7 +345,7 @@ fn resolve_mixins_cached(
     index: &RubyIndex,
     current_fqn: &FullyQualifiedName,
     cache: &mut HashMap<String, String>,
-) -> Vec<String> {
+) -> Vec<MixinInfo> {
     mixins
         .iter()
         .map(|m| resolve_mixin_cached(m, index, current_fqn, cache))

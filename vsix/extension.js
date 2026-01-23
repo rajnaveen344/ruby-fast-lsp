@@ -115,8 +115,16 @@ class RubyIndexProvider {
                 }
             } else if (element.nodeType === 'mixinSection') {
                 // Return individual mixin items
+                // mixins can be MixinInfo objects (with name and location) or strings (for included_by_classes)
                 const useClassIcon = element.mixinLabel === 'Superclass' || element.mixinLabel === 'Included By Classes';
-                return element.mixins.map(m => this.buildMixinItem(m, useClassIcon));
+                return element.mixins.map(m => {
+                    // Handle both MixinInfo objects and plain strings
+                    if (typeof m === 'object' && m.name) {
+                        return this.buildMixinItem(m.name, useClassIcon, m.location);
+                    } else {
+                        return this.buildMixinItem(m, useClassIcon, null);
+                    }
+                });
             } else if (element.nodeType === 'mixin') {
                 // Mixin items have no children
                 return [];
@@ -125,8 +133,8 @@ class RubyIndexProvider {
                 const ns = element.namespaceData;
                 const children = [];
 
-                // Add superclass section
-                if (ns.superclass && !ns.superclass.includes('(not found)')) {
+                // Add superclass section (superclass is now a MixinInfo object with name and location)
+                if (ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)')) {
                     children.push(this.buildMixinSectionItem('Superclass', 'arrow-up', [ns.superclass]));
                 }
 
@@ -181,7 +189,8 @@ class RubyIndexProvider {
     buildTreeItems(namespaces) {
         return namespaces.map(ns => {
             const hasChildren = ns.children && ns.children.length > 0;
-            const hasSuperclass = ns.superclass && !ns.superclass.includes('(not found)');
+            // superclass is now a MixinInfo object with name and location fields
+            const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
             const hasIncludes = ns.includes && ns.includes.length > 0;
             const hasPrepends = ns.prepends && ns.prepends.length > 0;
             const hasSingletonClass = ns.singleton_class != null;
@@ -194,25 +203,6 @@ class RubyIndexProvider {
                 hasAnyChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
             );
 
-            // Build detailed tooltip with mixin information
-            let tooltip = `${ns.kind}: ${ns.fqn}`;
-            if (ns.superclass) {
-                tooltip += `\nSuperclass: ${ns.superclass}`;
-            }
-            if (hasIncludes) {
-                tooltip += `\nIncludes: ${ns.includes.join(', ')}`;
-            }
-            if (hasPrepends) {
-                tooltip += `\nPrepends: ${ns.prepends.join(', ')}`;
-            }
-            if (hasSingletonClass && ns.singleton_class.includes) {
-                tooltip += `\nExtends: ${ns.singleton_class.includes.join(', ')}`;
-            }
-            if (hasIncludedByClasses) {
-                tooltip += `\nIncluded By Classes: ${ns.included_by_classes.join(', ')}`;
-            }
-
-            item.tooltip = tooltip;
             item.description = ns.kind;
 
             // Store namespace data for building mixin children
@@ -264,16 +254,6 @@ class RubyIndexProvider {
         item.nodeType = 'singleton';
         item.namespaceData = singletonClass;
 
-        // Build tooltip
-        let tooltip = `Singleton: ${singletonClass.fqn}`;
-        if (hasIncludes) {
-            tooltip += `\nIncludes (extends): ${singletonClass.includes.join(', ')}`;
-        }
-        if (hasPrepends) {
-            tooltip += `\nPrepends: ${singletonClass.prepends.join(', ')}`;
-        }
-        item.tooltip = tooltip;
-
         return item;
     }
 
@@ -286,18 +266,43 @@ class RubyIndexProvider {
         item.nodeType = 'mixinSection';
         item.mixins = mixins;
         item.mixinLabel = label;
-        item.tooltip = mixins.join('\n');
         return item;
     }
 
-    buildMixinItem(name, useClassIcon = false) {
+    buildMixinItem(name, useClassIcon = false, location = null) {
         const item = new vscode.TreeItem(
             name,
             vscode.TreeItemCollapsibleState.None
         );
         item.iconPath = new vscode.ThemeIcon(useClassIcon ? 'symbol-class' : 'symbol-interface');
         item.nodeType = 'mixin';
-        item.tooltip = name;
+
+        // If we have a call site location, use it directly for navigation
+        // Otherwise fall back to looking up the definition
+        if (location && location.uri) {
+            item.command = {
+                command: 'vscode.open',
+                title: 'Go to Call Site',
+                arguments: [
+                    vscode.Uri.parse(location.uri),
+                    {
+                        selection: new vscode.Range(
+                            location.line || 0,
+                            location.character || 0,
+                            location.line || 0,
+                            location.character || 0
+                        )
+                    }
+                ]
+            };
+        } else {
+            // Fall back to definition lookup (for items without call site location, like included_by_classes)
+            item.command = {
+                command: 'rubyIndex.gotoDefinition',
+                title: 'Go to Definition',
+                arguments: [name]
+            };
+        }
         return item;
     }
 }
@@ -465,6 +470,43 @@ function activate(context) {
         }
     });
 
+    // Register goto definition command for tree items
+    const gotoDefinitionCommand = vscode.commands.registerCommand('rubyIndex.gotoDefinition', async (fqn) => {
+        if (!client || client.state !== 2) {
+            vscode.window.showWarningMessage('Ruby Fast LSP is not ready yet. Please wait for indexing to complete.');
+            return;
+        }
+
+        try {
+            // Use the debug/lookup endpoint to find the definition location
+            const response = await client.sendRequest('ruby-fast-lsp/debug/lookup', { fqn });
+
+            if (response && response.found && response.entries && response.entries.length > 0) {
+                // Get the first entry's location
+                const entry = response.entries[0];
+                // Location format: "file:///path/to/file.rb:line:col" (0-indexed)
+                // Match the URI and the trailing :line:col
+                const locationMatch = entry.location.match(/^(.+):(\d+):(\d+)$/);
+
+                if (locationMatch) {
+                    const uri = locationMatch[1];
+                    const line = parseInt(locationMatch[2]);
+                    const col = parseInt(locationMatch[3]);
+
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+                    const editor = await vscode.window.showTextDocument(doc);
+                    const position = new vscode.Position(line, col);
+                    editor.selection = new vscode.Selection(position, position);
+                    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+                }
+            } else {
+                vscode.window.showWarningMessage(`Definition not found for: ${fqn}`);
+            }
+        } catch (error) {
+            outputChannel.appendLine(`[Ruby Fast LSP] Failed to goto definition: ${error.message}`);
+        }
+    });
+
     // Register wrapper command for showReferences to handle LSP JSON serialization
     const showReferencesCommand = vscode.commands.registerCommand('ruby-fast-lsp.showReferences',
         (uriStr, position, locations) => {
@@ -484,7 +526,7 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, showReferencesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showReferencesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {
