@@ -216,7 +216,14 @@ class RubyIndexProvider {
                 }
             } else if (element.nodeType === 'includedBySection') {
                 // Return individual class items (all includers are classes)
-                return element.includers.map(inc => this.buildIncluderItem(inc.name, inc.locations || []));
+                return element.includers.map(inc => this.buildIncluderItem(inc.name, inc.locations || [], inc.via_modules || []));
+            } else if (element.nodeType === 'includer') {
+                // Return via modules as children (intermediate modules in the include chain)
+                // viaModules is array of ViaModuleInfo objects { name, call_location }
+                if (element.viaModules && element.viaModules.length > 0) {
+                    return element.viaModules.map(viaModule => this.buildViaModuleItem(viaModule));
+                }
+                return [];
             } else if (element.nodeType === 'mixinSection') {
                 // Return individual mixin items
                 // mixins are MixinInfo objects (with name and locations)
@@ -453,20 +460,30 @@ class RubyIndexProvider {
         return item;
     }
 
-    buildIncluderItem(name, locations = []) {
+    buildIncluderItem(name, locations = [], viaModules = []) {
+        // Collapsible if there are intermediate modules in the include chain
+        const hasViaModules = viaModules && viaModules.length > 0;
         const item = new vscode.TreeItem(
             name,
-            vscode.TreeItemCollapsibleState.None
+            hasViaModules ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
         );
         // All includers are classes (we traverse through modules to find classes)
         item.iconPath = new vscode.ThemeIcon('symbol-class');
 
-        // Show location count if multiple
+        // Show description: via module count and/or location count
+        const descriptions = [];
+        if (hasViaModules) {
+            descriptions.push(`via ${viaModules.length} module${viaModules.length > 1 ? 's' : ''}`);
+        }
         if (locations && locations.length > 1) {
-            item.description = `(${locations.length} locations)`;
+            descriptions.push(`${locations.length} locations`);
+        }
+        if (descriptions.length > 0) {
+            item.description = `(${descriptions.join(', ')})`;
         }
 
         item.nodeType = 'includer';
+        item.viaModules = viaModules;
 
         // Navigate to definition using locations
         if (locations && locations.length === 1) {
@@ -498,6 +515,47 @@ class RubyIndexProvider {
                 command: 'rubyIndex.gotoDefinition',
                 title: 'Go to Definition',
                 arguments: [name]
+            };
+        }
+        return item;
+    }
+
+    buildViaModuleItem(viaModuleInfo) {
+        // viaModuleInfo is { name: string, call_location?: LocationInfo }
+        const moduleName = typeof viaModuleInfo === 'string' ? viaModuleInfo : viaModuleInfo.name;
+        const callLocation = typeof viaModuleInfo === 'object' ? viaModuleInfo.call_location : null;
+
+        const item = new vscode.TreeItem(
+            moduleName,
+            vscode.TreeItemCollapsibleState.None
+        );
+        item.iconPath = new vscode.ThemeIcon('symbol-module');
+        item.description = 'via';
+        item.nodeType = 'viaModule';
+
+        // Navigate to the include/prepend call site if available, otherwise fall back to module definition
+        if (callLocation) {
+            item.command = {
+                command: 'vscode.open',
+                title: 'Go to Include Call',
+                arguments: [
+                    vscode.Uri.parse(callLocation.uri),
+                    {
+                        selection: new vscode.Range(
+                            callLocation.line || 0,
+                            callLocation.character || 0,
+                            callLocation.line || 0,
+                            callLocation.character || 0
+                        )
+                    }
+                ]
+            };
+        } else {
+            // Fall back to module definition
+            item.command = {
+                command: 'rubyIndex.gotoDefinition',
+                title: 'Go to Definition',
+                arguments: [moduleName]
             };
         }
         return item;

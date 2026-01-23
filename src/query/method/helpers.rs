@@ -42,7 +42,11 @@ pub fn get_module_includers(
         module_fqn
     );
 
-    index.including_classes(module_fqn)
+    index
+        .including_classes(module_fqn)
+        .into_iter()
+        .map(|(fqn, _via_modules)| fqn)
+        .collect()
 }
 
 /// Check if entry's owner is in the ancestor chain.

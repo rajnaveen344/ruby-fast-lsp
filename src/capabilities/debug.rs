@@ -750,7 +750,7 @@ fn find_including_classes(
     let mut classes: Vec<String> = index
         .including_classes(module_fqn)
         .iter()
-        .map(|fqn| fqn_to_key(fqn))
+        .map(|(fqn, _via_modules)| fqn_to_key(fqn))
         .collect();
 
     classes.sort();

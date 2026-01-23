@@ -569,7 +569,7 @@ impl<'a> InferenceContext<'a> {
         // Get all classes/modules that include this module
         let includers = self.index.including_classes(module_fqn);
 
-        for includer_fqn in includers {
+        for (includer_fqn, _via_modules) in includers {
             // Get the includer's full MRO (includer_fqn is a Namespace FQN)
             let mro = self.index.get_ancestor_chain(&includer_fqn);
 

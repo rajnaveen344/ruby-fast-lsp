@@ -361,49 +361,57 @@ impl Graph {
         result
     }
 
-    /// Get all classes that include this module (transitively through intermediate modules).
+    /// Get all classes that include this module (transitively through intermediate modules),
+    /// along with the path of intermediate modules used to reach each class.
     ///
     /// Uses BFS to traverse included_by/prepended_by edges. When encountering a module,
-    /// continues traversing; when encountering a class, adds it to the result.
+    /// continues traversing; when encountering a class, adds it to the result with the path.
     ///
     /// Example: If module M is included by module N, and N is included by class C,
-    /// then `including_classes(M)` returns `[C]`.
-    pub fn including_classes(&self, fqn_id: FqnId) -> Vec<FqnId> {
+    /// then `including_classes(M)` returns `[(C, [N])]`.
+    ///
+    /// Returns: Vec of (class_fqn_id, via_modules) where via_modules is the path of
+    /// intermediate modules (empty for direct includes).
+    pub fn including_classes(&self, fqn_id: FqnId) -> Vec<(FqnId, Vec<FqnId>)> {
         use std::collections::VecDeque;
 
         let mut classes = Vec::new();
         let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
+        // Queue contains: (current_node_id, path_of_modules_to_reach_it)
+        let mut queue: VecDeque<(FqnId, Vec<FqnId>)> = VecDeque::new();
 
-        // Start from the module's direct includers
+        // Start from the module's direct includers (path is empty for direct includers)
         if let Some(node) = self.nodes.get(&fqn_id) {
             for &id in node.included_by.iter().chain(node.prepended_by.iter()) {
                 if visited.insert(id) {
-                    queue.push_back(id);
+                    queue.push_back((id, Vec::new()));
                 }
             }
         }
 
         // BFS through the graph
-        while let Some(current_id) = queue.pop_front() {
+        while let Some((current_id, path)) = queue.pop_front() {
             let Some(current_node) = self.nodes.get(&current_id) else {
                 continue;
             };
 
             match current_node.kind {
                 NodeKind::Class => {
-                    // Found a class - add to results
-                    classes.push(current_id);
+                    // Found a class - add to results with its path
+                    classes.push((current_id, path));
                 }
                 NodeKind::Module => {
                     // It's a module - continue traversing through its includers
+                    // Add this module to the path for subsequent nodes
                     for &id in current_node
                         .included_by
                         .iter()
                         .chain(current_node.prepended_by.iter())
                     {
                         if visited.insert(id) {
-                            queue.push_back(id);
+                            let mut new_path = path.clone();
+                            new_path.push(current_id);
+                            queue.push_back((id, new_path));
                         }
                     }
                 }
@@ -630,8 +638,23 @@ mod tests {
 
         // Should find C1 (via M2) and C2 (direct)
         assert_eq!(including_classes.len(), 2);
-        assert!(including_classes.contains(&ids[2])); // C1
-        assert!(including_classes.contains(&ids[3])); // C2
+        // Extract just the class FqnIds for easier checking
+        let class_ids: Vec<FqnId> = including_classes.iter().map(|(id, _)| *id).collect();
+        assert!(class_ids.contains(&ids[2])); // C1
+        assert!(class_ids.contains(&ids[3])); // C2
+
+        // Verify via_modules paths
+        let c1_entry = including_classes
+            .iter()
+            .find(|(id, _)| *id == ids[2])
+            .unwrap();
+        assert_eq!(c1_entry.1, vec![ids[1]]); // C1 via M2
+
+        let c2_entry = including_classes
+            .iter()
+            .find(|(id, _)| *id == ids[3])
+            .unwrap();
+        assert!(c2_entry.1.is_empty()); // C2 direct (no via modules)
         // Should NOT include M3 since it's a module
     }
 

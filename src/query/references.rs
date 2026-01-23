@@ -285,7 +285,7 @@ impl IndexQuery {
 
             // Also check including classes
             let including_classes = index.including_classes(&ancestor_fqn);
-            for including_class_fqn in including_classes {
+            for (including_class_fqn, _via_modules) in including_classes {
                 let inc_method_fqn = FullyQualifiedName::method(
                     including_class_fqn.namespace_parts(),
                     method.clone(),
@@ -315,7 +315,7 @@ impl IndexQuery {
         let mut all_references = Vec::new();
         let including_classes = index.including_classes(module_fqn);
 
-        for including_class_fqn in including_classes {
+        for (including_class_fqn, _via_modules) in including_classes {
             // Create Namespace FQN with kind for correct ancestor chain lookup
             let class_ns = FullyQualifiedName::namespace_with_kind(including_class_fqn.namespace_parts(), kind);
             let ancestor_chain = index.get_ancestor_chain(&class_ns);

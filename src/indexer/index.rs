@@ -983,14 +983,21 @@ impl RubyIndex {
         }
     }
 
-    /// Get all classes that include this module (transitively through intermediate modules).
+    /// Get all classes that include this module (transitively through intermediate modules),
+    /// along with the path of intermediate modules used to reach each class.
     ///
     /// Uses BFS to traverse included_by/prepended_by edges. When encountering a module,
-    /// continues traversing; when encountering a class, adds it to the result.
+    /// continues traversing; when encountering a class, adds it to the result with the path.
     ///
     /// Example: If module M is included by module N, and N is included by class C,
-    /// then `including_classes(M)` returns `[C]`.
-    pub fn including_classes(&self, module_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+    /// then `including_classes(M)` returns `[(C, [N])]`.
+    ///
+    /// Returns: Vec of (class_fqn, via_modules) where via_modules is the path of
+    /// intermediate modules (empty for direct includes).
+    pub fn including_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<(FullyQualifiedName, Vec<FullyQualifiedName>)> {
         let Some(fqn_id) = self.get_fqn_id(module_fqn) else {
             return Vec::new();
         };
@@ -998,7 +1005,14 @@ impl RubyIndex {
         self.graph
             .including_classes(fqn_id)
             .into_iter()
-            .filter_map(|id| self.get_fqn(id).cloned())
+            .filter_map(|(class_id, via_ids)| {
+                let class_fqn = self.get_fqn(class_id)?.clone();
+                let via_modules: Vec<FullyQualifiedName> = via_ids
+                    .into_iter()
+                    .filter_map(|id| self.get_fqn(id).cloned())
+                    .collect();
+                Some((class_fqn, via_modules))
+            })
             .collect()
     }
 
@@ -1025,7 +1039,7 @@ impl RubyIndex {
     pub fn get_class_definition_locations(&self, module_fqn: &FullyQualifiedName) -> Vec<Location> {
         self.including_classes(module_fqn)
             .iter()
-            .filter_map(|class_fqn| {
+            .filter_map(|(class_fqn, _via_modules)| {
                 let entries = self.get(class_fqn)?;
                 let entry = entries.first()?;
                 if matches!(entry.kind, EntryKind::Class(_)) {

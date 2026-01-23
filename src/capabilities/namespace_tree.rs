@@ -60,6 +60,16 @@ pub struct MixinInfo {
     pub locations: Vec<LocationInfo>,
 }
 
+/// Information about an intermediate module in the include chain
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ViaModuleInfo {
+    /// The fully qualified name of the intermediate module
+    pub name: String,
+    /// Location of the include/prepend call that includes the previous module in the chain
+    /// (i.e., where this module includes its target)
+    pub call_location: Option<LocationInfo>,
+}
+
 /// Information about a class that includes a module (directly or transitively)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IncluderInfo {
@@ -67,6 +77,11 @@ pub struct IncluderInfo {
     pub name: String,
     /// Definition locations (may have multiple if reopened)
     pub locations: Vec<LocationInfo>,
+    /// Intermediate modules in the include chain (empty if direct include)
+    /// e.g., if Module A is included by Module B, and B is included by Class C,
+    /// then via_modules = [ViaModuleInfo { name: "B", call_location: <where B includes A> }]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub via_modules: Vec<ViaModuleInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -566,7 +581,7 @@ fn build_children_iterative(
 
 /// Find all classes that include this module by traversing included_by/prepended_by edges.
 /// Uses the index's `including_classes` method which does BFS through intermediate modules.
-/// Returns only classes (not modules) with their definition locations.
+/// Returns only classes (not modules) with their definition locations and via_modules path.
 /// When `show_external_types` is false, only returns classes defined in project files.
 fn find_includers(
     module_fqn: &FullyQualifiedName,
@@ -576,7 +591,7 @@ fn find_includers(
     let mut classes: Vec<IncluderInfo> = index
         .including_classes(module_fqn)
         .into_iter()
-        .filter_map(|class_fqn| {
+        .filter_map(|(class_fqn, via_module_fqns)| {
             let entries = index.get(&class_fqn)?;
 
             // Check if this class is from a project file using the index's file source tracking
@@ -602,13 +617,81 @@ fn find_includers(
                 })
                 .collect();
 
+            // Build via_modules with call site locations
+            // via_modules[0] includes module_fqn (the target)
+            // via_modules[i] includes via_modules[i-1] for i > 0
+            let via_modules: Vec<ViaModuleInfo> = via_module_fqns
+                .iter()
+                .enumerate()
+                .map(|(i, via_fqn)| {
+                    // Determine what this via module includes
+                    let included_fqn = if i == 0 {
+                        module_fqn // First via module includes the target
+                    } else {
+                        &via_module_fqns[i - 1] // Subsequent via modules include the previous one
+                    };
+
+                    // Find the call site location where via_fqn includes included_fqn
+                    let call_location =
+                        find_mixin_call_location(index, via_fqn, included_fqn);
+
+                    ViaModuleInfo {
+                        name: via_fqn.to_string(),
+                        call_location,
+                    }
+                })
+                .collect();
+
             Some(IncluderInfo {
                 name: class_fqn.to_string(),
                 locations,
+                via_modules,
             })
         })
         .collect();
 
     classes.sort_by(|a, b| a.name.cmp(&b.name));
     classes
+}
+
+/// Find the call site location where `includer_fqn` includes/prepends `included_fqn`.
+/// Returns the location of the include/prepend statement, or None if not found.
+fn find_mixin_call_location(
+    index: &RubyIndex,
+    includer_fqn: &FullyQualifiedName,
+    included_fqn: &FullyQualifiedName,
+) -> Option<LocationInfo> {
+    let entries = index.get(includer_fqn)?;
+
+    for entry in entries {
+        let mixins = match &entry.kind {
+            EntryKind::Module(data) => data.includes.iter().chain(data.prepends.iter()),
+            EntryKind::Class(data) => data.includes.iter().chain(data.prepends.iter()),
+            _ => continue,
+        };
+
+        // Check each mixin to see if it resolves to included_fqn
+        let current_fqn = FullyQualifiedName::namespace(includer_fqn.namespace_parts().clone());
+        for mixin_ref in mixins {
+            if let Some(resolved_fqn) = resolve_constant_fqn_from_parts(
+                index,
+                &mixin_ref.parts,
+                mixin_ref.absolute,
+                &current_fqn,
+            ) {
+                if &resolved_fqn == included_fqn {
+                    // Found the mixin call - return its location
+                    return index.get_file_url(mixin_ref.location.file_id).map(|uri| {
+                        LocationInfo {
+                            uri: uri.to_string(),
+                            line: mixin_ref.location.range.start.line,
+                            character: mixin_ref.location.range.start.character,
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    None
 }
