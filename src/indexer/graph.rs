@@ -361,6 +361,58 @@ impl Graph {
         result
     }
 
+    /// Get all classes that include this module (transitively through intermediate modules).
+    ///
+    /// Uses BFS to traverse included_by/prepended_by edges. When encountering a module,
+    /// continues traversing; when encountering a class, adds it to the result.
+    ///
+    /// Example: If module M is included by module N, and N is included by class C,
+    /// then `including_classes(M)` returns `[C]`.
+    pub fn including_classes(&self, fqn_id: FqnId) -> Vec<FqnId> {
+        use std::collections::VecDeque;
+
+        let mut classes = Vec::new();
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+
+        // Start from the module's direct includers
+        if let Some(node) = self.nodes.get(&fqn_id) {
+            for &id in node.included_by.iter().chain(node.prepended_by.iter()) {
+                if visited.insert(id) {
+                    queue.push_back(id);
+                }
+            }
+        }
+
+        // BFS through the graph
+        while let Some(current_id) = queue.pop_front() {
+            let Some(current_node) = self.nodes.get(&current_id) else {
+                continue;
+            };
+
+            match current_node.kind {
+                NodeKind::Class => {
+                    // Found a class - add to results
+                    classes.push(current_id);
+                }
+                NodeKind::Module => {
+                    // It's a module - continue traversing through its includers
+                    for &id in current_node
+                        .included_by
+                        .iter()
+                        .chain(current_node.prepended_by.iter())
+                    {
+                        if visited.insert(id) {
+                            queue.push_back(id);
+                        }
+                    }
+                }
+            }
+        }
+
+        classes
+    }
+
     // ========================================================================
     // Internal Helpers
     // ========================================================================
@@ -541,5 +593,62 @@ mod tests {
         assert_eq!(mixers.len(), 2);
         assert!(mixers.contains(&ids[1]));
         assert!(mixers.contains(&ids[2]));
+    }
+
+    #[test]
+    fn test_including_classes() {
+        let (_map, ids) = create_fqn_ids(5);
+        let file_id = FileId::default();
+
+        let mut graph = Graph::new();
+
+        // Setup:
+        // - ids[0]: Module M1
+        // - ids[1]: Module M2 (includes M1)
+        // - ids[2]: Class C1 (includes M2)
+        // - ids[3]: Class C2 (includes M1 directly)
+        // - ids[4]: Module M3 (includes M1, but is not included by any class)
+
+        // Set node kinds
+        graph.ensure_node(ids[0], NodeKind::Module);
+        graph.ensure_node(ids[1], NodeKind::Module);
+        graph.ensure_node(ids[2], NodeKind::Class);
+        graph.ensure_node(ids[3], NodeKind::Class);
+        graph.ensure_node(ids[4], NodeKind::Module);
+
+        // M2 includes M1
+        graph.add_include(ids[1], ids[0], file_id);
+        // C1 includes M2
+        graph.add_include(ids[2], ids[1], file_id);
+        // C2 includes M1 directly
+        graph.add_include(ids[3], ids[0], file_id);
+        // M3 includes M1 (but no class includes M3)
+        graph.add_include(ids[4], ids[0], file_id);
+
+        // Find all classes that include M1 (transitively)
+        let including_classes = graph.including_classes(ids[0]);
+
+        // Should find C1 (via M2) and C2 (direct)
+        assert_eq!(including_classes.len(), 2);
+        assert!(including_classes.contains(&ids[2])); // C1
+        assert!(including_classes.contains(&ids[3])); // C2
+        // Should NOT include M3 since it's a module
+    }
+
+    #[test]
+    fn test_including_classes_empty() {
+        let (_map, ids) = create_fqn_ids(2);
+        let file_id = FileId::default();
+
+        let mut graph = Graph::new();
+
+        // Module with no includers
+        graph.ensure_node(ids[0], NodeKind::Module);
+        graph.ensure_node(ids[1], NodeKind::Module);
+        graph.add_include(ids[1], ids[0], file_id);
+
+        // No classes include either module
+        let including_classes = graph.including_classes(ids[0]);
+        assert!(including_classes.is_empty());
     }
 }

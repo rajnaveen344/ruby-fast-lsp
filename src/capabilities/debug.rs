@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::NamespaceKind;
-use crate::indexer::graph::{Graph, NodeKind};
-use crate::indexer::index::FqnId;
+use crate::indexer::graph::NodeKind;
+use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 
@@ -741,54 +741,17 @@ pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResp
 }
 
 /// Find all classes that ultimately include a module by traversing included_by/prepended_by edges.
-/// Uses BFS to traverse through intermediate modules until finding classes.
+/// Uses the index's `including_classes` method which does BFS through intermediate modules.
 fn find_including_classes(
-    start_id: FqnId,
-    graph: &Graph,
-    resolve_key: &impl Fn(FqnId) -> Option<String>,
+    module_fqn: &FullyQualifiedName,
+    index: &RubyIndex,
+    fqn_to_key: &impl Fn(&FullyQualifiedName) -> String,
 ) -> Vec<String> {
-    use std::collections::{HashSet, VecDeque};
-
-    let mut classes = Vec::new();
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::new();
-
-    // Start from the module's direct includers
-    if let Some(node) = graph.get_node(start_id) {
-        for &id in node.included_by.iter().chain(node.prepended_by.iter()) {
-            if visited.insert(id) {
-                queue.push_back(id);
-            }
-        }
-    }
-
-    // BFS through the graph
-    while let Some(current_id) = queue.pop_front() {
-        let Some(current_node) = graph.get_node(current_id) else {
-            continue;
-        };
-
-        match current_node.kind {
-            NodeKind::Class => {
-                // Found a class - add it to results
-                if let Some(key) = resolve_key(current_id) {
-                    classes.push(key);
-                }
-            }
-            NodeKind::Module => {
-                // It's a module - continue traversing through its includers
-                for &id in current_node
-                    .included_by
-                    .iter()
-                    .chain(current_node.prepended_by.iter())
-                {
-                    if visited.insert(id) {
-                        queue.push_back(id);
-                    }
-                }
-            }
-        }
-    }
+    let mut classes: Vec<String> = index
+        .including_classes(module_fqn)
+        .iter()
+        .map(|fqn| fqn_to_key(fqn))
+        .collect();
 
     classes.sort();
     classes
@@ -859,7 +822,7 @@ pub fn handle_export_graph(
 
         // For modules, find all classes that ultimately include this module
         let included_by_classes = if node.kind == NodeKind::Module {
-            find_including_classes(fqn_id, graph, &resolve_key)
+            find_including_classes(fqn, &index, &fqn_to_key)
         } else {
             Vec::new()
         };

@@ -23,7 +23,10 @@ pub fn is_module_instance_namespace(index: &RubyIndex, fqn: &FullyQualifiedName)
     false
 }
 
-/// Get all FQNs of classes/modules that include this module.
+/// Get all FQNs of classes that include this module (transitively).
+///
+/// Uses BFS traversal to find all classes that have this module
+/// in their ancestor chain (directly or via intermediate modules).
 ///
 /// INVARIANT: Must only be called with module instance namespaces.
 pub fn get_module_includers(
@@ -39,27 +42,7 @@ pub fn get_module_includers(
         module_fqn
     );
 
-    let Some(module_id) = index.get_fqn_id(module_fqn) else {
-        return Vec::new(); // Module not indexed yet
-    };
-
-    // Get includers from graph (reverse edges: who includes me?)
-    let mut includer_ids = index.get_graph().mixers(module_id);
-
-    // Fallback: scan all classes if graph incomplete
-    if includer_ids.is_empty() {
-        includer_ids = index
-            .get_transitive_mixin_classes(module_fqn)
-            .into_iter()
-            .filter_map(|fqn| index.get_fqn_id(&fqn))
-            .collect();
-    }
-
-    // Convert IDs to FQNs
-    includer_ids
-        .into_iter()
-        .filter_map(|id| index.get_fqn(id).cloned())
-        .collect()
+    index.including_classes(module_fqn)
 }
 
 /// Check if entry's owner is in the ancestor chain.

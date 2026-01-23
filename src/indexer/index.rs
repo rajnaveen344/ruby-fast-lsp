@@ -248,11 +248,7 @@ impl RubyIndex {
 
         // Step 6: Debug logging - show the computed ancestor chain
         let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
-        debug!(
-            "[Ancestor Chain] {}: {}",
-            fqn,
-            chain_str.join(" → ")
-        );
+        debug!("[Ancestor Chain] {}: {}", fqn, chain_str.join(" → "));
 
         chain
     }
@@ -753,14 +749,17 @@ impl RubyIndex {
 
         debug!("Building inheritance graph from indexed entries");
 
-        // Collect entries with their FQNs and file IDs first to avoid borrow conflicts
+        // Collect ALL entries with their FQNs and file IDs first to avoid borrow conflicts.
+        // Important: Ruby allows reopening classes/modules in multiple files, each with
+        // different include/prepend/extend statements. We must process ALL entries,
+        // not just the first one per FQN.
         let entries_data: Vec<(FqnId, FileId, Entry)> = self
             .definitions()
-            .filter_map(|(fqn, entries)| {
-                let entry = (*entries.first()?).clone();
-                let fqn_id = self.fqns.get_id(fqn).copied()?;
-                let file_id = entry.location.file_id;
-                Some((fqn_id, file_id, entry))
+            .flat_map(|(fqn, entries)| {
+                let fqn_id = self.fqns.get_id(fqn).copied();
+                entries.into_iter().filter_map(move |entry| {
+                    Some((fqn_id?, entry.location.file_id, (*entry).clone()))
+                })
             })
             .collect();
 
@@ -1019,75 +1018,42 @@ impl RubyIndex {
         includers
     }
 
+    /// Get all classes that include this module (transitively through intermediate modules).
+    ///
+    /// Uses BFS to traverse included_by/prepended_by edges. When encountering a module,
+    /// continues traversing; when encountering a class, adds it to the result.
+    ///
+    /// Example: If module M is included by module N, and N is included by class C,
+    /// then `including_classes(M)` returns `[C]`.
+    pub fn including_classes(&self, module_fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        let Some(fqn_id) = self.get_fqn_id(module_fqn) else {
+            return Vec::new();
+        };
+
+        self.graph
+            .including_classes(fqn_id)
+            .into_iter()
+            .filter_map(|id| self.get_fqn(id).cloned())
+            .collect()
+    }
+
     /// Get class definition locations for classes that use a module (transitively)
     /// This includes:
     /// - Classes that directly include/prepend/extend the module
     /// - Classes that include/prepend/extend a module that includes this module (transitively)
     pub fn get_class_definition_locations(&self, module_fqn: &FullyQualifiedName) -> Vec<Location> {
-        let transitive_classes = self.get_transitive_mixin_classes(module_fqn);
-        transitive_classes
+        self.including_classes(module_fqn)
             .iter()
             .filter_map(|class_fqn| {
-                self.get(class_fqn).and_then(|entries| {
-                    entries.first().and_then(|entry| {
-                        if matches!(entry.kind, EntryKind::Class(_)) {
-                            self.to_lsp_location(&entry.location)
-                        } else {
-                            None
-                        }
-                    })
-                })
+                let entries = self.get(class_fqn)?;
+                let entry = entries.first()?;
+                if matches!(entry.kind, EntryKind::Class(_)) {
+                    self.to_lsp_location(&entry.location)
+                } else {
+                    None
+                }
             })
             .collect()
-    }
-
-    /// Get all classes that transitively include/extend/prepend a module
-    /// This follows the chain: if A includes B and B includes C,
-    /// and class D includes A, then D is a transitive user of C
-    pub fn get_transitive_mixin_classes(
-        &self,
-        module_fqn: &FullyQualifiedName,
-    ) -> Vec<FullyQualifiedName> {
-        let mut result = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        self.collect_transitive_classes(module_fqn, &mut result, &mut visited);
-        result
-    }
-
-    fn collect_transitive_classes(
-        &self,
-        module_fqn: &FullyQualifiedName,
-        result: &mut Vec<FullyQualifiedName>,
-        visited: &mut std::collections::HashSet<FullyQualifiedName>,
-    ) {
-        if !visited.insert(module_fqn.clone()) {
-            return;
-        }
-
-        // Get direct mixers (classes and modules that include/prepend/extend this module)
-        let mixers = self.get_including_classes(module_fqn);
-
-        for mixer_fqn in mixers {
-            if let Some(entries) = self.get(&mixer_fqn) {
-                if let Some(entry) = entries.first() {
-                    match &entry.kind {
-                        EntryKind::Class(_) => {
-                            // It's a class - add to result
-                            if !result.contains(&mixer_fqn) {
-                                result.push(mixer_fqn.clone());
-                            }
-                        }
-                        EntryKind::Module(_) => {
-                            // It's a module - recursively find classes that use this module
-                            self.collect_transitive_classes(&mixer_fqn, result, visited);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        visited.remove(module_fqn);
     }
 
     /// Get all mixin usages for a given module (for CodeLens)
@@ -1341,8 +1307,15 @@ mod tests {
         // Should return [fqn, root] (not panic, not empty vec)
         let chain = index.get_ancestor_chain(&namespace_fqn);
 
-        assert_eq!(chain.len(), 2, "Should return two-element chain for unindexed class");
-        assert_eq!(chain[0], namespace_fqn, "First element should be the FQN itself");
+        assert_eq!(
+            chain.len(),
+            2,
+            "Should return two-element chain for unindexed class"
+        );
+        assert_eq!(
+            chain[0], namespace_fqn,
+            "First element should be the FQN itself"
+        );
         assert_eq!(
             chain[1],
             FullyQualifiedName::Namespace(Vec::new(), NamespaceKind::Instance),

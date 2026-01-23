@@ -1,14 +1,13 @@
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::{Entry, MixinRef, NamespaceKind};
-use crate::indexer::graph::{Graph, NodeKind};
-use crate::indexer::index::{FqnId, RubyIndex};
+use crate::indexer::index::RubyIndex;
 use crate::server::RubyLanguageServer;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -237,11 +236,7 @@ pub async fn handle_namespace_tree(
 
         // For modules, find all classes/modules that include this module
         let included_by = if kind == "Module" {
-            if let Some(fqn_id) = index.get_fqn_id(fqn) {
-                find_includers(fqn_id, index.get_graph(), &index)
-            } else {
-                Vec::new()
-            }
+            find_includers(fqn, &index)
         } else {
             Vec::new()
         };
@@ -503,70 +498,37 @@ fn build_children_iterative(
 }
 
 /// Find all classes that include this module by traversing included_by/prepended_by edges.
-/// Uses BFS to traverse through intermediate modules until finding classes.
+/// Uses the index's `including_classes` method which does BFS through intermediate modules.
 /// Returns only classes (not modules) with their definition locations.
-fn find_includers(start_id: FqnId, graph: &Graph, index: &RubyIndex) -> Vec<IncluderInfo> {
-    let mut classes = Vec::new();
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::new();
-
-    // Start from the module's direct includers
-    if let Some(node) = graph.get_node(start_id) {
-        for &id in node.included_by.iter().chain(node.prepended_by.iter()) {
-            if visited.insert(id) {
-                queue.push_back(id);
-            }
-        }
-    }
-
-    // BFS through the graph
-    while let Some(current_id) = queue.pop_front() {
-        let Some(current_node) = graph.get_node(current_id) else {
-            continue;
-        };
-
-        match current_node.kind {
-            NodeKind::Class => {
-                // Found a class - add it to results with its locations
-                if let Some(fqn) = index.get_fqn(current_id) {
-                    let locations = index
-                        .get(fqn)
-                        .map(|entries| {
-                            entries
-                                .iter()
-                                .filter_map(|entry| {
-                                    index.get_file_url(entry.location.file_id).map(|uri| {
-                                        LocationInfo {
-                                            uri: uri.to_string(),
-                                            line: entry.location.range.start.line,
-                                            character: entry.location.range.start.character,
-                                        }
-                                    })
-                                })
-                                .collect()
+fn find_includers(module_fqn: &FullyQualifiedName, index: &RubyIndex) -> Vec<IncluderInfo> {
+    let mut classes: Vec<IncluderInfo> = index
+        .including_classes(module_fqn)
+        .into_iter()
+        .filter_map(|class_fqn| {
+            let locations = index
+                .get(&class_fqn)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| {
+                            index.get_file_url(entry.location.file_id).map(|uri| {
+                                LocationInfo {
+                                    uri: uri.to_string(),
+                                    line: entry.location.range.start.line,
+                                    character: entry.location.range.start.character,
+                                }
+                            })
                         })
-                        .unwrap_or_default();
+                        .collect()
+                })
+                .unwrap_or_default();
 
-                    classes.push(IncluderInfo {
-                        name: fqn.to_string(),
-                        locations,
-                    });
-                }
-            }
-            NodeKind::Module => {
-                // It's a module - continue traversing through its includers
-                for &id in current_node
-                    .included_by
-                    .iter()
-                    .chain(current_node.prepended_by.iter())
-                {
-                    if visited.insert(id) {
-                        queue.push_back(id);
-                    }
-                }
-            }
-        }
-    }
+            Some(IncluderInfo {
+                name: class_fqn.to_string(),
+                locations,
+            })
+        })
+        .collect();
 
     classes.sort_by(|a, b| a.name.cmp(&b.name));
     classes

@@ -22,7 +22,8 @@
       "Bash(ruby:*)",
       "Bash(cargo doc:*)",
       "Bash(cargo tree:*)",
-      "Bash(./create_vsix.sh:*)"
+      "Bash(./create_vsix.sh:*)",
+      "Skill(ruby-index)"
     ]
   }
 }
