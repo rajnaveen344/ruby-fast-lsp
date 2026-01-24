@@ -114,21 +114,29 @@ impl IndexVisitor {
             FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
 
         // Convert YARD types to RubyType for type inference
+        // Use namespace-aware conversion to resolve relative type names
         let (yard_return_type, param_types) = if let Some(ref doc) = yard_doc {
-            // Convert return type from YARD
+            // Get index for namespace resolution
+            let index = self.index.lock();
+
+            // Convert return type from YARD with namespace resolution
             let return_type = if !doc.returns.is_empty() {
                 let all_return_types: Vec<String> =
                     doc.returns.iter().flat_map(|r| r.types.clone()).collect();
                 if all_return_types.is_empty() {
                     None
                 } else {
-                    Some(YardTypeConverter::convert_multiple(&all_return_types))
+                    Some(YardTypeConverter::convert_multiple_with_namespace(
+                        &all_return_types,
+                        &index,
+                        &namespace_parts,
+                    ))
                 }
             } else {
                 None
             };
 
-            // Convert parameter types
+            // Convert parameter types with namespace resolution
             let param_types: Vec<(String, RubyType)> = doc
                 .params
                 .iter()
@@ -138,12 +146,17 @@ impl IndexVisitor {
                     } else {
                         Some((
                             p.name.clone(),
-                            YardTypeConverter::convert_multiple(&p.types),
+                            YardTypeConverter::convert_multiple_with_namespace(
+                                &p.types,
+                                &index,
+                                &namespace_parts,
+                            ),
                         ))
                     }
                 })
                 .collect();
 
+            drop(index); // Release the lock before continuing
             (return_type, param_types)
         } else {
             (None, Vec::new())

@@ -29,7 +29,11 @@ impl IndexQuery {
         // First check if we're in a YARD comment type reference
         if let Some(yard_type) = YardParser::find_type_at_position(content, position) {
             info!("Found YARD type at position: {}", yard_type.type_name);
-            return self.find_yard_type_definitions(&yard_type.type_name);
+            // Get the enclosing namespace context for proper resolution
+            let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
+            let ancestors = analyzer.get_namespace_at_position(position);
+            info!("YARD type namespace context: {:?}", ancestors);
+            return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
 
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
@@ -161,62 +165,64 @@ impl IndexQuery {
             Identifier::RubyLocalVariable { name, scope, .. } => {
                 self.find_local_variable_definitions_at_position(name, *scope, position)
             }
-            Identifier::YardType { type_name, .. } => self.find_yard_type_definitions(type_name),
+            Identifier::YardType { type_name, .. } => {
+                // YardType identifier doesn't have namespace context, use empty ancestors
+                // The main YARD type path (detected via YardParser) handles namespace resolution
+                self.find_yard_type_definitions(type_name, &[])
+            }
         }
     }
 
     /// Find definitions for a YARD type reference string (e.g., "String", "Foo::Bar").
-    fn find_yard_type_definitions(&self, type_name: &str) -> Option<Vec<Location>> {
+    /// Uses namespace resolution to find types relative to the enclosing scope.
+    fn find_yard_type_definitions(
+        &self,
+        type_name: &str,
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
         // Handle built-in types
         let builtins = ["nil", "true", "false", "void", "Boolean", "bool"];
         if builtins.iter().any(|b| b.eq_ignore_ascii_case(type_name)) {
             return None;
         }
 
-        // Parse path
-        let parts: Vec<&str> = type_name.split("::").collect();
-        let mut namespace = Vec::new();
+        // Check if it's a root constant (starts with ::)
+        let is_root_constant = type_name.starts_with("::");
+        let type_to_parse = if is_root_constant {
+            &type_name[2..] // Strip leading ::
+        } else {
+            type_name
+        };
+
+        // Parse path into constant parts
+        let parts: Vec<&str> = type_to_parse.split("::").collect();
+        let mut constant_path = Vec::new();
         for part in parts {
             let trimmed = part.trim();
             if trimmed.is_empty() {
                 continue;
             }
             if let Ok(constant) = RubyConstant::try_from(trimmed) {
-                namespace.push(constant);
+                constant_path.push(constant);
             } else {
                 return None;
             }
         }
 
-        if namespace.is_empty() {
+        if constant_path.is_empty() {
             return None;
         }
 
-        // Find definition - try Namespace first (classes/modules), then Constant
-        let index = self.index.lock();
+        // Use namespace resolution (same as code constant resolution)
+        // For root constants (::Foo), use empty ancestors
+        let effective_ancestors = if is_root_constant {
+            &[][..]
+        } else {
+            ancestors
+        };
 
-        // Try as Namespace (for class/module definitions)
-        let namespace_fqn = FullyQualifiedName::namespace(namespace.clone());
-        if let Some(entries) = index.get(&namespace_fqn) {
-            let locations: Vec<Location> = entries
-                .iter()
-                .filter(|e| matches!(e.kind, EntryKind::Class(_) | EntryKind::Module(_)))
-                .filter_map(|e| index.to_lsp_location(&e.location))
-                .collect();
-            if !locations.is_empty() {
-                return Some(locations);
-            }
-        }
-
-        // Fallback to Constant (for value constants)
-        let fqn = FullyQualifiedName::Constant(namespace);
-        index.get(&fqn).map(|entries| {
-            entries
-                .iter()
-                .filter(|e| matches!(e.kind, EntryKind::Class(_) | EntryKind::Module(_)))
-                .filter_map(|e| index.to_lsp_location(&e.location))
-                .collect()
-        })
+        // Reuse the same resolution logic as code constants
+        self.find_constant_definitions_by_path(&constant_path, effective_ancestors)
     }
 
     /// Find method definitions by name.
@@ -363,24 +369,24 @@ mod tests {
     #[test]
     fn test_builtin_types_return_none() {
         let query = create_test_query();
-        assert!(query.find_yard_type_definitions("nil").is_none());
-        assert!(query.find_yard_type_definitions("true").is_none());
-        assert!(query.find_yard_type_definitions("false").is_none());
-        assert!(query.find_yard_type_definitions("void").is_none());
-        assert!(query.find_yard_type_definitions("Boolean").is_none());
+        assert!(query.find_yard_type_definitions("nil", &[]).is_none());
+        assert!(query.find_yard_type_definitions("true", &[]).is_none());
+        assert!(query.find_yard_type_definitions("false", &[]).is_none());
+        assert!(query.find_yard_type_definitions("void", &[]).is_none());
+        assert!(query.find_yard_type_definitions("Boolean", &[]).is_none());
     }
 
     #[test]
     fn test_empty_type_returns_none() {
         let query = create_test_query();
-        assert!(query.find_yard_type_definitions("").is_none());
-        assert!(query.find_yard_type_definitions("  ").is_none());
+        assert!(query.find_yard_type_definitions("", &[]).is_none());
+        assert!(query.find_yard_type_definitions("  ", &[]).is_none());
     }
 
     #[test]
     fn test_invalid_constant_returns_none() {
         let query = create_test_query();
         // lowercase names are not valid constants
-        assert!(query.find_yard_type_definitions("lowercase").is_none());
+        assert!(query.find_yard_type_definitions("lowercase", &[]).is_none());
     }
 }

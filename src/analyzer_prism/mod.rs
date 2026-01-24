@@ -207,6 +207,114 @@ impl RubyPrismAnalyzer {
 
         iden_visitor.get_result()
     }
+
+    /// Get the namespace context (enclosing module/class) at a given position.
+    /// This is useful for resolving types in YARD comments where there's no identifier
+    /// at the position, but we need to know the enclosing namespace context.
+    pub fn get_namespace_at_position(&self, position: Position) -> Vec<RubyConstant> {
+        let parse_result = ruby_prism::parse(self.code.as_bytes());
+        let root_node = parse_result.node();
+
+        // Collect namespaces that contain this position
+        let mut namespace_stack = Vec::new();
+        self.collect_namespaces_containing_position(&root_node, position, &mut namespace_stack);
+        namespace_stack
+    }
+
+    /// Recursively collect namespace (module/class) names that contain the given position.
+    fn collect_namespaces_containing_position(
+        &self,
+        node: &ruby_prism::Node,
+        position: Position,
+        namespace_stack: &mut Vec<RubyConstant>,
+    ) {
+        // Helper to check if position is within a node's range
+        let position_in_node = |node_loc: &ruby_prism::Location| -> bool {
+            let start_offset = node_loc.start_offset();
+            let end_offset = node_loc.end_offset();
+
+            // Convert position to byte offset
+            let target_offset = self.position_to_offset(position);
+            target_offset >= start_offset && target_offset < end_offset
+        };
+
+        // Check if this is a class node containing the position
+        if let Some(class_node) = node.as_class_node() {
+            if position_in_node(&class_node.location()) {
+                // Extract the class name(s) and add to stack
+                let constant_path = class_node.constant_path();
+                if let Some(cpn) = constant_path.as_constant_path_node() {
+                    let mut names = Vec::new();
+                    utils::collect_namespaces(&cpn, &mut names);
+                    namespace_stack.extend(names);
+                } else if let Some(crn) = constant_path.as_constant_read_node() {
+                    let name = String::from_utf8_lossy(crn.name().as_slice());
+                    if let Ok(constant) = RubyConstant::new(&name) {
+                        namespace_stack.push(constant);
+                    }
+                }
+
+                // Recurse into body
+                if let Some(body) = class_node.body() {
+                    self.collect_namespaces_containing_position(&body, position, namespace_stack);
+                }
+                return;
+            }
+        }
+
+        // Check if this is a module node containing the position
+        if let Some(module_node) = node.as_module_node() {
+            if position_in_node(&module_node.location()) {
+                // Extract the module name(s) and add to stack
+                let constant_path = module_node.constant_path();
+                if let Some(cpn) = constant_path.as_constant_path_node() {
+                    let mut names = Vec::new();
+                    utils::collect_namespaces(&cpn, &mut names);
+                    namespace_stack.extend(names);
+                } else if let Some(crn) = constant_path.as_constant_read_node() {
+                    let name = String::from_utf8_lossy(crn.name().as_slice());
+                    if let Ok(constant) = RubyConstant::new(&name) {
+                        namespace_stack.push(constant);
+                    }
+                }
+
+                // Recurse into body
+                if let Some(body) = module_node.body() {
+                    self.collect_namespaces_containing_position(&body, position, namespace_stack);
+                }
+                return;
+            }
+        }
+
+        // Recurse into child nodes for other node types
+        if let Some(program) = node.as_program_node() {
+            for stmt in program.statements().body().iter() {
+                self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+            }
+        } else if let Some(stmts) = node.as_statements_node() {
+            for stmt in stmts.body().iter() {
+                self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+            }
+        } else if let Some(begin_node) = node.as_begin_node() {
+            if let Some(stmts) = begin_node.statements() {
+                for stmt in stmts.body().iter() {
+                    self.collect_namespaces_containing_position(&stmt, position, namespace_stack);
+                }
+            }
+        }
+    }
+
+    /// Convert LSP position to byte offset in the source code.
+    fn position_to_offset(&self, position: Position) -> usize {
+        let mut offset = 0;
+        for (line_idx, line) in self.code.lines().enumerate() {
+            if line_idx == position.line as usize {
+                return offset + position.character as usize;
+            }
+            offset += line.len() + 1; // +1 for newline
+        }
+        offset
+    }
 }
 
 #[cfg(test)]
