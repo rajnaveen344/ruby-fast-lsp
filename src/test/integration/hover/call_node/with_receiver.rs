@@ -87,7 +87,7 @@ class Foo
   end
 end
 
-x = Foo.new.unknown_method<hover label="def unknown_method">
+x = Foo.new.unknown_method<hover label="?">
 "#,
     )
     .await;

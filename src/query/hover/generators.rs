@@ -327,8 +327,8 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
     );
 
     match return_type {
-        Some(t) => Some(HoverInfo::ruby_code(t.to_string())),
-        None => Some(HoverInfo::ruby_code(format!("def {}", name))),
+        Some(t) if t != RubyType::Unknown => Some(HoverInfo::ruby_code(t.to_string())),
+        _ => Some(HoverInfo::text("?".to_string())),
     }
 }
 

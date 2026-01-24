@@ -112,3 +112,18 @@ end
     )
     .await;
 }
+
+/// Hover on unknown method call without receiver shows "?"
+#[tokio::test]
+async fn unknown_method_call_without_receiver() {
+    check(
+        r#"
+class Foo
+  def process
+    unknown_method<hover label="?">
+  end
+end
+"#,
+    )
+    .await;
+}

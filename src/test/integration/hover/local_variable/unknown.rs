@@ -21,7 +21,8 @@ end
     .await;
 }
 
-/// Variable not in scope shows just the variable name
+/// Variable not in scope is treated as a method call - shows "?"
+/// In Ruby, a name without prior assignment in scope is a method call, not a variable read.
 #[tokio::test]
 async fn undefined_variable() {
     check(
@@ -32,8 +33,9 @@ class Example
   end
 
   def second_method
-    # secret should NOT be accessible here - it's in a different method
-    sec<hover label="secret">ret
+    # secret is NOT accessible here - it's in a different method
+    # Ruby treats this as a method call, not a variable read
+    sec<hover label="?">ret
   end
 end
 "#,

@@ -44,6 +44,7 @@ end
 }
 
 /// Variables don't cross method boundaries (hard scope)
+/// Ruby treats a name without prior assignment in scope as a method call.
 #[tokio::test]
 async fn variable_does_not_cross_method_boundary() {
     check(
@@ -55,7 +56,8 @@ class Example
 
   def second_method
     # secret is NOT accessible here - different method scope
-    sec<hover label="secret">ret
+    # Ruby parses this as a method call, not a variable read
+    sec<hover label="?">ret
   end
 end
 "#,
