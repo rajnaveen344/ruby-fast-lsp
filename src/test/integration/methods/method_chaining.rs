@@ -197,3 +197,62 @@ result = obj.unwrap.process$0
     )
     .await;
 }
+
+/// Goto definition for INTERMEDIATE method in chain (not the last one).
+/// In `a.b.c`, when cursor is on `b`, we should:
+/// 1. Resolve `a`'s type
+/// 2. Find `b` on that type
+#[tokio::test]
+async fn goto_intermediate_method_in_chain() {
+    check(
+        r#"
+class First
+  # @return [Second]
+  <def>def to_second
+    Second.new
+  end</def>
+end
+
+class Second
+  # @return [Third]
+  def to_third
+    Third.new
+  end
+end
+
+class Third
+  def final_method
+    42
+  end
+end
+
+a = First.new
+a.to_second$0.to_third.final_method
+"#,
+    )
+    .await;
+}
+
+/// Goto definition where the receiver is a method call (not a variable).
+/// In `First.new.to_second`, cursor on `to_second`:
+/// 1. `First.new` returns `First` (instance)
+/// 2. Find `to_second` on `First`
+#[tokio::test]
+async fn goto_method_with_method_call_receiver() {
+    check(
+        r#"
+class First
+  # @return [Second]
+  <def>def to_second
+    Second.new
+  end</def>
+end
+
+class Second
+end
+
+First.new.to_second$0
+"#,
+    )
+    .await;
+}

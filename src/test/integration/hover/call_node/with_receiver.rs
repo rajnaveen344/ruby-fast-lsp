@@ -120,3 +120,65 @@ hash.keys<hover label="Array">
     )
     .await;
 }
+
+// =============================================================================
+// Deep Chained Calls - hover on each intermediate method
+// =============================================================================
+
+/// Hover on each method in a deep chain shows correct return type
+#[tokio::test]
+async fn deep_chain_intermediate_methods() {
+    check(
+        r#"
+class First
+  # @return [Second]
+  def to_second
+    Second.new
+  end
+end
+
+class Second
+  # @return [Third]
+  def to_third
+    Third.new
+  end
+end
+
+class Third
+  # @return [Integer]
+  def value
+    42
+  end
+end
+
+a = First.new
+a.to_second<hover label="Second">.to_third<hover label="Third">.value<hover label="Integer">
+"#,
+    )
+    .await;
+}
+
+/// Hover on method where receiver is method call (not variable)
+#[tokio::test]
+async fn method_call_as_receiver() {
+    check(
+        r#"
+class First
+  # @return [Second]
+  def to_second
+    Second.new
+  end
+end
+
+class Second
+  # @return [String]
+  def name
+    "hello"
+  end
+end
+
+First.new.to_second<hover label="Second">.name<hover label="String">
+"#,
+    )
+    .await;
+}
