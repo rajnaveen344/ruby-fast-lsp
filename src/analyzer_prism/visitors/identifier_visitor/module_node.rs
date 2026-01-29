@@ -50,29 +50,18 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         // Add the module name to the namespace stack
-        if let Some(constant_path_node) = constant_path.as_constant_path_node() {
-            let mut namespaces = Vec::new();
-            utils::collect_namespaces(&constant_path_node, &mut namespaces);
-            self.scope_tracker.push_ns_scopes(namespaces);
-            let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.scope_tracker.push_lv_scope(LVScope::new(
-                scope_id,
-                body_loc.clone(),
-                LVScopeKind::Constant,
-            ));
-        } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
-            let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
-            let namespace = RubyConstant::new(name.as_ref()).unwrap();
-            self.scope_tracker.push_ns_scope(namespace);
+        if self
+            .scope_tracker
+            .push_namespace_from_constant_path(&constant_path, node.name().as_slice())
+            .is_ok()
+        {
             let scope_id = self.document.position_to_offset(body_loc.range.start);
             self.scope_tracker.push_lv_scope(LVScope::new(
                 scope_id,
@@ -87,13 +76,11 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
             self.scope_tracker.pop_ns_scope();

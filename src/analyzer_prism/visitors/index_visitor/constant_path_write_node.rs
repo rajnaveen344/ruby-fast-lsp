@@ -1,4 +1,4 @@
-use log::{trace, error};
+use log::{error, trace};
 use ruby_prism::ConstantPathWriteNode;
 
 use crate::analyzer_prism::utils;

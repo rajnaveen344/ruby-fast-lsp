@@ -1,6 +1,7 @@
 use log::warn;
 use ruby_prism::*;
 
+use crate::analyzer_prism::utils;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::{
@@ -27,34 +28,11 @@ impl IndexVisitor {
         //   * `def self.foo`            (receiver: self)
         //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
         // Otherwise skip indexing.
-        let mut namespace_kind = NamespaceKind::Instance;
-        let mut skip_method = false;
-
-        if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-            } else if let Some(read_node) = receiver.as_constant_read_node() {
-                let recv_name = String::from_utf8_lossy(read_node.name().as_slice()).to_string();
-                // Current namespace last element (if any) should match receiver constant
-                let ns_stack = self.scope_tracker.get_ns_stack();
-                let last_ns = ns_stack.last();
-                if let Some(last) = last_ns {
-                    if last.to_string() == recv_name {
-                        namespace_kind = NamespaceKind::Singleton;
-                    } else {
-                        skip_method = true;
-                    }
-                } else {
-                    // No enclosing namespace -> unsupported
-                    skip_method = true;
-                }
-            } else {
-                // ConstantPathNode or other receiver types not supported
-                skip_method = true;
-            }
-        } else if self.scope_tracker.in_singleton() {
-            namespace_kind = NamespaceKind::Singleton;
-        }
+        let (namespace_kind, skip_method) = utils::get_method_namespace_kind(
+            node.receiver(),
+            &self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.in_singleton(),
+        );
 
         if skip_method {
             warn!("Skipping method with unsupported receiver");
@@ -262,13 +240,11 @@ impl IndexVisitor {
             }
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         let scope_id = self.document.position_to_offset(body_loc.range.start);
         let scope_kind = match namespace_kind {

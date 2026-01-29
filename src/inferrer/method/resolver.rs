@@ -134,8 +134,10 @@ impl MethodResolver {
             let mut all_fqns_to_search: Vec<FullyQualifiedName> = Vec::new();
 
             // Add owner with the appropriate namespace kind
-            let owner_with_kind =
-                FullyQualifiedName::namespace_with_kind(owner_fqn.namespace_parts(), namespace_kind);
+            let owner_with_kind = FullyQualifiedName::namespace_with_kind(
+                owner_fqn.namespace_parts(),
+                namespace_kind,
+            );
             all_fqns_to_search.push(owner_with_kind.clone());
 
             // Add ancestor chain - kind is embedded in the FQN
@@ -399,7 +401,10 @@ impl MethodResolver {
             let index = self.index.lock();
 
             // Get the ancestor chain for this class/module (with namespace kind embedded)
-            let owner_ns = FullyQualifiedName::namespace_with_kind(owner_fqn.namespace_parts(), namespace_kind);
+            let owner_ns = FullyQualifiedName::namespace_with_kind(
+                owner_fqn.namespace_parts(),
+                namespace_kind,
+            );
             let ancestors = index.get_ancestor_chain(&owner_ns);
 
             // Search through the ancestor chain for the method
@@ -413,7 +418,8 @@ impl MethodResolver {
                             let owner = &data.owner;
                             let return_type = &data.return_type;
                             // Check if owner matches what we're looking for
-                            let owner_kind = owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
+                            let owner_kind =
+                                owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
                             if owner_kind != namespace_kind {
                                 continue;
                             }
@@ -452,7 +458,8 @@ impl MethodResolver {
                             let owner = &data.owner;
                             let return_type = &data.return_type;
                             // Check if owner matches the alternate kind
-                            let owner_kind = owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
+                            let owner_kind =
+                                owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
                             if owner_kind != alt_kind {
                                 continue;
                             }

@@ -167,7 +167,10 @@ impl IndexerGem {
     /// Index all Ruby files from a gem's lib paths
     fn index_gem_files(&self, gem_info: &GemInfo) -> Vec<Url> {
         let Some(processor) = &self.file_processor else {
-            warn!("No file processor set for gem indexer, skipping {}", gem_info.name);
+            warn!(
+                "No file processor set for gem indexer, skipping {}",
+                gem_info.name
+            );
             return Vec::new();
         };
 
@@ -183,7 +186,10 @@ impl IndexerGem {
                     if let Ok(content) = std::fs::read_to_string(file_path) {
                         if let Ok(uri) = Url::from_file_path(file_path) {
                             // Register file as gem source before indexing
-                            processor.index().lock().register_file(&uri, FileSource::Gem);
+                            processor
+                                .index()
+                                .lock()
+                                .register_file(&uri, FileSource::Gem);
 
                             if let Err(e) = processor.index_definitions(&uri, &content) {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);

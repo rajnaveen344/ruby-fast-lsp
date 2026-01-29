@@ -215,11 +215,7 @@ impl IndexQuery {
 
         // Use namespace resolution (same as code constant resolution)
         // For root constants (::Foo), use empty ancestors
-        let effective_ancestors = if is_root_constant {
-            &[][..]
-        } else {
-            ancestors
-        };
+        let effective_ancestors = if is_root_constant { &[][..] } else { ancestors };
 
         // Reuse the same resolution logic as code constants
         self.find_constant_definitions_by_path(&constant_path, effective_ancestors)

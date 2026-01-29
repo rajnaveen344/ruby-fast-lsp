@@ -270,9 +270,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
     fn process_def_node_entry(&mut self, node: &DefNode) {
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let namespace_kind = if node.receiver().is_some() {
-            Some(NamespaceKind::Singleton)
-        } else if self.scope_tracker.in_singleton() {
+        let namespace_kind = if node.receiver().is_some() || self.scope_tracker.in_singleton() {
             Some(NamespaceKind::Singleton)
         } else {
             Some(NamespaceKind::Instance)

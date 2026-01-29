@@ -100,8 +100,12 @@ class RubyIndexProvider {
     _flattenNamespaces(namespaces, result = []) {
         for (const ns of namespaces) {
             result.push(ns);
-            if (ns.children && ns.children.length > 0) {
-                this._flattenNamespaces(ns.children, result);
+            // Recursively flatten child modules and classes
+            if (ns.modules && ns.modules.length > 0) {
+                this._flattenNamespaces(ns.modules, result);
+            }
+            if (ns.classes && ns.classes.length > 0) {
+                this._flattenNamespaces(ns.classes, result);
             }
         }
         return result;
@@ -156,7 +160,9 @@ class RubyIndexProvider {
 
     // Build a single tree item from namespace data (used by getParent)
     _buildSingleTreeItem(ns) {
-        const hasChildren = ns.children && ns.children.length > 0;
+        const hasModules = ns.modules && ns.modules.length > 0;
+        const hasClasses = ns.classes && ns.classes.length > 0;
+        const hasChildren = hasModules || hasClasses;
         const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
         const hasIncludes = ns.includes && ns.includes.length > 0;
         const hasPrepends = ns.prepends && ns.prepends.length > 0;
@@ -209,10 +215,13 @@ class RubyIndexProvider {
                     show_external_types: showExternalTypes
                 });
 
-                if (response && response.namespaces) {
+                if (response && (response.modules || response.classes)) {
+                    // Combine modules and classes for caching (modules first, then classes)
+                    const allNamespaces = [...(response.modules || []), ...(response.classes || [])];
                     // Cache flattened namespaces for search
-                    this._cachedNamespaces = this._flattenNamespaces(response.namespaces);
-                    return this.buildTreeItems(response.namespaces);
+                    this._cachedNamespaces = this._flattenNamespaces(allNamespaces);
+                    // Build tree items: modules first, then classes
+                    return this.buildTreeItems(allNamespaces);
                 }
             } else if (element.nodeType === 'includedBySection') {
                 // Return individual class items (all includers are classes)
@@ -241,6 +250,7 @@ class RubyIndexProvider {
                 return [];
             } else if (element.nodeType === 'namespace' && element.namespaceData) {
                 // Build children: mixin sections + singleton class + nested namespaces
+                // Order: superclass, includes, prepends, singleton class, included by, modules, classes
                 const ns = element.namespaceData;
                 const children = [];
 
@@ -266,12 +276,15 @@ class RubyIndexProvider {
 
                 // Add included_by section for modules (classes that include this module, directly or transitively)
                 if (ns.included_by && ns.included_by.length > 0) {
-                    children.push(this.buildIncludedBySectionItem('Included By Classes', 'references', ns.included_by));
+                    children.push(this.buildIncludedBySectionItem('Included By', 'references', ns.included_by));
                 }
 
-                // Add nested namespace children
-                if (ns.children && ns.children.length > 0) {
-                    children.push(...this.buildTreeItems(ns.children));
+                // Add nested modules first, then classes
+                if (ns.modules && ns.modules.length > 0) {
+                    children.push(...this.buildTreeItems(ns.modules));
+                }
+                if (ns.classes && ns.classes.length > 0) {
+                    children.push(...this.buildTreeItems(ns.classes));
                 }
 
                 return children;
@@ -299,7 +312,9 @@ class RubyIndexProvider {
 
     buildTreeItems(namespaces) {
         return namespaces.map(ns => {
-            const hasChildren = ns.children && ns.children.length > 0;
+            const hasModules = ns.modules && ns.modules.length > 0;
+            const hasClasses = ns.classes && ns.classes.length > 0;
+            const hasChildren = hasModules || hasClasses;
             // superclass is now a MixinInfo object with name and location fields
             const hasSuperclass = ns.superclass && ns.superclass.name && !ns.superclass.name.includes('(not found)');
             const hasIncludes = ns.includes && ns.includes.length > 0;
@@ -822,8 +837,9 @@ function activate(context) {
                     uri: vscode.window.activeTextEditor?.document.uri.toString() || '',
                     show_external_types: showExternalTypes
                 });
-                if (response && response.namespaces) {
-                    namespaces = indexProvider._flattenNamespaces(response.namespaces);
+                if (response && (response.modules || response.classes)) {
+                    const allNamespaces = [...(response.modules || []), ...(response.classes || [])];
+                    namespaces = indexProvider._flattenNamespaces(allNamespaces);
                 }
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to fetch namespaces: ${error.message}`);

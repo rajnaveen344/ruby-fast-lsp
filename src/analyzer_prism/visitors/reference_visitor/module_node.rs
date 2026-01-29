@@ -1,10 +1,7 @@
 use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
-use crate::types::{
-    ruby_namespace::RubyConstant,
-    scope::{LVScope, LVScopeKind},
-};
+use crate::types::scope::{LVScope, LVScopeKind};
 
 use super::ReferenceVisitor;
 
@@ -12,40 +9,22 @@ impl ReferenceVisitor {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
         let const_path = node.constant_path();
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
-        if let Some(path_node) = const_path.as_constant_path_node() {
-            let mut namespace_parts = Vec::new();
-            utils::collect_namespaces(&path_node, &mut namespace_parts);
-            self.scope_tracker.push_ns_scopes(namespace_parts);
-            let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.scope_tracker.push_lv_scope(LVScope::new(
-                scope_id,
-                body_loc,
-                LVScopeKind::Constant,
-            ));
-        } else {
-            let name = String::from_utf8_lossy(node.name().as_slice());
-            match RubyConstant::new(&name) {
-                Ok(constant) => self.scope_tracker.push_ns_scope(constant),
-                Err(_) => {
-                    // Skip invalid module names - don't push to namespace stack
-                    return;
-                }
-            }
-            let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.scope_tracker.push_lv_scope(LVScope::new(
-                scope_id,
-                body_loc,
-                LVScopeKind::Constant,
-            ));
+        if self
+            .scope_tracker
+            .push_namespace_from_constant_path(&const_path, node.name().as_slice())
+            .is_err()
+        {
+            return; // Skip invalid names
         }
+        let scope_id = self.document.position_to_offset(body_loc.range.start);
+        self.scope_tracker
+            .push_lv_scope(LVScope::new(scope_id, body_loc, LVScopeKind::Constant));
     }
 
     pub fn process_module_node_exit(&mut self, _node: &ModuleNode) {

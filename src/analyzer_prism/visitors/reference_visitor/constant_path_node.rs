@@ -98,7 +98,8 @@ impl ReferenceVisitor {
                 current_namespace.iter().map(|c| c.to_string()).collect();
             trace!(
                 "Adding unresolved constant path: {} in context {:?}",
-                name, namespace_context
+                name,
+                namespace_context
             );
             index.add_unresolved_entry(
                 self.document.uri.clone(),

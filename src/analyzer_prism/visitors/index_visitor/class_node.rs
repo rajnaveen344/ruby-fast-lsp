@@ -2,30 +2,46 @@ use log::error;
 use ruby_prism::ClassNode;
 
 use crate::analyzer_prism::utils;
-use crate::indexer::entry::{entry_builder::EntryBuilder, entry_kind::EntryKind, MixinRef, NamespaceKind};
+use crate::indexer::entry::{
+    entry_builder::EntryBuilder, entry_kind::EntryKind, MixinRef, NamespaceKind,
+};
 use crate::types::compact_location::CompactLocation;
+use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::{LVScope, LVScopeKind};
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::IndexVisitor;
 
 impl IndexVisitor {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) {
-        let name_str = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let body_loc = self.get_body_location(node);
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         // Handle namespace setup
-        if let Err(()) = self.setup_class_namespace(node, &name_str) {
+        if self
+            .scope_tracker
+            .push_namespace_from_constant_path(&node.constant_path(), node.name().as_slice())
+            .is_err()
+        {
+            error!("Error creating namespace for class");
             return;
         }
 
         // Setup local variable scope
         let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), LVScopeKind::Constant));
+        self.scope_tracker.push_lv_scope(LVScope::new(
+            scope_id,
+            body_loc.clone(),
+            LVScopeKind::Constant,
+        ));
 
         let ns_stack = self.scope_tracker.get_ns_stack();
-        let location = self.document.prism_location_to_lsp_location(&node.location());
+        let location = self
+            .document
+            .prism_location_to_lsp_location(&node.location());
 
         // Create Instance namespace entry (the class itself)
         let instance_fqn = FullyQualifiedName::Namespace(ns_stack.clone(), NamespaceKind::Instance);
@@ -45,7 +61,10 @@ impl IndexVisitor {
             }
             self.add_entry(entry);
         } else {
-            error!("Error creating instance entry: {:?}", instance_entry_result.err());
+            error!(
+                "Error creating instance entry: {:?}",
+                instance_entry_result.err()
+            );
         }
 
         // Create Singleton namespace entry (the singleton class)
@@ -63,43 +82,16 @@ impl IndexVisitor {
         if let Ok(entry) = singleton_entry_result {
             self.add_entry(entry);
         } else {
-            error!("Error creating singleton entry: {:?}", singleton_entry_result.err());
+            error!(
+                "Error creating singleton entry: {:?}",
+                singleton_entry_result.err()
+            );
         }
     }
 
     pub fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_lv_scope();
-    }
-
-    /// Get the body location for a class node, falling back to the node location if no body exists
-    fn get_body_location(&self, node: &ClassNode) -> tower_lsp::lsp_types::Location {
-        if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        }
-    }
-
-    /// Setup the namespace for a class, handling both constant paths and simple names
-    fn setup_class_namespace(&mut self, node: &ClassNode, name_str: &str) -> Result<(), ()> {
-        let const_path = node.constant_path();
-        if let Some(path_node) = const_path.as_constant_path_node() {
-            let mut namespace_parts = Vec::new();
-            utils::collect_namespaces(&path_node, &mut namespace_parts);
-            self.scope_tracker.push_ns_scopes(namespace_parts);
-        } else {
-            match RubyConstant::new(name_str) {
-                Ok(namespace) => self.scope_tracker.push_ns_scope(namespace),
-                Err(e) => {
-                    error!("Error creating namespace: {}", e);
-                    return Err(());
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Create a MixinRef for the superclass constant path

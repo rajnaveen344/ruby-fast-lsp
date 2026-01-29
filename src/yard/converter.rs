@@ -495,7 +495,8 @@ impl YardTypeConverter {
         if let Some(inner) = Self::extract_generic(trimmed, "Hash") {
             let hash_parts = Self::split_hash_types(&inner);
             if hash_parts.len() >= 2 {
-                let key_type = Self::convert_with_namespace(&hash_parts[0], index, enclosing_namespace);
+                let key_type =
+                    Self::convert_with_namespace(&hash_parts[0], index, enclosing_namespace);
                 let value_types: Vec<RubyType> = hash_parts[1..]
                     .iter()
                     .map(|t| Self::convert_with_namespace(t, index, enclosing_namespace))
@@ -505,7 +506,8 @@ impl YardTypeConverter {
         }
         if let Some(inner) = Self::extract_hash_brace(trimmed) {
             if let Some((key_part, value_part)) = inner.split_once("=>") {
-                let key_type = Self::convert_with_namespace(key_part.trim(), index, enclosing_namespace);
+                let key_type =
+                    Self::convert_with_namespace(key_part.trim(), index, enclosing_namespace);
                 let value_types: Vec<RubyType> = value_part
                     .split(',')
                     .map(|t| Self::convert_with_namespace(t.trim(), index, enclosing_namespace))
@@ -526,7 +528,9 @@ impl YardTypeConverter {
             "Object" | "BasicObject" => RubyType::Unknown,
             // For any other type, resolve with namespace context
             _ => {
-                if let Some(fqn) = Self::resolve_type_with_namespace(trimmed, index, enclosing_namespace) {
+                if let Some(fqn) =
+                    Self::resolve_type_with_namespace(trimmed, index, enclosing_namespace)
+                {
                     RubyType::Class(fqn)
                 } else {
                     // Fallback to parsing without resolution
@@ -549,11 +553,7 @@ impl YardTypeConverter {
     ) -> Option<FullyQualifiedName> {
         // Check if it's a root constant (starts with ::)
         let is_root = type_name.starts_with("::");
-        let type_to_parse = if is_root {
-            &type_name[2..]
-        } else {
-            type_name
-        };
+        let type_to_parse = if is_root { &type_name[2..] } else { type_name };
 
         // Parse the type name into constant parts
         let parts: Vec<&str> = type_to_parse.split("::").collect();

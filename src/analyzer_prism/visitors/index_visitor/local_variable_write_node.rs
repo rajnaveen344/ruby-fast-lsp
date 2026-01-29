@@ -1,4 +1,4 @@
-use log::{trace, error};
+use log::{error, trace};
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
     LocalVariableTargetNode, LocalVariableWriteNode, Location, Node,
@@ -94,7 +94,8 @@ impl IndexVisitor {
                 .add_local_var_entry(current_scope, entry.clone());
             trace!(
                 "Added local variable entry with type: {:?} -> {:?}",
-                variable_name, inferred_type
+                variable_name,
+                inferred_type
             );
         } else {
             error!("Error creating entry for local variable: {}", variable_name);

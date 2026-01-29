@@ -126,7 +126,10 @@ impl IndexerStdlib {
                     if let Ok(content) = std::fs::read_to_string(path) {
                         if let Ok(uri) = Url::from_file_path(path) {
                             // Register file as stub source before indexing
-                            processor.index().lock().register_file(&uri, FileSource::Stub);
+                            processor
+                                .index()
+                                .lock()
+                                .register_file(&uri, FileSource::Stub);
 
                             if let Err(e) = processor.index_definitions(&uri, &content) {
                                 warn!("Failed to index stub {:?}: {}", path, e);
@@ -158,7 +161,10 @@ impl IndexerStdlib {
             if let Ok(content) = std::fs::read_to_string(path) {
                 if let Ok(uri) = Url::from_file_path(path) {
                     // Register file as stub source before indexing
-                    processor.index().lock().register_file(&uri, FileSource::Stub);
+                    processor
+                        .index()
+                        .lock()
+                        .register_file(&uri, FileSource::Stub);
 
                     if let Err(e) = processor.index_definitions(&uri, &content) {
                         warn!("Failed to index stub {:?}: {}", path, e);
@@ -208,7 +214,10 @@ impl IndexerStdlib {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     if let Ok(uri) = Url::from_file_path(path) {
                         // Register file as stdlib source (actual Ruby stdlib, not stubs)
-                        processor.index().lock().register_file(&uri, FileSource::Stdlib);
+                        processor
+                            .index()
+                            .lock()
+                            .register_file(&uri, FileSource::Stdlib);
 
                         if let Err(e) = processor.index_definitions(&uri, &content) {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);

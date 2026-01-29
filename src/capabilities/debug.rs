@@ -774,13 +774,11 @@ pub fn handle_export_graph(
     // Singleton: "#<Class:A::B::C>"
     let fqn_to_key = |fqn: &FullyQualifiedName| -> String {
         match fqn {
-            FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => {
-                parts
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join("::")
-            }
+            FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => parts
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join("::"),
             FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
                 let name = parts
                     .iter()

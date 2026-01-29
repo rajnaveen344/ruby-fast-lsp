@@ -501,7 +501,8 @@ impl<'a> InferenceContext<'a> {
 
         // 3. Search for method in the receiver's ancestor chain (MRO)
         // This follows Ruby's method resolution order: self -> prepends -> includes -> superclass
-        let receiver_ns = FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
+        let receiver_ns =
+            FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
         let ancestor_chain = self.index.get_ancestor_chain(&receiver_ns);
 
         for ancestor in &ancestor_chain {

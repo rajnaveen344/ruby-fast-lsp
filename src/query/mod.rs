@@ -18,12 +18,14 @@
 
 mod definition;
 mod hover;
+pub mod inference;
 mod inlay_hints;
 mod method;
 mod references;
 mod types;
 
 pub use hover::HoverInfo;
+pub use inference::{LocalVariableResolver, ReceiverResolver, ReturnTypeResolver};
 pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::MethodInfo;
 pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};

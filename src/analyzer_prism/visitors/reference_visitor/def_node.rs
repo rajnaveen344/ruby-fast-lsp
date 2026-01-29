@@ -1,6 +1,7 @@
 use log::warn;
 use ruby_prism::DefNode;
 
+use crate::analyzer_prism::utils;
 use crate::indexer::entry::NamespaceKind;
 use crate::types::{
     ruby_method::RubyMethod,
@@ -11,30 +12,18 @@ use super::ReferenceVisitor;
 
 impl ReferenceVisitor {
     pub fn process_def_node_entry(&mut self, node: &DefNode) {
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
         let scope_id = self.document.position_to_offset(body_loc.range.start);
 
-        let mut namespace_kind = NamespaceKind::Instance;
-        let mut scope_kind = LVScopeKind::InstanceMethod;
-
-        if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-                scope_kind = LVScopeKind::ClassMethod;
-            } else if receiver.as_constant_path_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-                scope_kind = LVScopeKind::ClassMethod;
-            } else if receiver.as_constant_read_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-                scope_kind = LVScopeKind::ClassMethod;
-            }
-        }
+        let namespace_kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
+        let scope_kind = match namespace_kind {
+            NamespaceKind::Singleton => LVScopeKind::ClassMethod,
+            NamespaceKind::Instance => LVScopeKind::InstanceMethod,
+        };
 
         self.scope_tracker
             .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));

@@ -479,7 +479,8 @@ async fn run_type_check(
         let position = expected.range.start;
 
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, _, _ancestors, _scope_stack, _namespace_kind) = analyzer.get_identifier(position);
+        let (identifier_opt, _, _ancestors, _scope_stack, _namespace_kind) =
+            analyzer.get_identifier(position);
 
         let type_query = TypeQuery::new(server.index.clone(), uri, content.as_bytes());
 
@@ -509,16 +510,15 @@ async fn run_type_check(
                         find_def_node_at_position(&node, position, content)
                     {
                         // Build method FQN from namespace + method name
-                        let method_fqn = crate::types::ruby_method::RubyMethod::new(
-                            &iden.to_string(),
-                        )
-                        .ok()
-                        .map(|m| {
-                            crate::types::fully_qualified_name::FullyQualifiedName::method(
-                                namespace.clone(),
-                                m,
-                            )
-                        });
+                        let method_fqn =
+                            crate::types::ruby_method::RubyMethod::new(&iden.to_string())
+                                .ok()
+                                .map(|m| {
+                                    crate::types::fully_qualified_name::FullyQualifiedName::method(
+                                        namespace.clone(),
+                                        m,
+                                    )
+                                });
 
                         if let Some(fqn) = method_fqn {
                             let mut index = server.index.lock();

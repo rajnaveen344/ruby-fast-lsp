@@ -28,8 +28,8 @@ use helpers::{
 };
 use log::{debug, trace};
 use tower_lsp::lsp_types::{Location, Position};
-use type_inference::TypeInferrer;
 
+use super::inference::ReceiverResolver;
 use super::IndexQuery;
 
 // ============================================================================
@@ -190,12 +190,9 @@ impl IndexQuery {
         position: Position,
     ) -> Option<FullyQualifiedName> {
         let content = self.doc.as_ref()?.read().content.clone();
-        let inferrer = TypeInferrer {
-            index: &self.index,
-            doc: self.doc.as_ref(),
-        };
+        let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
 
-        let var_type = inferrer.infer_variable_type(var_name, position, &content)?;
+        let var_type = resolver.resolve_variable(var_name, position, &content)?;
         trace!("Inferred type for '{}': {:?}", var_name, var_type);
 
         self.convert_type_to_namespace(&var_type)
@@ -208,20 +205,11 @@ impl IndexQuery {
         method_name: &str,
         position: Position,
     ) -> Option<FullyQualifiedName> {
-        let uri = self.uri.as_ref()?;
         let content = self.doc.as_ref()?.read().content.clone();
-        let inferrer = TypeInferrer {
-            index: &self.index,
-            doc: self.doc.as_ref(),
-        };
+        let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
 
-        let chain_type = inferrer.resolve_method_chain_type(
-            inner_receiver,
-            method_name,
-            uri,
-            position,
-            &content,
-        )?;
+        let chain_type =
+            resolver.resolve_method_chain(inner_receiver, method_name, position, &content)?;
         trace!(
             "Inferred type for '{}.{}': {:?}",
             receiver_to_string(inner_receiver),

@@ -24,7 +24,8 @@
       "Bash(cargo tree:*)",
       "Bash(./create_vsix.sh:*)",
       "Skill(ruby-index)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(cargo clean:*)"
     ]
   }
 }

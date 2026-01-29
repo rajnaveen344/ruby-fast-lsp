@@ -1,4 +1,4 @@
-use log::{trace, error};
+use log::{error, trace};
 use ruby_prism::{
     ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
     ClassVariableTargetNode, ClassVariableWriteNode, Node,
@@ -42,7 +42,8 @@ impl IndexVisitor {
 
         trace!(
             "Adding class variable entry: {:?} with type: {:?}",
-            fqn, inferred_type
+            fqn,
+            inferred_type
         );
 
         let entry = {
@@ -61,7 +62,8 @@ impl IndexVisitor {
             self.add_entry(entry);
             trace!(
                 "Added class variable entry: {} -> {:?}",
-                variable_name, inferred_type
+                variable_name,
+                inferred_type
             );
         } else {
             error!("Error creating entry for class variable: {}", variable_name);

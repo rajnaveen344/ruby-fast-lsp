@@ -96,11 +96,17 @@ impl IdentifierVisitor {
                         let name =
                             String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
                         let constant = RubyConstant::new(&name).unwrap();
-                        (MethodReceiver::Constant(vec![constant]), NamespaceKind::Singleton)
+                        (
+                            MethodReceiver::Constant(vec![constant]),
+                            NamespaceKind::Singleton,
+                        )
                     } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
                         let mut namespaces = Vec::new();
                         utils::collect_namespaces(&constant_path, &mut namespaces);
-                        (MethodReceiver::Constant(namespaces), NamespaceKind::Singleton)
+                        (
+                            MethodReceiver::Constant(namespaces),
+                            NamespaceKind::Singleton,
+                        )
                     } else if let Some(local_var) = receiver_node.as_local_variable_read_node() {
                         let var_name =
                             String::from_utf8_lossy(local_var.name().as_slice()).to_string();

@@ -1,4 +1,4 @@
-use log::{trace, error};
+use log::{error, trace};
 use ruby_prism::{
     GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode, GlobalVariableOrWriteNode,
     GlobalVariableTargetNode, GlobalVariableWriteNode, Node,
@@ -52,7 +52,8 @@ impl IndexVisitor {
 
         trace!(
             "Adding global variable entry: {:?} with type: {:?}",
-            fqn, inferred_type
+            fqn,
+            inferred_type
         );
 
         let entry = {
@@ -71,7 +72,8 @@ impl IndexVisitor {
             self.add_entry(entry);
             trace!(
                 "Added global variable entry: {} -> {:?}",
-                variable_name, inferred_type
+                variable_name,
+                inferred_type
             );
         } else {
             error!(

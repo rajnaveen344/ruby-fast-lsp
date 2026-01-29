@@ -73,12 +73,14 @@ impl FullyQualifiedName {
     /// Convert this FQN to an instance namespace (if applicable)
     pub fn to_instance_namespace(&self) -> Option<Self> {
         match self {
-            FullyQualifiedName::Namespace(parts, _) => {
-                Some(FullyQualifiedName::Namespace(parts.clone(), NamespaceKind::Instance))
-            }
-            FullyQualifiedName::Constant(parts) => {
-                Some(FullyQualifiedName::Namespace(parts.clone(), NamespaceKind::Instance))
-            }
+            FullyQualifiedName::Namespace(parts, _) => Some(FullyQualifiedName::Namespace(
+                parts.clone(),
+                NamespaceKind::Instance,
+            )),
+            FullyQualifiedName::Constant(parts) => Some(FullyQualifiedName::Namespace(
+                parts.clone(),
+                NamespaceKind::Instance,
+            )),
             _ => None,
         }
     }

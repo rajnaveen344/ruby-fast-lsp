@@ -1,9 +1,12 @@
-use crate::indexer::entry::MixinRef;
+use ruby_prism::{ConstantPathNode, ConstantReadNode, Location as PrismLocation, Node};
+use tower_lsp::lsp_types::Location as LspLocation;
+
+use crate::indexer::entry::{MixinRef, NamespaceKind};
 use crate::indexer::index::RubyIndex;
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
-use ruby_prism::{ConstantPathNode, ConstantReadNode, Node};
 
 /// Recursively collect all namespaces from a ConstantPathNode
 /// Eg: `Core::Platform::API::Users` will return
@@ -193,4 +196,91 @@ pub fn resolve_constant_fqn_from_parts(
     }
 
     None
+}
+
+/// Get the body location for a node that has an optional body.
+/// If the body exists, returns the body's location; otherwise returns the node's location.
+/// This pattern is used consistently across ClassNode, ModuleNode, and DefNode visitors.
+///
+/// # Arguments
+/// * `body_location` - Optional location from node.body().map(|b| b.location())
+/// * `node_location` - The fallback location from node.location()
+/// * `document` - The RubyDocument for converting prism locations to LSP locations
+pub fn get_body_location(
+    body_location: Option<PrismLocation>,
+    node_location: &PrismLocation,
+    document: &RubyDocument,
+) -> LspLocation {
+    if let Some(body_loc) = body_location {
+        document.prism_location_to_lsp_location(&body_loc)
+    } else {
+        document.prism_location_to_lsp_location(node_location)
+    }
+}
+
+/// Determine the NamespaceKind for a method based on its receiver.
+/// Returns (NamespaceKind, should_skip_method) where:
+/// - NamespaceKind::Instance for instance methods (no receiver or in singleton context)
+/// - NamespaceKind::Singleton for class methods (self receiver or matching constant receiver)
+/// - should_skip_method is true if the receiver type is unsupported
+///
+/// # Arguments
+/// * `receiver` - Optional receiver node from DefNode.receiver()
+/// * `current_namespace` - The current namespace stack for validating constant receivers
+/// * `in_singleton` - Whether we're currently in a singleton context (class << self)
+pub fn get_method_namespace_kind(
+    receiver: Option<Node>,
+    current_namespace: &[RubyConstant],
+    in_singleton: bool,
+) -> (NamespaceKind, bool) {
+    let mut namespace_kind = NamespaceKind::Instance;
+    let mut skip_method = false;
+
+    if let Some(receiver) = receiver {
+        if receiver.as_self_node().is_some() {
+            namespace_kind = NamespaceKind::Singleton;
+        } else if let Some(read_node) = receiver.as_constant_read_node() {
+            let recv_name = String::from_utf8_lossy(read_node.name().as_slice()).to_string();
+            // Current namespace last element (if any) should match receiver constant
+            let last_ns = current_namespace.last();
+            if let Some(last) = last_ns {
+                if last.to_string() == recv_name {
+                    namespace_kind = NamespaceKind::Singleton;
+                } else {
+                    skip_method = true;
+                }
+            } else {
+                // No enclosing namespace -> unsupported
+                skip_method = true;
+            }
+        } else if receiver.as_constant_path_node().is_some() {
+            // For reference/identifier visitors, any constant receiver = Singleton
+            namespace_kind = NamespaceKind::Singleton;
+        } else {
+            // Other receiver types not supported
+            skip_method = true;
+        }
+    } else if in_singleton {
+        namespace_kind = NamespaceKind::Singleton;
+    }
+
+    (namespace_kind, skip_method)
+}
+
+/// Simplified version of get_method_namespace_kind for visitors that don't need
+/// to validate constant receivers (reference_visitor, identifier_visitor).
+/// Returns NamespaceKind based on presence of receiver.
+pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKind {
+    if let Some(receiver) = receiver {
+        if receiver.as_self_node().is_some()
+            || receiver.as_constant_path_node().is_some()
+            || receiver.as_constant_read_node().is_some()
+        {
+            NamespaceKind::Singleton
+        } else {
+            NamespaceKind::Instance
+        }
+    } else {
+        NamespaceKind::Instance
+    }
 }

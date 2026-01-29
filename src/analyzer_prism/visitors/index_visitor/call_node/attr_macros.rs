@@ -26,7 +26,8 @@ impl IndexVisitor {
         };
 
         let namespace_parts = self.scope_tracker.get_ns_stack();
-        let owner_fqn = FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), namespace_kind);
+        let owner_fqn =
+            FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), namespace_kind);
 
         for arg in arguments.arguments().iter() {
             let (name, location) = if let Some(sym_node) = arg.as_symbol_node() {

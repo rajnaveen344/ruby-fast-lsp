@@ -655,7 +655,7 @@ mod tests {
             .find(|(id, _)| *id == ids[3])
             .unwrap();
         assert!(c2_entry.1.is_empty()); // C2 direct (no via modules)
-        // Should NOT include M3 since it's a module
+                                        // Should NOT include M3 since it's a module
     }
 
     #[test]

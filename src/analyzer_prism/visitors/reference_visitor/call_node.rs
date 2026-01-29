@@ -114,7 +114,8 @@ impl ReferenceVisitor {
                     ) {
                         trace!(
                             "Adding unresolved method call: {}.{}",
-                            receiver_name, method_name
+                            receiver_name,
+                            method_name
                         );
                         index.add_unresolved_entry(
                             self.document.uri.clone(),

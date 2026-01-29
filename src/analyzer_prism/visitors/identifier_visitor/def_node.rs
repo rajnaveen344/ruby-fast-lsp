@@ -2,7 +2,7 @@ use log::warn;
 use ruby_prism::DefNode;
 
 use crate::{
-    analyzer_prism::{Identifier, MethodReceiver},
+    analyzer_prism::{utils, Identifier, MethodReceiver},
     indexer::entry::NamespaceKind,
     types::{
         ruby_method::RubyMethod,
@@ -18,17 +18,7 @@ impl IdentifierVisitor {
             return;
         }
 
-        let mut namespace_kind = NamespaceKind::Instance;
-
-        if let Some(receiver) = node.receiver() {
-            if receiver.as_self_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-            } else if receiver.as_constant_path_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-            } else if receiver.as_constant_read_node().is_some() {
-                namespace_kind = NamespaceKind::Singleton;
-            }
-        }
+        let namespace_kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str());
@@ -38,13 +28,11 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         let method = method.unwrap();
         let scope_id = self.document.position_to_offset(body_loc.range.start);
@@ -83,13 +71,11 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_loc = utils::get_body_location(
+            node.body().map(|b| b.location()),
+            &node.location(),
+            &self.document,
+        );
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
             self.scope_tracker.pop_lv_scope();

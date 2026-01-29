@@ -1,6 +1,8 @@
+use ruby_prism::Node;
 use tower_lsp::lsp_types::{Location as LspLocation, Range};
 
 use crate::{
+    analyzer_prism::utils,
     indexer::entry::NamespaceKind,
     types::{
         ruby_document::RubyDocument,
@@ -81,6 +83,38 @@ impl ScopeTracker {
             })
             .flatten()
             .collect()
+    }
+
+    /// Push namespace from a constant path node (from class/module definition).
+    /// Handles both ConstantPathNode (e.g., `A::B::C`) and ConstantReadNode (e.g., `A`).
+    ///
+    /// # Arguments
+    /// * `constant_path` - The constant_path() from ClassNode or ModuleNode
+    /// * `fallback_name` - The name() bytes from the node (used if constant_path is a simple name)
+    ///
+    /// # Returns
+    /// * `Ok(())` if namespace was successfully pushed
+    /// * `Err(())` if the name is invalid (caller should skip processing)
+    pub fn push_namespace_from_constant_path(
+        &mut self,
+        constant_path: &Node,
+        fallback_name: &[u8],
+    ) -> Result<(), ()> {
+        if let Some(path_node) = constant_path.as_constant_path_node() {
+            let mut namespace_parts = Vec::new();
+            utils::collect_namespaces(&path_node, &mut namespace_parts);
+            self.push_ns_scopes(namespace_parts);
+            Ok(())
+        } else {
+            let name = String::from_utf8_lossy(fallback_name);
+            match RubyConstant::new(&name) {
+                Ok(constant) => {
+                    self.push_ns_scope(constant);
+                    Ok(())
+                }
+                Err(_) => Err(()),
+            }
+        }
     }
 
     // ---------- lv-scope helpers ----------

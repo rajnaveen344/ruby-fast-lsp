@@ -307,7 +307,8 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "", NamespaceKind::Instance);
+        let completions =
+            find_method_completions(&index, &string_type, "", NamespaceKind::Instance);
 
         // Should have methods from RBS
         assert!(!completions.is_empty(), "Should have string methods");
@@ -329,7 +330,8 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "up", NamespaceKind::Instance);
+        let completions =
+            find_method_completions(&index, &string_type, "up", NamespaceKind::Instance);
 
         // Should only have methods starting with "up"
         for completion in &completions {
@@ -346,7 +348,8 @@ mod tests {
         let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions = find_method_completions(&index, &string_type, "length", NamespaceKind::Instance);
+        let completions =
+            find_method_completions(&index, &string_type, "length", NamespaceKind::Instance);
 
         // Find the length method
         let length_completion = completions.iter().find(|c| c.label == "length");

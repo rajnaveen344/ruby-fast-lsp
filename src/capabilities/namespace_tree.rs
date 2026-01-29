@@ -28,8 +28,6 @@ pub struct NamespaceNode {
     pub fqn: String,
     /// Type: "Class", "Module", or "Singleton"
     pub kind: String,
-    /// Child namespaces
-    pub children: Vec<NamespaceNode>,
     /// Location information (multiple if class/module is reopened in different files)
     pub locations: Vec<LocationInfo>,
     /// Superclass (only for classes)
@@ -42,6 +40,10 @@ pub struct NamespaceNode {
     pub singleton_class: Option<Box<NamespaceNode>>,
     /// Classes/modules that ultimately include this module (for modules only)
     pub included_by: Vec<IncluderInfo>,
+    /// Child modules (nested modules within this namespace)
+    pub modules: Vec<NamespaceNode>,
+    /// Child classes (nested classes within this namespace)
+    pub classes: Vec<NamespaceNode>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -86,8 +88,10 @@ pub struct IncluderInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceTreeResponse {
-    /// Root namespace nodes
-    pub namespaces: Vec<NamespaceNode>,
+    /// Root modules (top-level modules)
+    pub modules: Vec<NamespaceNode>,
+    /// Root classes (top-level classes)
+    pub classes: Vec<NamespaceNode>,
 }
 
 pub async fn handle_namespace_tree(
@@ -265,13 +269,14 @@ pub async fn handle_namespace_tree(
                 name: singleton_fqn.clone(),
                 fqn: singleton_fqn,
                 kind: "Singleton".to_string(),
-                children: Vec::new(),
                 locations: Vec::new(), // Singleton doesn't have its own location
                 superclass: None,
                 includes: resolved_extends, // extends become includes on singleton
                 prepends: Vec::new(),
                 singleton_class: None,
                 included_by: Vec::new(),
+                modules: Vec::new(),
+                classes: Vec::new(),
             }))
         } else {
             None
@@ -288,13 +293,14 @@ pub async fn handle_namespace_tree(
             name,
             fqn: fqn_string.clone(),
             kind,
-            children: Vec::new(),
             locations,
             superclass: resolved_superclass,
             includes: resolved_includes,
             prepends: resolved_prepends,
             singleton_class,
             included_by,
+            modules: Vec::new(),
+            classes: Vec::new(),
         };
 
         namespace_map.insert(fqn_string, node);
@@ -307,13 +313,17 @@ pub async fn handle_namespace_tree(
         "[NAMESPACE_TREE] Starting tree building with {} total namespaces",
         namespace_map.len()
     );
-    let namespaces = build_namespace_tree(namespace_map);
+    let tree_result = build_namespace_tree(namespace_map);
     debug!(
-        "[NAMESPACE_TREE] Built tree with {} root namespaces",
-        namespaces.len()
+        "[NAMESPACE_TREE] Built tree with {} root modules and {} root classes",
+        tree_result.modules.len(),
+        tree_result.classes.len()
     );
 
-    let response = NamespaceTreeResponse { namespaces };
+    let response = NamespaceTreeResponse {
+        modules: tree_result.modules,
+        classes: tree_result.classes,
+    };
 
     // Cache the result
     {
@@ -477,10 +487,19 @@ fn resolve_single_mixin(
     })
 }
 
+/// Result of building the namespace tree, with modules and classes separated
+struct NamespaceTreeResult {
+    modules: Vec<NamespaceNode>,
+    classes: Vec<NamespaceNode>,
+}
+
 // Tree building using iterative approach
-fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<NamespaceNode> {
+fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> NamespaceTreeResult {
     if namespace_map.is_empty() {
-        return Vec::new();
+        return NamespaceTreeResult {
+            modules: Vec::new(),
+            classes: Vec::new(),
+        };
     }
 
     // Convert to vector and sort by FQN for consistent ordering
@@ -509,7 +528,8 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<Na
 
     // Second pass: identify root nodes and build tree
     let mut processed = HashSet::new();
-    let mut roots = Vec::new();
+    let mut root_modules = Vec::new();
+    let mut root_classes = Vec::new();
     let all_fqns: Vec<String> = node_lookup.keys().cloned().collect();
 
     for fqn in all_fqns {
@@ -535,14 +555,24 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Vec<Na
                     &mut node_lookup,
                     &mut processed,
                 );
-                roots.push(node);
+                // Separate root modules and classes
+                if node.kind == "Module" {
+                    root_modules.push(node);
+                } else {
+                    root_classes.push(node);
+                }
             }
         }
     }
 
     // Sort roots by name
-    roots.sort_by(|a, b| a.name.cmp(&b.name));
-    roots
+    root_modules.sort_by(|a, b| a.name.cmp(&b.name));
+    root_classes.sort_by(|a, b| a.name.cmp(&b.name));
+
+    NamespaceTreeResult {
+        modules: root_modules,
+        classes: root_classes,
+    }
 }
 
 // Helper function to build children iteratively
@@ -556,7 +586,8 @@ fn build_children_iterative(
     processed.insert(parent_fqn.to_string());
 
     if let Some(child_fqns) = children_map.get(parent_fqn) {
-        let mut children = Vec::new();
+        let mut modules = Vec::new();
+        let mut classes = Vec::new();
 
         for child_fqn in child_fqns {
             if let Some(mut child_node) = node_map.remove(child_fqn) {
@@ -569,13 +600,20 @@ fn build_children_iterative(
                         processed,
                     );
                 }
-                children.push(child_node);
+                // Separate modules and classes
+                if child_node.kind == "Module" {
+                    modules.push(child_node);
+                } else {
+                    classes.push(child_node);
+                }
             }
         }
 
-        // Sort children by name
-        children.sort_by(|a, b| a.name.cmp(&b.name));
-        parent_node.children = children;
+        // Sort modules and classes by name
+        modules.sort_by(|a, b| a.name.cmp(&b.name));
+        classes.sort_by(|a, b| a.name.cmp(&b.name));
+        parent_node.modules = modules;
+        parent_node.classes = classes;
     }
 }
 
@@ -632,8 +670,7 @@ fn find_includers(
                     };
 
                     // Find the call site location where via_fqn includes included_fqn
-                    let call_location =
-                        find_mixin_call_location(index, via_fqn, included_fqn);
+                    let call_location = find_mixin_call_location(index, via_fqn, included_fqn);
 
                     ViaModuleInfo {
                         name: via_fqn.to_string(),

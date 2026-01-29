@@ -51,10 +51,7 @@ async fn main() -> Result<()> {
         "ruby-fast-lsp/debug/inference-stats",
         RubyLanguageServer::handle_debug_inference_stats,
     )
-    .custom_method(
-        "ruby/exportGraph",
-        RubyLanguageServer::handle_export_graph,
-    )
+    .custom_method("ruby/exportGraph", RubyLanguageServer::handle_export_graph)
     .finish();
 
     info!("Ruby LSP server initialized, waiting for client connections");
