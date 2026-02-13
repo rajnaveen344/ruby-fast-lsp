@@ -35,7 +35,6 @@ All AI-related documentation is maintained in the `.ai/` folder. Read these file
 ```bash
 cargo test                    # Run all tests
 cargo test -- --nocapture     # With output
-cargo insta review            # Update snapshots
 cargo build --release         # Release build
 ./create_vsix.sh --current-platform-only   # Build VS Code extension
 ```
@@ -45,8 +44,7 @@ cargo build --release         # Release build
 1. **LSP positions are 0-indexed** - Line 1 in editor = line 0 in LSP
 2. **Prism uses byte offsets** - Must convert to LSP positions
 3. **FQN-based indexing** - All symbols use fully qualified names (e.g., `MyModule::MyClass`)
-4. **Snapshot testing** - Use `cargo insta review` to accept/reject changes
-5. **AST Traversal** - Use recursive traversal (visitor pattern) over ad-hoc matching for type inference to handle nesting/chaining correctly
+4. **AST Traversal** - Use recursive traversal (visitor pattern) over ad-hoc matching for type inference to handle nesting/chaining correctly
 
 ## TigerBeetle Principles (MANDATORY)
 

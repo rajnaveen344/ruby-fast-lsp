@@ -70,7 +70,7 @@ Notes:
    * Macro `assert_goto!(file, line, char, exp_file, exp_line)` etc. for brevity.
 
 3. **Parameterized Tests**
-   * Use `insta` snapshots (e.g. `insta::assert_json_snapshot!`) together with small helper macros to apply the same test logic across many fixtures.
+   * Use small helper macros to apply the same test logic across many fixtures.
    * Descriptive JSON per fixture: what request to send and expected result. Example:
      ```jsonc
      {
@@ -127,5 +127,4 @@ Notes:
 ### Appendix A – Useful crates
 
 * `tower-lsp` test utilities
-* `insta` for quick diffing of JSON responses
 * `serde_json` for fixture descriptors

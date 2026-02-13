@@ -42,19 +42,6 @@ Current fixture categories:
 - Various Ruby language constructs (classes, modules, methods, constants)
 - Cross-file reference scenarios
 
-#### Snapshot Testing
-
-The project uses the `insta` crate for snapshot testing, which provides:
-
-- **JSON Response Capture**: LSP responses are serialized to JSON and compared against stored snapshots
-- **Path Normalization**: Absolute file paths are replaced with `$PROJECT_ROOT` placeholders for cross-platform compatibility
-- **Automatic Diff Generation**: Clear visual diffs when test expectations change
-
-Snapshot files are stored in <mcfolder name="snapshots" path="src/test/snapshots"></mcfolder> with descriptive names like:
-
-- `ruby_fast_lsp__test__integration_test__foo_class_def.snap`
-- `ruby_fast_lsp__test__integration_test__value_const_ref.snap`
-
 ### Test Categories
 
 #### 1. Definition Tests (`definitions.rs`)

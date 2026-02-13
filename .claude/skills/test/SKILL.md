@@ -11,7 +11,6 @@ cargo test                          # Run all tests
 cargo test -- --nocapture           # Run with output visible
 cargo test test_name                # Run specific test
 cargo test methods::                # Run tests in a module
-cargo insta review                  # Review snapshot changes
 ```
 
 ## Test Architecture Overview
@@ -311,7 +310,6 @@ The `check()` function auto-detects which assertions to run based on markers pre
 2. **Find or create the appropriate test file** in `src/test/integration/`
 3. **Write inline fixture** with appropriate markers
 4. **Run `cargo test test_name`** to verify
-5. **Use `cargo insta review`** if snapshots are involved
 
 ## Test Organization Conventions
 

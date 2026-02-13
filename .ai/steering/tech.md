@@ -39,7 +39,6 @@
 
 - **Testing**:
 
-  - insta 1.43.1 for snapshot testing (with json, redactions features)
   - pretty_assertions 1.4.0 for readable test diffs
   - tokio-test 0.4.3 for async testing
   - tempfile 3.8.0 for temporary test files
@@ -64,9 +63,6 @@ cargo test -- --nocapture
 
 # Run a specific test
 cargo test test_name
-
-# Update snapshots
-cargo insta review
 
 # Check for issues without building
 cargo check
@@ -161,7 +157,6 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 
 ### Testing Best Practices
 
-- **Snapshot Testing**: Use `cargo insta review` to accept/reject test changes
 - **Position Verification**: Double-check line numbers in test files (0-indexed!)
 - **Fixture Files**: Keep fixtures in `src/test/fixtures/`
 - **Snapshot Files**: Stored in `src/test/snapshots/`

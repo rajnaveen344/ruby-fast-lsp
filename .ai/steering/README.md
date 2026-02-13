@@ -96,7 +96,6 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 ```bash
 cargo test                    # Run all tests
 cargo test -- --nocapture     # With output
-cargo insta review            # Update snapshots
 ```
 
 ### Building
@@ -126,5 +125,4 @@ cargo build --release         # Release build
 
 - **LSP positions are 0-indexed** - Common source of bugs in tests
 - **Prism AST nodes use byte offsets** - Must convert to LSP positions
-- **Snapshot tests** - Many tests use `insta` for snapshot testing
 - **Cross-platform** - Code must work on macOS, Linux, and Windows
