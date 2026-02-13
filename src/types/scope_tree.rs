@@ -14,7 +14,7 @@
 //! - **Hard boundaries** (Constant, InstanceMethod, ClassMethod): Inner scopes CANNOT access outer variables
 //! - **Soft boundaries** (Block): Inner scopes CAN capture outer variables
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp::lsp_types::{Location, Position, Range};
 
 use crate::types::scope::LVScopeId;
 pub use crate::types::scope::LVScopeKind;
@@ -96,6 +96,16 @@ impl ScopeTree {
 
         self.current = Some(id);
         id
+    }
+
+    /// Navigate into an existing child scope matching the given range.
+    /// Used by the ReferenceVisitor to track scope context for variable references.
+    pub fn enter_child_scope(&mut self, range: Range) {
+        if let Some(current) = self.current {
+            if let Some(child_id) = self.find_child_scope_by_range(current, range) {
+                self.current = Some(child_id);
+            }
+        }
     }
 
     /// Exit the current scope (called when exiting method, block, etc.)
@@ -272,6 +282,33 @@ impl ScopeTree {
         }
     }
 
+    /// Find the scope that owns a variable at a given cursor position.
+    /// Scans all scopes for a variable with the given name where any location
+    /// (definition, read, or write) contains the cursor position.
+    pub fn find_scope_for_variable_at(&self, name: &str, position: Position) -> Option<LVScopeId> {
+        let name_key = ustr::ustr(name);
+        for scope in &self.scopes {
+            for var in &scope.local_variables {
+                if var.name == name_key {
+                    if position_in_range(position, &var.definition_location.range) {
+                        return Some(scope.id);
+                    }
+                    for loc in &var.read_locations {
+                        if position_in_range(position, &loc.range) {
+                            return Some(scope.id);
+                        }
+                    }
+                    for loc in &var.write_locations {
+                        if position_in_range(position, &loc.range) {
+                            return Some(scope.id);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Find the scope at a given position
     pub fn scope_at_position(&self, position: tower_lsp::lsp_types::Position) -> Option<LVScopeId> {
         self.find_scope_at(self.root, position)
@@ -422,4 +459,13 @@ pub enum RenameTargetKind {
     Definition,
     Read,
     Write,
+}
+
+/// Check if a position falls within a range (inclusive on both ends).
+fn position_in_range(position: Position, range: &Range) -> bool {
+    let after_start = position.line > range.start.line
+        || (position.line == range.start.line && position.character >= range.start.character);
+    let before_end = position.line < range.end.line
+        || (position.line == range.end.line && position.character <= range.end.character);
+    after_start && before_end
 }

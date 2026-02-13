@@ -68,7 +68,7 @@ const ALL_TAGS: &[&str] = &[
 pub async fn check(fixture_text: &str) {
     // Extract cursor if present
     let has_cursor = fixture_text.contains("$0");
-    let (cursor, text_without_cursor) = if has_cursor {
+    let (_cursor_in_tagged, text_without_cursor) = if has_cursor {
         let (pos, clean) = extract_cursor(fixture_text);
         (Some(pos), clean)
     } else {
@@ -81,6 +81,26 @@ pub async fn check(fixture_text: &str) {
     // Also extract simple tags for def/ref (they don't use attributes)
     let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
     let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
+
+    // Recompute cursor position in clean-text coordinates by stripping tags first,
+    // then finding cursor. This avoids tag characters inflating the cursor offset.
+    let cursor = if has_cursor {
+        // Use a sentinel to track the cursor through tag removal
+        let sentinel = "\x00CURSOR\x00";
+        let text_with_sentinel = fixture_text.replace("$0", sentinel);
+        let (_, clean_with_sentinel) =
+            extract_tags_with_attributes(&text_with_sentinel, ALL_TAGS);
+        let sentinel_byte_pos = clean_with_sentinel
+            .find(sentinel)
+            .expect("Sentinel should be present after tag removal");
+        let before = &clean_with_sentinel[..sentinel_byte_pos];
+        let line = before.matches('\n').count() as u32;
+        let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let character = (sentinel_byte_pos - last_newline) as u32;
+        Some(Position { line, character })
+    } else {
+        None
+    };
 
     // Categorize tags by kind
     let hint_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hint").collect();

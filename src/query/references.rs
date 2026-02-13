@@ -7,7 +7,6 @@ use crate::indexer::entry::{EntryKind, NamespaceKind};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
-use crate::types::scope::LVScopeId;
 use crate::yard::YardTypeConverter;
 use log::info;
 use tower_lsp::lsp_types::{Location, Position, Url};
@@ -28,7 +27,7 @@ impl IndexQuery {
 
         let identifier = identifier_opt?;
 
-        self.find_references_for_identifier(&identifier, &ancestors)
+        self.find_references_for_identifier(&identifier, &ancestors, position)
     }
 
     /// Find references to a constant by FQN.
@@ -94,10 +93,15 @@ impl IndexQuery {
     fn find_local_variable_references(
         &self,
         name: &str,
-        scope_id: LVScopeId,
+        position: Position,
     ) -> Option<Vec<Location>> {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
+
+        // Use position-based lookup to find the scope owning this variable
+        let scope_id = document
+            .get_scope_tree()
+            .find_scope_for_variable_at(name, position)?;
 
         // Use ScopeTree to find all references
         let targets = document
@@ -124,6 +128,7 @@ impl IndexQuery {
         &self,
         identifier: &Identifier,
         ancestors: &[RubyConstant],
+        position: Position,
     ) -> Option<Vec<Location>> {
         match identifier {
             Identifier::RubyConstant { namespace: _, iden } => {
@@ -166,8 +171,8 @@ impl IndexQuery {
                     None
                 }
             }
-            Identifier::RubyLocalVariable { name, scope, .. } => {
-                self.find_local_variable_references(name, *scope)
+            Identifier::RubyLocalVariable { name, .. } => {
+                self.find_local_variable_references(name, position)
             }
             Identifier::YardType { type_name, .. } => {
                 if let Some(fqn) = YardTypeConverter::parse_type_name_to_fqn_public(type_name) {

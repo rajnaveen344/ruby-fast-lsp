@@ -26,7 +26,12 @@ impl ReferenceVisitor {
         };
 
         self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));
+            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));
+
+        // Navigate scope tree to match current scope for variable references
+        self.document
+            .scope_tree_mut()
+            .enter_child_scope(body_loc.range);
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str());
@@ -41,5 +46,6 @@ impl ReferenceVisitor {
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.scope_tracker.pop_lv_scope();
+        self.document.scope_tree_mut().exit_scope();
     }
 }
