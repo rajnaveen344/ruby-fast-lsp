@@ -51,7 +51,8 @@ use super::fixture::{
 };
 use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
-use crate::capabilities::diagnostics::{generate_diagnostics, generate_yard_diagnostics};
+use crate::capabilities::diagnostics::generate_diagnostics;
+use crate::query::generate_yard_diagnostics_inner;
 use crate::capabilities::inlay_hints::handle_inlay_hints;
 use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
@@ -748,7 +749,7 @@ async fn run_diagnostics_check(
     let mut diagnostics = generate_diagnostics(&parse_result, &document);
     {
         let index = server.index.lock();
-        diagnostics.extend(generate_yard_diagnostics(&index, uri));
+        diagnostics.extend(generate_yard_diagnostics_inner(&index, uri));
     }
 
     // Force re-indexing to run IndexVisitor again (since setup_with_fixture already indexed it)

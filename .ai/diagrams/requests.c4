@@ -96,19 +96,21 @@ views {
     // =========================================================================
     dynamic view completion {
         title 'requests/Completion'
-        description 'Provides autocomplete suggestions for symbols and methods.'
+        description 'Provides autocomplete suggestions for constants and methods via IndexQuery.'
 
         ide -> lsp.server 'completion request'
 
-        // Query for completions
-        lsp.server -> lsp.query 'Get completion items'
-        lsp.query -> lsp.docs 'Resolve context at position'
-        lsp.query -> lsp.index.prefixTree 'Search by prefix'
-        lsp.query -> lsp.index.entryStore 'Get symbol details'
+        // Capabilities → Query
+        lsp.server -> lsp.capabilities.completionCap 'find_completion_at_position'
+        lsp.capabilities.completionCap -> lsp.query.completionQuery 'find_constant_completions / find_method_completions'
+
+        // Query → Index
+        lsp.query.completionQuery -> lsp.index.prefixTree 'Search by prefix'
+        lsp.query.completionQuery -> lsp.index.entryStore 'Get symbol details'
 
         // Return result
-        lsp.index.entryStore -> lsp.query 'Return matching entries'
-        lsp.query -> lsp.server 'Return CompletionItems'
+        lsp.query.completionQuery -> lsp.capabilities.completionCap 'Return CompletionItems'
+        lsp.capabilities.completionCap -> lsp.server 'CompletionResponse'
         lsp.server -> ide 'CompletionResponse'
 
         autoLayout TopBottom
@@ -182,15 +184,17 @@ views {
     // =========================================================================
     dynamic view workspaceSymbols {
         title 'requests/Workspace Symbols'
-        description 'Provides symbol search across the entire workspace (Cmd+T).'
+        description 'Provides symbol search across the entire workspace (Cmd+T) via IndexQuery.'
 
         ide -> lsp.server 'workspaceSymbol request'
 
         // Query for symbols
-        lsp.server -> lsp.index.prefixTree 'Search symbols by query'
-        lsp.server -> lsp.index.entryStore 'Get symbol locations'
+        lsp.server -> lsp.query 'IndexQuery.search_workspace_symbols'
+        lsp.query -> lsp.index.prefixTree 'Search symbols by query'
+        lsp.query -> lsp.index.entryStore 'Get symbol locations'
 
         // Return result
+        lsp.query -> lsp.server 'Return SymbolInformation'
         lsp.server -> ide 'WorkspaceSymbolResponse'
 
         autoLayout TopBottom
@@ -220,15 +224,16 @@ views {
     // =========================================================================
     dynamic view codeLens {
         title 'requests/Code Lens'
-        description 'Provides inline actions like reference counts on methods.'
+        description 'Provides module mixin usage counts via IndexQuery.'
 
         ide -> lsp.server 'codeLens request'
 
         // Query for code lens
-        lsp.server -> lsp.index.entryStore 'Get file entries'
-        lsp.server -> lsp.index.entryStore 'Count references'
+        lsp.server -> lsp.query 'IndexQuery.get_code_lenses'
+        lsp.query -> lsp.index.entryStore 'Get mixin usages and class locations'
 
         // Return result
+        lsp.query -> lsp.server 'Return CodeLensData'
         lsp.server -> ide 'CodeLensResponse'
 
         autoLayout TopBottom
@@ -314,16 +319,38 @@ views {
     // =========================================================================
     dynamic view namespaceTree {
         title 'requests/Namespace Tree'
-        description 'Custom request to get namespace tree for explorer view.'
+        description 'Custom request to get namespace tree for explorer view via IndexQuery.'
 
         ide -> lsp.server 'rubyLsp/namespaceTree request'
 
         // Query for namespace tree
-        lsp.server -> lsp.index.entryStore 'Get all namespaces'
-        lsp.server -> lsp.index.entryStore 'Build tree structure'
+        lsp.server -> lsp.query 'IndexQuery namespace tree methods'
+        lsp.query -> lsp.index.entryStore 'Get all namespaces'
 
         // Return result
+        lsp.query -> lsp.server 'Return tree structure'
         lsp.server -> ide 'NamespaceTreeResponse'
+
+        autoLayout TopBottom
+    }
+
+    // =========================================================================
+    // DEBUG (Custom)
+    // =========================================================================
+    dynamic view debug {
+        title 'requests/Debug'
+        description 'Custom debug/inspection requests (lookup, stats, ancestors, methods, inference-stats, export-graph) via IndexQuery.'
+
+        ide -> lsp.server 'debug request (lookup/stats/ancestors/...)'
+
+        // Capabilities → Query
+        lsp.server -> lsp.query 'IndexQuery.debug_* methods'
+        lsp.query -> lsp.index.entryStore 'Query entries, counts, FQNs'
+        lsp.query -> lsp.index.inheritanceGraph 'Ancestor chains, graph export'
+
+        // Return result
+        lsp.query -> lsp.server 'Return debug response'
+        lsp.server -> ide 'Debug JSON response'
 
         autoLayout TopBottom
     }

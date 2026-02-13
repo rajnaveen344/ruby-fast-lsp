@@ -1,9 +1,9 @@
-use crate::capabilities::diagnostics::get_unresolved_diagnostics;
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::ProcessingOptions;
+use crate::query::IndexQuery;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use crate::{capabilities, indexer::file_processor::FileProcessor};
+use crate::indexer::file_processor::FileProcessor;
 
 use log::{debug, info};
 use parking_lot::RwLock;
@@ -63,19 +63,15 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
     // Add unresolved entry diagnostics and YARD diagnostics (no re-parsing needed)
-    diagnostics.extend(get_unresolved_diagnostics(server, &uri));
-    {
-        let index = server.index.lock();
-        diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
-            &index, &uri,
-        ));
-    }
+    let query = IndexQuery::new(server.index.clone());
+    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Publish diagnostics for files affected by removed definitions (cross-file propagation)
     for affected_uri in affected_uris {
         if affected_uri != uri {
-            let affected_diagnostics = get_unresolved_diagnostics(server, &affected_uri);
+            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
             server
                 .publish_diagnostics(affected_uri, affected_diagnostics)
                 .await;
@@ -121,7 +117,8 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         };
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
-    diagnostics.extend(get_unresolved_diagnostics(server, &uri));
+    let query = IndexQuery::new(server.index.clone());
+    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
 
     debug!(
         "Publishing {} diagnostics for {} on change",
@@ -137,7 +134,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Publish diagnostics for affected files (cross-file propagation)
     for affected_uri in affected_uris {
         if affected_uri != uri {
-            let affected_diagnostics = get_unresolved_diagnostics(server, &affected_uri);
+            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
             server
                 .publish_diagnostics(affected_uri, affected_diagnostics)
                 .await;
@@ -181,19 +178,15 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     server.invalidate_namespace_tree_cache_debounced();
 
     // Add unresolved diagnostics and YARD diagnostics (no re-parsing needed)
-    diagnostics.extend(get_unresolved_diagnostics(server, &uri));
-    {
-        let index = server.index.lock();
-        diagnostics.extend(capabilities::diagnostics::generate_yard_diagnostics(
-            &index, &uri,
-        ));
-    }
+    let query = IndexQuery::new(server.index.clone());
+    diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Publish diagnostics for files affected by removed definitions
     for affected_uri in affected_uris {
         if affected_uri != uri {
-            let affected_diagnostics = get_unresolved_diagnostics(server, &affected_uri);
+            let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
             server
                 .publish_diagnostics(affected_uri, affected_diagnostics)
                 .await;
@@ -212,7 +205,8 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     debug!("Doc cache size: {}", server.docs.lock().len());
 
     // Keep unresolved entry diagnostics visible (project-wide diagnostics)
-    let diagnostics = get_unresolved_diagnostics(server, &uri);
+    let query = IndexQuery::new(server.index.clone());
+    let diagnostics = query.get_unresolved_diagnostics(&uri);
     server.publish_diagnostics(uri, diagnostics).await;
 }
 

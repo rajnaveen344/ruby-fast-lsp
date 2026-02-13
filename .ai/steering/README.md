@@ -73,20 +73,27 @@ This folder contains context and guidance for AI assistants working on the Ruby 
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Request/Notification                     │
-│                (request.rs,notification.rs)                 │
+│                (request.rs, notification.rs)                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌───────────────────┐  ┌───────────────┐  ┌───────────────────┐
-│   Capabilities    │  │   Inferrer    │  │      Indexer      │
-│ (src/capabilities)│─▶│(src/inferrer) │◀─│   (src/indexer)   │
-└───────────────────┘  └───────────────┘  └───────────────────┘
-          │                   │
-          ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Analyzer (Prism)                         │
-│                 (src/analyzer_prism/)                       │
+│               Capabilities (thin adapters)                  │
+│                    (src/capabilities/)                      │
 └─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Query Layer (IndexQuery)                   │
+│                      (src/query/)                           │
+│  definition, references, hover, completion, debug, etc.     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────┐  ┌───────────────┐  ┌────────────────────┐
+│      Indexer      │  │   Inferrer    │  │  Analyzer (Prism)  │
+│   (src/indexer)   │  │(src/inferrer) │  │(src/analyzer_prism)│
+└───────────────────┘  └───────────────┘  └────────────────────┘
 ```
 
 ## Common Development Tasks

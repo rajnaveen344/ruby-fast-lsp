@@ -8,47 +8,74 @@ The Query Engine provides a unified service layer between LSP handlers (`server.
 
 ```mermaid
 graph TB
-    subgraph "API Layer (server.rs)"
+    subgraph "API Layer (server.rs / handlers/)"
         TD[textDocument/definition]
         TR[textDocument/references]
         TH[textDocument/hover]
         TC[textDocument/completion]
         TI[textDocument/inlayHint]
+        TDB[debug/*]
     end
-    
+
+    subgraph "Capabilities (thin adapters)"
+        CAP[capabilities/]
+    end
+
     subgraph "Service Layer (src/query/)"
         IQ[IndexQuery]
         DEF[definition.rs]
         REF[references.rs]
         HOV[hover.rs]
+        COMP[completion.rs]
+        DBG[debug.rs]
         METH[method.rs]
         TYPES[types.rs]
+        CL[code_lens.rs]
+        WS[workspace_symbols.rs]
+        IH[inlay_hints.rs]
+        DIAG[diagnostics.rs]
+        NS[namespace_tree.rs]
+        TH2[type_hierarchy.rs]
+        INF[inference.rs]
     end
-    
+
     subgraph "Data Layer (src/indexer/)"
         IDX[RubyIndex]
         GRAPH[Graph]
         PT[PrefixTree]
     end
-    
-    TD --> IQ
-    TR --> IQ
-    TH --> IQ
-    TC --> IQ
-    TI --> IQ
-    
+
+    TD --> CAP
+    TR --> CAP
+    TH --> CAP
+    TC --> CAP
+    TI --> CAP
+    TDB --> CAP
+
+    CAP --> IQ
+
     IQ --> DEF
     IQ --> REF
     IQ --> HOV
+    IQ --> COMP
+    IQ --> DBG
     IQ --> METH
     IQ --> TYPES
-    
+    IQ --> CL
+    IQ --> WS
+    IQ --> IH
+    IQ --> DIAG
+    IQ --> NS
+    IQ --> TH2
+    IQ --> INF
+
     DEF --> IDX
     REF --> IDX
     HOV --> IDX
+    COMP --> IDX
+    DBG --> IDX
     METH --> IDX
-    TYPES --> IDX
-    
+
     IDX --> GRAPH
     IDX --> PT
 ```
@@ -90,47 +117,49 @@ impl<'a> IndexQuery<'a> {
 }
 ```
 
-## Query Modules
+## Query Modules (Implemented)
 
 ### 1. Definition Query (`definition.rs`)
-
-```rust
-impl IndexQuery<'_> {
-    fn find_definitions_at_position(&self, uri, position, content) -> Option<Vec<Location>>;
-    fn find_constant_definitions_by_path(&self, path, ancestors) -> Option<Vec<Location>>;
-    fn find_method_definitions_by_name(&self, method, ancestors) -> Option<Vec<Location>>;
-    fn find_instance_variable_definitions(&self, name) -> Option<Vec<Location>>;
-}
-```
+Finds where symbols are defined (constants, methods, variables, YARD types).
 
 ### 2. Reference Query (`references.rs`)
+Finds all usages of a symbol, with mixin-aware method reference searching.
 
-```rust
-impl IndexQuery<'_> {
-    fn find_references_at_position(&self, uri, position, content) -> Option<Vec<Location>>;
-    fn find_constant_references(&self, fqn) -> Option<Vec<Location>>;
-    fn find_variable_references(&self, fqn) -> Option<Vec<Location>>;
-    fn find_method_references(&self, receiver, method, ancestors) -> Option<Vec<Location>>;
-}
-```
+### 3. Hover Query (`hover.rs`)
+Gets type and documentation information for hover display.
 
-### 3. Type/Method Query (`method.rs`, `hover.rs`)
+### 4. Method Query (`method.rs`)
+Resolves method calls, receivers, and return types via MRO.
 
-```rust
-impl IndexQuery<'_> {
-    // Method resolution
-    fn get_method_return_type_from_index(&self, receiver_type, method_name) -> Option<RubyType>;
-    fn find_method_at_position(&self, uri, position, method_name) -> Option<MethodInfo>;
-    
-    // Variable types
-    fn get_instance_variable_type(&self, uri, name) -> Option<RubyType>;
-    fn get_class_variable_type(&self, uri, name) -> Option<RubyType>;
-    
-    // Type checks
-    fn is_module(&self, fqn) -> bool;
-    fn is_class(&self, fqn) -> bool;
-}
-```
+### 5. Types Query (`types.rs`)
+Type inference utilities for assignments and local variables.
+
+### 6. Completion Query (`completion.rs`)
+Constant completions (scope-resolved) and method completions (type-aware).
+
+### 7. Debug Query (`debug.rs`)
+Index inspection: lookup, stats, ancestors, methods, inference-stats, export-graph.
+
+### 8. Code Lens Query (`code_lens.rs`)
+Module mixin usage counts (include/prepend/extend/class).
+
+### 9. Workspace Symbols Query (`workspace_symbols.rs`)
+Symbol search with exact, prefix, camel case, and fuzzy matching.
+
+### 10. Inlay Hints Query (`inlay_hints.rs`)
+On-demand type inference for visible code ranges.
+
+### 11. Diagnostics Query (`diagnostics.rs`)
+YARD validation and unresolved constant/method diagnostics.
+
+### 12. Namespace Tree Query (`namespace_tree.rs`)
+Namespace tree structure for explorer views.
+
+### 13. Type Hierarchy Query (`type_hierarchy.rs`)
+Supertype and subtype navigation.
+
+### 14. Inference Query (`inference.rs`)
+Receiver, return type, and local variable resolvers.
 
 ## Composability Examples
 
@@ -159,18 +188,27 @@ Query flow:
 3. `get_method_return_type(Array[Order], "first")` → `Order`
 4. Display: `Order#first -> Order`
 
-## Integration Strategy
+## Integration Status
 
-| Capability | Uses IndexQuery For |
-|------------|---------------------|
-| `definitions/mod.rs` | Constants, variables |
-| `definitions/method.rs` | Type-aware method resolution (complex) |
-| `references.rs` | All reference lookups |
-| `hover.rs` | Variable types, constant info |
-| `completion/` | Method completions (future) |
+All capabilities now route through `IndexQuery`:
 
-## Files That Stay in Capabilities
+| Capability | Query Module | Status |
+|------------|-------------|--------|
+| `definitions/` | `query/definition.rs` | ✅ |
+| `references.rs` | `query/references.rs` | ✅ |
+| `hover.rs` | `query/hover.rs` | ✅ |
+| `completion/` | `query/completion.rs` | ✅ |
+| `diagnostics.rs` | `query/diagnostics.rs` | ✅ |
+| `code_lens.rs` | `query/code_lens.rs` | ✅ |
+| `workspace_symbols.rs` | `query/workspace_symbols.rs` | ✅ |
+| `inlay_hints.rs` | `query/inlay_hints.rs` | ✅ |
+| `namespace_tree.rs` | `query/namespace_tree.rs` | ✅ |
+| `type_hierarchy.rs` | `query/type_hierarchy.rs` | ✅ |
+| `debug.rs` | `query/debug.rs` | ✅ |
 
-- `definitions/method.rs` - Complex type-aware resolution with TypeNarrowing
-- `definitions/variable.rs` - Local variables from document scope
-- Thin adapter code in `definitions/mod.rs`
+## Files That Stay in Capabilities (AST-only)
+
+- `document_symbols.rs` — AST traversal, no index access
+- `folding_range.rs` — AST traversal, no index access
+- `formatting.rs` — Text manipulation, no index access
+- `semantic_tokens.rs` — AST traversal, no index access

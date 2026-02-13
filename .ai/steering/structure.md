@@ -99,26 +99,53 @@ indexer/
     └── entry_kind.rs       # Entry type definitions
 ```
 
+## Query Module (`src/query/`)
+
+The unified query layer between handlers and the index. All index-heavy
+business logic lives here; capabilities are thin adapters.
+
+```
+query/
+├── mod.rs                  # IndexQuery struct and module exports
+├── code_lens.rs            # Module mixin code lens queries
+├── completion.rs           # Constant and method completion queries
+├── debug.rs                # Debug/inspection queries (lookup, stats, ancestors, etc.)
+├── definition.rs           # Go-to-definition queries
+├── diagnostics.rs          # YARD and unresolved diagnostics queries
+├── hover.rs                # Hover information queries
+├── inference.rs            # Type inference resolvers
+├── inlay_hints.rs          # Inlay hint queries
+├── method.rs               # Method resolution and return types
+├── namespace_tree.rs       # Namespace tree queries
+├── references.rs           # Find-references queries
+├── type_hierarchy.rs       # Supertype/subtype queries
+├── types.rs                # Type inference utilities
+└── workspace_symbols.rs    # Workspace symbol search queries
+```
+
 ## Capabilities Module (`src/capabilities/`)
+
+Thin adapters that bridge handlers to the query layer. AST-only features
+(no index access) live here directly; index-heavy features delegate to `query/`.
 
 ```
 capabilities/
 ├── mod.rs                  # Module exports
-├── code_lens.rs            # Code lens (mixin usage counts)
-├── hover.rs                # Documentation and type hover
-├── completion/             # Code completion engine
-├── definitions/            # Go-to-definition (constant, method, variable)
-├── diagnostics.rs          # Syntax and semantic diagnostics
-├── document_symbols.rs     # Document outline
-├── folding_range.rs        # Code folding
-├── formatting.rs           # Auto-end and basic formatting
-├── inlay_hints.rs          # Inlay hints
-├── namespace_tree.rs       # Namespace tree navigation
-├── references.rs           # Find references
-├── semantic_tokens.rs      # Syntax highlighting
-├── type_hierarchy.rs       # Superclass/Subclass navigation
-├── workspace_symbols.rs    # Workspace-wide symbol search
-├── debug.rs                # Debugging utilities
+├── code_lens.rs            # Code lens adapter (→ query/code_lens.rs)
+├── hover.rs                # Hover adapter (→ query/hover.rs)
+├── completion/             # Completion adapter (→ query/completion.rs)
+├── definitions/            # Definition adapter (→ query/definition.rs)
+├── diagnostics.rs          # Diagnostics adapter (→ query/diagnostics.rs)
+├── document_symbols.rs     # Document outline (AST-only)
+├── folding_range.rs        # Code folding (AST-only)
+├── formatting.rs           # Auto-end and basic formatting (AST-only)
+├── inlay_hints.rs          # Inlay hints adapter (→ query/inlay_hints.rs)
+├── namespace_tree.rs       # Namespace tree adapter (→ query/namespace_tree.rs)
+├── references.rs           # References adapter (→ query/references.rs)
+├── semantic_tokens.rs      # Syntax highlighting (AST-only)
+├── type_hierarchy.rs       # Type hierarchy adapter (→ query/type_hierarchy.rs)
+├── workspace_symbols.rs    # Workspace symbols adapter (→ query/workspace_symbols.rs)
+├── debug.rs                # Debug adapter (→ query/debug.rs)
 └── indexing/               # Indexing-related capabilities
 ```
 
@@ -189,7 +216,8 @@ test/
 
 1. **Visitor Pattern**: Used extensively for AST traversal
 2. **Builder Pattern**: Used for constructing index entries
-3. **Service Layer**: Indexer and analyzer act as services to capabilities
-4. **Separation of Concerns**: Clear boundaries between parsing, indexing, analysis, and LSP features
-5. **Position Translation**: Consistent byte offset → LSP position conversion
-6. **FQN-based Indexing**: All symbols stored with fully qualified names
+3. **3-Layer Architecture**: `handlers/` (API) → `query/` (Service) → `indexer/` (Data)
+4. **Thin Capabilities**: `capabilities/` are adapters; business logic lives in `query/`
+5. **Separation of Concerns**: Clear boundaries between parsing, indexing, analysis, and LSP features
+6. **Position Translation**: Consistent byte offset → LSP position conversion
+7. **FQN-based Indexing**: All symbols stored with fully qualified names

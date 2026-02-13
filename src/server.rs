@@ -2,7 +2,7 @@ use crate::capabilities::debug::{
     AncestorsParams, AncestorsResponse, ListCommandsResponse, LookupParams, LookupResponse,
     MethodsParams, MethodsResponse, StatsParams, StatsResponse,
 };
-use crate::capabilities::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
+use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;

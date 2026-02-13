@@ -16,14 +16,23 @@
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 
+mod code_lens;
+mod completion;
+mod debug;
 mod definition;
+pub mod diagnostics;
 mod hover;
 pub mod inference;
 mod inlay_hints;
 mod method;
+pub mod namespace_tree;
 mod references;
+pub mod type_hierarchy;
 mod types;
+mod workspace_symbols;
 
+pub use code_lens::CodeLensData;
+pub use diagnostics::generate_yard_diagnostics_inner;
 pub use hover::HoverInfo;
 pub use inference::{LocalVariableResolver, ReceiverResolver, ReturnTypeResolver};
 pub use inlay_hints::{InlayHintData, InlayHintKind};

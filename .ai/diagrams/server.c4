@@ -63,6 +63,11 @@ model {
                 description 'Provides type hints and parameter hints via on-demand inference using the Ruby Index.'
             }
 
+            debugCap = component 'Debug' {
+                technology 'capabilities/debug.rs'
+                description 'Thin adapter for debug/inspection commands.'
+            }
+
             indexingCap = component 'Indexing' {
                 technology 'capabilities/indexing/'
                 description 'Handles document lifecycle and workspace indexing.'
@@ -88,6 +93,16 @@ model {
         hoverQuery = component 'Hover Query' {
             technology 'query/hover.rs'
             description 'Gets type and documentation for hover.'
+        }
+
+        completionQuery = component 'Completion Query' {
+            technology 'query/completion.rs'
+            description 'Constant and method completion lookups.'
+        }
+
+        debugQuery = component 'Debug Query' {
+            technology 'query/debug.rs'
+            description 'Index inspection: lookup, stats, ancestors, methods, inference-stats, export-graph.'
         }
 
         methodQuery = component 'Method Query' {
@@ -150,13 +165,15 @@ model {
     lsp.server.requestHandlers -> lsp.capabilities.hoverCap 'Hover'
     lsp.server.requestHandlers -> lsp.capabilities.completionCap 'Completion'
     lsp.server.requestHandlers -> lsp.capabilities.inlayHintsCap 'Inlay Hints'
+    lsp.server.requestHandlers -> lsp.capabilities.debugCap 'Debug commands'
 
     // Capabilities → Query Layer
     lsp.capabilities.definitionsCap -> lsp.query.definitionQuery 'find_definitions_at_position'
     lsp.capabilities.referencesCap -> lsp.query.referencesQuery 'find_references_at_position'
     lsp.capabilities.hoverCap -> lsp.query.hoverQuery 'get_hover_for_position'
-    lsp.capabilities.completionCap -> lsp.query 'get_completions'
+    lsp.capabilities.completionCap -> lsp.query.completionQuery 'find_constant/method_completions'
     lsp.capabilities.inlayHintsCap -> lsp.query.inlayHintsQuery 'infer_and_update_visible_types'
+    lsp.capabilities.debugCap -> lsp.query.debugQuery 'debug_lookup, debug_stats, etc.'
 
     // Query Layer → Index and Docs
     lsp.query.definitionQuery -> lsp.index.entryStore 'Lookup by FQN'
@@ -164,7 +181,11 @@ model {
     lsp.query.referencesQuery -> lsp.index.entryStore 'Search references'
     lsp.query.hoverQuery -> lsp.index.entryStore 'Get type info'
     lsp.query.hoverQuery -> lsp.docs.rubyDocument 'Get local var type'
+    lsp.query.completionQuery -> lsp.index.entryStore 'Constant and method lookups'
+    lsp.query.debugQuery -> lsp.index.entryStore 'Lookup, stats, methods'
+    lsp.query.debugQuery -> lsp.index.inheritanceGraph 'Ancestors, export graph'
     lsp.query.methodQuery -> lsp.index.inheritanceGraph 'Resolve via MRO'
+    lsp.query.typesQuery -> lsp.index.entryStore 'Type inference lookups'
     lsp.query.inlayHintsQuery -> lsp.index.entryStore 'Update inferred types'
     lsp.query.inlayHintsQuery -> lsp.docs.rubyDocument 'Read/write local variable types'
 }
@@ -180,7 +201,7 @@ views {
         description 'Shows how the LSP Server handles requests via capabilities.'
 
         include *
-        include lsp.capabilities
+        include * ->
 
         autoLayout LeftRight
     }
@@ -191,9 +212,7 @@ views {
         description 'Shows the capabilities layer that orchestrates handler logic.'
 
         include *
-        include lsp.query
-        include lsp.index
-        include lsp.docs
+        include -> * ->
 
         autoLayout LeftRight
     }
@@ -204,8 +223,7 @@ views {
         description 'Shows the query modules that access Index and Docs.'
 
         include *
-        include lsp.index
-        include lsp.docs
+        include -> * ->
 
         autoLayout TopBottom
     }
@@ -216,6 +234,7 @@ views {
         description 'Shows the internal data structures of the Index.'
 
         include *
+        include -> * ->
 
         autoLayout LeftRight
     }

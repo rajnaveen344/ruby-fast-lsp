@@ -14,6 +14,7 @@ use tower_lsp::lsp_types::{
 use crate::{
     analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer},
     indexer::entry::NamespaceKind,
+    query::IndexQuery,
     server::RubyLanguageServer,
 };
 
@@ -226,9 +227,9 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let index = server.index.lock();
+        let query = IndexQuery::new(server.index.clone());
         let constant_completions =
-            constant::find_constant_completions(&index, &analyzer, position, partial_string);
+            query.find_constant_completions(&analyzer, position, partial_string);
         completions.extend(constant_completions);
     } else if is_method_call_context {
         // Method call context: provide type-aware method completions
@@ -255,8 +256,8 @@ pub async fn find_completion_at_position(
                 NamespaceKind::Instance // Default fallback
             };
 
-            let method_completions = method::find_method_completions(
-                &server.index,
+            let query = IndexQuery::new(server.index.clone());
+            let method_completions = query.find_method_completions(
                 &receiver_type,
                 &partial_string,
                 kind,
@@ -271,9 +272,8 @@ pub async fn find_completion_at_position(
         completions.extend(variable_completions);
 
         // Add constant completions
-        let index = server.index.lock();
-        let constant_completions = constant::find_constant_completions(
-            &index,
+        let query = IndexQuery::new(server.index.clone());
+        let constant_completions = query.find_constant_completions(
             &analyzer,
             position,
             partial_string.clone(),

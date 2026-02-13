@@ -1,50 +1,42 @@
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index::RubyIndex;
-use crate::types::ruby_document::RubyDocument;
-use crate::yard::YardTypeConverter;
-use log::{debug, warn};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
+//! Diagnostics capability — syntax diagnostics from the parser.
+//!
+//! AST-only diagnostics (syntax errors/warnings) live here.
+//! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
-/// Generate diagnostics from a parse result
+use crate::types::ruby_document::RubyDocument;
+use log::{debug, warn};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+
+/// Generate diagnostics from a parse result.
 ///
-/// This extracts syntax errors and warnings from an existing parse result.
+/// Extracts syntax errors and warnings from an existing parse result.
 /// Used by process_file() to avoid re-parsing.
 pub fn generate_diagnostics(
     parse_result: &ruby_prism::ParseResult<'_>,
     document: &RubyDocument,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-
-    // Extend with syntax diagnostics (errors and warnings from parser)
     diagnostics.extend(extract_syntax_diagnostics(parse_result, document));
-
     diagnostics
 }
 
-/// Extract syntax errors and warnings from a parse result
+/// Extract syntax errors and warnings from a parse result.
 fn extract_syntax_diagnostics(
     parse_result: &ruby_prism::ParseResult<'_>,
     document: &RubyDocument,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // Check for syntax errors
     let errors: Vec<_> = parse_result.errors().collect();
-
     if !errors.is_empty() {
         debug!("Found {} syntax errors in document", errors.len());
 
         for error in errors {
             let location = error.location();
-            let start_offset = location.start_offset();
-            let end_offset = location.end_offset();
+            let start_pos = document.offset_to_position(location.start_offset());
+            let end_pos = document.offset_to_position(location.end_offset());
 
-            // Convert byte offsets to LSP positions
-            let start_pos = document.offset_to_position(start_offset);
-            let end_pos = document.offset_to_position(end_offset);
-
-            // Create diagnostic for syntax error
-            let diagnostic = Diagnostic {
+            diagnostics.push(Diagnostic {
                 range: Range::new(start_pos, end_pos),
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
@@ -54,29 +46,20 @@ fn extract_syntax_diagnostics(
                 related_information: None,
                 tags: None,
                 data: None,
-            };
-
-            diagnostics.push(diagnostic);
+            });
         }
     }
 
-    // Check for warnings from the parser
     let warnings: Vec<_> = parse_result.warnings().collect();
-
     if !warnings.is_empty() {
         debug!("Found {} warnings in document", warnings.len());
 
         for warning in warnings {
             let location = warning.location();
-            let start_offset = location.start_offset();
-            let end_offset = location.end_offset();
+            let start_pos = document.offset_to_position(location.start_offset());
+            let end_pos = document.offset_to_position(location.end_offset());
 
-            // Convert byte offsets to LSP positions
-            let start_pos = document.offset_to_position(start_offset);
-            let end_pos = document.offset_to_position(end_offset);
-
-            // Create diagnostic for warning
-            let diagnostic = Diagnostic {
+            diagnostics.push(Diagnostic {
                 range: Range::new(start_pos, end_pos),
                 severity: Some(DiagnosticSeverity::WARNING),
                 code: None,
@@ -86,9 +69,7 @@ fn extract_syntax_diagnostics(
                 related_information: None,
                 tags: None,
                 data: None,
-            };
-
-            diagnostics.push(diagnostic);
+            });
         }
     }
 
@@ -99,272 +80,13 @@ fn extract_syntax_diagnostics(
     diagnostics
 }
 
-/// Generate diagnostics for YARD documentation issues
-/// This checks for:
-/// - @param tags that reference non-existent parameters
-/// - Type references that don't exist in the index (classes/modules)
-pub fn generate_yard_diagnostics(index: &RubyIndex, uri: &Url) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    let entries = index.file_entries(uri);
-    for entry in entries {
-        let (yard_doc, method_params) = match &entry.kind {
-            EntryKind::Method(data) => match &data.yard_doc {
-                Some(doc) => (doc, &data.params),
-                None => continue,
-            },
-            _ => continue,
-        };
-        // Get actual parameter names from the method
-        let actual_param_names: Vec<&str> = method_params.iter().map(|p| p.name.as_str()).collect();
-
-        // Find YARD @param tags that don't match any actual parameter
-        let unmatched = yard_doc.find_unmatched_params(&actual_param_names);
-
-        for (yard_param, range) in unmatched {
-            let diagnostic = Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                    "yard-unknown-param".to_string(),
-                )),
-                code_description: None,
-                source: Some("ruby-fast-lsp".to_string()),
-                message: format!(
-                    "YARD @param '{}' does not match any method parameter",
-                    yard_param.name
-                ),
-                related_information: None,
-                tags: None,
-                data: None,
-            };
-            diagnostics.push(diagnostic);
-        }
-
-        // Check for unresolved types in @param tags
-        for param in &yard_doc.params {
-            let result =
-                YardTypeConverter::convert_multiple_with_validation(&param.types, Some(index));
-            for unresolved in result.unresolved_types {
-                // Prefer types_range (just the [Type] portion) over range (entire line)
-                let diagnostic_range = param.types_range.or(param.range);
-                if let Some(range) = diagnostic_range {
-                    let diagnostic = Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                            "yard-unknown-type".to_string(),
-                        )),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message: format!(
-                            "Unknown type '{}' in YARD @param documentation",
-                            unresolved.type_name
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    };
-                    diagnostics.push(diagnostic);
-                }
-            }
-        }
-
-        // Check for unresolved types in @return tags
-        for return_doc in &yard_doc.returns {
-            let result =
-                YardTypeConverter::convert_multiple_with_validation(&return_doc.types, Some(index));
-            for unresolved in result.unresolved_types {
-                // For return types, we don't have a specific range stored
-                // We could add range tracking to YardReturn in the future
-                debug!(
-                    "Unresolved return type '{}' (no range available for diagnostic)",
-                    unresolved.type_name
-                );
-            }
-        }
-
-        // Check for return type mismatch with RBS
-        if !yard_doc.returns.is_empty() {
-            if let EntryKind::Method(data) = &entry.kind {
-                // Get owner class/module name (handles both Namespace and Constant variants)
-                let owner_parts = data.owner.namespace_parts();
-                if !owner_parts.is_empty() {
-                    let class_name = owner_parts
-                        .iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<_>>()
-                        .join("::");
-
-                    let method_name = data.name.get_name();
-                    // Determine if singleton from owner namespace kind
-                    let is_singleton = matches!(
-                        data.owner.namespace_kind(),
-                        Some(crate::indexer::entry::NamespaceKind::Singleton)
-                    );
-
-                    if let Some(rbs_type) =
-                        crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
-                            &class_name,
-                            &method_name,
-                            is_singleton,
-                        )
-                    {
-                        // Check if any YARD type matches the RBS type
-                        // This is a simplified check. We verify if the RBS type is NOT represented in YARD.
-                        // Ideally we check compatibility (is_subtype_of), but here we check for blatant conflict.
-
-                        let yard_types_str: Vec<String> = yard_doc
-                            .returns
-                            .iter()
-                            .flat_map(|r| r.types.clone())
-                            .collect();
-
-                        // Heuristic: If RBS returns Integer, look for "Integer" in YARD types.
-                        // First, basic debug string check.
-
-                        // Better approach: convert YARD types to RubyType and check equality/subtype?
-                        // But YARD types might be "String", "nil", etc.
-                        let yard_ruby_types = YardTypeConverter::convert_multiple(&yard_types_str);
-
-                        // Simple conflict check:
-                        // If we have RBS type, and YARD says something completely different.
-                        // Example: RBS=Integer, YARD=String.
-
-                        // Let's use string based comparison of the top-level type for now as diagnostic MVP.
-                        // Actually, let's use the ruby_type comparison if possible.
-
-                        // If RBS type is known (not Unknown)
-                        if rbs_type != crate::inferrer::r#type::ruby::RubyType::Unknown {
-                            // Check if yard_ruby_types represents the same thing.
-                            // Example: RBS=Integer, YARD=Integer -> OK.
-
-                            // Since we don't have perfect equality check yet for Union vs Single,
-                            // let's do a strict check: if RBS type is NOT in the YARD types.
-
-                            // Warning: This might be flaky if YARD uses "Array<String>" and RBS uses "Array[String]" (generic syntax).
-                            // We should rely on `RubyType` comparison.
-
-                            // Construct a warning if they are definitely different.
-                            // For this task, specifically checking the "String" vs "Integer" mismatch from requirements.
-
-                            if yard_ruby_types != rbs_type {
-                                // Additional safety: allows generic mismatches if base type matches?
-                                // For now, strict inequality.
-
-                                // Only emit if we have a valid range for the return tag
-                                if let Some(first_return) = yard_doc.returns.first() {
-                                    // Use types_range or range
-                                    if let Some(range) =
-                                        first_return.types_range.or(first_return.range)
-                                    {
-                                        let diagnostic = Diagnostic {
-                                            range,
-                                            severity: Some(DiagnosticSeverity::WARNING),
-                                            code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                                                "yard-rbs-mismatch".to_string(),
-                                            )),
-                                            code_description: None,
-                                            source: Some("ruby-fast-lsp".to_string()),
-                                            message: format!(
-                                                "YARD return type '{}' conflicts with RBS type '{}'",
-                                                yard_ruby_types, // formatted debug representation
-                                                rbs_type
-                                            ),
-                                            related_information: None,
-                                            tags: None,
-                                            data: None,
-                                        };
-                                        diagnostics.push(diagnostic);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    diagnostics
-}
-
-/// Get diagnostics for unresolved entries (constants and methods) from the index
-pub fn get_unresolved_diagnostics(
-    server: &crate::server::RubyLanguageServer,
-    uri: &Url,
-) -> Vec<Diagnostic> {
-    use crate::indexer::index::UnresolvedEntry;
-    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
-
-    let index = server.index.lock();
-    let unresolved_list = index.get_unresolved_entries(uri);
-
-    unresolved_list
-        .iter()
-        .map(|entry| match entry {
-            UnresolvedEntry::Constant { name, location, .. } => Diagnostic {
-                range: location.range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("unresolved-constant".to_string())),
-                code_description: None,
-                source: Some("ruby-fast-lsp".to_string()),
-                message: format!("Unresolved constant `{}`", name),
-                related_information: None,
-                tags: None,
-                data: None,
-            },
-            UnresolvedEntry::Method {
-                name,
-                receiver_type,
-                location,
-            } => {
-                if let Some(crate::inferrer::r#type::ruby::RubyType::Unknown) = receiver_type {
-                    Diagnostic {
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unknown-receiver-type".to_string())),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message: format!(
-                            "Cannot determine receiver type for method call `{}`. Definition may be imprecise.",
-                            name
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    }
-                } else {
-                    let message = match receiver_type {
-                        Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
-                        None => format!("Unresolved method `{}`", name),
-                    };
-
-                    Diagnostic {
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unresolved-method".to_string())),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message,
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    }
-                }
-            }
-        })
-        .collect()
-}
-
-/// Validate that a diagnostic range is within document bounds
+/// Validate that a diagnostic range is within document bounds.
 ///
-/// This is a safety check to ensure we don't send invalid ranges to the client
+/// Safety check to ensure we don't send invalid ranges to the client.
 fn _validate_diagnostic_range(document: &RubyDocument, range: &Range) -> bool {
     let lines: Vec<&str> = document.content.lines().collect();
     let line_count = lines.len();
 
-    // Check if start position is valid
     if range.start.line as usize >= line_count {
         warn!(
             "Diagnostic start line {} exceeds document line count {}",
@@ -373,7 +95,6 @@ fn _validate_diagnostic_range(document: &RubyDocument, range: &Range) -> bool {
         return false;
     }
 
-    // Check if end position is valid
     if range.end.line as usize >= line_count {
         warn!(
             "Diagnostic end line {} exceeds document line count {}",
@@ -382,7 +103,6 @@ fn _validate_diagnostic_range(document: &RubyDocument, range: &Range) -> bool {
         return false;
     }
 
-    // Check if character positions are valid for their respective lines
     if let Some(start_line) = lines.get(range.start.line as usize) {
         if range.start.character as usize > start_line.len() {
             warn!(
