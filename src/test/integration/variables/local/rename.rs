@@ -80,3 +80,32 @@ end
     )
     .await;
 }
+
+/// Rename a method parameter - should find all usages of the parameter
+#[tokio::test]
+async fn rename_method_parameter() {
+    check(
+        r#"
+def greet(name)
+  puts "Hello, #{name<rename to="user">}!"
+  puts name.upcase
+end
+"#,
+    )
+    .await;
+}
+
+/// Rename a method parameter used in a block inside the method
+#[tokio::test]
+async fn rename_method_parameter_in_block() {
+    check(
+        r#"
+def process(items)
+  items.each do |item|
+    puts item<rename to="i">
+  end
+end
+"#,
+    )
+    .await;
+}

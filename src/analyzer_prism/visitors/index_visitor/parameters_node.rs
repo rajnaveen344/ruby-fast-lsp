@@ -121,6 +121,12 @@ impl IndexVisitor {
         if let Ok(entry) = entry {
             self.document
                 .add_local_var_entry(current_scope, entry.clone());
+
+            // Also add to ScopeTree for rename/references
+            let location = self.document.prism_location_to_lsp_location(&location);
+            self.document
+                .scope_tree_mut()
+                .define_variable(param_name, location);
         } else {
             error!("Error creating entry for parameter: {}", param_name);
         }
