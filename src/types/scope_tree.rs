@@ -322,10 +322,14 @@ impl ScopeTree {
     }
 
     /// Find a local variable definition by name in a scope or parent scopes
-    pub fn find_variable(&self, name: &str, scope_id: LVScopeId) -> Option<(LVScopeId, &VariableNode)> {
+    pub fn find_variable(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+    ) -> Option<(LVScopeId, &VariableNode)> {
         let name_key = ustr::ustr(name);
         let mut current = Some(scope_id);
-        
+
         while let Some(sid) = current {
             if let Some(scope) = self.scopes.get(sid) {
                 for var in &scope.local_variables {
@@ -333,21 +337,20 @@ impl ScopeTree {
                         return Some((sid, var));
                     }
                 }
-                
+
                 // If hard boundary, stop
                 if scope.kind.is_hard_scope_boundary() {
                     return None;
                 }
-                
+
                 current = scope.parent;
             } else {
                 return None;
             }
         }
-        
+
         None
     }
-}
 
     /// Find a child scope that matches the given range
     pub fn find_child_scope_by_range(

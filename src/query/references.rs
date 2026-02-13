@@ -90,7 +90,7 @@ impl IndexQuery {
         }
     }
 
-    /// Find references to a local variable using document.lvars (file-local storage).
+    /// Find references to a local variable using ScopeTree.
     fn find_local_variable_references(
         &self,
         name: &str,
@@ -98,32 +98,22 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
+
+        // Use ScopeTree to find all references
+        let targets = document
+            .get_scope_tree()
+            .find_rename_targets(name, scope_id);
+
+        if targets.is_empty() {
+            return None;
+        }
+
         let mut all_locations = Vec::new();
-
-        // Get the definition location for this scope
-        if let Some(entries) = document.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    if &data.name == name {
-                        all_locations.push(Location {
-                            uri: document.uri.clone(),
-                            range: entry.location.range,
-                        });
-                        break;
-                    }
-                }
-            }
+        for target in targets {
+            all_locations.push(target.location);
         }
 
-        // Get all references to this local variable (scoped)
-        let refs = document.get_lvar_references(name, &[scope_id]);
-        all_locations.extend(refs);
-
-        if all_locations.is_empty() {
-            None
-        } else {
-            Some(all_locations)
-        }
+        Some(all_locations)
     }
 }
 

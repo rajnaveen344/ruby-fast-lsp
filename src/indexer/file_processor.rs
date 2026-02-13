@@ -252,26 +252,15 @@ impl FileProcessor {
                 );
                 visitor.visit(&node);
 
-                // Merge lvar_references from visitor's document into existing document
-                {
-                    let docs = server.docs.lock();
-                    if let Some(doc_arc) = docs.get(uri) {
-                        let mut doc = doc_arc.write();
-                        doc.clear_lvar_references();
-                        for ((scope_id, name), locations) in
-                            visitor.document.get_all_lvar_references()
-                        {
-                            for location in locations {
-                                doc.add_lvar_reference(*scope_id, *name, location.clone());
-                            }
-                        }
-                    }
+                // Update the document with ScopeTree from visitor (includes references)
+                let docs = server.docs.lock();
+                if let Some(doc_arc) = docs.get(uri) {
+                    let mut doc = doc_arc.write();
+                    doc.scope_tree = visitor.document.scope_tree;
                 }
             } else {
                 warn!("Document not found for reference indexing: {}", uri);
             }
-
-            // Merge lvar_references from visitor's document into existing document
         }
 
         // Mark as indexed

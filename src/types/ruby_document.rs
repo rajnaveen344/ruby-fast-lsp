@@ -29,11 +29,9 @@ pub struct RubyDocument {
     /// Inlay hints in the document for modules, classes, methods, etc.
     inlay_hints: Vec<InlayHint>,
 
-    /// Local variables in the document (definitions)
+    /// Local variables in the document (definitions with type info)
+    /// Kept for hover/inlay hints which need the Entry type info
     lvars: BTreeMap<LVScopeId, Vec<Entry>>,
-
-    /// Local variable references (keyed by (scope_id, variable_name) for proper scoping)
-    lvar_references: HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>>,
 
     /// Comments in the document (start_offset, end_offset)
     comments: Vec<(usize, usize)>,
@@ -42,8 +40,8 @@ pub struct RubyDocument {
     /// Key = offset where state was recorded, Value = variables and their types at that point
     var_types: BTreeMap<usize, HashMap<String, RubyType>>,
 
-    /// Scope tree for local variable tracking (used for rename)
-    scope_tree: ScopeTree,
+    /// Scope tree for local variable tracking (used for rename and references)
+    pub scope_tree: ScopeTree,
 }
 
 impl RubyDocument {
@@ -58,7 +56,6 @@ impl RubyDocument {
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
             lvars: BTreeMap::new(),
-            lvar_references: HashMap::new(),
             comments,
             var_types: BTreeMap::new(),
             scope_tree: ScopeTree::new(),
@@ -86,7 +83,6 @@ impl RubyDocument {
         self.content = content;
         self.version = version;
         self.lvars.clear();
-        self.lvar_references.clear();
         self.var_types.clear();
         self.scope_tree = ScopeTree::new();
         self.compute_line_offsets();
@@ -295,19 +291,6 @@ impl RubyDocument {
         None
     }
 
-    /// Add a reference to a local variable (scoped by scope_id)
-    pub fn add_lvar_reference(
-        &mut self,
-        scope_id: LVScopeId,
-        name: ustr::Ustr,
-        location: LspLocation,
-    ) {
-        self.lvar_references
-            .entry((scope_id, name))
-            .or_default()
-            .push(location);
-    }
-
     /// Update the type of a local variable (persistence from inference)
     pub fn update_local_var_type(
         &mut self,
@@ -333,30 +316,6 @@ impl RubyDocument {
                 }
             }
         }
-    }
-
-    /// Get all references to a local variable by name within specific scopes
-    pub fn get_lvar_references(&self, name: &str, scope_ids: &[LVScopeId]) -> Vec<LspLocation> {
-        let uname = ustr::ustr(name);
-        let mut refs = Vec::new();
-        for &scope_id in scope_ids {
-            if let Some(locations) = self.lvar_references.get(&(scope_id, uname)) {
-                refs.extend(locations.iter().cloned());
-            }
-        }
-        refs
-    }
-
-    /// Clear all local variable references (called before re-indexing)
-    pub fn clear_lvar_references(&mut self) {
-        self.lvar_references.clear();
-    }
-
-    /// Get all local variable references (for merging into another document)
-    pub fn get_all_lvar_references(
-        &self,
-    ) -> &std::collections::HashMap<(LVScopeId, ustr::Ustr), Vec<LspLocation>> {
-        &self.lvar_references
     }
 
     /// Count total number of local variable entries (for diagnostics)
