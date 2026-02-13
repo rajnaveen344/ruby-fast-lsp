@@ -9,6 +9,7 @@ use crate::{
     indexer::entry::{Entry, EntryKind},
     inferrer::RubyType,
     types::scope::LVScopeId,
+    types::scope_tree::ScopeTree,
 };
 
 /// A document representation that handles conversions between byte offsets and LSP positions
@@ -40,6 +41,9 @@ pub struct RubyDocument {
     /// Variable types at each offset (simple BTreeMap for easy queries)
     /// Key = offset where state was recorded, Value = variables and their types at that point
     var_types: BTreeMap<usize, HashMap<String, RubyType>>,
+
+    /// Scope tree for local variable tracking (used for rename)
+    scope_tree: ScopeTree,
 }
 
 impl RubyDocument {
@@ -57,6 +61,7 @@ impl RubyDocument {
             lvar_references: HashMap::new(),
             comments,
             var_types: BTreeMap::new(),
+            scope_tree: ScopeTree::new(),
         };
         doc.compute_line_offsets();
         doc
@@ -83,6 +88,7 @@ impl RubyDocument {
         self.lvars.clear();
         self.lvar_references.clear();
         self.var_types.clear();
+        self.scope_tree = ScopeTree::new();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }
@@ -201,6 +207,16 @@ impl RubyDocument {
     /// Returns a reference to the entire lvars map for iteration
     pub fn get_all_lvars(&self) -> &std::collections::BTreeMap<LVScopeId, Vec<Entry>> {
         &self.lvars
+    }
+
+    /// Returns a mutable reference to the scope tree for building during indexing
+    pub fn scope_tree_mut(&mut self) -> &mut ScopeTree {
+        &mut self.scope_tree
+    }
+
+    /// Get the scope tree for queries
+    pub fn get_scope_tree(&self) -> &ScopeTree {
+        &self.scope_tree
     }
 
     /// Get the type of a variable at a specific offset

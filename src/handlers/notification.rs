@@ -98,6 +98,7 @@ pub async fn handle_initialize(
         document_on_type_formatting_provider: Some(
             capabilities::formatting::get_document_on_type_formatting_options(),
         ),
+        rename_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     };
 

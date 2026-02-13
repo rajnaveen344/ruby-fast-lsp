@@ -5,7 +5,7 @@
 
 use crate::capabilities::{
     code_lens, completion, debug, definitions, document_symbols, folding_range, formatting, hover,
-    inlay_hints, namespace_tree, references, semantic_tokens, type_hierarchy, workspace_symbols,
+    inlay_hints, namespace_tree, references, rename, semantic_tokens, type_hierarchy, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info, trace};
@@ -277,6 +277,20 @@ pub async fn handle_subtypes(
         "[PERF] Subtypes completed in {:?}, returned {} items",
         start_time.elapsed(),
         count
+    );
+    Ok(result)
+}
+
+pub async fn handle_rename(
+    lang_server: &RubyLanguageServer,
+    params: RenameParams,
+) -> LspResult<Option<WorkspaceEdit>> {
+    info!("Rename request received for: {:?}", params.text_document_position);
+    let start_time = std::time::Instant::now();
+    let result = rename::handle_rename(lang_server, params).await;
+    info!(
+        "[PERF] Rename completed in {:?}",
+        start_time.elapsed()
     );
     Ok(result)
 }

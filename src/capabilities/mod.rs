@@ -11,6 +11,7 @@ pub mod indexing;
 pub mod inlay_hints;
 pub mod namespace_tree;
 pub mod references;
+pub mod rename;
 pub mod semantic_tokens;
 pub mod type_hierarchy;
 pub mod workspace_symbols;

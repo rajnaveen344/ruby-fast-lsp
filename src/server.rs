@@ -24,9 +24,9 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
     FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
     InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
-    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, TypeHierarchyItem,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
-    WorkspaceSymbolParams,
+    RenameParams, SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit,
+    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Url, WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -597,5 +597,12 @@ impl LanguageServer for RubyLanguageServer {
         params: TypeHierarchySubtypesParams,
     ) -> LspResult<Option<Vec<TypeHierarchyItem>>> {
         request::handle_subtypes(self, params).await
+    }
+
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> LspResult<Option<WorkspaceEdit>> {
+        request::handle_rename(self, params).await
     }
 }
