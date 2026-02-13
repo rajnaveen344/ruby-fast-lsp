@@ -138,15 +138,28 @@ impl ScopeTree {
 
     /// Record a reference to a variable. Walks up parent scopes to find the definition.
     /// Returns (scope_id, variable_index) if found, and whether it was captured from an outer scope.
+    /// Also records the read location.
     pub fn reference_variable(
         &mut self,
         name: &str,
-        _location: Location,
+        location: Location,
     ) -> Option<(LVScopeId, usize, bool)> {
         let current = self.current?;
         let name_key = ustr::ustr(name);
 
-        self.reference_variable_from_scope(current, name_key)
+        // Try to find the variable in current or parent scopes
+        let result = self.reference_variable_from_scope(current, name_key);
+
+        // If found, record the read location
+        if let Some((scope_id, var_idx, _)) = result {
+            if let Some(scope) = self.scopes.get_mut(scope_id) {
+                if let Some(var) = scope.local_variables.get_mut(var_idx) {
+                    var.read_locations.push(location);
+                }
+            }
+        }
+
+        result
     }
 
     fn reference_variable_from_scope(
@@ -295,6 +308,62 @@ impl ScopeTree {
     /// Get a scope's kind
     pub fn scope_kind(&self, scope_id: LVScopeId) -> Option<LVScopeKind> {
         self.scopes.get(scope_id).map(|s| s.kind)
+    }
+
+    /// Get all local variable definitions across all scopes
+    pub fn get_all_definitions(&self) -> Vec<(LVScopeId, &VariableNode)> {
+        let mut results = Vec::new();
+        for scope in &self.scopes {
+            for var in &scope.local_variables {
+                results.push((scope.id, var));
+            }
+        }
+        results
+    }
+
+    /// Find a local variable definition by name in a scope or parent scopes
+    pub fn find_variable(&self, name: &str, scope_id: LVScopeId) -> Option<(LVScopeId, &VariableNode)> {
+        let name_key = ustr::ustr(name);
+        let mut current = Some(scope_id);
+        
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get(sid) {
+                for var in &scope.local_variables {
+                    if var.name == name_key {
+                        return Some((sid, var));
+                    }
+                }
+                
+                // If hard boundary, stop
+                if scope.kind.is_hard_scope_boundary() {
+                    return None;
+                }
+                
+                current = scope.parent;
+            } else {
+                return None;
+            }
+        }
+        
+        None
+    }
+}
+
+    /// Find a child scope that matches the given range
+    pub fn find_child_scope_by_range(
+        &self,
+        parent_id: LVScopeId,
+        range: Range,
+    ) -> Option<LVScopeId> {
+        let scope = self.scopes.get(parent_id)?;
+        for &child_id in &scope.children {
+            if let Some(child) = self.scopes.get(child_id) {
+                if child.range == range {
+                    return Some(child_id);
+                }
+            }
+        }
+        None
     }
 }
 

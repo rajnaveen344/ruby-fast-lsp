@@ -252,11 +252,18 @@ impl IndexVisitor {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc, scope_kind));
+            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));
+
+        self.document.scope_tree_mut().enter_scope(
+            scope_kind,
+            body_loc.range,
+            Some(method_name_str.to_string()),
+        );
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
         self.scope_tracker.pop_lv_scope();
+        self.document.scope_tree_mut().exit_scope();
     }
 
     /// Extract parameter information from a DefNode for inlay hints

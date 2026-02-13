@@ -71,13 +71,15 @@ impl IndexVisitor {
 
         let fqn = FullyQualifiedName::local_variable(variable_name.clone(), current_scope).unwrap();
 
+        // Get location for both index entry and ScopeTree
+        let location = self.document.prism_location_to_lsp_location(&name_loc);
+
         let entry = {
-            let location = self.document.prism_location_to_lsp_location(&name_loc);
             let assignment_range = location.range.clone();
             let mut index = self.index.lock();
             EntryBuilder::new()
                 .fqn(fqn)
-                .location(location)
+                .location(location.clone())
                 .kind(EntryKind::new_local_variable(
                     variable_name.clone(),
                     current_scope,
@@ -92,6 +94,12 @@ impl IndexVisitor {
             // This is a performance optimization - file-local data should not bloat the global index
             self.document
                 .add_local_var_entry(current_scope, entry.clone());
+
+            // Also add to ScopeTree for rename support
+            self.document
+                .scope_tree_mut()
+                .define_variable(&variable_name, location.clone());
+
             trace!(
                 "Added local variable entry with type: {:?} -> {:?}",
                 variable_name,

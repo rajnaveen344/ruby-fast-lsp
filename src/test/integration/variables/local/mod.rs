@@ -5,3 +5,4 @@
 //! - src/test/integration/inlay_hints/
 
 mod rename;
+mod rename_precision;

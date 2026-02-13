@@ -38,6 +38,14 @@ impl IndexVisitor {
             LVScopeKind::Constant,
         ));
 
+        // Get class name for scope tree
+        let class_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        self.document.scope_tree_mut().enter_scope(
+            LVScopeKind::Constant,
+            body_loc.range,
+            Some(class_name),
+        );
+
         let ns_stack = self.scope_tracker.get_ns_stack();
         let location = self
             .document
@@ -92,6 +100,7 @@ impl IndexVisitor {
     pub fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
         self.scope_tracker.pop_lv_scope();
+        self.document.scope_tree_mut().exit_scope();
     }
 
     /// Create a MixinRef for the superclass constant path

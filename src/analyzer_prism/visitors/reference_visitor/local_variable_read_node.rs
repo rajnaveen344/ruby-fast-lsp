@@ -14,14 +14,13 @@ impl ReferenceVisitor {
             .document
             .prism_location_to_lsp_location(&node.location());
 
-        // LocalVariable references are stored in document.lvar_references (NOT global index)
-        let lv_stack = self.scope_tracker.get_lv_stack();
-        let scope_ids: Vec<_> = lv_stack.iter().map(|s| s.scope_id()).collect();
-
-        if let Some(found_scope_id) = self
+        // First, use ScopeTree to record the reference and find the scope
+        if let Some((found_scope_id, _var_idx, _captured)) = self
             .document
-            .find_local_var_scope(&variable_name, &scope_ids)
+            .scope_tree_mut()
+            .reference_variable(&variable_name, location.clone())
         {
+            // Also store in legacy lvar_references for now (until we fully migrate)
             self.document
                 .add_lvar_reference(found_scope_id, ustr(&variable_name), location);
         }
