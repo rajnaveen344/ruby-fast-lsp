@@ -4,5 +4,6 @@
 //! - src/test/integration/hover/
 //! - src/test/integration/inlay_hints/
 
+mod references;
 mod rename;
 mod rename_precision;
