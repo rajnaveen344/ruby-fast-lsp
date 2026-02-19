@@ -3,7 +3,7 @@
 //! Tests for the rename refactoring capability for local variables.
 //!
 //! Note: Currently only supports local variables within a single scope.
-//! Future: ScopeTree for proper capture handling in blocks.
+//! Future: VariableScopes for proper capture handling in blocks.
 
 use crate::test::harness::check;
 

@@ -13,9 +13,9 @@ impl ReferenceVisitor {
             .document
             .prism_location_to_lsp_location(&node.location());
 
-        // Use ScopeTree to record the reference
+        // Use VariableScopes to record the reference
         self.document
-            .scope_tree_mut()
+            .variable_scopes_mut()
             .reference_variable(&variable_name, location);
     }
 

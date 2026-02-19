@@ -5,7 +5,6 @@
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
-use crate::utils::position_to_offset;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
@@ -23,10 +22,20 @@ impl<'a> LocalVariableResolver<'a> {
     }
 
     /// Resolve the type of a local variable at the given position
-    pub fn resolve(&self, name: &str, position: Position, content: &str) -> Option<RubyType> {
-        let offset = position_to_offset(content, position);
+    pub fn resolve(&self, name: &str, position: Position, _content: &str) -> Option<RubyType> {
         let doc = self.document.read();
-        doc.get_var_type(offset, name).cloned()
+        let scope_id = doc
+            .variable_scopes()
+            .find_scope_for_variable_at(name, position)
+            .or_else(|| doc.variable_scopes().scope_at_position(position))?;
+        let ty = doc
+            .variable_scopes()
+            .get_type_at_position(name, scope_id, position)?;
+        if *ty != RubyType::Unknown {
+            Some(ty.clone())
+        } else {
+            None
+        }
     }
 
     /// Get a reference to the index

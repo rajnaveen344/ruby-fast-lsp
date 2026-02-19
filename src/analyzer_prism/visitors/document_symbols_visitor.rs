@@ -20,6 +20,7 @@ pub struct DocumentSymbolsVisitor<'a> {
     visibility_stack: Vec<MethodVisibility>, // Stack of visibility states for nested scopes
     scope_tracker: ScopeTracker,
     scope_to_symbol_index: HashMap<usize, usize>, // scope_id -> symbol_index
+    scope_id_stack: Vec<usize>,                    // Stack of scope_ids for hierarchy building
 }
 
 impl<'a> DocumentSymbolsVisitor<'a> {
@@ -28,8 +29,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             flat_symbols: Vec::new(),
             document,
             visibility_stack: vec![MethodVisibility::Public], // Start with public visibility
-            scope_tracker: ScopeTracker::new(document),
+            scope_tracker: ScopeTracker::new(),
             scope_to_symbol_index: std::collections::HashMap::new(),
+            scope_id_stack: Vec::new(),
         }
     }
 
@@ -119,13 +121,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
     }
 
     fn find_current_parent_index(&self) -> Option<usize> {
-        // Look for the most recent container symbol in the current scope
-        if let Some(current_scope) = self.scope_tracker.current_lv_scope() {
-            let scope_id = current_scope.scope_id();
-            self.scope_to_symbol_index.get(&scope_id).copied()
-        } else {
-            None
-        }
+        // Use the scope_id_stack to find the current innermost scope
+        let scope_id = self.scope_id_stack.last()?;
+        self.scope_to_symbol_index.get(scope_id).copied()
     }
 
     fn create_symbol(
@@ -172,7 +170,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Handle scope tracking similar to IndexVisitor
-        let body_loc = if let Some(body) = node.body() {
+        let _body_loc = if let Some(body) = node.body() {
             self.document
                 .prism_location_to_lsp_location(&body.location())
         } else {
@@ -185,19 +183,14 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             self.scope_tracker.push_ns_scope(namespace);
         }
 
-        // Push local variable scope
-        // Use the class node's start offset + 1 as the scope_id to avoid collision
-        // with the top-level scope (which has scope_id = 0)
-        let scope_id = node.location().start_offset() + 1;
-        let lv_scope = crate::types::scope::LVScope::new(
-            scope_id,
-            body_loc,
-            crate::types::scope::LVScopeKind::Constant,
-        );
-        self.scope_tracker.push_lv_scope(lv_scope);
+        // Push local variable scope kind
+        self.scope_tracker
+            .push_scope_kind(crate::types::scope::LVScopeKind::Constant);
 
         // Map scope to symbol for hierarchy building
+        let scope_id = node.location().start_offset() + 1;
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
+        self.scope_id_stack.push(scope_id);
 
         // Push new visibility scope (classes start with public visibility)
         self.push_visibility_scope();
@@ -205,7 +198,8 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
     fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
-        self.scope_tracker.pop_lv_scope();
+        self.scope_tracker.pop_scope_kind();
+        self.scope_id_stack.pop();
         // Pop visibility scope when exiting class
         self.pop_visibility_scope();
     }
@@ -218,7 +212,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
         // Handle scope tracking
-        let body_loc = if let Some(body) = node.body() {
+        let _body_loc = if let Some(body) = node.body() {
             self.document
                 .prism_location_to_lsp_location(&body.location())
         } else {
@@ -231,19 +225,14 @@ impl<'a> DocumentSymbolsVisitor<'a> {
             self.scope_tracker.push_ns_scope(namespace);
         }
 
-        // Push local variable scope
-        // Use the module node's start offset + 1 as the scope_id to avoid collision
-        // with the top-level scope (which has scope_id = 0)
-        let scope_id = node.location().start_offset() + 1;
-        let lv_scope = crate::types::scope::LVScope::new(
-            scope_id,
-            body_loc,
-            crate::types::scope::LVScopeKind::Constant,
-        );
-        self.scope_tracker.push_lv_scope(lv_scope);
+        // Push local variable scope kind
+        self.scope_tracker
+            .push_scope_kind(crate::types::scope::LVScopeKind::Constant);
 
         // Map scope to symbol for hierarchy building
+        let scope_id = node.location().start_offset() + 1;
         self.scope_to_symbol_index.insert(scope_id, symbol_index);
+        self.scope_id_stack.push(scope_id);
 
         // Push new visibility scope (modules start with public visibility)
         self.push_visibility_scope();
@@ -251,7 +240,8 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
     fn process_module_node_exit(&mut self, _node: &ModuleNode) {
         self.scope_tracker.pop_ns_scope();
-        self.scope_tracker.pop_lv_scope();
+        self.scope_tracker.pop_scope_kind();
+        self.scope_id_stack.pop();
         // Pop visibility scope when exiting module
         self.pop_visibility_scope();
     }
@@ -280,22 +270,17 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol = self.create_symbol(name, SymbolKind::METHOD, &node.location(), namespace_kind);
         let _symbol_index = self.add_symbol_to_flat_list(symbol);
 
-        // Push method scope
-        let method_loc = self
-            .document
-            .prism_location_to_lsp_location(&node.location());
-        let scope_id = self.document.position_to_offset(method_loc.range.start);
+        // Push method scope kind
         let scope_kind = if node.receiver().is_some() || self.scope_tracker.in_singleton() {
             crate::types::scope::LVScopeKind::ClassMethod
         } else {
             crate::types::scope::LVScopeKind::InstanceMethod
         };
-        let lv_scope = crate::types::scope::LVScope::new(scope_id, method_loc, scope_kind);
-        self.scope_tracker.push_lv_scope(lv_scope);
+        self.scope_tracker.push_scope_kind(scope_kind);
     }
 
     fn process_def_node_exit(&mut self, _node: &DefNode) {
-        self.scope_tracker.pop_lv_scope();
+        self.scope_tracker.pop_scope_kind();
     }
 
     fn process_constant_write_node_entry(&mut self, node: &ConstantWriteNode) {

@@ -2,7 +2,6 @@ use ruby_prism::*;
 use tower_lsp::lsp_types::Diagnostic;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::resolver::MethodResolver;
@@ -38,7 +37,7 @@ pub struct IndexVisitor {
 
 impl IndexVisitor {
     pub fn new(index: Index<Unlocked>, document: RubyDocument) -> Self {
-        let scope_tracker = ScopeTracker::new(&document);
+        let scope_tracker = ScopeTracker::new();
         Self {
             index,
             document,
@@ -145,36 +144,28 @@ impl IndexVisitor {
 
     /// Helper to get the type of a local variable by name at a given location.
     fn get_local_var_type(&self, var_name: &str, location: &Location) -> Option<RubyType> {
-        let lvar_line = self
+        let position = self
             .document
             .prism_location_to_lsp_range(location)
-            .start
-            .line;
+            .start;
 
-        // Search all scopes for this variable
-        for (_scope_id, entries) in self.document.get_all_lvars() {
-            // Find entries for this variable that are before the read position
-            let matching_entry = entries
-                .iter()
-                .filter(|entry| {
-                    if let EntryKind::LocalVariable(data) = &entry.kind {
-                        data.name == var_name && entry.location.range.start.line < lvar_line
-                    } else {
-                        false
-                    }
-                })
-                .last();
+        // Use VariableScopes tree for type lookup
+        let scope_id = self
+            .document
+            .variable_scopes()
+            .find_scope_for_variable_at(var_name, position)
+            .or_else(|| self.document.variable_scopes().scope_at_position(position))?;
 
-            if let Some(entry) = matching_entry {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    if let Some(assignment) = data.assignments.last() {
-                        return Some(assignment.r#type.clone());
-                    }
-                }
-            }
+        let ty = self
+            .document
+            .variable_scopes()
+            .get_type_at_position(var_name, scope_id, position)?;
+
+        if *ty != RubyType::Unknown {
+            Some(ty.clone())
+        } else {
+            None
         }
-
-        None
     }
 
     /// Helper to flatten a ConstantPathNode into a string (e.g., "Module::Class")

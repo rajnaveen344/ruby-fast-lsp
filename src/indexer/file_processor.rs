@@ -168,17 +168,16 @@ impl FileProcessor {
             diagnostics.extend(visitor.diagnostics);
 
             // Run TypeTracker to infer types for all code
-            let mut updated_document = visitor.document.clone();
+            let updated_document = visitor.document.clone();
             if let Some(program) = node.as_program_node() {
                 // Track top-level statements (outside methods)
                 let mut top_level_tracker =
                     TypeTracker::new(content.as_bytes(), self.index.clone(), uri);
                 top_level_tracker.track_program(&program);
 
-                // Store variable types in document (simple BTreeMap)
-                for (offset, vars) in top_level_tracker.into_var_types() {
-                    updated_document.set_vars_at(offset, vars);
-                }
+                // TypeTracker results are no longer needed — VariableScopes tree
+                // already has types from IndexVisitor at assignment positions.
+                let _var_types = top_level_tracker.into_var_types();
 
                 // NOTE: Method return types are ONLY derived from YARD/RBS signatures.
                 // We do NOT infer return types from method bodies to keep the system simple and fast.
@@ -252,11 +251,11 @@ impl FileProcessor {
                 );
                 visitor.visit(&node);
 
-                // Update the document with ScopeTree from visitor (includes references)
+                // Update the document with VariableScopes from visitor (includes references)
                 let docs = server.docs.lock();
                 if let Some(doc_arc) = docs.get(uri) {
                     let mut doc = doc_arc.write();
-                    doc.scope_tree = visitor.document.scope_tree;
+                    doc.variable_scopes = visitor.document.variable_scopes;
                 }
             } else {
                 warn!("Document not found for reference indexing: {}", uri);

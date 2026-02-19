@@ -8,7 +8,7 @@ use crate::indexer::entry::{
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
-use crate::types::scope::{LVScope, LVScopeKind};
+use crate::types::scope::LVScopeKind;
 
 use super::IndexVisitor;
 
@@ -31,16 +31,11 @@ impl IndexVisitor {
         }
 
         // Setup local variable scope
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker.push_lv_scope(LVScope::new(
-            scope_id,
-            body_loc.clone(),
-            LVScopeKind::Constant,
-        ));
+        self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
         // Get class name for scope tree
         let class_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        self.document.scope_tree_mut().enter_scope(
+        self.document.variable_scopes_mut().enter_scope(
             LVScopeKind::Constant,
             body_loc.range,
             Some(class_name),
@@ -99,8 +94,8 @@ impl IndexVisitor {
 
     pub fn process_class_node_exit(&mut self, _node: &ClassNode) {
         self.scope_tracker.pop_ns_scope();
-        self.scope_tracker.pop_lv_scope();
-        self.document.scope_tree_mut().exit_scope();
+        self.scope_tracker.pop_scope_kind();
+        self.document.variable_scopes_mut().exit_scope();
     }
 
     /// Create a MixinRef for the superclass constant path

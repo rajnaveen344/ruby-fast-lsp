@@ -6,7 +6,7 @@ use crate::{
     indexer::entry::NamespaceKind,
     types::{
         ruby_method::RubyMethod,
-        scope::{LVScope, LVScopeKind},
+        scope::LVScopeKind,
     },
 };
 
@@ -28,20 +28,18 @@ impl IdentifierVisitor {
             return;
         }
 
-        let body_loc = utils::get_body_location(
+        let _body_loc = utils::get_body_location(
             node.body().map(|b| b.location()),
             &node.location(),
             &self.document,
         );
 
         let method = method.unwrap();
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
         let scope_kind = match namespace_kind {
             NamespaceKind::Singleton => LVScopeKind::ClassMethod,
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));
+        self.scope_tracker.push_scope_kind(scope_kind);
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -61,7 +59,7 @@ impl IdentifierVisitor {
                 }),
                 Some(IdentifierType::MethodDef),
                 self.scope_tracker.get_ns_stack(),
-                self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
+                Some(0),
             );
         }
     }
@@ -78,7 +76,7 @@ impl IdentifierVisitor {
         );
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
-            self.scope_tracker.pop_lv_scope();
+            self.scope_tracker.pop_scope_kind();
         }
     }
 }

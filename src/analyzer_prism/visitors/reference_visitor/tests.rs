@@ -136,35 +136,25 @@ my_method
     let server = create_server().await;
     let uri = Url::parse("file:///local_vars.rb").unwrap();
 
-    // Test with local vars enabled - should store in document.lvars (NOT global index)
+    // Test with local vars enabled - should store in VariableScopes (NOT global index)
     open_file_with_options(&server, code, &uri, true);
 
-    // Verify LocalVariables are in document.lvars
+    // Verify LocalVariables are in VariableScopes
     let doc_guard = server.docs.lock();
     let doc = doc_guard.get(&uri).expect("Document should exist");
     let doc_read = doc.read();
 
-    // Check that the document has local variable entries
-    // Method body scope starts at a specific offset
-    let mut found_local_var = false;
-    for scope_id in 0..100 {
-        if let Some(entries) = doc_read.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let crate::indexer::entry::EntryKind::LocalVariable(data) = &entry.kind {
-                    if &data.name == "local_var" {
-                        found_local_var = true;
-                        break;
-                    }
-                }
-            }
-        }
-    }
+    let found_local_var = doc_read
+        .variable_scopes()
+        .get_all_definitions()
+        .iter()
+        .any(|(_, var)| var.name == "local_var");
     drop(doc_read);
     drop(doc_guard);
 
     assert!(
         found_local_var,
-        "Should find local_var in document.lvars when include_local_vars is true"
+        "Should find local_var in VariableScopes when include_local_vars is true"
     );
 
     // Verify LocalVariables are NOT in global index

@@ -12,7 +12,7 @@ use crate::{
     inferrer::return_type::infer_return_values_for_node,
 };
 
-use crate::types::scope::{LVScope, LVScopeKind};
+use crate::types::scope::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 use crate::yard::YardTypeConverter;
 
@@ -246,15 +246,13 @@ impl IndexVisitor {
             &self.document,
         );
 
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
         let scope_kind = match namespace_kind {
             NamespaceKind::Singleton => LVScopeKind::ClassMethod,
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
-        self.scope_tracker
-            .push_lv_scope(LVScope::new(scope_id, body_loc.clone(), scope_kind));
+        self.scope_tracker.push_scope_kind(scope_kind);
 
-        self.document.scope_tree_mut().enter_scope(
+        self.document.variable_scopes_mut().enter_scope(
             scope_kind,
             body_loc.range,
             Some(method_name_str.to_string()),
@@ -262,8 +260,8 @@ impl IndexVisitor {
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
-        self.scope_tracker.pop_lv_scope();
-        self.document.scope_tree_mut().exit_scope();
+        self.scope_tracker.pop_scope_kind();
+        self.document.variable_scopes_mut().exit_scope();
     }
 
     /// Extract parameter information from a DefNode for inlay hints

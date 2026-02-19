@@ -1,80 +1,34 @@
 use std::collections::HashSet;
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionItemLabelDetails};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Position};
 
-use crate::{
-    indexer::entry::entry_kind::EntryKind,
-    types::{ruby_document::RubyDocument, scope::LVScopeId},
-};
+use crate::types::ruby_document::RubyDocument;
 
 pub fn find_variable_completions(
     document: &RubyDocument,
-    scope_id: LVScopeId,
+    position: Position,
 ) -> Vec<CompletionItem> {
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
-    // Add local variable completions from the given scope
-    if let Some(entries) = document.get_local_var_entries(scope_id) {
-        for entry in entries {
-            match &entry.kind {
-                EntryKind::LocalVariable(data) => {
-                    let name = &data.name;
-                    if seen_variables.insert(name.clone()) {
-                        completions.push(CompletionItem {
-                            label: name.clone(),
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: Some(" local_variable".to_string()),
-                                description: None,
-                            }),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
-                    }
-                }
-                EntryKind::InstanceVariable(data) => {
-                    let name = &data.name;
-                    if seen_variables.insert(name.clone()) {
-                        completions.push(CompletionItem {
-                            label: name.clone(),
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: Some(" instance_variable".to_string()),
-                                description: None,
-                            }),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
-                    }
-                }
-                EntryKind::ClassVariable(data) => {
-                    let name = &data.name;
-                    if seen_variables.insert(name.clone()) {
-                        completions.push(CompletionItem {
-                            label: name.clone(),
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: Some(" class_variable".to_string()),
-                                description: None,
-                            }),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
-                    }
-                }
-                EntryKind::GlobalVariable(data) => {
-                    let name = &data.name;
-                    if seen_variables.insert(name.clone()) {
-                        completions.push(CompletionItem {
-                            label: name.clone(),
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: Some(" global_variable".to_string()),
-                                description: None,
-                            }),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
-                    }
-                }
-                _ => {}
-            }
+    let scope_id = match document.variable_scopes().scope_at_position(position) {
+        Some(id) => id,
+        None => return completions,
+    };
+
+    // Get visible variables from the VariableScopes tree (walks scope chain respecting boundaries)
+    let visible_vars = document.variable_scopes().get_visible_variables(scope_id);
+    for var in &visible_vars {
+        let name = var.name.to_string();
+        if seen_variables.insert(name.clone()) {
+            completions.push(CompletionItem {
+                label: name,
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: Some(" local_variable".to_string()),
+                    description: None,
+                }),
+                kind: Some(CompletionItemKind::VARIABLE),
+                ..Default::default()
+            });
         }
     }
 

@@ -195,72 +195,51 @@ impl<'a> TypeQuery<'a> {
         }
     }
 
-    /// Get local variable type hints from document.lvars
+    /// Get local variable type hints from VariableScopes tree
     fn get_local_var_hints(&self, document: &RubyDocument, range: &Range) -> Vec<TypeHint> {
         let mut hints = Vec::new();
         let content_str = std::str::from_utf8(self.content).unwrap_or("");
 
-        for (_scope_id, entries) in document.get_all_lvars() {
-            for entry in entries {
-                // Skip entries outside the requested range
-                if !Self::is_in_range(&entry.location.range.start, range)
-                    && !Self::is_in_range(&entry.location.range.end, range)
-                {
+        // Get all scopes and their variables from the VariableScopes tree
+        for scope_id in 0..document.variable_scopes().scope_count() {
+            let vars = document.variable_scopes().get_visible_variables(scope_id);
+            for var in vars {
+                let def_pos = &var.definition_location.range.end;
+                if !Self::is_in_range(def_pos, range) {
                     continue;
                 }
 
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    // Get type from assignment tracking
-                    let from_lvar = data.assignments.last().map(|a| a.r#type.clone());
+                // Get type from VariableScopes tree
+                let tree_type = document
+                    .variable_scopes()
+                    .get_type_at_position(&var.name.to_string(), scope_id, *def_pos)
+                    .cloned();
 
-                    // Resolve final type (type narrowing removed)
-                    let final_type = self.resolve_local_var_type_internal(
-                        content_str,
-                        &data.name,
-                        from_lvar.as_ref(),
-                        None,
-                    );
+                let final_type = if let Some(ref ty) = tree_type {
+                    if *ty != RubyType::Unknown {
+                        tree_type
+                    } else {
+                        // Fallback to AST-based inference
+                        let index = self.index.lock();
+                        infer_type_from_assignment(content_str, &var.name.to_string(), &index)
+                    }
+                } else {
+                    let index = self.index.lock();
+                    infer_type_from_assignment(content_str, &var.name.to_string(), &index)
+                };
 
-                    let ruby_type = final_type.unwrap_or(RubyType::Unknown);
+                let ruby_type = final_type.unwrap_or(RubyType::Unknown);
 
-                    hints.push(TypeHint {
-                        position: entry.location.range.end,
-                        ruby_type,
-                        kind: TypeHintKind::LocalVariable,
-                        tooltip: None,
-                    });
-                }
+                hints.push(TypeHint {
+                    position: *def_pos,
+                    ruby_type,
+                    kind: TypeHintKind::LocalVariable,
+                    tooltip: None,
+                });
             }
         }
 
         hints
-    }
-
-    /// Resolve local variable type using fallback chain
-    fn resolve_local_var_type_internal(
-        &self,
-        content: &str,
-        name: &str,
-        known_type: Option<&RubyType>,
-        type_narrowing: Option<RubyType>,
-    ) -> Option<RubyType> {
-        // 1. Try type narrowing
-        if let Some(ty) = type_narrowing {
-            if ty != RubyType::Unknown {
-                return Some(ty);
-            }
-        }
-
-        // 2. Try known type from assignment tracking
-        if let Some(ty) = known_type {
-            if *ty != RubyType::Unknown {
-                return Some(ty.clone());
-            }
-        }
-
-        // 3. Try fallback inference
-        let index = self.index.lock();
-        infer_type_from_assignment(content, name, &index)
     }
 
     /// Get method return type hints in a range (after inference has been done)

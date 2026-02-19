@@ -1,6 +1,6 @@
 use ruby_prism::BlockNode;
 
-use crate::types::scope::{LVScope, LVScopeKind};
+use crate::types::scope::LVScopeKind;
 
 use super::IndexVisitor;
 
@@ -13,19 +13,14 @@ impl IndexVisitor {
             self.document
                 .prism_location_to_lsp_location(&node.location())
         };
-        let scope_id = self.document.position_to_offset(body_loc.range.start);
-        self.scope_tracker.push_lv_scope(LVScope::new(
-            scope_id,
-            body_loc.clone(),
-            LVScopeKind::Block,
-        ));
+        self.scope_tracker.push_scope_kind(LVScopeKind::Block);
         self.document
-            .scope_tree_mut()
+            .variable_scopes_mut()
             .enter_scope(LVScopeKind::Block, body_loc.range, None);
     }
 
     pub fn process_block_node_exit(&mut self, _node: &BlockNode) {
-        self.scope_tracker.pop_lv_scope();
-        self.document.scope_tree_mut().exit_scope();
+        self.scope_tracker.pop_scope_kind();
+        self.document.variable_scopes_mut().exit_scope();
     }
 }

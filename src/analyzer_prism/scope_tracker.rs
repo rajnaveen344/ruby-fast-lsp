@@ -1,23 +1,27 @@
 use ruby_prism::Node;
-use tower_lsp::lsp_types::{Location as LspLocation, Range};
 
 use crate::{
     analyzer_prism::utils,
     indexer::entry::NamespaceKind,
-    types::{
-        ruby_document::RubyDocument,
-        ruby_namespace::RubyConstant,
-        scope::{LVScope, LVScopeKind, LVScopeStack},
-    },
+    types::{ruby_namespace::RubyConstant, scope::LVScopeKind},
 };
 
+/// Tracks namespace context and scope kinds during AST traversal.
+///
+/// Namespace tracking (frames) is used for FQN construction by all visitors.
+/// Scope kind tracking is a lightweight stack used by `current_method_context()`
+/// to determine instance vs class method context.
+///
+/// Note: Local variable scope *traversal* is handled by `VariableScopes`
+/// (enter_scope/exit_scope/enter_child_scope). This struct only tracks the
+/// *kind* of each scope for method context resolution.
 #[derive(Debug, Clone)]
 pub struct ScopeTracker {
     /// Ordered stack of namespace/singleton frames.
     frames: Vec<ScopeFrame>,
 
-    /// Local-variable scopes (method/block/rescue/lambda)
-    lv_stack: LVScopeStack,
+    /// Lightweight scope kind stack for `current_method_context()`
+    scope_kind_stack: Vec<LVScopeKind>,
 }
 
 /// Mixed scope frame – either a namespace or a `class << self` marker
@@ -37,24 +41,12 @@ pub enum ScopeFrame {
 }
 
 impl ScopeTracker {
-    pub fn new(document: &RubyDocument) -> Self {
-        let frames = Vec::new();
-        // We start with an empty namespace stack. Top-level constants are stored
-        // without any prefix, matching Ruby's internal representation.
-        let mut lv_stack = LVScopeStack::new();
-        let top_lv_scope = LVScope::new(
-            0,
-            LspLocation {
-                uri: document.uri.clone(),
-                range: Range::new(
-                    document.offset_to_position(0),
-                    document.offset_to_position(document.content.len()),
-                ),
-            },
-            LVScopeKind::Constant,
-        );
-        lv_stack.push(top_lv_scope);
-        Self { frames, lv_stack }
+    pub fn new() -> Self {
+        Self {
+            frames: Vec::new(),
+            // Start with a Constant scope kind (file-level)
+            scope_kind_stack: vec![LVScopeKind::Constant],
+        }
     }
 }
 
@@ -117,21 +109,13 @@ impl ScopeTracker {
         }
     }
 
-    // ---------- lv-scope helpers ----------
-    pub fn push_lv_scope(&mut self, scope: LVScope) {
-        self.lv_stack.push(scope);
+    // ---------- scope kind helpers ----------
+    pub fn push_scope_kind(&mut self, kind: LVScopeKind) {
+        self.scope_kind_stack.push(kind);
     }
 
-    pub fn pop_lv_scope(&mut self) {
-        self.lv_stack.pop();
-    }
-
-    pub fn current_lv_scope(&self) -> Option<&LVScope> {
-        self.lv_stack.last()
-    }
-
-    pub fn get_lv_stack(&self) -> LVScopeStack {
-        self.lv_stack.clone()
+    pub fn pop_scope_kind(&mut self) {
+        self.scope_kind_stack.pop();
     }
 
     // ---------- singleton helpers ----------
@@ -151,12 +135,12 @@ impl ScopeTracker {
         matches!(self.frames.last(), Some(ScopeFrame::Singleton))
     }
 
-    /// Returns the current method context based on the local variable scope stack.
+    /// Returns the current method context based on the scope kind stack.
     /// This helps determine whether bare method calls should be treated as instance or singleton methods.
     pub fn current_method_context(&self) -> NamespaceKind {
-        // Look for the most recent method scope in the LV stack
-        for scope in self.lv_stack.iter().rev() {
-            match scope.kind() {
+        // Look for the most recent method scope in the kind stack
+        for kind in self.scope_kind_stack.iter().rev() {
+            match kind {
                 LVScopeKind::InstanceMethod => return NamespaceKind::Instance,
                 LVScopeKind::ClassMethod => return NamespaceKind::Singleton,
                 LVScopeKind::Constant => break, // Hard scope boundary
@@ -184,48 +168,26 @@ impl ScopeTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ruby_document::RubyDocument;
-
-    // Helper that returns a minimal RubyDocument for constructing a ScopeTracker.
-    fn dummy_document() -> RubyDocument {
-        // The content is irrelevant for the scope-tracker tests; we only need a
-        // valid, non-empty document so that `offset_to_position` works.
-        let content = "# dummy\n".to_string();
-        RubyDocument::new("file:///dummy.rb".parse().unwrap(), content, 1)
-    }
+    use crate::types::ruby_namespace::RubyConstant;
 
     // ---------- constructor ----------
     #[test]
     fn test_new_initial_state() {
-        // ensure that a fresh `ScopeTracker` contains:
-        //   * no namespace frames (top-level has no artificial prefix)
-        //   * an `LVScopeStack` with a single `Constant` scope spanning the file
-        let doc = dummy_document();
-        let tracker = ScopeTracker::new(&doc);
+        let tracker = ScopeTracker::new();
 
         // Check namespace frames - should be empty at start
         assert_eq!(tracker.frames.len(), 0);
         assert!(tracker.get_ns_stack().is_empty());
 
-        // Check LV scope stack
-        let lv_stack = tracker.get_lv_stack();
-        assert_eq!(lv_stack.len(), 1);
-        let top_scope = lv_stack.last().unwrap();
-        assert_eq!(*top_scope.kind(), LVScopeKind::Constant);
-
-        // Check that the scope spans the entire document
-        let doc_content_len = doc.content.len();
-        let expected_range = Range::new(
-            doc.offset_to_position(0),
-            doc.offset_to_position(doc_content_len),
-        );
-        assert_eq!(top_scope.location().range, expected_range);
+        // Check scope kind stack starts with Constant
+        assert_eq!(tracker.scope_kind_stack.len(), 1);
+        assert_eq!(tracker.scope_kind_stack[0], LVScopeKind::Constant);
     }
 
     // ---------- namespace helpers ----------
     #[test]
     fn test_push_and_pop_ns_scope() {
-        let mut tracker = ScopeTracker::new(&dummy_document());
+        let mut tracker = ScopeTracker::new();
 
         // Initially empty namespace
         assert_eq!(tracker.frames.len(), 0);
@@ -267,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_get_ns_stack() {
-        let mut tracker = ScopeTracker::new(&dummy_document());
+        let mut tracker = ScopeTracker::new();
         let const_a = RubyConstant::new("A").unwrap();
         let const_b = RubyConstant::new("B").unwrap();
         let const_c = RubyConstant::new("C").unwrap();
@@ -281,57 +243,37 @@ mod tests {
         assert_eq!(tracker.get_ns_stack(), expected_stack);
     }
 
-    // ---------- lv-scope helpers ----------
+    // ---------- scope kind helpers ----------
     #[test]
-    fn test_push_pop_current_lv_scope() {
-        let doc = dummy_document();
-        let mut tracker = ScopeTracker::new(&doc);
+    fn test_push_pop_scope_kind() {
+        let mut tracker = ScopeTracker::new();
 
         // Initial state
-        assert_eq!(tracker.get_lv_stack().len(), 1);
-        assert_eq!(
-            tracker.current_lv_scope().unwrap().kind(),
-            &LVScopeKind::Constant
-        );
+        assert_eq!(tracker.scope_kind_stack.len(), 1);
+        assert_eq!(tracker.scope_kind_stack[0], LVScopeKind::Constant);
 
-        // Push a method scope
-        let method_scope = LVScope::new(
-            1,
-            LspLocation::new(doc.uri.clone(), Range::default()),
-            LVScopeKind::InstanceMethod,
-        );
-        tracker.push_lv_scope(method_scope.clone());
-        assert_eq!(tracker.get_lv_stack().len(), 2);
-        assert_eq!(tracker.current_lv_scope().unwrap(), &method_scope);
+        // Push a method scope kind
+        tracker.push_scope_kind(LVScopeKind::InstanceMethod);
+        assert_eq!(tracker.scope_kind_stack.len(), 2);
 
-        // Push a block scope
-        let block_scope = LVScope::new(
-            2,
-            LspLocation::new(doc.uri.clone(), Range::default()),
-            LVScopeKind::Block,
-        );
-        tracker.push_lv_scope(block_scope.clone());
-        assert_eq!(tracker.get_lv_stack().len(), 3);
-        assert_eq!(tracker.current_lv_scope().unwrap(), &block_scope);
+        // Push a block scope kind
+        tracker.push_scope_kind(LVScopeKind::Block);
+        assert_eq!(tracker.scope_kind_stack.len(), 3);
 
-        // Pop block scope
-        tracker.pop_lv_scope();
-        assert_eq!(tracker.get_lv_stack().len(), 2);
-        assert_eq!(tracker.current_lv_scope().unwrap(), &method_scope);
+        // Pop block
+        tracker.pop_scope_kind();
+        assert_eq!(tracker.scope_kind_stack.len(), 2);
 
-        // Pop method scope
-        tracker.pop_lv_scope();
-        assert_eq!(tracker.get_lv_stack().len(), 1);
-        assert_eq!(
-            tracker.current_lv_scope().unwrap().kind(),
-            &LVScopeKind::Constant
-        );
+        // Pop method
+        tracker.pop_scope_kind();
+        assert_eq!(tracker.scope_kind_stack.len(), 1);
+        assert_eq!(tracker.scope_kind_stack[0], LVScopeKind::Constant);
     }
 
     // ---------- singleton helpers ----------
     #[test]
     fn test_enter_and_exit_singleton() {
-        let mut tracker = ScopeTracker::new(&dummy_document());
+        let mut tracker = ScopeTracker::new();
 
         // Enter singleton
         tracker.enter_singleton();
@@ -356,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_in_singleton_behavior() {
-        let mut tracker = ScopeTracker::new(&dummy_document());
+        let mut tracker = ScopeTracker::new();
 
         // Initially not in singleton
         assert!(!tracker.in_singleton());

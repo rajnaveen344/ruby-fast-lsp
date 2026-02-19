@@ -10,7 +10,6 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
-use crate::utils::position_to_offset;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
@@ -64,13 +63,22 @@ impl<'a> ReceiverResolver<'a> {
         position: Position,
         content: &str,
     ) -> Option<RubyType> {
-        let offset = self.calculate_variable_offset(name, position, content);
-
-        // Try document snapshot first
+        // Try VariableScopes tree
         if let Some(doc_arc) = self.document {
             let doc = doc_arc.read();
-            if let Some(ty) = doc.get_var_type(offset, name) {
-                return Some(ty.clone());
+            if let Some(scope_id) = doc
+                .variable_scopes()
+                .find_scope_for_variable_at(name, position)
+                .or_else(|| doc.variable_scopes().scope_at_position(position))
+            {
+                if let Some(ty) = doc
+                    .variable_scopes()
+                    .get_type_at_position(name, scope_id, position)
+                {
+                    if *ty != RubyType::Unknown {
+                        return Some(ty.clone());
+                    }
+                }
             }
         }
 
@@ -89,29 +97,6 @@ impl<'a> ReceiverResolver<'a> {
         let inner_type = self.resolve(inner_receiver, position, content)?;
         let index = self.index.lock();
         MethodResolver::resolve_method_return_type(&index, &inner_type, method_name)
-    }
-
-    /// Calculate the byte offset for a variable
-    fn calculate_variable_offset(
-        &self,
-        var_name: &str,
-        position: Position,
-        content: &str,
-    ) -> usize {
-        let line = content.lines().nth(position.line as usize).unwrap_or("");
-        let before_cursor = &line[..std::cmp::min(position.character as usize, line.len())];
-
-        if let Some(var_pos) = before_cursor.rfind(var_name) {
-            position_to_offset(
-                content,
-                Position {
-                    line: position.line,
-                    character: var_pos as u32,
-                },
-            )
-        } else {
-            position_to_offset(content, position)
-        }
     }
 
     /// Infer type from constructor assignment pattern (e.g., x = Foo.new)

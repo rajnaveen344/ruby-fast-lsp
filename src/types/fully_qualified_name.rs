@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use ustr::Ustr;
 
-use crate::{analyzer_prism::Identifier, indexer::entry::NamespaceKind, types::scope::LVScopeId};
+use crate::{analyzer_prism::Identifier, indexer::entry::NamespaceKind};
 
 use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant};
 
@@ -21,8 +21,8 @@ pub enum FullyQualifiedName {
     /// Example: `Foo::Bar#baz` → `Method(vec!["Foo", "Bar"], RubyMethod::new("baz"))`
     Method(Vec<RubyConstant>, RubyMethod),
 
-    /// Local variable, e.g., `a = 1` → `LocalVariable("a", scope_id)`
-    LocalVariable(Ustr, LVScopeId),
+    /// Local variable, e.g., `a = 1` → `LocalVariable("a")`
+    LocalVariable(Ustr),
 
     /// Instance variable, e.g., `@name` → `InstanceVariable("@name")`
     InstanceVariable(Ustr),
@@ -98,9 +98,9 @@ impl FullyQualifiedName {
         }
     }
 
-    pub fn local_variable(name: String, scope_id: LVScopeId) -> Result<Self, &'static str> {
+    pub fn local_variable(name: String) -> Result<Self, &'static str> {
         Self::validate_local_variable(&name)?;
-        Ok(Self::LocalVariable(Ustr::from(&name), scope_id))
+        Ok(Self::LocalVariable(Ustr::from(&name)))
     }
 
     pub fn instance_variable(name: String) -> Result<Self, &'static str> {
@@ -247,7 +247,7 @@ impl FullyQualifiedName {
             FullyQualifiedName::Namespace(ns, _) => ns.clone(),
             FullyQualifiedName::Constant(ns) => ns.clone(),
             FullyQualifiedName::Method(ns, _) => ns.clone(),
-            FullyQualifiedName::LocalVariable(_, _) => vec![],
+            FullyQualifiedName::LocalVariable(_) => vec![],
             FullyQualifiedName::InstanceVariable(_) => vec![],
             FullyQualifiedName::ClassVariable(_) => vec![],
             FullyQualifiedName::GlobalVariable(_) => vec![],
@@ -259,7 +259,7 @@ impl FullyQualifiedName {
             FullyQualifiedName::Namespace(ns, _) => ns.is_empty(),
             FullyQualifiedName::Constant(ns) => ns.is_empty(),
             FullyQualifiedName::Method(ns, _) => ns.is_empty(),
-            FullyQualifiedName::LocalVariable(_, _) => true, // Variables are not namespaced
+            FullyQualifiedName::LocalVariable(_) => true, // Variables are not namespaced
             FullyQualifiedName::InstanceVariable(_) => true,
             FullyQualifiedName::ClassVariable(_) => true,
             FullyQualifiedName::GlobalVariable(_) => true,
@@ -276,7 +276,7 @@ impl FullyQualifiedName {
                 ns.last().map(|c| c.to_string()).unwrap_or_default()
             }
             FullyQualifiedName::Method(_, method) => method.to_string(),
-            FullyQualifiedName::LocalVariable(name, _) => name.to_string(),
+            FullyQualifiedName::LocalVariable(name) => name.to_string(),
             FullyQualifiedName::InstanceVariable(name) => name.to_string(),
             FullyQualifiedName::ClassVariable(name) => name.to_string(),
             FullyQualifiedName::GlobalVariable(name) => name.to_string(),
@@ -306,8 +306,8 @@ impl From<Identifier> for FullyQualifiedName {
             Identifier::RubyMethod {
                 namespace, iden, ..
             } => FullyQualifiedName::Method(namespace, iden),
-            Identifier::RubyLocalVariable { name, scope, .. } => {
-                FullyQualifiedName::LocalVariable(Ustr::from(&name), scope)
+            Identifier::RubyLocalVariable { name, .. } => {
+                FullyQualifiedName::LocalVariable(Ustr::from(&name))
             }
             Identifier::RubyInstanceVariable { name, .. } => {
                 FullyQualifiedName::InstanceVariable(Ustr::from(&name))
@@ -384,7 +384,7 @@ impl Display for FullyQualifiedName {
             FullyQualifiedName::Method(_, method) => {
                 write!(f, "{namespace}#{method}")
             }
-            FullyQualifiedName::LocalVariable(name, _) => write!(f, "{}", name),
+            FullyQualifiedName::LocalVariable(name) => write!(f, "{}", name),
             FullyQualifiedName::InstanceVariable(name) => write!(f, "{}", name),
             FullyQualifiedName::ClassVariable(name) => write!(f, "{}", name),
             FullyQualifiedName::GlobalVariable(name) => write!(f, "{}", name),

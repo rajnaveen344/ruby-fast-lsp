@@ -1,4 +1,4 @@
-//! Scope Tree - Tree structure for local variable scope tracking.
+//! Variable Scopes - Tree structure for local variable scope tracking.
 //!
 //! This module provides a tree-based representation of scopes in a Ruby document,
 //! enabling proper handling of variable capture in blocks and proper rename refactoring.
@@ -16,13 +16,14 @@
 
 use tower_lsp::lsp_types::{Location, Position, Range};
 
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::scope::LVScopeId;
 pub use crate::types::scope::LVScopeKind;
 
 /// A tree structure representing the nesting of local variable scopes.
 /// Each node represents a scope with its variables and relationships.
 #[derive(Clone)]
-pub struct ScopeTree {
+pub struct VariableScopes {
     /// All scope nodes indexed by LVScopeId
     scopes: Vec<ScopeNode>,
     /// Root scope id
@@ -31,7 +32,7 @@ pub struct ScopeTree {
     current: Option<LVScopeId>,
 }
 
-impl ScopeTree {
+impl VariableScopes {
     /// Create a new empty scope tree
     pub fn new() -> Self {
         let mut scopes = Vec::new();
@@ -134,13 +135,23 @@ impl ScopeTree {
         let scope = self.scopes.get_mut(current)?;
 
         let name_key = ustr::ustr(name);
-        let idx = scope.local_variables.len();
 
+        // Check if variable already exists in current scope (reassignment)
+        for (idx, var) in scope.local_variables.iter_mut().enumerate() {
+            if var.name == name_key {
+                // Record as a write location instead of creating a duplicate
+                var.write_locations.push(location);
+                return Some(idx);
+            }
+        }
+
+        let idx = scope.local_variables.len();
         scope.local_variables.push(VariableNode {
             name: name_key,
             definition_location: location,
             read_locations: Vec::new(),
             write_locations: Vec::new(),
+            type_assignments: Vec::new(),
         });
 
         Some(idx)
@@ -328,6 +339,11 @@ impl ScopeTree {
             }
         }
 
+        // Root scope (no parent) always matches - it covers the entire file
+        if scope.parent.is_none() {
+            return Some(scope_id);
+        }
+
         // Check if position is within this scope's range
         let range = &scope.range;
         let after_start = position.line > range.start.line
@@ -405,9 +421,145 @@ impl ScopeTree {
         }
         None
     }
+
+    /// Add a type assignment to a variable in a given scope.
+    /// If the variable doesn't exist in this scope, returns false.
+    pub fn add_type_assignment(
+        &mut self,
+        scope_id: LVScopeId,
+        var_name: &str,
+        range: Range,
+        ruby_type: RubyType,
+    ) -> bool {
+        let name_key = ustr::ustr(var_name);
+
+        // Walk the scope chain to find the variable (respecting hard boundaries)
+        let mut current = Some(scope_id);
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get_mut(sid) {
+                for var in &mut scope.local_variables {
+                    if var.name == name_key {
+                        var.type_assignments
+                            .push(TypeAssignment { range, ruby_type });
+                        return true;
+                    }
+                }
+                if scope.kind.is_hard_scope_boundary() {
+                    return false;
+                }
+                current = scope.parent;
+            } else {
+                return false;
+            }
+        }
+        false
+    }
+
+    /// Get the type of a variable at a given position.
+    /// Finds the latest type assignment whose range starts before or at the position.
+    /// Walks the scope chain respecting hard boundaries.
+    pub fn get_type_at_position(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        position: Position,
+    ) -> Option<&RubyType> {
+        let name_key = ustr::ustr(name);
+        let mut current = Some(scope_id);
+
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get(sid) {
+                for var in &scope.local_variables {
+                    if var.name == name_key {
+                        // Find the latest type assignment before the given position
+                        let best = var
+                            .type_assignments
+                            .iter()
+                            .filter(|ta| {
+                                ta.range.start.line < position.line
+                                    || (ta.range.start.line == position.line
+                                        && ta.range.start.character <= position.character)
+                            })
+                            .last();
+                        if let Some(ta) = best {
+                            return Some(&ta.ruby_type);
+                        }
+                        // Variable found but no type assignment before position
+                        return None;
+                    }
+                }
+
+                if scope.kind.is_hard_scope_boundary() {
+                    return None;
+                }
+
+                current = scope.parent;
+            } else {
+                return None;
+            }
+        }
+
+        None
+    }
+
+    /// Get the total number of scopes in the tree.
+    pub fn scope_count(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// Debug dump of the entire tree for diagnostics.
+    pub fn debug_dump(&self) -> String {
+        let mut out = String::new();
+        for scope in &self.scopes {
+            out.push_str(&format!(
+                "Scope {} (kind={:?}, range={:?}-{:?}, vars=[",
+                scope.id, scope.kind, scope.range.start, scope.range.end
+            ));
+            for (i, var) in scope.local_variables.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&format!(
+                    "{}(def={:?}, types={:?})",
+                    var.name,
+                    var.definition_location.range,
+                    var.type_assignments
+                        .iter()
+                        .map(|t| format!("{:?}@{:?}", t.ruby_type, t.range.start))
+                        .collect::<Vec<_>>()
+                ));
+            }
+            out.push_str("])\n");
+        }
+        out
+    }
+
+    /// Get all visible variables from a scope (walking up the chain respecting boundaries).
+    pub fn get_visible_variables(&self, scope_id: LVScopeId) -> Vec<&VariableNode> {
+        let mut result = Vec::new();
+        let mut current = Some(scope_id);
+
+        while let Some(sid) = current {
+            if let Some(scope) = self.scopes.get(sid) {
+                for var in &scope.local_variables {
+                    result.push(var);
+                }
+
+                if scope.kind.is_hard_scope_boundary() {
+                    break;
+                }
+
+                current = scope.parent;
+            } else {
+                break;
+            }
+        }
+
+        result
+    }
 }
 
-impl Default for ScopeTree {
+impl Default for VariableScopes {
     fn default() -> Self {
         Self::new()
     }
@@ -436,6 +588,15 @@ pub struct VariableNode {
     pub definition_location: Location,
     pub read_locations: Vec<Location>,
     pub write_locations: Vec<Location>,
+    /// Type assignments at specific ranges (for flow-sensitive type tracking)
+    pub type_assignments: Vec<TypeAssignment>,
+}
+
+/// A type assignment at a specific range (for flow-sensitive type tracking)
+#[derive(Clone)]
+pub struct TypeAssignment {
+    pub range: Range,
+    pub ruby_type: RubyType,
 }
 
 /// A reference to a variable from an outer scope (captured in a block)

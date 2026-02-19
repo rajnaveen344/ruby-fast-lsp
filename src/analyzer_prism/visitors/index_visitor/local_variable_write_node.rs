@@ -57,21 +57,13 @@ impl IndexVisitor {
             return;
         }
 
-        // Get current scope id for the local variable
-        let current_scope = match self.scope_tracker.current_lv_scope() {
-            Some(scope) => scope.scope_id(),
-            None => {
-                error!(
-                    "No current local variable scope available for variable: {}",
-                    variable_name
-                );
-                return;
-            }
-        };
+        // Scope id is no longer tracked by ScopeTracker; use dummy value
+        // since EntryKind::new_local_variable still requires it
+        let current_scope = 0usize;
 
-        let fqn = FullyQualifiedName::local_variable(variable_name.clone(), current_scope).unwrap();
+        let fqn = FullyQualifiedName::local_variable(variable_name.clone()).unwrap();
 
-        // Get location for both index entry and ScopeTree
+        // Get location for both index entry and VariableScopes
         let location = self.document.prism_location_to_lsp_location(&name_loc);
 
         let entry = {
@@ -89,16 +81,21 @@ impl IndexVisitor {
                 .build(&mut index)
         };
 
-        if let Ok(entry) = entry {
-            // NOTE: LocalVariables are stored ONLY in RubyDocument.lvars, NOT in global index
-            // This is a performance optimization - file-local data should not bloat the global index
+        if let Ok(_entry) = entry {
+            // Add to VariableScopes tree (the single source of truth for local variables)
             self.document
-                .add_local_var_entry(current_scope, entry.clone());
-
-            // Also add to ScopeTree for rename support
-            self.document
-                .scope_tree_mut()
+                .variable_scopes_mut()
                 .define_variable(&variable_name, location.clone());
+
+            // Dual-write: also store type in VariableScopes
+            if let Some(current_scope_id) = self.document.variable_scopes().current_scope() {
+                self.document.variable_scopes_mut().add_type_assignment(
+                    current_scope_id,
+                    &variable_name,
+                    location.range,
+                    inferred_type.clone(),
+                );
+            }
 
             trace!(
                 "Added local variable entry with type: {:?} -> {:?}",
@@ -203,7 +200,7 @@ mod tests {
         let index = create_test_index();
         let document =
             crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
-        let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new(&document);
+        let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new();
         let literal_analyzer = crate::inferrer::r#type::literal::LiteralAnalyzer::new();
 
         let visitor = IndexVisitor {
@@ -218,20 +215,27 @@ mod tests {
         (visitor, parse_result)
     }
 
+    /// Helper to check that a variable exists in VariableScopes
+    fn find_var_in_scopes(
+        visitor: &IndexVisitor,
+        name: &str,
+    ) -> bool {
+        let scopes = visitor.document.variable_scopes();
+        scopes
+            .get_all_definitions()
+            .iter()
+            .any(|(_, var)| var.name == name)
+    }
+
     #[test]
     fn test_index_visitor_infers_string_type() {
         let content = "name = 'John'";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
-
-        visitor.visit(&node);
-
-        // Check that type information was stored in document.lvars
-        let variable_entry = visitor.document.find_local_var_by_name("name");
+        visitor.visit(&parse_result.node());
 
         assert!(
-            variable_entry.is_some(),
-            "No type information was stored by IndexVisitor"
+            find_var_in_scopes(&visitor, "name"),
+            "No variable 'name' stored in VariableScopes"
         );
     }
 
@@ -239,16 +243,11 @@ mod tests {
     fn test_index_visitor_infers_integer_type() {
         let content = "age = 25";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
-
-        visitor.visit(&node);
-
-        // Check that type information was stored in document.lvars
-        let variable_entry = visitor.document.find_local_var_by_name("age");
+        visitor.visit(&parse_result.node());
 
         assert!(
-            variable_entry.is_some(),
-            "No type information was stored for integer assignment"
+            find_var_in_scopes(&visitor, "age"),
+            "No variable 'age' stored in VariableScopes"
         );
     }
 
@@ -256,16 +255,11 @@ mod tests {
     fn test_index_visitor_infers_float_type() {
         let content = "price = 19.99";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
-
-        visitor.visit(&node);
-
-        // Check that type information was stored in document.lvars
-        let variable_entry = visitor.document.find_local_var_by_name("price");
+        visitor.visit(&parse_result.node());
 
         assert!(
-            variable_entry.is_some(),
-            "No type information was stored for float assignment"
+            find_var_in_scopes(&visitor, "price"),
+            "No variable 'price' stored in VariableScopes"
         );
     }
 
@@ -273,16 +267,11 @@ mod tests {
     fn test_index_visitor_infers_boolean_type() {
         let content = "active = true";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
-
-        visitor.visit(&node);
-
-        // Check that type information was stored in document.lvars
-        let variable_entry = visitor.document.find_local_var_by_name("active");
+        visitor.visit(&parse_result.node());
 
         assert!(
-            variable_entry.is_some(),
-            "No type information was stored for boolean assignment"
+            find_var_in_scopes(&visitor, "active"),
+            "No variable 'active' stored in VariableScopes"
         );
     }
 
@@ -290,14 +279,10 @@ mod tests {
     fn test_index_visitor_handles_unknown_type() {
         let content = "name = some_method";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
+        visitor.visit(&parse_result.node());
 
-        visitor.visit(&node);
-
-        // Verify that unknown types are stored in document.lvars
-        let variable_entry = visitor.document.find_local_var_by_name("name");
         assert!(
-            variable_entry.is_some(),
+            find_var_in_scopes(&visitor, "name"),
             "Local variable should be stored even with unknown type"
         );
     }
@@ -306,24 +291,15 @@ mod tests {
     fn test_index_visitor_generates_type_hints() {
         let content = "name = 'John'\nage = 25";
         let (mut visitor, parse_result) = create_test_visitor(content);
-        let node = parse_result.node();
-
-        visitor.visit(&node);
-
-        // Verify that local variables are stored in document.lvars
-        let name_entry = visitor.document.find_local_var_by_name("name");
-        let age_entry = visitor.document.find_local_var_by_name("age");
+        visitor.visit(&parse_result.node());
 
         assert!(
-            name_entry.is_some(),
-            "Should store 'name' variable in document.lvars"
+            find_var_in_scopes(&visitor, "name"),
+            "Should store 'name' variable in VariableScopes"
         );
         assert!(
-            age_entry.is_some(),
-            "Should store 'age' variable in document.lvars"
+            find_var_in_scopes(&visitor, "age"),
+            "Should store 'age' variable in VariableScopes"
         );
     }
-
-    // Note: test_combined_hints_functionality removed as we've moved to entry-based type storage
-    // Type hints are now computed from indexed Variable entries rather than stored in document
 }

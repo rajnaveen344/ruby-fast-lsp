@@ -89,7 +89,7 @@ impl IndexQuery {
         }
     }
 
-    /// Find references to a local variable using ScopeTree.
+    /// Find references to a local variable using VariableScopes.
     fn find_local_variable_references(
         &self,
         name: &str,
@@ -100,12 +100,12 @@ impl IndexQuery {
 
         // Use position-based lookup to find the scope owning this variable
         let scope_id = document
-            .get_scope_tree()
+            .variable_scopes()
             .find_scope_for_variable_at(name, position)?;
 
-        // Use ScopeTree to find all references
+        // Use VariableScopes to find all references
         let targets = document
-            .get_scope_tree()
+            .variable_scopes()
             .find_rename_targets(name, scope_id);
 
         if targets.is_empty() {

@@ -51,7 +51,7 @@ pub struct IdentifierVisitor {
 
 impl IdentifierVisitor {
     pub fn new(document: RubyDocument, position: Position) -> Self {
-        let scope_tracker = ScopeTracker::new(&document);
+        let scope_tracker = ScopeTracker::new();
 
         Self {
             document,
@@ -107,13 +107,7 @@ impl IdentifierVisitor {
             _ => self.ns_stack_at_pos.clone(),
         };
 
-        let lv_scope_id = self.lv_scope_id_at_pos.unwrap_or_else(|| {
-            // If lv_scope_id_at_pos is not set, use the current scope from tracker
-            self.scope_tracker
-                .current_lv_scope()
-                .map(|s| s.scope_id())
-                .unwrap_or(0)
-        });
+        let lv_scope_id = self.lv_scope_id_at_pos.unwrap_or(0);
 
         // Determine namespace kind from current method context
         let namespace_kind = self.scope_tracker.current_method_context();

@@ -57,36 +57,24 @@ impl IndexQuery {
         self.find_definitions_for_identifier(&identifier, &ancestors, namespace_kind, position)
     }
 
-    /// Find definitions for a local variable using document.lvars (file-local storage)
+    /// Find definitions for a local variable using VariableScopes (position-based lookup)
     fn find_local_variable_definitions_at_position(
         &self,
         name: &str,
-        scope_id: crate::types::scope::LVScopeId,
         position: Position,
     ) -> Option<Vec<Location>> {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
 
-        // Try exact scope ID match with position filter
-        if let Some(entries) = document.get_local_var_entries(scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    // Ensure we find the definition that is BEFORE the usage
-                    if &data.name == name && entry.location.range.start < position {
-                        let loc = Location {
-                            uri: document.uri.clone(),
-                            range: entry.location.range,
-                        };
-                        return Some(vec![loc]);
-                    }
-                }
-            }
-        }
+        // Use position-based scope lookup in the VariableScopes tree
+        let tree_scope_id = document
+            .variable_scopes()
+            .find_scope_for_variable_at(name, position)
+            .or_else(|| document.variable_scopes().scope_at_position(position))?;
 
-        // Fallback: search all scopes in the document for this variable name
-        if let Some(location) = document.find_local_var_by_name(name) {
-            if location.range.start < position {
-                return Some(vec![location]);
+        if let Some((_sid, var)) = document.variable_scopes().find_variable(name, tree_scope_id) {
+            if var.definition_location.range.start < position {
+                return Some(vec![var.definition_location.clone()]);
             }
         }
 
@@ -162,8 +150,8 @@ impl IndexQuery {
             Identifier::RubyGlobalVariable { name, .. } => {
                 self.find_global_variable_definitions(name)
             }
-            Identifier::RubyLocalVariable { name, scope, .. } => {
-                self.find_local_variable_definitions_at_position(name, *scope, position)
+            Identifier::RubyLocalVariable { name, .. } => {
+                self.find_local_variable_definitions_at_position(name, position)
             }
             Identifier::YardType { type_name, .. } => {
                 // YardType identifier doesn't have namespace context, use empty ancestors

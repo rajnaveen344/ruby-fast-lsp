@@ -35,7 +35,7 @@ impl ReferenceVisitor {
         document: RubyDocument,
         include_local_vars: bool,
     ) -> Self {
-        let scope_tracker = ScopeTracker::new(&document);
+        let scope_tracker = ScopeTracker::new();
         Self {
             index,
             document,
@@ -51,7 +51,7 @@ impl ReferenceVisitor {
         document: RubyDocument,
         include_local_vars: bool,
     ) -> Self {
-        let scope_tracker = ScopeTracker::new(&document);
+        let scope_tracker = ScopeTracker::new();
         Self {
             index,
             document,

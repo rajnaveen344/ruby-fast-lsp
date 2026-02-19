@@ -3,7 +3,7 @@
 //! Currently supports:
 //! - Local variables (within a single scope and captured in blocks)
 //!
-//! Uses ScopeTree for proper scope hierarchy handling.
+//! Uses VariableScopes for proper scope hierarchy handling.
 
 use tower_lsp::lsp_types::{RenameParams, TextEdit, Url};
 
@@ -34,12 +34,17 @@ pub async fn handle_rename(
 
     // Only support local variables for now
     match identifier {
-        Identifier::RubyLocalVariable { name, scope, .. } => {
-            let scope_id = scope;
+        Identifier::RubyLocalVariable { name, .. } => {
             let var_name = name.to_string();
 
-            // Use ScopeTree to find all rename targets
-            let targets = document.get_scope_tree().find_rename_targets(&var_name, scope_id);
+            // Use position-based scope lookup to find the correct scope in the tree
+            let scope_id = document
+                .variable_scopes()
+                .find_scope_for_variable_at(&var_name, position)
+                .expect("INVARIANT VIOLATED: variable at cursor must exist in scope tree. This is a bug because the identifier visitor found a local variable but the scope tree doesn't contain it. Fix: ensure IndexVisitor populates the scope tree for all local variables.");
+
+            // Use VariableScopes to find all rename targets
+            let targets = document.variable_scopes().find_rename_targets(&var_name, scope_id);
             
             if targets.is_empty() {
                 return None;

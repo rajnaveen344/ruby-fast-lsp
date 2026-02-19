@@ -1,16 +1,8 @@
 use ruby_prism::Location as PrismLocation;
-use std::{
-    cmp,
-    collections::{BTreeMap, HashMap},
-};
+use std::cmp;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
-use crate::{
-    indexer::entry::{Entry, EntryKind},
-    inferrer::RubyType,
-    types::scope::LVScopeId,
-    types::scope_tree::ScopeTree,
-};
+use crate::types::variable_scopes::VariableScopes;
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -29,19 +21,11 @@ pub struct RubyDocument {
     /// Inlay hints in the document for modules, classes, methods, etc.
     inlay_hints: Vec<InlayHint>,
 
-    /// Local variables in the document (definitions with type info)
-    /// Kept for hover/inlay hints which need the Entry type info
-    lvars: BTreeMap<LVScopeId, Vec<Entry>>,
-
     /// Comments in the document (start_offset, end_offset)
     comments: Vec<(usize, usize)>,
 
-    /// Variable types at each offset (simple BTreeMap for easy queries)
-    /// Key = offset where state was recorded, Value = variables and their types at that point
-    var_types: BTreeMap<usize, HashMap<String, RubyType>>,
-
-    /// Scope tree for local variable tracking (used for rename and references)
-    pub scope_tree: ScopeTree,
+    /// Variable scopes for local variable tracking (definitions, references, types)
+    pub variable_scopes: VariableScopes,
 }
 
 impl RubyDocument {
@@ -55,10 +39,8 @@ impl RubyDocument {
             indexed_version: None,
             line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
-            lvars: BTreeMap::new(),
             comments,
-            var_types: BTreeMap::new(),
-            scope_tree: ScopeTree::new(),
+            variable_scopes: VariableScopes::new(),
         };
         doc.compute_line_offsets();
         doc
@@ -74,17 +56,12 @@ impl RubyDocument {
     }
 
     /// Updates document content and version, recomputing line offsets
-    /// Also clears lvars and lvar_references since they will be re-indexed
-    /// Note: comments are NOT cleared here because they are typically populated
-    /// immediately after by the indexer. However, we should probably clear them
-    /// to be safe, assuming the caller will re-populate them.
+    /// Clears variable scopes since they will be re-indexed.
     pub fn update(&mut self, content: String, version: i32) {
         self.comments = parse_comments(&content);
         self.content = content;
         self.version = version;
-        self.lvars.clear();
-        self.var_types.clear();
-        self.scope_tree = ScopeTree::new();
+        self.variable_scopes = VariableScopes::new();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }
@@ -192,135 +169,14 @@ impl RubyDocument {
         self.inlay_hints.clone()
     }
 
-    pub fn add_local_var_entry(&mut self, scope_id: LVScopeId, entry: Entry) {
-        self.lvars.entry(scope_id).or_default().push(entry);
+    /// Returns a mutable reference to variable scopes for building during indexing
+    pub fn variable_scopes_mut(&mut self) -> &mut VariableScopes {
+        &mut self.variable_scopes
     }
 
-    pub fn get_local_var_entries(&self, scope_id: LVScopeId) -> Option<&Vec<Entry>> {
-        self.lvars.get(&scope_id)
-    }
-
-    /// Returns a reference to the entire lvars map for iteration
-    pub fn get_all_lvars(&self) -> &std::collections::BTreeMap<LVScopeId, Vec<Entry>> {
-        &self.lvars
-    }
-
-    /// Returns a mutable reference to the scope tree for building during indexing
-    pub fn scope_tree_mut(&mut self) -> &mut ScopeTree {
-        &mut self.scope_tree
-    }
-
-    /// Get the scope tree for queries
-    pub fn get_scope_tree(&self) -> &ScopeTree {
-        &self.scope_tree
-    }
-
-    /// Get the type of a variable at a specific offset
-    /// Uses BTreeMap range query to find the most recent state before/at the offset
-    pub fn get_var_type(&self, offset: usize, var_name: &str) -> Option<&RubyType> {
-        self.var_types
-            .range(..=offset)
-            .next_back()
-            .and_then(|(_, vars)| vars.get(var_name))
-    }
-
-    /// Get all variables and their types at a specific offset
-    pub fn get_vars_at(&self, offset: usize) -> Option<&HashMap<String, RubyType>> {
-        self.var_types
-            .range(..=offset)
-            .next_back()
-            .map(|(_, vars)| vars)
-    }
-
-    /// Record variable state at an offset (called during indexing)
-    pub fn set_var_type(&mut self, offset: usize, var_name: String, ty: RubyType) {
-        self.var_types
-            .entry(offset)
-            .or_default()
-            .insert(var_name, ty);
-    }
-
-    /// Record complete variable state at an offset (called during indexing)
-    pub fn set_vars_at(&mut self, offset: usize, vars: HashMap<String, RubyType>) {
-        self.var_types.insert(offset, vars);
-    }
-
-    /// Clear all variable type information
-    pub fn clear_var_types(&mut self) {
-        self.var_types.clear();
-    }
-
-    /// Check if a local variable with the given name exists in any of the provided scope IDs
-    /// Returns the scope_id where the variable was found, or None if not found
-    pub fn find_local_var_scope(&self, name: &str, scope_ids: &[LVScopeId]) -> Option<LVScopeId> {
-        use crate::indexer::entry::entry_kind::EntryKind;
-
-        // Search from innermost to outermost scope
-        for &scope_id in scope_ids.iter().rev() {
-            if let Some(entries) = self.lvars.get(&scope_id) {
-                for entry in entries {
-                    if let EntryKind::LocalVariable(data) = &entry.kind {
-                        if &data.name == name {
-                            return Some(scope_id);
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Search ALL scopes in the document for a local variable by name (fallback method)
-    /// Returns the first matching location found
-    pub fn find_local_var_by_name(&self, name: &str) -> Option<tower_lsp::lsp_types::Location> {
-        use crate::indexer::entry::entry_kind::EntryKind;
-
-        for (_scope_id, entries) in &self.lvars {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &entry.kind {
-                    if &data.name == name {
-                        // Convert CompactLocation to Location using document URI
-                        return Some(tower_lsp::lsp_types::Location {
-                            uri: self.uri.clone(),
-                            range: entry.location.range,
-                        });
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Update the type of a local variable (persistence from inference)
-    pub fn update_local_var_type(
-        &mut self,
-        scope_id: LVScopeId,
-        name: &str,
-        range: Range,
-        new_type: RubyType,
-    ) {
-        if let Some(entries) = self.lvars.get_mut(&scope_id) {
-            for entry in entries {
-                if let EntryKind::LocalVariable(data) = &mut entry.kind {
-                    if data.name == name && entry.location.range == range {
-                        use crate::indexer::entry::entry_kind::LocalVariableAssignment;
-                        data.assignments.push(LocalVariableAssignment {
-                            range: Range {
-                                start: Position::new(0, 0),
-                                end: Position::new(u32::MAX, u32::MAX),
-                            },
-                            r#type: new_type,
-                        });
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Count total number of local variable entries (for diagnostics)
-    pub fn count_lvars(&self) -> usize {
-        self.lvars.values().map(|v| v.len()).sum()
+    /// Get variable scopes for queries
+    pub fn variable_scopes(&self) -> &VariableScopes {
+        &self.variable_scopes
     }
 }
 

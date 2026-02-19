@@ -59,7 +59,7 @@ pub async fn find_completion_at_position(
         .nth(position.line as usize)
         .unwrap_or("");
 
-    let (partial_name, _, _, lv_stack_at_pos, _namespace_kind) = analyzer.get_identifier(position);
+    let (partial_name, _, _, _lv_scope_id, _namespace_kind) = analyzer.get_identifier(position);
 
     // Check if we're in a :: (scope resolution) context
     let is_scope_resolution_context = if is_trigger_character && trigger_character == Some(":") {
@@ -268,7 +268,7 @@ pub async fn find_completion_at_position(
         // Normal completion: include variables, constants, and snippets
 
         // Add local variable completions
-        let variable_completions = variable::find_variable_completions(&document, lv_stack_at_pos);
+        let variable_completions = variable::find_variable_completions(&document, position);
         completions.extend(variable_completions);
 
         // Add constant completions
@@ -372,24 +372,29 @@ fn get_receiver_type_from_snapshots(
         }
     }
 
-    // For variables, use type snapshots from TypeTracker
+    // For variables, use VariableScopes tree for type resolution
     if is_variable_name(receiver_text) {
-        // Calculate offset of the receiver variable (before the dot)
-        // We need to find where receiver_text starts in the line
-        let receiver_start_in_line = dot_pos - receiver_text.len();
-        let receiver_offset = position_to_offset(
-            content,
-            Position {
-                line: position.line,
-                character: receiver_start_in_line as u32,
-            },
-        );
+        let receiver_position = Position {
+            line: position.line,
+            character: (dot_pos - receiver_text.len()) as u32,
+        };
 
-        // Get type from document variable tracking
+        // Get type from VariableScopes tree
         if let Some(doc_arc) = server.docs.lock().get(uri) {
             let doc = doc_arc.read();
-            if let Some(ty) = doc.get_var_type(receiver_offset, receiver_text) {
-                return Some(ty.clone());
+            if let Some(scope_id) = doc
+                .variable_scopes()
+                .find_scope_for_variable_at(receiver_text, receiver_position)
+                .or_else(|| doc.variable_scopes().scope_at_position(receiver_position))
+            {
+                if let Some(ty) = doc
+                    .variable_scopes()
+                    .get_type_at_position(receiver_text, scope_id, receiver_position)
+                {
+                    if *ty != RubyType::Unknown {
+                        return Some(ty.clone());
+                    }
+                }
             }
         }
 
@@ -521,7 +526,6 @@ fn is_variable_name(text: &str) -> bool {
     text.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
-use crate::utils::position_to_offset;
 
 #[cfg(test)]
 mod tests {

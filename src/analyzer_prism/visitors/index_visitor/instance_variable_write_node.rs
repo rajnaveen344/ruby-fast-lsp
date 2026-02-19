@@ -183,7 +183,7 @@ mod tests {
         let index = create_test_index();
         let document =
             crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
-        let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new(&document);
+        let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new();
         let literal_analyzer = crate::inferrer::r#type::literal::LiteralAnalyzer::new();
 
         let visitor = IndexVisitor {

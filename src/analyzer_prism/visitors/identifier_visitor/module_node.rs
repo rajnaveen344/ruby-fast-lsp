@@ -4,7 +4,7 @@ use crate::{
     analyzer_prism::{utils, Identifier},
     types::{
         ruby_namespace::RubyConstant,
-        scope::{LVScope, LVScopeKind},
+        scope::LVScopeKind,
     },
 };
 
@@ -31,7 +31,7 @@ impl IdentifierVisitor {
                     }),
                     Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
+                    Some(0),
                 );
             } else if let Some(constant_read_node) = constant_path.as_constant_read_node() {
                 let name = String::from_utf8_lossy(constant_read_node.name().as_slice());
@@ -43,14 +43,14 @@ impl IdentifierVisitor {
                     }),
                     Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
+                    Some(0),
                 );
             }
 
             return;
         }
 
-        let body_loc = utils::get_body_location(
+        let _body_loc = utils::get_body_location(
             node.body().map(|b| b.location()),
             &node.location(),
             &self.document,
@@ -62,12 +62,7 @@ impl IdentifierVisitor {
             .push_namespace_from_constant_path(&constant_path, node.name().as_slice())
             .is_ok()
         {
-            let scope_id = self.document.position_to_offset(body_loc.range.start);
-            self.scope_tracker.push_lv_scope(LVScope::new(
-                scope_id,
-                body_loc.clone(),
-                LVScopeKind::Constant,
-            ));
+            self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
         }
     }
 
@@ -84,7 +79,7 @@ impl IdentifierVisitor {
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
             self.scope_tracker.pop_ns_scope();
-            self.scope_tracker.pop_lv_scope();
+            self.scope_tracker.pop_scope_kind();
         }
     }
 }

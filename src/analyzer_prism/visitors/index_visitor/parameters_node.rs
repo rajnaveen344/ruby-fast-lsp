@@ -83,21 +83,13 @@ impl IndexVisitor {
             return;
         }
 
-        // Get current scope id for the parameter
-        let current_scope = match self.scope_tracker.current_lv_scope() {
-            Some(scope) => scope.scope_id(),
-            None => {
-                error!(
-                    "No current local variable scope available for parameter: {}",
-                    param_name
-                );
-                return;
-            }
-        };
+        // Scope id is no longer tracked by ScopeTracker; use dummy value
+        // since EntryKind::new_local_variable still requires it
+        let current_scope = 0usize;
 
         // Create a fully qualified name for the parameter (local variable)
         let fqn =
-            FullyQualifiedName::local_variable(param_name.to_string(), current_scope).unwrap();
+            FullyQualifiedName::local_variable(param_name.to_string()).unwrap();
 
         // Create an entry with EntryKind::LocalVariable
         let entry = {
@@ -116,17 +108,22 @@ impl IndexVisitor {
                 .build(&mut index)
         };
 
-        // Add the entry to RubyDocument only (NOT global index)
-        // Parameters are LocalVariables - file-local data should not bloat the global index
-        if let Ok(entry) = entry {
-            self.document
-                .add_local_var_entry(current_scope, entry.clone());
-
-            // Also add to ScopeTree for rename/references
+        if let Ok(_entry) = entry {
+            // Add to VariableScopes tree (the single source of truth for local variables)
             let location = self.document.prism_location_to_lsp_location(&location);
             self.document
-                .scope_tree_mut()
-                .define_variable(param_name, location);
+                .variable_scopes_mut()
+                .define_variable(param_name, location.clone());
+
+            // Dual-write: also store type in VariableScopes (Unknown for params initially)
+            if let Some(current_scope_id) = self.document.variable_scopes().current_scope() {
+                self.document.variable_scopes_mut().add_type_assignment(
+                    current_scope_id,
+                    param_name,
+                    location.range,
+                    RubyType::Unknown,
+                );
+            }
         } else {
             error!("Error creating entry for parameter: {}", param_name);
         }

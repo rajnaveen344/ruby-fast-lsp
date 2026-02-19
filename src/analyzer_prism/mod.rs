@@ -103,14 +103,12 @@ pub enum Identifier {
         iden: RubyMethod,
     },
 
-    /// Ruby local variable with scope context
+    /// Ruby local variable with namespace context
     /// - namespace: Current namespace stack (where the cursor is located)
     /// - name: Variable name
-    /// - scope: Local variable scope ID
     RubyLocalVariable {
         namespace: Vec<RubyConstant>,
         name: String,
-        scope: LVScopeId,
     },
 
     /// Ruby instance variable
@@ -1186,18 +1184,11 @@ end
         assert_variable_identifier(&identifier, "local_var");
         assert_namespace_context(&namespace, &["TestClass"]);
 
-        // Verify the variable has proper local variable scope context
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), verify it's set
-                // Local variables in methods should have scope > 0 (0 is top-level constant scope)
-                assert!(
-                    scope > 0,
-                    "Local variable in method should have non-zero scope ID"
-                );
-            }
-            _ => panic!("Expected RubyLocalVariable identifier"),
-        }
+        // Verify the variable is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]
@@ -1233,17 +1224,11 @@ end
         assert_variable_identifier(&identifier, "inner_var");
         assert_namespace_context(&namespace, &["TestClass"]);
 
-        // Verify both have proper local variable scope context
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), verify it's set
-                assert!(
-                    scope > 0,
-                    "Local variable in block should have non-zero scope ID"
-                );
-            }
-            _ => panic!("Expected RubyLocalVariable identifier"),
-        }
+        // Verify it is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]
@@ -1270,17 +1255,11 @@ end
         assert_variable_identifier(&identifier, "block_local");
         assert_namespace_context(&namespace, &["TestClass"]);
 
-        // Verify it has proper local variable scope context with explicit block local scope
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), verify it's set
-                assert!(
-                    scope > 0,
-                    "Local variable in block should have non-zero scope ID"
-                );
-            }
-            _ => panic!("Expected RubyLocalVariable identifier"),
-        }
+        // Verify it is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]
@@ -1306,17 +1285,11 @@ end
         assert_variable_identifier(&identifier, "error_var");
         assert_namespace_context(&namespace, &["TestClass"]);
 
-        // Verify it has proper local variable scope context with rescue scope
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), verify it's set
-                assert!(
-                    scope > 0,
-                    "Local variable in rescue should have non-zero scope ID"
-                );
-            }
-            _ => panic!("Expected Local variable type"),
-        }
+        // Verify it is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]
@@ -1344,15 +1317,11 @@ end
         assert_variable_identifier(&identifier, "class_local");
         assert_namespace_context(&namespace, &["TestClass"]);
 
-        // Verify it has proper local variable scope context with constant scope
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), class body scope can be 0 or higher
-                // Just verify it's a valid scope ID (any value is valid)
-                let _ = scope; // Scope ID exists
-            }
-            _ => panic!("Expected Local variable type"),
-        }
+        // Verify it is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]
@@ -1379,15 +1348,11 @@ end
         assert_variable_identifier(&identifier, "module_local");
         assert_namespace_context(&namespace, &["TestModule"]);
 
-        // Verify it has proper local variable scope context with constant scope
-        match identifier {
-            Identifier::RubyLocalVariable { scope, .. } => {
-                // scope is now a LVScopeId (usize), module body scope can be 0 or higher
-                // Just verify it's a valid scope ID (any value is valid)
-                let _ = scope; // Scope ID exists
-            }
-            _ => panic!("Expected Local variable type"),
-        }
+        // Verify it is a local variable identifier
+        assert!(
+            matches!(identifier, Identifier::RubyLocalVariable { .. }),
+            "Expected RubyLocalVariable identifier"
+        );
     }
 
     #[test]

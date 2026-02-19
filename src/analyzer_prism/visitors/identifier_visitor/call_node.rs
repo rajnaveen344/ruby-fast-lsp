@@ -170,7 +170,7 @@ impl IdentifierVisitor {
                     }),
                     Some(IdentifierType::MethodCall),
                     self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.current_lv_scope().map(|s| s.scope_id()),
+                    Some(0),
                 );
             }
         }

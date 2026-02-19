@@ -1,48 +1,6 @@
-use std::{
-    fmt,
-    hash::{Hash, Hasher},
-};
+use std::fmt;
 
-use tower_lsp::lsp_types::Location;
-
-pub type LVScopeStack = Vec<LVScope>;
 pub type LVScopeId = usize;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LVScope {
-    id: LVScopeId,
-    location: Location,
-    kind: LVScopeKind,
-}
-
-impl LVScope {
-    pub fn new(id: LVScopeId, location: Location, kind: LVScopeKind) -> Self {
-        Self { id, location, kind }
-    }
-
-    pub fn scope_id(&self) -> LVScopeId {
-        self.id
-    }
-
-    pub fn location(&self) -> &Location {
-        &self.location
-    }
-
-    pub fn kind(&self) -> &LVScopeKind {
-        &self.kind
-    }
-}
-
-impl Hash for LVScope {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.location.uri.hash(state);
-        self.location.range.start.line.hash(state);
-        self.location.range.start.character.hash(state);
-        self.location.range.end.line.hash(state);
-        self.location.range.end.character.hash(state);
-        self.kind.hash(state);
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LVScopeKind {
@@ -60,7 +18,7 @@ pub enum LVScopeKind {
     ///   def instance_method
     ///     puts x  # NameError: undefined local variable or method `x'
     ///   end
-    ///   
+    ///
     ///   class Nested
     ///     puts x  # NameError: undefined local variable or method `x'
     ///   end

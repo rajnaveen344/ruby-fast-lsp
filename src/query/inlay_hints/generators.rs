@@ -236,40 +236,20 @@ fn infer_variable_type(
 ) -> Option<RubyType> {
     match kind {
         VariableKind::Local => {
-            // Check document's local variable tracking
-            let lvars = document.get_all_lvars();
-            for (_scope_id, entries) in lvars {
-                for entry in entries {
-                    if let EntryKind::LocalVariable(data) = &entry.kind {
-                        if data.name == name {
-                            // Find the assignment at this specific position
-                            // Each assignment has a range, and we want the one where the
-                            // variable name ends at our hint position
-                            for assignment in &data.assignments {
-                                if assignment.range.start.line == position.line {
-                                    // Found the assignment at this line
-                                    if assignment.r#type != RubyType::Unknown {
-                                        return Some(assignment.r#type.clone());
-                                    }
-                                }
-                            }
-
-                            // Fallback: if no assignment matched by position, try document var types
-                            if entry.location.range.end == *position {
-                                let offset =
-                                    crate::utils::position_to_offset(context.content, *position);
-                                if let Some(ty) = document.get_var_type(offset, name) {
-                                    if *ty != RubyType::Unknown {
-                                        return Some(ty.clone());
-                                    }
-                                }
-                            }
-                        }
+            // Try VariableScopes tree
+            if let Some(scope_id) = document.variable_scopes().scope_at_position(*position) {
+                if let Some(ty) =
+                    document
+                        .variable_scopes()
+                        .get_type_at_position(name, scope_id, *position)
+                {
+                    if *ty != RubyType::Unknown {
+                        return Some(ty.clone());
                     }
                 }
             }
 
-            // Try inference from assignment
+            // Fallback: Try inference from assignment (AST-based)
             let index = context.index.lock();
             crate::query::infer_type_from_assignment(context.content, name, &index)
         }

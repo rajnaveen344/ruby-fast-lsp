@@ -143,7 +143,7 @@ fn extract_display_name(fqn: &FullyQualifiedName) -> String {
             parts.last().map(|c| c.to_string()).unwrap_or_default()
         }
         FullyQualifiedName::Method(_, method) => method.get_name(),
-        FullyQualifiedName::LocalVariable(name, _) => name.to_string(),
+        FullyQualifiedName::LocalVariable(name) => name.to_string(),
         FullyQualifiedName::InstanceVariable(name) => name.to_string(),
         FullyQualifiedName::ClassVariable(name) => name.to_string(),
         FullyQualifiedName::GlobalVariable(name) => name.to_string(),
@@ -172,7 +172,7 @@ fn extract_container_name(fqn: &FullyQualifiedName) -> Option<String> {
                 None
             }
         }
-        FullyQualifiedName::LocalVariable(_, _) => None,
+        FullyQualifiedName::LocalVariable(_) => None,
         FullyQualifiedName::InstanceVariable(_) => None,
         FullyQualifiedName::ClassVariable(_) => None,
         FullyQualifiedName::GlobalVariable(_) => None,

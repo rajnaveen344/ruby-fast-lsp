@@ -539,7 +539,7 @@ impl MethodResolver {
 
         // Search through all definitions for local variables with matching name
         for (fqn, entries) in index.definitions() {
-            if let FullyQualifiedName::LocalVariable(name, _) = fqn {
+            if let FullyQualifiedName::LocalVariable(name) = fqn {
                 if name == var_name {
                     log::trace!("Found local variable {} in index", var_name);
                     for entry in entries {
@@ -820,17 +820,14 @@ mod tests {
         let index = create_test_index();
 
         // Add a local variable with a known type
-        use crate::types::scope::LVScopeId;
-
-        let scope_id: LVScopeId = 1; // A non-zero scope ID for method scope
-        let var_fqn = FullyQualifiedName::local_variable("user".to_string(), scope_id).unwrap();
+        let var_fqn = FullyQualifiedName::local_variable("user".to_string()).unwrap();
 
         let var_entry = EntryBuilder::new()
             .fqn(var_fqn)
             .location(create_test_location())
             .kind(EntryKind::new_local_variable(
                 "user".to_string(),
-                scope_id,
+                0,
                 RubyType::Class(FullyQualifiedName::Constant(vec![RubyConstant::new(
                     "User",
                 )
