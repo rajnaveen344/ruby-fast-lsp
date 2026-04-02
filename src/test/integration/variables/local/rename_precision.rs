@@ -8,13 +8,11 @@ use crate::test::harness::check;
 /// Ensure renaming a local variable doesn't rename a method call with the same name
 #[tokio::test]
 async fn rename_excludes_method_calls() {
-    // Should rename 'count = 0' and 'puts count' -> 2 changes
-    // 'obj.count' should remain untouched
     check(
         r#"
 def example
-  count = 0
-  puts count<rename to="counter">
+  <rename to="counter">count</rename> = 0
+  puts <rename>count</rename>
   obj.count
 end
 "#,
@@ -25,14 +23,12 @@ end
 /// Mimic the user's screenshot exactly
 #[tokio::test]
 async fn rename_excludes_receiver_calls_mimic_screenshot() {
-    // Should rename 'aks = 1' and 'puts aks' -> 2 changes
-    // 'abc.aks' should remain untouched
     check(
         r#"
 def test
   abc = Object.new
-  aks = 1
-  puts aks<rename to="counter">
+  <rename to="counter">aks</rename> = 1
+  puts <rename>aks</rename>
   puts abc.aks
 end
 "#,
@@ -50,8 +46,8 @@ def count
 end
 
 def example
-  count = 0
-  puts count<rename to="counter">
+  <rename to="counter">count</rename> = 0
+  puts <rename>count</rename>
 end
 "#,
     )
@@ -63,8 +59,8 @@ end
 async fn rename_excludes_symbols() {
     check(
         r#"
-x = 1
-puts x<rename to="y">
+<rename to="y">x</rename> = 1
+puts <rename>x</rename>
 puts :x
 "#,
     )

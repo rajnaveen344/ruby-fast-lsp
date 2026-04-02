@@ -1222,51 +1222,66 @@ async fn run_rename_check(
     use crate::capabilities::rename::handle_rename;
     use tower_lsp::lsp_types::RenameParams;
 
-    for tag in rename_tags {
-        let new_name = tag
-            .attributes
-            .get("to")
-            .expect("rename tag missing 'to' attribute")
-            .clone();
+    // Find the cursor tag (the one with the "to" attribute)
+    let cursor_tag = rename_tags
+        .iter()
+        .find(|t| t.attributes.contains_key("to"))
+        .expect("At least one <rename> tag must have a 'to' attribute");
 
-        let position = tag.range.start;
+    let new_name = cursor_tag
+        .attributes
+        .get("to")
+        .expect("rename tag missing 'to' attribute")
+        .clone();
 
-        let params = RenameParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            new_name: new_name.clone(),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        };
+    let position = cursor_tag.range.start;
 
-        let result = handle_rename(server, params).await;
+    let params = RenameParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position,
+        },
+        new_name: new_name.clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
 
-        // For local variables, we expect a successful rename
-        // The result should contain the locations that will be changed
-        if let Some(edit) = result {
-            // Verify the edit contains changes for our URI
-            if let Some(changes) = &edit.changes {
-                if let Some(uri_changes) = changes.get(uri) {
-                    // Verify at least one change was returned
-                    assert!(
-                        !uri_changes.is_empty(),
-                        "Expected at least one location to rename at {:?}",
-                        position
-                    );
+    let result = handle_rename(server, params).await;
 
-                    // For now, just verify rename returned valid changes
-                    // The exact locations will be verified in integration tests
-                    println!(
-                        "Rename returned {} changes for '{}'",
-                        uri_changes.len(),
-                        new_name
-                    );
-                }
-            }
-        }
-        // If result is None, rename is not supported for this symbol type
-        // (which is expected for non-local-variable symbols)
+    // All <rename> tags mark expected rename locations
+    let expected_ranges: Vec<Range> = rename_tags.iter().map(|t| t.range).collect();
+
+    let edit = result.unwrap_or_else(|| {
+        panic!(
+            "Rename should return a result at {:?} for '{}'",
+            position, new_name
+        )
+    });
+    let changes = edit.changes.expect("WorkspaceEdit should have changes");
+    let uri_edits = changes
+        .get(uri)
+        .expect("Should have changes for this URI");
+
+    // Verify exact count
+    assert_eq!(
+        uri_edits.len(),
+        expected_ranges.len(),
+        "Expected {} rename locations, got {}.\nExpected ranges: {:?}\nActual edits: {:?}",
+        expected_ranges.len(),
+        uri_edits.len(),
+        expected_ranges,
+        uri_edits.iter().map(|e| &e.range).collect::<Vec<_>>()
+    );
+
+    // Verify each expected range is found in the actual edits
+    for expected in &expected_ranges {
+        assert!(
+            uri_edits
+                .iter()
+                .any(|e| ranges_match(&e.range, expected)),
+            "Expected rename at {:?} not found in actual edits: {:?}",
+            expected,
+            uri_edits.iter().map(|e| &e.range).collect::<Vec<_>>()
+        );
     }
 }
 
