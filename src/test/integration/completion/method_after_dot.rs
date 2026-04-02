@@ -497,7 +497,25 @@ end
     .await;
 }
 
-// ─── 13. Self Receiver ───
+// ─── 13. Regression: exact screenshot scenario ───
+
+#[tokio::test]
+async fn constant_receiver_ne_partial_shows_new() {
+    check(
+        r#"
+class UserA
+  def name
+  end
+end
+
+a = UserA.ne$0
+<complete items="new" excludes="name">
+"#,
+    )
+    .await;
+}
+
+// ─── 14. Self Receiver ───
 
 #[tokio::test]
 async fn self_receiver_instance_context() {
