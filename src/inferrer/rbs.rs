@@ -351,7 +351,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Known gap: RBS parser does not load class.rbs — Class#new is hardcoded in method.rs
     fn test_class_has_new_method() {
         assert!(has_rbs_class("Class"), "Should have Class class in RBS");
         let methods = get_rbs_class_methods("Class", false);

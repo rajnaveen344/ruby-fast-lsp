@@ -65,17 +65,23 @@ pub fn find_method_completions(
         }
     }
 
-    // For singleton methods on classes, ensure `new` is always available.
-    // In Ruby, every class responds to `.new` (inherited from Class).
-    // The RBS parser doesn't currently load Class, so we inject it directly.
-    if is_singleton && !seen_methods.contains("new") && "new".starts_with(partial_method) {
-        seen_methods.insert("new".to_string());
-        completions.push(create_method_completion_item(&RbsMethodInfo {
-            name: "new".to_string(),
-            return_type: None, // Return type depends on the receiver class
-            is_singleton: true,
-            params: vec![],
-        }));
+    // For singleton methods on classes, include Class/Module instance methods from RBS.
+    // When you call `User.new`, `new` is an instance method of `Class`
+    // (since `User` is an instance of `Class`).
+    if is_singleton {
+        for rbs_class in &["Class", "Module"] {
+            let class_methods = get_rbs_class_methods(rbs_class, false);
+            for method_info in class_methods {
+                if !method_info.name.starts_with(partial_method) {
+                    continue;
+                }
+                if seen_methods.contains(&method_info.name) {
+                    continue;
+                }
+                seen_methods.insert(method_info.name.clone());
+                completions.push(create_method_completion_item(&method_info));
+            }
+        }
     }
 
     // Sort by name
