@@ -15,6 +15,7 @@
 //! | `<err>...</err>` | No | Expected error diagnostic |
 //! | `<warn>...</warn>` | No | Expected warning diagnostic |
 //! | `<th supertypes="A,B" subtypes="C,D">` | Yes | Type hierarchy check at cursor |
+//! | `<complete items="a,b" excludes="c">` | Yes | Expected completion items at cursor |
 //!
 //! # Examples
 //!
@@ -39,15 +40,16 @@
 //! ```
 
 use tower_lsp::lsp_types::{
-    CodeLensParams, DiagnosticSeverity, GotoDefinitionParams, InlayHintParams, PartialResultParams,
-    Position, Range, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
-    TextDocumentPositionParams, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Url, WorkDoneProgressParams,
+    CodeLensParams, CompletionParams, CompletionResponse, DiagnosticSeverity,
+    GotoDefinitionParams, InlayHintParams, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+    WorkDoneProgressParams,
 };
 
+use super::fake_editor::FakeEditor;
 use super::fixture::{
-    extract_cursor, extract_tags, extract_tags_with_attributes, setup_with_fixture,
-    setup_with_multi_file_fixture, Tag,
+    extract_cursor, extract_tags, extract_tags_with_attributes, Tag,
 };
 use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
@@ -58,14 +60,40 @@ use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
 
 /// All supported tag names for extraction.
-const ALL_TAGS: &[&str] = &[
-    "def", "ref", "type", "hint", "lens", "err", "warn", "hover", "th", "rename",
+pub(super) const ALL_TAGS: &[&str] = &[
+    "def", "ref", "type", "hint", "lens", "err", "warn", "hover", "th", "rename", "complete",
 ];
+
+/// Strip all markers ($0 and tags) from fixture text, returning clean Ruby source.
+pub(super) fn strip_all_markers(fixture: &str) -> String {
+    let without_cursor = fixture.replace("$0", "");
+    let (_, clean) = extract_tags_with_attributes(&without_cursor, ALL_TAGS);
+    clean
+}
 
 /// Unified check function that runs checks based on tags present in the fixture.
 ///
 /// See module documentation for supported tags and examples.
 pub async fn check(fixture_text: &str) {
+    let mut editor = FakeEditor::new().await;
+    let clean = strip_all_markers(fixture_text);
+    editor.open("inline_test.rb", &clean);
+    editor.check("inline_test.rb", fixture_text).await;
+}
+
+/// Core assertion dispatch: parses tags from fixture and runs all matching checks.
+///
+/// This is the shared engine used by both `check()` and `FakeEditor::check()`.
+/// The `server` and `uri` must already be set up with `content` indexed.
+/// The `fixture_text` is the original text with markers ($0, <def>, etc.).
+/// `extra_file_contents` provides additional file contents for cross-file type inference.
+pub(super) async fn run_checks_on_fixture(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+    fixture_text: &str,
+    extra_file_contents: Option<&[(Url, Vec<u8>)]>,
+) {
     // Extract cursor if present
     let has_cursor = fixture_text.contains("$0");
     let (_cursor_in_tagged, text_without_cursor) = if has_cursor {
@@ -76,7 +104,7 @@ pub async fn check(fixture_text: &str) {
     };
 
     // Extract all tags in one pass
-    let (all_tags, content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
+    let (all_tags, _content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
 
     // Also extract simple tags for def/ref (they don't use attributes)
     let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
@@ -111,6 +139,7 @@ pub async fn check(fixture_text: &str) {
     let th_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "th").collect();
     let type_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "type").collect();
     let rename_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "rename").collect();
+    let complete_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "complete").collect();
 
     // Separate "none" tags (range-scoped negative assertions) from positive assertions
     let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
@@ -127,43 +156,41 @@ pub async fn check(fixture_text: &str) {
     let positive_lens_tags: Vec<&Tag> =
         lens_tags.iter().filter(|t| !t.is_none()).copied().collect();
 
-    // Setup server once
-    let (server, uri) = setup_with_fixture(&content).await;
-
     // Track which checks were run
     let mut checks_run = Vec::new();
 
     // Run goto definition check if we have cursor and def tags
     if cursor.is_some() && !def_ranges.is_empty() {
-        run_goto_check(&server, &uri, cursor.unwrap(), &def_ranges).await;
+        run_goto_check(server, uri, cursor.unwrap(), &def_ranges).await;
         checks_run.push("goto");
     }
 
     // Run references check if we have cursor and ref tags
     if cursor.is_some() && !ref_ranges.is_empty() {
-        run_references_check(&server, &uri, cursor.unwrap(), &ref_ranges).await;
+        run_references_check(server, uri, cursor.unwrap(), &ref_ranges).await;
         checks_run.push("references");
     }
 
     // Run type check if we have type tags (no cursor needed - uses tag position)
     if !type_tags.is_empty() {
-        let file_contents_owned = vec![(uri.clone(), content.as_bytes().to_vec())];
-        run_type_check(&server, &uri, &content, &type_tags, &file_contents_owned).await;
+        let default_contents = vec![(uri.clone(), content.as_bytes().to_vec())];
+        let file_contents = extra_file_contents.unwrap_or(&default_contents);
+        run_type_check(server, uri, content, &type_tags, file_contents).await;
         checks_run.push("type");
     }
 
     // Run inlay hints check if we have hint tags (positive or negative)
     if !hint_tags.is_empty() {
-        run_inlay_hints_check(&server, &uri, &positive_hint_tags, &none_hint_tags).await;
+        run_inlay_hints_check(server, uri, &positive_hint_tags, &none_hint_tags).await;
         checks_run.push("hints");
     }
 
     // Run diagnostics check if we have err or warn tags (positive or negative)
     if !err_tags.is_empty() || !warn_tags.is_empty() {
         run_diagnostics_check(
-            &server,
-            &uri,
-            &content,
+            server,
+            uri,
+            content,
             &positive_err_tags,
             &positive_warn_tags,
             &none_err_tags,
@@ -175,26 +202,32 @@ pub async fn check(fixture_text: &str) {
 
     // Run code lens check if we have lens tags (positive or negative)
     if !lens_tags.is_empty() {
-        run_code_lens_check(&server, &uri, &positive_lens_tags, &none_lens_tags).await;
+        run_code_lens_check(server, uri, &positive_lens_tags, &none_lens_tags).await;
         checks_run.push("lens");
     }
 
     // Run hover check if we have hover tags
     if !hover_tags.is_empty() {
-        run_hover_check(&server, &uri, &hover_tags).await;
+        run_hover_check(server, uri, &hover_tags).await;
         checks_run.push("hover");
     }
 
     // Run type hierarchy check if we have th tags
     if cursor.is_some() && !th_tags.is_empty() {
-        run_type_hierarchy_check(&server, &uri, cursor.unwrap(), &th_tags).await;
+        run_type_hierarchy_check(server, uri, cursor.unwrap(), &th_tags).await;
         checks_run.push("type_hierarchy");
     }
 
     // Run rename check if we have rename tags
     if !rename_tags.is_empty() {
-        run_rename_check(&server, &uri, &content, &rename_tags).await;
+        run_rename_check(server, uri, content, &rename_tags).await;
         checks_run.push("rename");
+    }
+
+    // Run completion check if we have complete tags (requires cursor)
+    if cursor.is_some() && !complete_tags.is_empty() {
+        run_completion_check(server, uri, cursor.unwrap(), &complete_tags).await;
+        checks_run.push("completion");
     }
 
     // If no checks were run, that's okay - it means the fixture is valid with no expectations
@@ -231,135 +264,37 @@ pub async fn check_multi_file(files: &[(&str, &str)]) {
         "check_multi_file requires at least one file"
     );
 
+    let mut editor = FakeEditor::new().await;
+
+    // Open all files — primary file gets markers stripped, others are plain content
     let (primary_filename, primary_fixture) = files[0];
+    let primary_clean = strip_all_markers(primary_fixture);
+    editor.open(primary_filename, &primary_clean);
 
-    // Extract cursor if present in primary file
-    let has_cursor = primary_fixture.contains("$0");
-    let (cursor, text_without_cursor) = if has_cursor {
-        let (pos, clean) = extract_cursor(primary_fixture);
-        (Some(pos), clean)
-    } else {
-        (None, primary_fixture.to_string())
-    };
-
-    // Extract all tags from primary file
-    let (all_tags, primary_content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
-
-    // Also extract simple tags for def/ref
-    let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
-    let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
-
-    // Categorize tags
-    let hint_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hint").collect();
-    let lens_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "lens").collect();
-    let err_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "err").collect();
-    let warn_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "warn").collect();
-    let hover_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "hover").collect();
-    let th_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "th").collect();
-    let type_tags: Vec<&Tag> = all_tags.iter().filter(|t| t.kind == "type").collect();
-
-    // Separate none tags
-    let none_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| t.is_none()).copied().collect();
-    let none_warn_tags: Vec<&Tag> = warn_tags.iter().filter(|t| t.is_none()).copied().collect();
-    let none_hint_tags: Vec<&Tag> = hint_tags.iter().filter(|t| t.is_none()).copied().collect();
-    let none_lens_tags: Vec<&Tag> = lens_tags.iter().filter(|t| t.is_none()).copied().collect();
-
-    let positive_err_tags: Vec<&Tag> = err_tags.iter().filter(|t| !t.is_none()).copied().collect();
-    let positive_warn_tags: Vec<&Tag> =
-        warn_tags.iter().filter(|t| !t.is_none()).copied().collect();
-    let positive_hint_tags: Vec<&Tag> =
-        hint_tags.iter().filter(|t| !t.is_none()).copied().collect();
-    let positive_lens_tags: Vec<&Tag> =
-        lens_tags.iter().filter(|t| !t.is_none()).copied().collect();
-
-    // Build file list with cleaned primary content
-    let mut cleaned_files: Vec<(&str, String)> = Vec::new();
-    cleaned_files.push((primary_filename, primary_content.clone()));
     for (filename, content) in files.iter().skip(1) {
-        cleaned_files.push((filename, content.to_string()));
+        editor.open(filename, content);
     }
 
-    let file_refs: Vec<(&str, &str)> = cleaned_files
+    // Build file contents map for cross-file type inference
+    let file_contents_owned: Vec<(Url, Vec<u8>)> = files
         .iter()
-        .map(|(f, c)| (*f, c.as_str()))
+        .map(|(filename, content)| {
+            let uri = FakeEditor::filename_to_uri(filename);
+            let clean = strip_all_markers(content);
+            (uri, clean.as_bytes().to_vec())
+        })
         .collect();
 
-    // Setup server with all files
-    let (server, uris) = setup_with_multi_file_fixture(&file_refs).await;
-    let primary_uri = &uris[0];
-
-    // Track checks run
-    let mut checks_run = Vec::new();
-
-    // Run goto definition check
-    if cursor.is_some() && !def_ranges.is_empty() {
-        run_goto_check(&server, primary_uri, cursor.unwrap(), &def_ranges).await;
-        checks_run.push("goto");
-    }
-
-    // Run references check
-    if cursor.is_some() && !ref_ranges.is_empty() {
-        run_references_check(&server, primary_uri, cursor.unwrap(), &ref_ranges).await;
-        checks_run.push("references");
-    }
-
-    // Run type check (no cursor needed - uses tag position)
-    if !type_tags.is_empty() {
-        // Build file contents map for all files
-        let file_contents_owned: Vec<(Url, Vec<u8>)> = cleaned_files
-            .iter()
-            .enumerate()
-            .map(|(i, (_, content))| (uris[i].clone(), content.as_bytes().to_vec()))
-            .collect();
-        run_type_check(
-            &server,
-            primary_uri,
-            &primary_content,
-            &type_tags,
-            &file_contents_owned,
-        )
-        .await;
-        checks_run.push("type");
-    }
-
-    // Run inlay hints check
-    if !hint_tags.is_empty() {
-        run_inlay_hints_check(&server, primary_uri, &positive_hint_tags, &none_hint_tags).await;
-        checks_run.push("hints");
-    }
-
-    // Run diagnostics check
-    if !err_tags.is_empty() || !warn_tags.is_empty() {
-        run_diagnostics_check(
-            &server,
-            primary_uri,
-            &primary_content,
-            &positive_err_tags,
-            &positive_warn_tags,
-            &none_err_tags,
-            &none_warn_tags,
-        )
-        .await;
-        checks_run.push("diagnostics");
-    }
-
-    // Run code lens check
-    if !lens_tags.is_empty() {
-        run_code_lens_check(&server, primary_uri, &positive_lens_tags, &none_lens_tags).await;
-        checks_run.push("lens");
-    }
-
-    // Run hover check
-    if !hover_tags.is_empty() {
-        run_hover_check(&server, primary_uri, &hover_tags).await;
-        checks_run.push("hover");
-    }
-
-    // Run type hierarchy check
-    if cursor.is_some() && !th_tags.is_empty() {
-        run_type_hierarchy_check(&server, primary_uri, cursor.unwrap(), &th_tags).await;
-        checks_run.push("type_hierarchy");
-    }
+    // Run assertions on primary file with extra file contents for type inference
+    let primary_uri = FakeEditor::filename_to_uri(primary_filename);
+    run_checks_on_fixture(
+        editor.server(),
+        &primary_uri,
+        &primary_clean,
+        primary_fixture,
+        Some(&file_contents_owned),
+    )
+    .await;
 }
 
 /// Run goto definition check.
@@ -1285,6 +1220,82 @@ async fn run_rename_check(
     }
 }
 
+/// Run completion check.
+///
+/// The `<complete items="greet,to_s">` tag asserts expected completion items at the cursor.
+///
+/// Attributes:
+/// - `items` (required): comma-separated list of expected completion item labels
+/// - `excludes` (optional): comma-separated list of items that must NOT appear
+async fn run_completion_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    cursor: Position,
+    complete_tags: &[&Tag],
+) {
+    for tag in complete_tags {
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: cursor,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+
+        let result = request::handle_completion(server, params)
+            .await
+            .expect("Completion request failed");
+
+        let items = match result {
+            Some(CompletionResponse::Array(items)) => items,
+            Some(CompletionResponse::List(list)) => list.items,
+            None => vec![],
+        };
+
+        let actual_labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+        // Check expected items are present
+        if let Some(expected_items_str) = tag.attributes.get("items") {
+            let expected: Vec<&str> = expected_items_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            for expected_item in &expected {
+                assert!(
+                    actual_labels.iter().any(|l| l.contains(expected_item)),
+                    "Expected completion item '{}' not found at {:?}.\nActual items: {:?}",
+                    expected_item,
+                    cursor,
+                    actual_labels
+                );
+            }
+        }
+
+        // Check excluded items are NOT present
+        if let Some(excludes_str) = tag.attributes.get("excludes") {
+            let excluded: Vec<&str> = excludes_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            for excluded_item in &excluded {
+                assert!(
+                    !actual_labels.iter().any(|l| l.contains(excluded_item)),
+                    "Completion item '{}' should NOT be present at {:?}.\nActual items: {:?}",
+                    excluded_item,
+                    cursor,
+                    actual_labels
+                );
+            }
+        }
+    }
+}
+
 /// Compare ranges exactly.
 fn ranges_match(actual: &Range, expected: &Range) -> bool {
     actual.start.line == expected.start.line
@@ -1417,5 +1428,36 @@ end
 "#,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_check_completion() {
+        check(
+            r#"
+class Greeter
+end
+
+class GreetHelper
+end
+
+Greet$0
+<complete items="Greeter,GreetHelper">
+"#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_fake_editor_lifecycle() {
+        let mut editor = FakeEditor::new().await;
+        editor.open("lifecycle.rb", "class Foo; end");
+        editor.set("lifecycle.rb", "class Foo\n  def greet\n    \"hi\"\n  end\nend");
+        editor.check("lifecycle.rb", r#"
+class Foo
+  def greet
+    "hi"
+  end
+end
+"#).await;
     }
 }

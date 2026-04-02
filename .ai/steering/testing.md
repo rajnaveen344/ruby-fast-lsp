@@ -161,18 +161,21 @@ The integration test suite aims to cover:
 - ✅ Single-file and multi-file scenarios
 - ✅ Nested namespace resolution
 - ✅ Cross-file reference tracking
+- ✅ Hover information
+- ✅ Code completion (`<complete>` tag)
+- ✅ Diagnostics (errors and warnings)
+- ✅ Rename operations
+- ✅ Inlay hints
+- ✅ Code lens
+- ✅ Type hierarchy
+- ✅ Type inference
+- ✅ Editor lifecycle testing (FakeEditor)
 
 #### Planned Expansions
 
-Based on the integration test plan, future coverage will include:
-
-- Hover information
-- Code completion
 - Document symbols
 - Workspace symbols
-- Diagnostics
 - Semantic tokens
-- Rename operations
 - Formatting
 
 ### Best Practices
@@ -203,3 +206,13 @@ Based on the integration test plan, future coverage will include:
 - Regular review of test coverage and identification of gaps
 
 The integration testing strategy provides a robust foundation for ensuring the Ruby Fast LSP server delivers reliable and accurate language server functionality across a wide range of Ruby language constructs and usage patterns.
+
+### Known Gaps
+
+The harness now supports lifecycle testing via `FakeEditor` (open → edit → query) and completion testing via `<complete>` tags. Remaining gaps:
+
+1. **No workspace-level tests** — The harness simulates individual files, not a real workspace with `rootUri`, `workspace/configuration`, or file watchers. Scenarios like "add a new file, verify symbols appear" aren't testable.
+
+2. **No latency/performance assertions** — For editor tooling, a correct-but-slow response is a bug. There's no way to assert "this completes in <50ms."
+
+3. **No snapshot testing** — For complex hover markdown or completion item details, snapshots catch unintended formatting regressions that marker-based tests miss.

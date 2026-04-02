@@ -20,11 +20,13 @@
 //! ```
 
 mod check;
+mod fake_editor;
 mod fixture;
 mod inlay_hints;
 
 // Re-export unified check functions (the only API)
 pub use check::{check, check_multi_file};
+pub use fake_editor::FakeEditor;
 
 // Re-export core utilities for tests (used internally by check)
 pub use fixture::{
