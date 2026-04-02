@@ -25,7 +25,6 @@ User.f$0
 }
 
 #[tokio::test]
-#[ignore] // BUG: RBS `new` not returned for user-defined classes
 async fn constant_receiver_new() {
     check(
         r#"
