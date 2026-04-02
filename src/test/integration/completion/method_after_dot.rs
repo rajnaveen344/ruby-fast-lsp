@@ -326,6 +326,64 @@ User.new.n$0
     .await;
 }
 
+// ─── 8b. Deep Method Chaining ───
+
+#[tokio::test]
+async fn chain_two_levels_rbs() {
+    // "hello" → String, .upcase → String (RBS), .d → downcase
+    check(
+        r#"
+name = "hello"
+name.upcase.d$0
+<complete items="downcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn chain_three_levels_rbs() {
+    check(
+        r#"
+name = "hello"
+name.upcase.downcase.s$0
+<complete items="strip">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn chain_through_new_then_yard() {
+    check(
+        r#"
+class User
+  # @return [String]
+  def name
+    @name
+  end
+end
+
+User.new.name.u$0
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore] // Array#first returns generic Elem, can't resolve to Integer without generics support
+async fn chain_array_methods() {
+    check(
+        r#"
+arr = [1, 2, 3]
+arr.first.a$0
+<complete items="abs">
+"#,
+    )
+    .await;
+}
+
 // ─── 9. YARD Return Types ───
 
 #[tokio::test]
