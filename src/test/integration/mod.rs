@@ -12,6 +12,7 @@
 //! - variables/ - Tests for variables
 
 // Feature-based organization (new)
+mod completion;
 mod hover;
 mod inlay_hints;
 
