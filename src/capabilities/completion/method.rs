@@ -65,6 +65,25 @@ pub fn find_method_completions(
         }
     }
 
+    // For singleton methods on classes, also include Class instance methods from RBS
+    // (e.g., `new`, `allocate`). When you call `User.new`, `new` is an instance method
+    // of `Class` (since `User` is an instance of `Class`).
+    if is_singleton {
+        for rbs_class in &["Class", "Module"] {
+            let class_methods = get_rbs_class_methods(rbs_class, false);
+            for method_info in class_methods {
+                if !method_info.name.starts_with(partial_method) {
+                    continue;
+                }
+                if seen_methods.contains(&method_info.name) {
+                    continue;
+                }
+                seen_methods.insert(method_info.name.clone());
+                completions.push(create_method_completion_item(&method_info));
+            }
+        }
+    }
+
     // Sort by name
     completions.sort_by(|a, b| a.label.cmp(&b.label));
 

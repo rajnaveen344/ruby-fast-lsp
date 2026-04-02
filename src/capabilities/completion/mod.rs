@@ -327,6 +327,50 @@ fn get_receiver_type_from_snapshots(
         return Some(RubyType::ClassReference(fqn));
     }
 
+    // Handle self receiver — resolve to the enclosing class/module
+    if let Some(Identifier::RubyMethod {
+        receiver: MethodReceiver::SelfReceiver,
+        namespace,
+        ..
+    }) = identifier
+    {
+        if !namespace.is_empty() {
+            let fqn = FullyQualifiedName::from(namespace.clone());
+            return Some(RubyType::Class(fqn));
+        }
+    }
+
+    // Handle method call chains — resolve inner receiver, then infer return type
+    // e.g., User.new.name -> Constant(User) + "new" -> Class(User) instance, then lookup "name"
+    // e.g., user.name.upcase -> Variable("user") + "name" -> infer return type of name
+    if let Some(Identifier::RubyMethod {
+        receiver: MethodReceiver::MethodCall { inner_receiver, method_name },
+        ..
+    }) = identifier
+    {
+        let inner_type = resolve_method_receiver_type(server, uri, content, position, inner_receiver);
+        if let Some(inner_type) = inner_type {
+            // Special case: .new on a ClassReference returns an instance of that class
+            if method_name == "new" {
+                if let RubyType::ClassReference(fqn) = &inner_type {
+                    return Some(RubyType::Class(fqn.clone()));
+                }
+            }
+
+            // General case: look up the method's return type
+            let mut index = server.index.lock();
+            let return_type = crate::inferrer::return_type::infer_method_call(
+                &mut index,
+                &inner_type,
+                method_name,
+                None,
+            );
+            if let Some(rt) = return_type {
+                return Some(rt);
+            }
+        }
+    }
+
     // Extract receiver text from the line
     let line = content.lines().nth(position.line as usize)?;
     let char_pos = position.character as usize;
@@ -338,7 +382,15 @@ fn get_receiver_type_from_snapshots(
     };
 
     let dot_pos = before_cursor.rfind('.')?;
-    let before_dot = &before_cursor[..dot_pos];
+    let before_dot = before_cursor[..dot_pos].trim_end();
+
+    // Try literal detection on the raw text before the dot first,
+    // before we strip to just the last word token. This handles cases
+    // like `"hello".upcase` and `[1,2,3].first` where the literal
+    // expression contains non-alphanumeric chars.
+    if let Some(literal_type) = infer_literal_type_from_expression(before_dot) {
+        return Some(literal_type);
+    }
 
     // Extract only the last token (word) before the dot
     // This handles cases like "puts b." where we want just "b"
@@ -353,7 +405,7 @@ fn get_receiver_type_from_snapshots(
         return None;
     }
 
-    // Handle literals directly (no CFG needed - these are unambiguous)
+    // Handle literals from single-word text (e.g., integer `42.abs`)
     if let Some(literal_type) = infer_literal_type(receiver_text) {
         return Some(literal_type);
     }
@@ -405,6 +457,76 @@ fn get_receiver_type_from_snapshots(
     }
 
     None
+}
+
+/// Resolve a `MethodReceiver` to a `RubyType` for method chain resolution.
+///
+/// This handles the base cases (Constant, LocalVariable, SelfReceiver) that
+/// `get_receiver_type_from_snapshots` handles for Identifier, but operates
+/// on the recursive `MethodReceiver` structure used in chained calls.
+fn resolve_method_receiver_type(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+    position: Position,
+    receiver: &MethodReceiver,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+    use crate::types::fully_qualified_name::FullyQualifiedName;
+
+    match receiver {
+        MethodReceiver::Constant(parts) => {
+            let fqn = FullyQualifiedName::Constant(parts.clone());
+            Some(RubyType::ClassReference(fqn))
+        }
+        MethodReceiver::LocalVariable(name) => {
+            // Look up variable type from VariableScopes
+            if let Some(doc_arc) = server.docs.lock().get(uri) {
+                let doc = doc_arc.read();
+                if let Some(scope_id) = doc
+                    .variable_scopes()
+                    .find_scope_for_variable_at(name, position)
+                    .or_else(|| doc.variable_scopes().scope_at_position(position))
+                {
+                    if let Some(ty) = doc
+                        .variable_scopes()
+                        .get_type_at_position(name, scope_id, position)
+                    {
+                        if *ty != RubyType::Unknown {
+                            return Some(ty.clone());
+                        }
+                    }
+                }
+            }
+            // Fallback to constructor pattern
+            infer_type_from_constructor_assignment(content, name)
+        }
+        MethodReceiver::SelfReceiver => {
+            // Would need namespace context — not available here
+            None
+        }
+        MethodReceiver::MethodCall {
+            inner_receiver,
+            method_name,
+        } => {
+            let inner_type =
+                resolve_method_receiver_type(server, uri, content, position, inner_receiver)?;
+            // Special case: .new on a ClassReference returns an instance
+            if method_name == "new" {
+                if let RubyType::ClassReference(fqn) = &inner_type {
+                    return Some(RubyType::Class(fqn.clone()));
+                }
+            }
+            let mut index = server.index.lock();
+            crate::inferrer::return_type::infer_method_call(
+                &mut index,
+                &inner_type,
+                method_name,
+                None,
+            )
+        }
+        _ => None,
+    }
 }
 
 /// Look for a constructor assignment pattern like `var = ClassName.new` in the source
@@ -463,6 +585,46 @@ fn infer_type_from_constructor_assignment(
                 }
             }
         }
+    }
+
+    None
+}
+
+/// Infer type from a literal expression at the end of text before a dot.
+///
+/// Unlike `infer_literal_type` which works on a single token, this handles
+/// full expressions like `"hello"`, `[1, 2, 3]`, `{ a: 1 }` by looking
+/// at the trailing expression in the text.
+fn infer_literal_type_from_expression(text: &str) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+
+    let trimmed = text.trim();
+
+    // String literal ending: ..." or ...'
+    if trimmed.ends_with('"') || trimmed.ends_with('\'') {
+        return Some(RubyType::string());
+    }
+
+    // Array literal ending: ...]
+    if trimmed.ends_with(']') {
+        return Some(RubyType::Array(vec![RubyType::Unknown]));
+    }
+
+    // Hash literal ending: ...}
+    if trimmed.ends_with('}') {
+        return Some(RubyType::Hash(
+            vec![RubyType::Unknown],
+            vec![RubyType::Unknown],
+        ));
+    }
+
+    // Symbol literal: check for :word pattern at end
+    if let Some(rest) = trimmed.rsplit_once(|c: char| c.is_whitespace() || c == '(' || c == ',') {
+        if rest.1.starts_with(':') {
+            return Some(RubyType::symbol());
+        }
+    } else if trimmed.starts_with(':') {
+        return Some(RubyType::symbol());
     }
 
     None

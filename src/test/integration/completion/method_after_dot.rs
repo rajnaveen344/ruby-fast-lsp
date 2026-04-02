@@ -159,7 +159,6 @@ sym.t$0
 // ─── 3. Literal Receivers (Direct) ───
 
 #[tokio::test]
-#[ignore] // BUG: Direct literal receiver extraction fails (works via variable assignment)
 async fn string_literal_receiver() {
     check(
         r#"
@@ -171,7 +170,6 @@ async fn string_literal_receiver() {
 }
 
 #[tokio::test]
-#[ignore] // BUG: Direct literal receiver extraction fails (works via variable assignment)
 async fn array_literal_receiver() {
     check(
         r#"
@@ -313,7 +311,6 @@ user.$0
 // ─── 8. Method Chaining ───
 
 #[tokio::test]
-#[ignore] // BUG: Method chaining through .new not resolved
 async fn chain_through_new() {
     check(
         r#"
@@ -333,7 +330,6 @@ User.new.n$0
 // ─── 9. YARD Return Types ───
 
 #[tokio::test]
-#[ignore] // BUG: Chained method call return type not inferred for completion
 async fn yard_return_type_on_method() {
     check(
         r#"
@@ -401,7 +397,6 @@ end
 // ─── 12. Self Receiver ───
 
 #[tokio::test]
-#[ignore] // BUG: self receiver not handled in completion context
 async fn self_receiver_instance_context() {
     check(
         r#"
