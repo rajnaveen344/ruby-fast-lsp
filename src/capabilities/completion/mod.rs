@@ -371,6 +371,21 @@ fn get_receiver_type_from_snapshots(
         }
     }
 
+    // Handle instance/class/global variable receivers — look up type from index
+    if let Some(Identifier::RubyMethod { receiver, .. }) = identifier {
+        let var_type = match receiver {
+            MethodReceiver::InstanceVariable(name)
+            | MethodReceiver::ClassVariable(name)
+            | MethodReceiver::GlobalVariable(name) => {
+                lookup_variable_type_from_index(server, uri, name, receiver)
+            }
+            _ => None,
+        };
+        if let Some(ty) = var_type {
+            return Some(ty);
+        }
+    }
+
     // Extract receiver text from the line
     let line = content.lines().nth(position.line as usize)?;
     let char_pos = position.character as usize;
@@ -505,6 +520,11 @@ fn resolve_method_receiver_type(
             // Would need namespace context — not available here
             None
         }
+        MethodReceiver::InstanceVariable(name)
+        | MethodReceiver::ClassVariable(name)
+        | MethodReceiver::GlobalVariable(name) => {
+            lookup_variable_type_from_index(server, uri, name, receiver)
+        }
         MethodReceiver::MethodCall {
             inner_receiver,
             method_name,
@@ -531,6 +551,44 @@ fn resolve_method_receiver_type(
 
 /// Look for a constructor assignment pattern like `var = ClassName.new` in the source
 /// and return the class instance type if found.
+/// Look up the type of an instance/class/global variable from the index.
+///
+/// These variables have their types tracked in EntryKind::InstanceVariable,
+/// ClassVariable, and GlobalVariable entries in the RubyIndex.
+fn lookup_variable_type_from_index(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    name: &str,
+    receiver: &MethodReceiver,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::indexer::entry::entry_kind::EntryKind;
+    use crate::inferrer::r#type::ruby::RubyType;
+
+    let index = server.index.lock();
+    // Search entries for this file to find the variable with matching name and type
+    for entry in index.file_entries(uri) {
+        match (&entry.kind, receiver) {
+            (EntryKind::InstanceVariable(data), MethodReceiver::InstanceVariable(_)) => {
+                if data.name == *name && data.r#type != RubyType::Unknown {
+                    return Some(data.r#type.clone());
+                }
+            }
+            (EntryKind::ClassVariable(data), MethodReceiver::ClassVariable(_)) => {
+                if data.name == *name && data.r#type != RubyType::Unknown {
+                    return Some(data.r#type.clone());
+                }
+            }
+            (EntryKind::GlobalVariable(data), MethodReceiver::GlobalVariable(_)) => {
+                if data.name == *name && data.r#type != RubyType::Unknown {
+                    return Some(data.r#type.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn infer_type_from_constructor_assignment(
     content: &str,
     var_name: &str,

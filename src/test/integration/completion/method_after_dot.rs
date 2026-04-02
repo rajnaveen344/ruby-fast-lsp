@@ -451,7 +451,53 @@ end
     .await;
 }
 
-// ─── 12. Self Receiver ───
+// ─── 12. Instance Variable Receiver ───
+
+#[tokio::test]
+async fn instance_variable_string_receiver() {
+    check(
+        r#"
+class User
+  def initialize
+    @name = "hello"
+  end
+
+  def greet
+    @name.u$0
+  end
+end
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn instance_variable_constructor_receiver() {
+    check(
+        r#"
+class App
+  def initialize
+    @user = User.new
+  end
+
+  def run
+    @user.n$0
+  end
+end
+
+class User
+  def name
+    "hello"
+  end
+end
+<complete items="name">
+"#,
+    )
+    .await;
+}
+
+// ─── 13. Self Receiver ───
 
 #[tokio::test]
 async fn self_receiver_instance_context() {
