@@ -252,8 +252,15 @@ pub async fn find_completion_at_position(
                     MethodReceiver::Constant(_) => NamespaceKind::Singleton,
                     _ => NamespaceKind::Instance,
                 }
+            } else if matches!(
+                receiver_type,
+                crate::inferrer::r#type::ruby::RubyType::ClassReference(_)
+            ) {
+                // Dot-trigger on a constant (e.g., "UserA.") — partial_name is None
+                // but the text-based receiver detection found a ClassReference
+                NamespaceKind::Singleton
             } else {
-                NamespaceKind::Instance // Default fallback
+                NamespaceKind::Instance
             };
 
             let query = IndexQuery::new(server.index.clone());
@@ -265,7 +272,7 @@ pub async fn find_completion_at_position(
             completions.extend(method_completions);
         }
     } else {
-        // Normal completion: include variables, constants, and snippets
+        // Normal completion: include variables, constants, methods, and snippets
 
         // Add local variable completions
         let variable_completions = variable::find_variable_completions(&document, position);
@@ -279,6 +286,13 @@ pub async fn find_completion_at_position(
             partial_string.clone(),
         );
         completions.extend(constant_completions);
+
+        // Add top-level method completions (methods defined outside any class/module)
+        let top_level_methods = method::find_top_level_method_completions(
+            &server.index,
+            &partial_string,
+        );
+        completions.extend(top_level_methods);
 
         // Add snippet completions with context awareness
         // Only include snippets if not triggered by a dot character
@@ -468,6 +482,48 @@ fn get_receiver_type_from_snapshots(
         // Fallback: Look for constructor assignment pattern (var = ClassName.new)
         if let Some(ty) = infer_type_from_constructor_assignment(content, receiver_text) {
             return Some(ty);
+        }
+    }
+
+    // Fallback: receiver might be a bare method call (e.g., `top_level.to_s`)
+    // Look up method in the index, infer return type from source if needed
+    if let Ok(ruby_method) = crate::types::ruby_method::RubyMethod::new(receiver_text) {
+        let mut index = server.index.lock();
+
+        // First check stored return type, then collect FQN for inference
+        let method_fqn = if let Some(entries) = index.get_methods_by_name(&ruby_method) {
+            let mut fqn = None;
+            for entry in entries {
+                if let crate::indexer::entry::entry_kind::EntryKind::Method(data) = &entry.kind {
+                    if let Some(ref rt) = data.return_type {
+                        if *rt != RubyType::Unknown {
+                            return Some(rt.clone());
+                        }
+                    }
+                    // Remember FQN for source-level inference
+                    if fqn.is_none() {
+                        fqn = Some(FullyQualifiedName::method(
+                            data.owner.namespace_parts(),
+                            ruby_method.clone(),
+                        ));
+                    }
+                }
+            }
+            fqn
+        } else {
+            None
+        };
+
+        // Try source-level inference with the method FQN
+        if let Some(fqn) = method_fqn {
+            if let Some(rt) = crate::inferrer::return_type::infer_method_return_type(
+                &mut index,
+                &fqn,
+                None,
+                None,
+            ) {
+                return Some(rt);
+            }
         }
     }
 

@@ -515,6 +515,40 @@ a = UserA.ne$0
     .await;
 }
 
+// ─── 13b. Regression: constant receiver should not leak other classes' methods ───
+
+#[tokio::test]
+async fn constant_receiver_does_not_leak_other_class_methods() {
+    check(
+        r#"
+class UserA
+  def namea
+  end
+end
+
+class Order
+  def self.calculate_total
+  end
+
+  def amount
+  end
+end
+
+class Product
+  def self.find_by_name
+  end
+
+  def price
+  end
+end
+
+a = UserA.$0
+<complete excludes="calculate_total,amount,find_by_name,price">
+"#,
+    )
+    .await;
+}
+
 // ─── 14. Self Receiver ───
 
 #[tokio::test]
@@ -535,3 +569,22 @@ end
     )
     .await;
 }
+
+// ─── 15. Top-level method completions ───
+
+#[tokio::test]
+async fn top_level_method_completion() {
+    check(
+        r#"
+def top_level
+end
+
+top$0
+<complete items="top_level">
+"#,
+    )
+    .await;
+}
+
+// TODO: Bare method call as receiver (e.g., `top_level.to_s`)
+// needs inference pipeline to resolve method return types on-the-fly

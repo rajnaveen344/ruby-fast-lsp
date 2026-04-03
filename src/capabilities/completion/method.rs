@@ -182,12 +182,12 @@ fn get_index_methods_with_ancestors(
             .map(|c| c.to_string())
             .collect::<Vec<_>>()
             .join("::");
-        if !classes_to_search.contains(&ancestor_name) {
+        if !ancestor_name.is_empty() && !classes_to_search.contains(&ancestor_name) {
             classes_to_search.push(ancestor_name);
         }
         // Also add the simple name
         if let Some(simple_name) = parts.last().map(|c| c.to_string()) {
-            if !classes_to_search.contains(&simple_name) {
+            if !simple_name.is_empty() && !classes_to_search.contains(&simple_name) {
                 classes_to_search.push(simple_name);
             }
         }
@@ -245,6 +245,52 @@ fn get_index_methods_with_ancestors(
     }
 
     methods
+}
+
+/// Find top-level methods (methods defined outside any class/module) matching a partial.
+///
+/// These methods have an empty owner namespace (the root namespace).
+/// Examples: methods defined in rake tasks, scripts, or at the top of a file.
+pub fn find_top_level_method_completions(
+    index: &Index<Unlocked>,
+    partial_method: &str,
+) -> Vec<CompletionItem> {
+    let index = index.lock();
+    let mut completions = Vec::new();
+    let mut seen_methods = std::collections::HashSet::new();
+
+    for (ruby_method, entries) in index.methods_by_name() {
+        let method_name = ruby_method.get_name();
+        if !method_name.starts_with(partial_method) {
+            continue;
+        }
+        if seen_methods.contains(&method_name.to_string()) {
+            continue;
+        }
+
+        for entry in entries {
+            if let EntryKind::Method(data) = &entry.kind {
+                let owner = &data.owner;
+                // Top-level methods have an empty namespace (root)
+                if owner.namespace_parts().is_empty() {
+                    seen_methods.insert(method_name.to_string());
+                    let param_names: Vec<String> =
+                        data.params.iter().map(|p| p.name.clone()).collect();
+                    let method_info = RbsMethodInfo {
+                        name: method_name.to_string(),
+                        return_type: data.return_type.clone(),
+                        is_singleton: false,
+                        params: param_names,
+                    };
+                    completions.push(create_method_completion_item(&method_info));
+                    break;
+                }
+            }
+        }
+    }
+
+    completions.sort_by(|a, b| a.label.cmp(&b.label));
+    completions
 }
 
 /// Create a completion item for a method
