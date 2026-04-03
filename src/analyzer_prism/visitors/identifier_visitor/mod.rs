@@ -129,6 +129,12 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_class_node_exit(node);
     }
 
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode) {
+        self.scope_tracker.enter_singleton();
+        visit_singleton_class_node(self, node);
+        self.scope_tracker.exit_singleton();
+    }
+
     fn visit_module_node(&mut self, node: &ModuleNode) {
         self.process_module_node_entry(node);
         visit_module_node(self, node);

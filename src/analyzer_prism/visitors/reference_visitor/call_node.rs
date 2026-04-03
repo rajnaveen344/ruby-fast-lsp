@@ -4,7 +4,7 @@ use ruby_prism::{CallNode, Node};
 use crate::{
     analyzer_prism::utils,
     indexer::{entry::NamespaceKind, index::UnresolvedEntry},
-    inferrer::r#type::ruby::RubyType,
+    inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
         ruby_method::RubyMethod, ruby_namespace::RubyConstant,
@@ -63,6 +63,22 @@ impl ReferenceVisitor {
                 (ns, kind, ReceiverInfo::NoReceiver)
             }
         };
+
+        // For expression receivers, skip indexing if type inference fails.
+        // Indexing under the wrong FQN causes false positives in find-references.
+        // It's better to miss a reference than to return incorrect results.
+        if matches!(
+            receiver_info,
+            ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
+        ) && target_namespace == current_namespace
+        {
+            // Type inference didn't resolve the receiver — don't add this reference
+            trace!(
+                "Skipping method call with unresolved expression receiver: .{}",
+                method_name
+            );
+            return;
+        }
 
         // Create the method, handling potential validation errors gracefully
         let method = match RubyMethod::new(&method_name) {
@@ -219,12 +235,11 @@ impl ReferenceVisitor {
                 );
                 (ns, kind, ReceiverInfo::ConstantReceiver(receiver_name))
             } else {
-                // Invalid constant path - contains non-constant nodes
-                let (ns, kind) = self.handle_expression_receiver(current_namespace);
+                let (ns, kind) = self.handle_expression_receiver(receiver_node, current_namespace);
                 (ns, kind, ReceiverInfo::InvalidConstantPath)
             }
         } else {
-            let (ns, kind) = self.handle_expression_receiver(current_namespace);
+            let (ns, kind) = self.handle_expression_receiver(receiver_node, current_namespace);
             (ns, kind, ReceiverInfo::ExpressionReceiver)
         }
     }
@@ -334,13 +349,118 @@ impl ReferenceVisitor {
         }
     }
 
-    /// Handle method calls with expression receiver (e.g., `variable.method`)
+    /// Handle method calls with expression receiver (e.g., `variable.method`).
+    ///
+    /// Tries to infer the receiver's type using:
+    /// 1. Local variable → constructor pattern matching (`x = Foo.new`)
+    /// 2. Method call chain → return type resolution (`a.b` → resolve b's return type)
+    ///
+    /// Falls back to current namespace if inference fails. The caller checks whether
+    /// inference changed the result and skips indexing if it didn't (to avoid false positives).
     fn handle_expression_receiver(
         &self,
+        receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        // Expression receiver - use current namespace
+        // Try to infer the receiver's type
+        if let Some(resolved_type) = self.infer_expression_receiver_type(receiver_node) {
+            if let Some(ns) = self.type_to_namespace_parts(&resolved_type) {
+                return (ns, NamespaceKind::Instance);
+            }
+        }
+
+        // Fallback — caller will detect that namespace didn't change and skip indexing
         (current_namespace.clone(), NamespaceKind::Instance)
+    }
+
+    /// Try to infer the type of an expression receiver node.
+    fn infer_expression_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
+        // Case 1: Local variable (e.g., `user.name` where `user = User.new`)
+        if let Some(local_var) = receiver_node.as_local_variable_read_node() {
+            let var_name = String::from_utf8_lossy(local_var.name().as_slice()).to_string();
+            return self.infer_variable_type(&var_name);
+        }
+
+        // Case 2: Method call chain (e.g., `team.leader.name`)
+        if let Some(call) = receiver_node.as_call_node() {
+            let inner_method = String::from_utf8_lossy(call.name().as_slice()).to_string();
+
+            // First resolve the inner receiver's type
+            let inner_type = if let Some(inner_receiver) = call.receiver() {
+                if let Some(constant_read) = inner_receiver.as_constant_read_node() {
+                    // Constant receiver: Foo.bar → ClassReference(Foo)
+                    let name =
+                        String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                    Some(RubyType::ClassReference(FullyQualifiedName::Constant(
+                        vec![RubyConstant::new(&name).ok()?],
+                    )))
+                } else {
+                    // Recursive: try to infer inner receiver's type
+                    self.infer_expression_receiver_type(&inner_receiver)
+                }
+            } else {
+                // No receiver (bare method call) - type is current class
+                let ns = self.scope_tracker.get_ns_stack();
+                if ns.is_empty() {
+                    None
+                } else {
+                    Some(RubyType::Class(FullyQualifiedName::Constant(ns)))
+                }
+            }?;
+
+            // Now resolve the method's return type
+            let index = self.index.lock();
+            return MethodResolver::resolve_method_return_type(&index, &inner_type, &inner_method);
+        }
+
+        None
+    }
+
+    /// Infer a local variable's type from constructor patterns in the source.
+    fn infer_variable_type(&self, var_name: &str) -> Option<RubyType> {
+        let content = &self.document.content;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix(var_name) {
+                let next_char = rest.chars().next();
+                if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
+                    continue;
+                }
+                let rest = rest.trim();
+                if let Some(rest) = rest.strip_prefix('=') {
+                    let rhs = rest.trim();
+                    if let Some(new_pos) = rhs.find(".new") {
+                        let class_part = rhs[..new_pos].trim();
+                        if !class_part
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_uppercase())
+                        {
+                            continue;
+                        }
+
+                        let parts: Vec<_> = class_part
+                            .split("::")
+                            .filter_map(|s| RubyConstant::new(s.trim()).ok())
+                            .collect();
+                        if parts.is_empty() {
+                            continue;
+                        }
+
+                        return Some(RubyType::Class(FullyQualifiedName::Constant(parts)));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Convert a RubyType to namespace parts for FQN construction.
+    fn type_to_namespace_parts(&self, ruby_type: &RubyType) -> Option<Vec<RubyConstant>> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::Module(fqn) => Some(fqn.namespace_parts()),
+            _ => None,
+        }
     }
 
     /// Resolve relative constant paths by checking namespace hierarchy

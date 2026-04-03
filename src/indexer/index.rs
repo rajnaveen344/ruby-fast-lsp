@@ -1016,6 +1016,20 @@ impl RubyIndex {
             .collect()
     }
 
+    /// Get all descendant classes/modules (subclasses, sub-subclasses, etc.)
+    /// of the given FQN, transitively.
+    pub fn descendants(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        let Some(fqn_id) = self.get_fqn_id(fqn) else {
+            return Vec::new();
+        };
+
+        self.graph
+            .descendants(fqn_id)
+            .into_iter()
+            .filter_map(|id| self.get_fqn(id).cloned())
+            .collect()
+    }
+
     /// Get all classes/modules that directly include or prepend this module.
     ///
     /// Unlike `including_classes`, this returns direct mixers only (not transitive),

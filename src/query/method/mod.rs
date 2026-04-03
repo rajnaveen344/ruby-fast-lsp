@@ -64,15 +64,9 @@ impl IndexQuery {
         position: Position,
     ) -> Option<Vec<Location>> {
         // 1. Resolve receiver → namespace FQN
+        // If type inference fails, return None — correct or nothing.
         let namespace_fqn =
-            match self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
-            {
-                Some(fqn) => fqn,
-                None => {
-                    // Type inference failed - fall back to name-only search
-                    return self.search_by_name(method);
-                }
-            };
+            self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)?;
 
         let index = self.index.lock();
 
@@ -104,9 +98,8 @@ impl IndexQuery {
 
         drop(index);
 
-        // 4. Return results (with fallback)
         if all_definitions.is_empty() {
-            self.search_by_name(method) // Fallback: search by name only
+            None
         } else {
             Some(deduplicate_locations(all_definitions))
         }
@@ -119,7 +112,8 @@ impl IndexQuery {
 
 impl IndexQuery {
     /// Convert method receiver to namespace FQN.
-    fn resolve_receiver_to_namespace(
+    /// Used by both go-to-definition and find-references.
+    pub(crate) fn resolve_receiver_to_namespace(
         &self,
         receiver: &MethodReceiver,
         current_namespace: &[RubyConstant],
@@ -292,25 +286,3 @@ impl IndexQuery {
     }
 }
 
-// ============================================================================
-// Fallback Search
-// ============================================================================
-
-impl IndexQuery {
-    /// Fallback: search by method name only (no type filtering).
-    fn search_by_name(&self, method: &RubyMethod) -> Option<Vec<Location>> {
-        let index = self.index.lock();
-        index.get_methods_by_name(method).and_then(|entries| {
-            let locations: Vec<Location> = entries
-                .iter()
-                .filter_map(|entry| index.to_lsp_location(&entry.location))
-                .collect();
-
-            if locations.is_empty() {
-                None
-            } else {
-                Some(locations)
-            }
-        })
-    }
-}

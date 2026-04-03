@@ -4,50 +4,78 @@ A high-performance Ruby Language Server written in Rust, delivering fast and acc
 
 ## Features
 
-### Core Features
+### Feature Status vs Competitors
 
-| **Feature**             | Status | Description                                           |
-| ----------------------- | ------ | ----------------------------------------------------- |
-| **Syntax Highlighting** | ✅     | Full semantic token-based highlighting                |
-| **Workspace Indexing**  | ✅     | Project files, stdlib stubs, gem dependencies         |
-| **Go to Definition**    | ✅     | Classes, modules, constants, local variables, methods |
-| **Find References**     | ✅     | Classes, modules, constants, local variables, methods |
-| **Code Completion**     | ✅     | Variables, constants, classes, modules, snippets      |
-| **Document Symbols**    | ✅     | Nested hierarchy with visibility info                 |
-| **Workspace Symbols**   | ✅     | Fuzzy search with camel case matching                 |
-| **Type Hierarchy**      | ✅     | Explore superclasses and subclasses                   |
-| **Hover**               | ✅     | Quick info for symbols                                |
-| **Inlay Hints**         | ✅     | End keyword hints for blocks                          |
-| **Code Folding**        | ✅     | Classes, modules, methods, control flow               |
-| **Diagnostics**         | ✅     | Syntax errors, warnings, unresolved constants/methods |
-| **Code Lens**           | ✅     | Module mixin usage counts                             |
-| **Formatting**          | ✅     | On-type formatting (auto-end) and basic formatting    |
+| **Feature**                | ruby-fast-lsp | ruby-lsp | Solargraph |
+| -------------------------- | :-----------: | :------: | :--------: |
+| **Syntax Highlighting**    |      ✅       |    ✅    |     ❌     |
+| **Workspace Indexing**     |      ✅       |    ✅    |     ✅     |
+| **Go to Definition**       |      ✅       |    ✅    |     ✅     |
+| **Find References**        |    ✅ / 🚧    |    ✅    |     ✅     |
+| **Code Completion**        |      ✅       |    ✅    |     ✅     |
+| **Hover**                  |      ✅       |    ✅    |     ✅     |
+| **Document Symbols**       |      ✅       |    ✅    |     ✅     |
+| **Workspace Symbols**      |      ✅       |    ✅    |     ✅     |
+| **Type Hierarchy**         |      ✅       |    ✅    |     ❌     |
+| **Inlay Hints**            |      ✅       |    ✅    |     ❌     |
+| **Code Folding**           |      ✅       |    ✅    |     ✅     |
+| **Diagnostics**            |      ✅       |    ✅    |     ✅     |
+| **Semantic Tokens**        |      ✅       |    ✅    |     ❌     |
+| **Code Lens**              |      ✅       |    ✅    |     ❌     |
+| **On-Type Formatting**     |      ✅       |    ✅    |     ❌     |
+| **Rename (local vars)**    |      ✅       |    ✅    |     ✅     |
+| **Signature Help**         |      ❌       |    ✅    |     ✅     |
+| **Code Actions**           |      ❌       |    ✅    |     ❌     |
+| **Document Highlight**     |      ❌       |    ✅    |     ✅     |
+| **Selection Range**        |      ❌       |    ✅    |     ❌     |
+| **Call Hierarchy**         |      ❌       |   🚧    |     ❌     |
+| **Cross-file Rename**      |      ❌       |    ✅    |     ✅     |
+| **Formatting (RuboCop)**   |      ❌       |    ✅    |     ✅     |
+| **Rails Support**          |      ❌       |    ✅    |     🚧     |
+| **Metaprogramming / DSLs** |      ❌       |    ✅    |     🚧     |
+| **YARD Docs in Hover**     |      ❌       |    ✅    |     ✅     |
+| **ERB / HAML Support**     |      ❌       |    ✅    |     ❌     |
 
 ### Navigation Details
 
-- **Go to Definition**
+- **Go to Definition**: Modules ✅ · Classes ✅ · Constants ✅ · Local variables ✅ · Methods ✅ · Instance/Class/Global variables 🚧
+- **Find References**: Modules ✅ · Classes ✅ · Constants ✅ · Local variables ✅ · Methods 🚧 (limited coverage)
 
-  - Modules ✅
-  - Classes ✅
-  - Constants ✅
-  - Local variables ✅
-  - Methods (limited) 🚧
-  - Instance/Class/Global variables 🚧
+### What's Working Well
 
-- **Find References**
-  - Modules ✅
-  - Classes ✅
-  - Constants ✅
-  - Local variables ✅
-  - Methods (limited) 🚧
+- **16 LSP features implemented** — strong core feature set
+- **Performance** — Rust-native with sub-millisecond completions via trie lookups
+- **Type inference engine** — RBS-backed with generic substitution (e.g., `Array[Integer]#first` → `Integer`)
+- **Semantic tokens** and **inlay hints** — features competitors often lack
 
-### Planned Features
+### Known Limitations
 
-- Code actions / Quick fixes ❌
-- Rename support ❌
-- Full type inference (Infrastructure in place) 🚧
-- Meta-programming support ❌
-- Run/Debug support ❌
+- **Method references** — incomplete; may miss matches across files
+- **Type inference** — expanding but not yet comprehensive (no flow-sensitive typing, limited YARD)
+- **Rename** — local variables only, no cross-file rename for methods/constants
+- **No metaprogramming awareness** — `attr_accessor`, `define_method`, `method_missing`, Rails DSLs not recognized
+- **No formatter integration** — no RuboCop/Standard delegation
+- **No signature help** — no parameter hints on method calls
+
+### Roadmap
+
+**High Priority** (biggest impact for daily use):
+- Signature help (parameter hints)
+- Document highlight (same-symbol occurrences)
+- Cross-file rename (methods, constants, classes)
+- YARD documentation in hover
+
+**Medium Priority** (competitive parity):
+- Code actions / Quick fixes
+- Formatting integration (RuboCop/Standard)
+- Metaprogramming support (`attr_accessor`, `define_method`)
+- Selection range (expand/shrink selection)
+
+**Future** (differentiation):
+- Rails support (routes, associations, callbacks, ERB)
+- Call hierarchy (incoming/outgoing calls)
+- Flow-sensitive type narrowing (`is_a?`, `nil?` guards)
+- Run/Debug support
 
 ## Getting Started
 
@@ -80,9 +108,10 @@ Ruby Fast LSP is designed for speed:
 
 ## Known Issues
 
-- Method references may be incomplete in some cases
-- Large workspaces may take time to index initially
-- Some edge cases in Ruby syntax may not be fully supported yet
+- Method references may be incomplete across files
+- Metaprogramming constructs (`attr_accessor`, `define_method`, etc.) are not indexed
+- Large workspaces may take time for initial indexing
+- Some Ruby edge cases (complex splatting, pattern matching) may not be fully supported
 
 ## Development
 

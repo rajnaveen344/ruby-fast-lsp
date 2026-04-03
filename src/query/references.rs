@@ -3,7 +3,7 @@
 //! Consolidates reference logic from `capabilities/references.rs`.
 
 use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
-use crate::indexer::entry::{EntryKind, NamespaceKind};
+use crate::indexer::entry::NamespaceKind;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -22,12 +22,12 @@ impl IndexQuery {
         content: &str,
     ) -> Option<Vec<Location>> {
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, _, ancestors, _scope_stack, _namespace_kind) =
+        let (identifier_opt, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(position);
 
         let identifier = identifier_opt?;
 
-        self.find_references_for_identifier(&identifier, &ancestors, position)
+        self.find_references_for_identifier(&identifier, &ancestors, namespace_kind, position)
     }
 
     /// Find references to a constant by FQN.
@@ -52,40 +52,47 @@ impl IndexQuery {
         None
     }
 
-    /// Find references to a method (mixin-aware).
+    /// Find references to a method.
+    ///
+    /// Uses the same type-inference-based receiver resolution as go-to-definition
+    /// to correctly resolve expression receivers. If the receiver type cannot be
+    /// inferred, returns None rather than guessing (correctness over completeness).
     fn find_method_references(
         &self,
         receiver: &MethodReceiver,
         method: &RubyMethod,
         ancestors: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
     ) -> Option<Vec<Location>> {
-        let mut all_references = Vec::new();
+        // `def initialize` is indexed as `new` (singleton) — map accordingly
+        if method.get_name() == "initialize" {
+            if let Ok(new_method) = RubyMethod::new("new") {
+                let context_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
+                return self.find_method_refs_with_receiver(&context_fqn, &new_method);
+            }
+        }
 
         match receiver {
             MethodReceiver::Constant(receiver_ns) => {
                 let receiver_fqn = self.resolve_receiver_fqn(receiver_ns, ancestors);
-                if let Some(refs) = self.find_method_refs_with_receiver(&receiver_fqn, method) {
-                    all_references.extend(refs);
-                }
+                self.find_method_refs_with_receiver(&receiver_fqn, method)
             }
             MethodReceiver::None | MethodReceiver::SelfReceiver => {
                 let context_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
-                if let Some(refs) = self.find_method_refs_without_receiver(&context_fqn, method) {
-                    all_references.extend(refs);
-                }
+                self.find_method_refs_without_receiver(&context_fqn, method)
             }
+            // For expression receivers, use type inference to resolve the actual type.
+            // This mirrors go-to-definition's `resolve_receiver_to_namespace`.
             _ => {
-                // Variable/expression receiver - search by method name
-                if let Some(refs) = self.find_method_refs_by_name(method) {
-                    all_references.extend(refs);
-                }
+                let resolved_ns = self.resolve_receiver_to_namespace(
+                    receiver,
+                    ancestors,
+                    namespace_kind,
+                    position,
+                )?;
+                self.find_method_refs_for_resolved_namespace(&resolved_ns, method)
             }
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
         }
     }
 
@@ -128,6 +135,7 @@ impl IndexQuery {
         &self,
         identifier: &Identifier,
         ancestors: &[RubyConstant],
+        namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<Vec<Location>> {
         match identifier {
@@ -149,7 +157,7 @@ impl IndexQuery {
                 namespace: _,
                 receiver,
                 iden,
-            } => self.find_method_references(receiver, iden, ancestors),
+            } => self.find_method_references(receiver, iden, ancestors, namespace_kind, position),
             Identifier::RubyInstanceVariable { name, .. } => {
                 if let Ok(fqn) = FullyQualifiedName::instance_variable(name.clone()) {
                     self.find_variable_references(&fqn)
@@ -207,17 +215,21 @@ impl IndexQuery {
         FullyQualifiedName::Constant(full_ns)
     }
 
-    /// Find method references with a receiver.
-    fn find_method_refs_with_receiver(
+    /// Find method references when the receiver has been resolved to a namespace FQN.
+    /// Searches the namespace's ancestor chain, descendants, and including classes.
+    fn find_method_refs_for_resolved_namespace(
         &self,
-        receiver_fqn: &FullyQualifiedName,
+        namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let mut all_references = Vec::new();
-        // When searching with a constant receiver (e.g., Foo.bar), use singleton namespace
-        let kind = NamespaceKind::Singleton;
+        let kind = NamespaceKind::Instance;
 
-        if let Some(refs) = self.find_method_refs_in_ancestor_chain(receiver_fqn, method, kind) {
+        if let Some(refs) = self.find_method_refs_in_ancestor_chain(namespace_fqn, method, kind) {
+            all_references.extend(refs);
+        }
+
+        if let Some(refs) = self.find_method_refs_in_descendants(namespace_fqn, method, kind) {
             all_references.extend(refs);
         }
 
@@ -228,14 +240,22 @@ impl IndexQuery {
         }
     }
 
-    /// Find method references without a receiver.
+    /// Find method references with a constant receiver (singleton namespace).
+    fn find_method_refs_with_receiver(
+        &self,
+        receiver_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<Location>> {
+        self.find_method_refs_in_ancestor_chain(receiver_fqn, method, NamespaceKind::Singleton)
+    }
+
+    /// Find method references without a receiver (instance method in current scope).
     fn find_method_refs_without_receiver(
         &self,
         context_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let mut all_references = Vec::new();
-        // Try instance methods first for bare method calls
         let method_kind = NamespaceKind::Instance;
 
         if let Some(refs) =
@@ -248,6 +268,12 @@ impl IndexQuery {
         if let Some(refs) =
             self.find_method_refs_in_sibling_modules(context_fqn, method, method_kind)
         {
+            all_references.extend(refs);
+        }
+
+        // Search descendants (subclasses) — a call to `parent_method` in Child < Parent
+        // is indexed as Child#parent_method, so we need to check subclasses too
+        if let Some(refs) = self.find_method_refs_in_descendants(context_fqn, method, method_kind) {
             all_references.extend(refs);
         }
 
@@ -267,7 +293,6 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
-        // Create Namespace FQN with kind for correct ancestor chain lookup
         let context_ns =
             FullyQualifiedName::namespace_with_kind(context_fqn.namespace_parts(), kind);
         let ancestor_chain = index.get_ancestor_chain(&context_ns);
@@ -313,7 +338,6 @@ impl IndexQuery {
         let including_classes = index.including_classes(module_fqn);
 
         for (including_class_fqn, _via_modules) in including_classes {
-            // Create Namespace FQN with kind for correct ancestor chain lookup
             let class_ns = FullyQualifiedName::namespace_with_kind(
                 including_class_fqn.namespace_parts(),
                 kind,
@@ -336,20 +360,46 @@ impl IndexQuery {
         }
     }
 
-    /// Find method references by name (fallback for expression receivers).
-    fn find_method_refs_by_name(&self, method: &RubyMethod) -> Option<Vec<Location>> {
+    /// Find method references in descendant classes (subclasses, sub-subclasses, etc.)
+    /// and descendants of classes that include this module.
+    ///
+    /// When `parent_method` is defined in Parent and called as a bare method in
+    /// `Child < Parent`, the reference is indexed as `Child#parent_method`.
+    /// Similarly, when a module method is called in a subclass of the including class.
+    fn find_method_refs_in_descendants(
+        &self,
+        context_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        kind: NamespaceKind,
+    ) -> Option<Vec<Location>> {
         let index = self.index.lock();
         let mut all_references = Vec::new();
 
-        if let Some(entries) = index.get_methods_by_name(method) {
-            for entry in entries {
-                if let EntryKind::Method(_) = &entry.kind {
-                    if let Some(fqn) = index.get_fqn(entry.fqn_id) {
-                        let refs = index.references(fqn);
-                        if !refs.is_empty() {
-                            all_references.extend(refs);
-                        }
-                    }
+        let context_ns =
+            FullyQualifiedName::namespace_with_kind(context_fqn.namespace_parts(), kind);
+
+        // Collect all FQNs to check descendants of:
+        // 1. The context itself (direct subclasses)
+        // 2. Classes that include this module (their subclasses too)
+        let mut roots_to_search = vec![context_ns.clone()];
+        let including_classes = index.including_classes(&context_ns);
+        for (class_fqn, _via) in &including_classes {
+            roots_to_search.push(FullyQualifiedName::namespace_with_kind(
+                class_fqn.namespace_parts(),
+                kind,
+            ));
+        }
+
+        for root in &roots_to_search {
+            let descendants = index.descendants(root);
+            for descendant_fqn in descendants {
+                let method_fqn = FullyQualifiedName::method(
+                    descendant_fqn.namespace_parts(),
+                    method.clone(),
+                );
+                let refs = index.references(&method_fqn);
+                if !refs.is_empty() {
+                    all_references.extend(refs);
                 }
             }
         }

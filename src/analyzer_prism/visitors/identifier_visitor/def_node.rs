@@ -18,7 +18,12 @@ impl IdentifierVisitor {
             return;
         }
 
-        let namespace_kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
+        let mut namespace_kind = utils::get_method_namespace_kind_simple(node.receiver().as_ref());
+        // Account for `class << self` context — get_method_namespace_kind_simple
+        // only checks for explicit `self.` receiver, not the singleton class scope
+        if self.scope_tracker.in_singleton() && namespace_kind == NamespaceKind::Instance {
+            namespace_kind = NamespaceKind::Singleton;
+        }
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         let method = RubyMethod::new(name.as_str());

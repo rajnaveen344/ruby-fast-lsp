@@ -50,15 +50,31 @@ Ruby Fast LSP is a high-performance Language Server Protocol (LSP) implementatio
 - **On-Type Formatting**
   - Instant `end` keyword insertion.
 
+- **Hover**
+
+  - Quick info for classes, modules, constants, methods, and local variables.
+  - Displays inferred types and method signatures.
+
+- **Rename**
+
+  - Local variable rename with scope-aware AST traversal.
+
+- **Type Hierarchy**
+  - Superclass/subclass navigation for exploring inheritance chains.
+
 ### Planned Features
 
-- Hover information
 - Code actions / Quick fixes
-- Rename support
-- Formatting integration (Rubocop)
+- Signature help (parameter hints)
+- Document highlight (same-symbol occurrences)
+- Call hierarchy (incoming/outgoing calls)
+- Selection range (expand/shrink selection)
+- Cross-file rename (methods, constants, classes)
+- Formatting integration (RuboCop/Standard)
 - Instance/class/global variable enhancements
-- Expanded Type inference (RBS/YARD integration)
-- Meta-programming support
+- Expanded type inference (RBS/YARD integration)
+- Meta-programming support (attr_accessor, define_method, DSLs)
+- Rails support (routes, associations, callbacks, ERB)
 - Run/Debug support
 
 ## Architecture Philosophy
