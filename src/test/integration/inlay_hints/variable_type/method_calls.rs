@@ -161,3 +161,29 @@ end
     )
     .await;
 }
+
+// =============================================================================
+// Generic Type Resolution
+// =============================================================================
+
+/// Array#first should resolve generic Elem to Integer
+#[tokio::test]
+async fn array_first_resolves_generic() {
+    check(
+        r#"
+a<hint label="Integer"> = [1, 2, 3].first
+"#,
+    )
+    .await;
+}
+
+/// Integer#abs should return Integer, not (Integer | Numeric)
+#[tokio::test]
+async fn integer_abs_returns_integer() {
+    check(
+        r#"
+b<hint label="Integer"> = 2.abs
+"#,
+    )
+    .await;
+}

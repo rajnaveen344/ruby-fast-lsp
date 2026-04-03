@@ -931,4 +931,42 @@ mod tests {
             &range
         ));
     }
+
+    #[test]
+    fn test_infer_array_first_from_assignment() {
+        use crate::indexer::index::RubyIndex;
+        use parking_lot::Mutex;
+        use std::sync::Arc;
+
+        let index = RubyIndex::new();
+        let code = r#"a = [1, 2, 3].first"#;
+        let result = infer_type_from_assignment(code, "a", &index);
+        println!("a = [1,2,3].first => {:?}", result);
+        assert!(result.is_some(), "Should infer type for a = [1,2,3].first");
+        let ty = result.unwrap();
+        assert_eq!(
+            ty,
+            RubyType::integer(),
+            "Expected Integer, got {:?}",
+            ty
+        );
+    }
+
+    #[test]
+    fn test_infer_integer_abs_from_assignment() {
+        use crate::indexer::index::RubyIndex;
+
+        let index = RubyIndex::new();
+        let code = r#"b = 2.abs"#;
+        let result = infer_type_from_assignment(code, "b", &index);
+        println!("b = 2.abs => {:?}", result);
+        assert!(result.is_some(), "Should infer type for b = 2.abs");
+        let ty = result.unwrap();
+        assert_eq!(
+            ty,
+            RubyType::integer(),
+            "Expected Integer, got {:?}",
+            ty
+        );
+    }
 }
