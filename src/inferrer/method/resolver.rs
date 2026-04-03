@@ -16,7 +16,6 @@ use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::{
     get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
-    substitute_type_vars_in_results,
 };
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
@@ -159,8 +158,13 @@ impl MethodResolver {
             _ => (None, false),
         };
 
+        // For generic built-in types (Array, Hash), skip user index and go straight to RBS.
+        // The user index may contain methods from gems with unresolved type variables
+        // (e.g., Enumerable#first → Elem). RBS handles generic substitution correctly.
+        let has_type_args = !get_type_args_for_receiver(receiver_type).is_empty();
+
         // Try to look up in Ruby index first (for user-defined methods)
-        if let Some(owner_fqn) = owner_fqn {
+        if let Some(owner_fqn) = owner_fqn.filter(|_| !has_type_args) {
             let namespace_kind = if is_singleton {
                 NamespaceKind::Singleton
             } else {
@@ -238,19 +242,6 @@ impl MethodResolver {
             }
 
             if !found_return_types.is_empty() {
-                // Apply generic substitution for types containing type variables
-                // (e.g., Enumerable#first returns Elem, but receiver is Array[Integer])
-                let type_args = get_type_args_for_receiver(receiver_type);
-                if !type_args.is_empty() {
-                    let substituted = substitute_type_vars_in_results(
-                        &found_return_types,
-                        class_name.as_deref().unwrap_or(""),
-                        &type_args,
-                    );
-                    if !substituted.is_empty() {
-                        return Some(RubyType::union(substituted));
-                    }
-                }
                 return Some(RubyType::union(found_return_types));
             }
         }
