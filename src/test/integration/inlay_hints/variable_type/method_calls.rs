@@ -197,7 +197,7 @@ async fn generic_types_survive_reindex() {
     let code = "a = [1, 2, 3].first\nb = 2.abs";
 
     // First indexing
-    editor.open("test.rb", code);
+    editor.open("test.rb", code).await;
     editor
         .check(
             "test.rb",
@@ -207,7 +207,7 @@ b<hint label="Integer"> = 2.abs"#,
         .await;
 
     // Simulate edit (same content, triggers re-indexing)
-    editor.set("test.rb", code);
+    editor.set("test.rb", code).await;
     editor
         .check(
             "test.rb",
@@ -235,7 +235,7 @@ a = [1,2,3].first
 b = 2.abs"#;
 
     // First indexing
-    editor.open("test.rb", code);
+    editor.open("test.rb", code).await;
     editor
         .check(
             "test.rb",
@@ -253,7 +253,7 @@ b<hint label="Integer"> = 2.abs"#,
         .await;
 
     // Simulate edit (triggers re-indexing)
-    editor.set("test.rb", code);
+    editor.set("test.rb", code).await;
     editor
         .check(
             "test.rb",
@@ -271,7 +271,7 @@ b<hint label="Integer"> = 2.abs"#,
         .await;
 
     // Third edit — still correct
-    editor.set("test.rb", code);
+    editor.set("test.rb", code).await;
     editor
         .check(
             "test.rb",

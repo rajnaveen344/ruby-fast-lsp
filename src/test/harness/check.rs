@@ -77,7 +77,7 @@ pub(super) fn strip_all_markers(fixture: &str) -> String {
 pub async fn check(fixture_text: &str) {
     let mut editor = FakeEditor::new().await;
     let clean = strip_all_markers(fixture_text);
-    editor.open("inline_test.rb", &clean);
+    editor.open("inline_test.rb", &clean).await;
     editor.check("inline_test.rb", fixture_text).await;
 }
 
@@ -269,10 +269,10 @@ pub async fn check_multi_file(files: &[(&str, &str)]) {
     // Open all files — primary file gets markers stripped, others are plain content
     let (primary_filename, primary_fixture) = files[0];
     let primary_clean = strip_all_markers(primary_fixture);
-    editor.open(primary_filename, &primary_clean);
+    editor.open(primary_filename, &primary_clean).await;
 
     for (filename, content) in files.iter().skip(1) {
-        editor.open(filename, content);
+        editor.open(filename, content).await;
     }
 
     // Build file contents map for cross-file type inference
@@ -714,25 +714,14 @@ async fn run_diagnostics_check(
         diagnostics.extend(generate_yard_diagnostics_inner(&index, uri));
     }
 
-    // Force re-indexing to run IndexVisitor again (since setup_with_fixture already indexed it)
+    // Run IndexVisitor directly on the parsed AST to collect its diagnostics
+    // (e.g., return type mismatches) without mutating server state.
     {
-        let docs = server.docs.lock();
-        if let Some(doc_arc) = docs.get(uri) {
-            let mut doc = doc_arc.write();
-            doc.indexed_version = None;
-        }
-    }
-
-    // Run FileProcessor to get indexing diagnostics (including return type checks)
-    let processor = crate::indexer::file_processor::FileProcessor::new(server.index.clone());
-    let options = crate::indexer::file_processor::ProcessingOptions {
-        index_definitions: true,
-        index_references: false,
-        resolve_mixins: false,
-        include_local_vars: true,
-    };
-    if let Ok(process_result) = processor.process_file(uri, content, server, options) {
-        diagnostics.extend(process_result.diagnostics);
+        use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+        use ruby_prism::Visit;
+        let mut visitor = IndexVisitor::new(server.index.clone(), document.clone());
+        visitor.visit(&parse_result.node());
+        diagnostics.extend(visitor.diagnostics);
     }
 
     let errors: Vec<_> = diagnostics
@@ -1450,8 +1439,8 @@ Greet$0
     #[tokio::test]
     async fn test_fake_editor_lifecycle() {
         let mut editor = FakeEditor::new().await;
-        editor.open("lifecycle.rb", "class Foo; end");
-        editor.set("lifecycle.rb", "class Foo\n  def greet\n    \"hi\"\n  end\nend");
+        editor.open("lifecycle.rb", "class Foo; end").await;
+        editor.set("lifecycle.rb", "class Foo\n  def greet\n    \"hi\"\n  end\nend").await;
         editor.check("lifecycle.rb", r#"
 class Foo
   def greet
@@ -1459,5 +1448,33 @@ class Foo
   end
 end
 "#).await;
+    }
+
+    #[tokio::test]
+    async fn test_literal_dot_completion() {
+        let mut editor = FakeEditor::new().await;
+
+        // Array literal after assignment
+        editor.open("a.rb", "a = [1,2,3].").await;
+        let items = editor.complete_with_trigger("a.rb", 0, 12, ".").await;
+        assert!(!items.is_empty(), "Expected completions for `a = [1,2,3].`");
+        assert!(items.iter().any(|i| i.label == "first"), "Expected `first` in Array completions");
+
+        // String literal after assignment
+        editor.open("b.rb", r#"b = "hello"."#).await;
+        let items = editor.complete_with_trigger("b.rb", 0, 12, ".").await;
+        assert!(!items.is_empty(), "Expected completions for `b = \"hello\".`");
+        assert!(items.iter().any(|i| i.label == "upcase"), "Expected `upcase` in String completions");
+
+        // Hash literal after assignment
+        editor.open("c.rb", "c = {a: 1}.").await;
+        let items = editor.complete_with_trigger("c.rb", 0, 11, ".").await;
+        assert!(!items.is_empty(), "Expected completions for hash literal dot completion");
+
+        // Integer literal after assignment
+        editor.open("d.rb", "d = 42.").await;
+        let items = editor.complete_with_trigger("d.rb", 0, 7, ".").await;
+        assert!(!items.is_empty(), "Expected completions for `d = 42.`");
+        assert!(items.iter().any(|i| i.label == "abs"), "Expected `abs` in Integer completions");
     }
 }

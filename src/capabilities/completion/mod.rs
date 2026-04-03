@@ -219,6 +219,7 @@ pub async fn find_completion_at_position(
                     | MethodReceiver::ClassVariable(_)
                     | MethodReceiver::GlobalVariable(_)
                     | MethodReceiver::MethodCall { .. }
+                    | MethodReceiver::Literal(_)
                     | MethodReceiver::Expression,
                 ..
             })
@@ -383,6 +384,15 @@ fn get_receiver_type_from_snapshots(
                 return Some(rt);
             }
         }
+    }
+
+    // Handle literal receivers — type is already known from the AST
+    if let Some(Identifier::RubyMethod {
+        receiver: MethodReceiver::Literal(ty),
+        ..
+    }) = identifier
+    {
+        return Some(ty.clone());
     }
 
     // Handle instance/class/global variable receivers — look up type from index

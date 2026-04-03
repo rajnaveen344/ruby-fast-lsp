@@ -1,14 +1,14 @@
 //! Core fixture utilities - marker extraction and server setup.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use parking_lot::RwLock;
-use tower_lsp::lsp_types::{InitializeParams, Position, Range, Url};
+use tower_lsp::lsp_types::{
+    DidOpenTextDocumentParams, InitializeParams, Position, Range, TextDocumentItem, Url,
+};
 use tower_lsp::LanguageServer;
 
+use crate::capabilities::indexing;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_document::RubyDocument;
 
 /// Cursor marker indicating where the LSP action should be triggered.
 pub const CURSOR_MARKER: &str = "$0";
@@ -337,30 +337,24 @@ fn virtual_uri_with_name(name: &str) -> Url {
 }
 
 /// Sets up a server with an inline fixture loaded.
+///
+/// Routes through the real `handle_did_open` handler to ensure tests
+/// exercise the same code path as a real editor.
 pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
     let server = RubyLanguageServer::default();
     let _ = server.initialize(InitializeParams::default()).await;
 
     let uri = virtual_uri();
 
-    let document = RubyDocument::new(uri.clone(), content.to_string(), 1);
-    server
-        .docs
-        .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document)));
-
-    // Index the document
-    {
-        use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
-        let indexer = FileProcessor::new(server.index.clone());
-        let options = ProcessingOptions {
-            index_definitions: true,
-            index_references: true,
-            resolve_mixins: true,
-            include_local_vars: true,
-        };
-        let _ = indexer.process_file(&uri, content, &server, options);
-    }
+    let params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "ruby".to_string(),
+            version: 1,
+            text: content.to_string(),
+        },
+    };
+    indexing::handle_did_open(&server, params).await;
 
     (server, uri)
 }
@@ -369,6 +363,9 @@ pub async fn setup_with_fixture(content: &str) -> (RubyLanguageServer, Url) {
 ///
 /// Each tuple contains (filename, content). The first file in the list
 /// is considered the "primary" file and its URI is returned.
+///
+/// Routes through the real `handle_did_open` handler to ensure tests
+/// exercise the same code path as a real editor.
 ///
 /// This is useful for testing cross-file scenarios like:
 /// - Class reopenings with mixins in different files
@@ -382,32 +379,19 @@ pub async fn setup_with_multi_file_fixture(
 
     let mut uris = Vec::new();
 
-    // First pass: create documents and add them to server
     for (filename, content) in files {
         let uri = virtual_uri_with_name(filename);
         uris.push(uri.clone());
 
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 1);
-        server
-            .docs
-            .lock()
-            .insert(uri, Arc::new(RwLock::new(document)));
-    }
-
-    // Second pass: index all files (order matters for testing cross-file)
-    {
-        use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
-        let indexer = FileProcessor::new(server.index.clone());
-        let options = ProcessingOptions {
-            index_definitions: true,
-            index_references: true,
-            resolve_mixins: true,
-            include_local_vars: true,
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri,
+                language_id: "ruby".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
         };
-
-        for (i, (_, content)) in files.iter().enumerate() {
-            let _ = indexer.process_file(&uris[i], content, &server, options.clone());
-        }
+        indexing::handle_did_open(&server, params).await;
     }
 
     (server, uris)

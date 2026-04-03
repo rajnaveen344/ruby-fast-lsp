@@ -10,6 +10,12 @@ use ustr::Ustr;
 pub struct RubyMethod(Ustr);
 
 impl RubyMethod {
+    /// Create an empty method name placeholder for completion at dot position
+    /// (e.g., `obj.` with no method typed yet).
+    pub fn empty() -> Self {
+        Self(Ustr::from(""))
+    }
+
     pub fn new(name: &str) -> Result<Self, &'static str> {
         if name.is_empty() {
             return Err("Method name cannot be empty");

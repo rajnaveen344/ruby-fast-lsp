@@ -133,7 +133,10 @@ Multi-file tests use `check_multi_file(&[("main.rb", "..."), ("other.rb", "...")
 
 ### FakeEditor (Lifecycle/Re-indexing Tests)
 
-Use `FakeEditor` to test behavior across edits — simulates open/edit/save cycle:
+FakeEditor routes all operations through the **real LSP handlers** (`handle_did_open`,
+`handle_did_change`, etc.), ensuring tests exercise the exact same code paths as a real editor.
+
+#### Tag-based assertions (simple cases)
 
 ```rust
 use crate::test::harness::FakeEditor;
@@ -143,25 +146,63 @@ async fn types_survive_reindex() {
     let mut editor = FakeEditor::new().await;
     let code = "a = [1, 2, 3].first";
 
-    // First indexing
-    editor.open("test.rb", code);
+    editor.open("test.rb", code).await;
     editor.check("test.rb", r#"a<hint label="Integer"> = [1, 2, 3].first"#).await;
 
-    // Simulate edit (re-indexes)
-    editor.set("test.rb", code);
+    editor.set("test.rb", code).await;
     editor.check("test.rb", r#"a<hint label="Integer"> = [1, 2, 3].first"#).await;
 }
 ```
 
-**Key methods:**
-- `editor.open("file.rb", content)` — first open + index
-- `editor.set("file.rb", new_content)` — edit + re-index (bumps version)
-- `editor.check("file.rb", fixture)` — assert with tags (content must match)
-- `editor.close("file.rb")` — close file
+#### Programmatic assertions (complex scenarios)
+
+```rust
+#[tokio::test]
+async fn completion_filtering() {
+    let mut editor = FakeEditor::new().await;
+    editor.open("test.rb", "user = User.new\nuser.").await;
+
+    // Type "na" after the dot
+    editor.type_at("test.rb", 1, 5, "na").await;
+    let items = editor.complete_with_trigger("test.rb", 1, 7, ".").await;
+    assert!(items.iter().any(|i| i.label == "name"));
+
+    // Backspace and retype
+    editor.backspace_at("test.rb", 1, 7, 2).await;
+    editor.type_at("test.rb", 1, 5, "to").await;
+    let items = editor.complete_with_trigger("test.rb", 1, 7, ".").await;
+    assert!(items.iter().any(|i| i.label == "to_s"));
+}
+```
+
+**Lifecycle methods** (all async, route through real handlers):
+- `editor.open("file.rb", content).await` — triggers `handle_did_open`
+- `editor.set("file.rb", new_content).await` — triggers `handle_did_change`
+- `editor.save("file.rb").await` — triggers `handle_did_save`
+- `editor.close("file.rb").await` — triggers `handle_did_close`
+
+**Editing methods** (simulate typing):
+- `editor.type_at("file.rb", line, char, "text").await` — insert text at position
+- `editor.backspace_at("file.rb", line, char, count).await` — delete before position
+
+**Query methods** (return raw LSP results for programmatic assertions):
+- `editor.complete_at(file, line, char)` — completion items (no trigger context)
+- `editor.complete_with_trigger(file, line, char, ".")` — completion with trigger
+- `editor.hover_at(file, line, char)` — hover information
+- `editor.goto_def_at(file, line, char)` — definition locations
+- `editor.references_at(file, line, char)` — reference locations
+- `editor.inlay_hints(file)` — all inlay hints for file
+- `editor.code_lens(file)` — all code lenses for file
+- `editor.diagnostics(file)` — all diagnostics for file
+- `editor.rename_at(file, line, char, "new_name")` — rename workspace edit
+
+**Apply methods**:
+- `editor.apply_edit(&workspace_edit).await` — apply rename/code action results
+- `editor.content("file.rb")` — get current file content
 
 **When to use FakeEditor vs check():**
 - `check()` — single indexing pass, sufficient for most feature tests
-- `FakeEditor` — when behavior differs between initial indexing and re-indexing (e.g., user index state changes after workspace indexing completes)
+- `FakeEditor` — lifecycle tests, completion filtering, multi-step scenarios, snippet testing
 
 ### Type Inference Architecture
 

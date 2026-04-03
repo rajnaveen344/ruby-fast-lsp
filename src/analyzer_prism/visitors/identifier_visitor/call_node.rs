@@ -2,7 +2,6 @@ use ruby_prism::{CallNode, Node};
 
 use crate::{
     analyzer_prism::{utils, Identifier, MethodReceiver},
-    indexer::entry::NamespaceKind,
     inferrer::r#type::ruby::RubyType,
     types::{ruby_method::RubyMethod, ruby_namespace::RubyConstant},
 };
@@ -116,87 +115,35 @@ impl IdentifierVisitor {
             if self.is_position_in_location(&message_loc) {
                 let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
-                // Skip method names that don't follow Ruby method naming conventions
-                if !RubyMethod::is_valid_ruby_method_name(&method_name) {
+                // Empty or invalid method name means cursor is at the dot position
+                // (prism produces a zero-width message_loc right after the dot).
+                // Extract the receiver so completion can provide method suggestions.
+                if method_name.is_empty() || !RubyMethod::is_valid_ruby_method_name(&method_name) {
+                    let receiver = if let Some(receiver_node) = node.receiver() {
+                        extract_receiver_from_node(&receiver_node)
+                    } else {
+                        return;
+                    };
+                    self.set_result(
+                        Some(Identifier::RubyMethod {
+                            namespace: self.scope_tracker.get_ns_stack(),
+                            receiver,
+                            iden: RubyMethod::empty(),
+                        }),
+                        Some(IdentifierType::MethodCall),
+                        self.scope_tracker.get_ns_stack(),
+                        Some(0),
+                    );
                     return;
                 }
 
-                // Determine receiver and namespace kind
-                let (receiver, namespace_kind) = if let Some(receiver_node) = node.receiver() {
-                    if receiver_node.as_self_node().is_some() {
-                        // Use context from scope tracker for self receiver
-                        let kind = self.infer_namespace_kind_from_context();
-                        (MethodReceiver::SelfReceiver, kind)
-                    } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
-                        let name =
-                            String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-                        let constant = RubyConstant::new(&name).unwrap();
-                        (
-                            MethodReceiver::Constant(vec![constant]),
-                            NamespaceKind::Singleton,
-                        )
-                    } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
-                        let mut namespaces = Vec::new();
-                        utils::collect_namespaces(&constant_path, &mut namespaces);
-                        (
-                            MethodReceiver::Constant(namespaces),
-                            NamespaceKind::Singleton,
-                        )
-                    } else if let Some(local_var) = receiver_node.as_local_variable_read_node() {
-                        let var_name =
-                            String::from_utf8_lossy(local_var.name().as_slice()).to_string();
-                        (
-                            MethodReceiver::LocalVariable(var_name),
-                            NamespaceKind::Instance,
-                        )
-                    } else if let Some(instance_var) =
-                        receiver_node.as_instance_variable_read_node()
-                    {
-                        let var_name =
-                            String::from_utf8_lossy(instance_var.name().as_slice()).to_string();
-                        (
-                            MethodReceiver::InstanceVariable(var_name),
-                            NamespaceKind::Instance,
-                        )
-                    } else if let Some(class_var) = receiver_node.as_class_variable_read_node() {
-                        let var_name =
-                            String::from_utf8_lossy(class_var.name().as_slice()).to_string();
-                        (
-                            MethodReceiver::ClassVariable(var_name),
-                            NamespaceKind::Instance,
-                        )
-                    } else if let Some(global_var) = receiver_node.as_global_variable_read_node() {
-                        let var_name =
-                            String::from_utf8_lossy(global_var.name().as_slice()).to_string();
-                        (
-                            MethodReceiver::GlobalVariable(var_name),
-                            NamespaceKind::Instance,
-                        )
-                    } else if let Some(call_node) = receiver_node.as_call_node() {
-                        // Method call receiver, e.g., `user.name` in `user.name.upcase`
-                        let inner_method_name =
-                            String::from_utf8_lossy(call_node.name().as_slice()).to_string();
-                        let inner_receiver = extract_receiver_from_call_node(&call_node);
-                        (
-                            MethodReceiver::MethodCall {
-                                inner_receiver: Box::new(inner_receiver),
-                                method_name: inner_method_name,
-                            },
-                            NamespaceKind::Instance,
-                        )
-                    } else {
-                        (MethodReceiver::Expression, NamespaceKind::Instance)
-                    }
+                let receiver = if let Some(receiver_node) = node.receiver() {
+                    extract_receiver_from_node(&receiver_node)
                 } else {
-                    // No receiver - use context from scope tracker
-                    let kind = self.infer_namespace_kind_from_context();
-                    (MethodReceiver::None, kind)
+                    MethodReceiver::None
                 };
 
-                // Note: namespace_kind is used by the query layer to determine which ancestor chain to use
-                let _ = namespace_kind; // Mark as intentionally unused for now
                 let method = RubyMethod::new(&method_name).unwrap();
-
                 self.set_result(
                     Some(Identifier::RubyMethod {
                         namespace: self.scope_tracker.get_ns_stack(),
@@ -209,14 +156,6 @@ impl IdentifierVisitor {
                 );
             }
         }
-    }
-
-    /// Determines the NamespaceKind for a call with no explicit class receiver.
-    /// Uses scope context to distinguish between:
-    /// - Instance namespace (in instance methods or at top-level)
-    /// - Singleton namespace (in class body)
-    fn infer_namespace_kind_from_context(&self) -> NamespaceKind {
-        self.scope_tracker.current_method_context()
     }
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {

@@ -1,40 +1,74 @@
 //! FakeEditor - a stateful editor simulation for lifecycle testing.
 //!
-//! FakeEditor is the single implementation path for all test assertions.
-//! It owns a `RubyLanguageServer`, tracks open files with content and versions,
-//! and provides methods to open, edit, close, and assert against files.
+//! FakeEditor routes all operations through the real LSP handlers
+//! (`handle_did_open`, `handle_did_change`, `handle_did_close`, `handle_did_save`),
+//! ensuring tests exercise the exact same code paths as a real editor.
 //!
-//! # Usage
+//! # Tag-based assertions (simple feature tests)
 //!
 //! ```ignore
 //! let mut editor = FakeEditor::new().await;
-//! editor.open("foo.rb", "class Foo; end");
-//! editor.set("foo.rb", "class Foo\n  def greet; end\nend");
+//! editor.open("foo.rb", "class Foo\n  def greet; end\nend").await;
 //! editor.check("foo.rb", r#"
 //! class Foo
 //!   def $0greet; end
 //! end
 //! "#).await;
 //! ```
+//!
+//! # Programmatic assertions (complex scenarios)
+//!
+//! ```ignore
+//! let mut editor = FakeEditor::new().await;
+//! editor.open("test.rb", "user = User.new\nuser.").await;
+//!
+//! // Type "na" after the dot
+//! editor.type_at("test.rb", 1, 5, "na").await;
+//!
+//! // Check completions filter to "name"
+//! let items = editor.complete_with_trigger("test.rb", 1, 7, ".").await;
+//! assert!(items.iter().any(|i| i.label == "name"));
+//!
+//! // Backspace and retype
+//! editor.backspace_at("test.rb", 1, 7, 2).await;
+//! editor.type_at("test.rb", 1, 5, "to").await;
+//! let items = editor.complete_with_trigger("test.rb", 1, 7, ".").await;
+//! assert!(items.iter().any(|i| i.label == "to_s"));
+//! ```
+//!
+//! # Available methods
+//!
+//! **Lifecycle**: `open`, `set`, `save`, `close`
+//! **Editing**: `type_at`, `backspace_at`
+//! **Queries**: `complete_at`, `complete_with_trigger`, `hover_at`, `goto_def_at`,
+//!             `references_at`, `inlay_hints`, `code_lens`, `diagnostics`, `rename_at`
+//! **Apply**: `apply_edit` (applies WorkspaceEdit from rename/code actions)
+//! **Assertions**: `check` (tag-based), `content` (get current file content)
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use parking_lot::RwLock;
-use tower_lsp::lsp_types::{InitializeParams, Url};
+use tower_lsp::lsp_types::{
+    CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
+    CompletionResponse, CompletionTriggerKind, Diagnostic, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InlayHint, InlayHintParams,
+    InitializeParams, Location, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, RenameParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceEdit,
+};
 use tower_lsp::LanguageServer;
 
-use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
+use crate::capabilities::indexing;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_document::RubyDocument;
 
 use super::check::{run_checks_on_fixture, strip_all_markers};
 
 /// A stateful editor simulation for testing LSP lifecycle scenarios.
 ///
-/// Tracks open files with their content and version numbers, provides
-/// methods to simulate editor actions, and delegates assertions to the
-/// shared `run_checks_on_fixture` engine.
+/// Routes all operations through the real LSP handlers, ensuring tests
+/// exercise the exact same code paths as a real editor. Tracks open files
+/// with their content and version numbers for assertion verification.
 pub struct FakeEditor {
     server: RubyLanguageServer,
     /// Tracks open files: filename -> (clean_content, version)
@@ -54,9 +88,9 @@ impl FakeEditor {
 
     /// Open a file in the editor with the given content.
     ///
-    /// Creates a document, indexes it, and tracks it in the buffer list.
+    /// Routes through the real `handle_did_open` handler.
     /// Panics if the file is already open (use `set()` to update).
-    pub fn open(&mut self, filename: &str, content: &str) {
+    pub async fn open(&mut self, filename: &str, content: &str) {
         assert!(
             !self.buffers.contains_key(filename),
             "INVARIANT VIOLATED: File '{}' is already open. Use set() to update content.",
@@ -66,26 +100,25 @@ impl FakeEditor {
         let uri = Self::filename_to_uri(filename);
         let version = 1;
 
-        // Create document and insert into server
-        let document = RubyDocument::new(uri.clone(), content.to_string(), version);
-        self.server
-            .docs
-            .lock()
-            .insert(uri.clone(), Arc::new(RwLock::new(document)));
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri,
+                language_id: "ruby".to_string(),
+                version,
+                text: content.to_string(),
+            },
+        };
+        indexing::handle_did_open(&self.server, params).await;
 
-        // Index the document
-        self.index_file(&uri, content);
-
-        // Track in buffers
         self.buffers
             .insert(filename.to_string(), (content.to_string(), version));
     }
 
     /// Update an open file's content.
     ///
-    /// Bumps the version, updates the document, and re-indexes.
+    /// Routes through the real `handle_did_change` handler.
     /// Panics if the file is not open (use `open()` first).
-    pub fn set(&mut self, filename: &str, new_content: &str) {
+    pub async fn set(&mut self, filename: &str, new_content: &str) {
         let (_, version) = self.buffers.get(filename).unwrap_or_else(|| {
             panic!(
                 "INVARIANT VIOLATED: File '{}' is not open. Call open() before set().",
@@ -96,32 +129,49 @@ impl FakeEditor {
 
         let uri = Self::filename_to_uri(filename);
 
-        // Update the document
-        {
-            let docs = self.server.docs.lock();
-            let doc_arc = docs.get(&uri).unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: File '{}' is in buffers but not in server.docs. This is a bug in FakeEditor.",
-                    filename
-                )
-            });
-            let mut doc = doc_arc.write();
-            doc.update(new_content.to_string(), new_version);
-        }
+        let params = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri,
+                version: new_version,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: new_content.to_string(),
+            }],
+        };
+        indexing::handle_did_change(&self.server, params).await;
 
-        // Re-index
-        self.index_file(&uri, new_content);
-
-        // Update buffer tracking
         self.buffers
             .insert(filename.to_string(), (new_content.to_string(), new_version));
     }
 
+    /// Save a file in the editor.
+    ///
+    /// Routes through the real `handle_did_save` handler.
+    /// Triggers YARD diagnostics and inlay hint refresh.
+    /// Panics if the file is not open.
+    pub async fn save(&mut self, filename: &str) {
+        assert!(
+            self.buffers.contains_key(filename),
+            "INVARIANT VIOLATED: File '{}' is not open. Call open() before save().",
+            filename
+        );
+
+        let uri = Self::filename_to_uri(filename);
+
+        let params = DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri },
+            text: None,
+        };
+        indexing::handle_did_save(&self.server, params).await;
+    }
+
     /// Close a file in the editor.
     ///
-    /// Removes from both buffer tracking and server document cache.
+    /// Routes through the real `handle_did_close` handler.
     /// Index entries are preserved (matching real LSP behavior).
-    pub fn close(&mut self, filename: &str) {
+    pub async fn close(&mut self, filename: &str) {
         assert!(
             self.buffers.remove(filename).is_some(),
             "INVARIANT VIOLATED: File '{}' is not open. Cannot close a file that was never opened.",
@@ -129,7 +179,11 @@ impl FakeEditor {
         );
 
         let uri = Self::filename_to_uri(filename);
-        self.server.docs.lock().remove(&uri);
+
+        let params = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri },
+        };
+        indexing::handle_did_close(&self.server, params).await;
     }
 
     /// Run tag-based assertions against a file's current state.
@@ -168,20 +222,366 @@ impl FakeEditor {
         &self.server
     }
 
+    /// Consume the editor and return the underlying server.
+    pub fn into_server(self) -> RubyLanguageServer {
+        self.server
+    }
+
+    // ─── Editing Helpers ───────────────────────────────────────────────
+
+    /// Insert text at a 0-indexed position, triggering a `did_change`.
+    ///
+    /// Simulates the user typing at a specific cursor position.
+    /// The position is in the file's current content (before insertion).
+    pub async fn type_at(&mut self, filename: &str, line: u32, character: u32, text: &str) {
+        let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: File '{}' is not open. Call open() before type_at().",
+                filename
+            )
+        });
+
+        let offset = Self::position_to_byte_offset(content, line, character);
+        let mut new_content = String::with_capacity(content.len() + text.len());
+        new_content.push_str(&content[..offset]);
+        new_content.push_str(text);
+        new_content.push_str(&content[offset..]);
+
+        self.set(filename, &new_content).await;
+    }
+
+    /// Delete `count` characters before a 0-indexed position, triggering a `did_change`.
+    ///
+    /// Simulates the user pressing backspace at a specific cursor position.
+    pub async fn backspace_at(&mut self, filename: &str, line: u32, character: u32, count: usize) {
+        let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: File '{}' is not open. Call open() before backspace_at().",
+                filename
+            )
+        });
+
+        let offset = Self::position_to_byte_offset(content, line, character);
+        let delete_start = offset.saturating_sub(count);
+        let mut new_content = String::with_capacity(content.len() - (offset - delete_start));
+        new_content.push_str(&content[..delete_start]);
+        new_content.push_str(&content[offset..]);
+
+        self.set(filename, &new_content).await;
+    }
+
+    // ─── Query Methods ───────────────────────────────────────────────
+
+    /// Returns completion items at a 0-indexed position.
+    ///
+    /// Sends `context: None` (equivalent to user pressing Ctrl+Space).
+    /// Use `complete_with_trigger` to test trigger-character behavior.
+    pub async fn complete_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<CompletionItem> {
+        self.complete_with_context(filename, line, character, None)
+            .await
+    }
+
+    /// Returns completion items with a trigger character context.
+    ///
+    /// Simulates the editor auto-triggering completion after typing
+    /// a trigger character like `.` or `:`.
+    pub async fn complete_with_trigger(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+        trigger: &str,
+    ) -> Vec<CompletionItem> {
+        let context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(trigger.to_string()),
+        });
+        self.complete_with_context(filename, line, character, context)
+            .await
+    }
+
+    /// Returns hover information at a 0-indexed position.
+    pub async fn hover_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<Hover> {
+        self.assert_open(filename, "hover_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.server.hover(params).await.ok().flatten()
+    }
+
+    /// Returns goto-definition locations at a 0-indexed position.
+    pub async fn goto_def_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<Location> {
+        self.assert_open(filename, "goto_def_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        match self.server.goto_definition(params).await {
+            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => vec![loc],
+            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs,
+            Ok(Some(GotoDefinitionResponse::Link(links))) => links
+                .into_iter()
+                .map(|link| Location {
+                    uri: link.target_uri,
+                    range: link.target_range,
+                })
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// Returns all references at a 0-indexed position.
+    pub async fn references_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<Location> {
+        self.assert_open(filename, "references_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        };
+        self.server
+            .references(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns inlay hints for an entire file.
+    pub async fn inlay_hints(&self, filename: &str) -> Vec<InlayHint> {
+        self.assert_open(filename, "inlay_hints");
+        let uri = Self::filename_to_uri(filename);
+        let (content, _) = &self.buffers[filename];
+        let line_count = content.lines().count() as u32;
+
+        let params = InlayHintParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(Position::new(0, 0), Position::new(line_count, 0)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.server
+            .inlay_hint(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns code lenses for a file.
+    pub async fn code_lens(&self, filename: &str) -> Vec<CodeLens> {
+        self.assert_open(filename, "code_lens");
+        let uri = Self::filename_to_uri(filename);
+        let params = CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        self.server
+            .code_lens(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns diagnostics for a file by re-generating them from current state.
+    pub async fn diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
+        self.assert_open(filename, "diagnostics");
+        let uri = Self::filename_to_uri(filename);
+        let (content, _) = &self.buffers[filename];
+
+        let document = self.server.docs.lock().get(&uri).unwrap().read().clone();
+        let parse_result = ruby_prism::parse(content.as_bytes());
+
+        let mut diagnostics =
+            crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
+
+        // Add YARD diagnostics
+        {
+            let index = self.server.index.lock();
+            diagnostics.extend(crate::query::generate_yard_diagnostics_inner(&index, &uri));
+        }
+
+        // Add unresolved entry diagnostics
+        {
+            let query = crate::query::IndexQuery::new(self.server.index.clone());
+            diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+        }
+
+        diagnostics
+    }
+
+    /// Performs a rename at a 0-indexed position and returns the workspace edit.
+    pub async fn rename_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+        new_name: &str,
+    ) -> Option<WorkspaceEdit> {
+        self.assert_open(filename, "rename_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            new_name: new_name.to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.server.rename(params).await.ok().flatten()
+    }
+
+    /// Applies a `WorkspaceEdit` to the editor's buffers.
+    ///
+    /// Updates affected files via `set()`, so changes go through the real
+    /// `handle_did_change` handler. Only supports the `changes` field
+    /// (not `document_changes`).
+    pub async fn apply_edit(&mut self, edit: &WorkspaceEdit) {
+        if let Some(changes) = &edit.changes {
+            for (uri, text_edits) in changes {
+                // Find the filename for this URI
+                let filename = self
+                    .buffers
+                    .keys()
+                    .find(|f| Self::filename_to_uri(f) == *uri)
+                    .cloned();
+
+                let filename = filename.unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: WorkspaceEdit references URI '{}' which is not open in the editor.",
+                        uri
+                    )
+                });
+
+                let (content, _) = &self.buffers[&filename];
+                let mut new_content = content.clone();
+
+                // Apply edits in reverse order to preserve positions
+                let mut sorted_edits = text_edits.clone();
+                sorted_edits.sort_by(|a, b| {
+                    b.range
+                        .start
+                        .line
+                        .cmp(&a.range.start.line)
+                        .then(b.range.start.character.cmp(&a.range.start.character))
+                });
+
+                for edit in &sorted_edits {
+                    let start = Self::position_to_byte_offset(&new_content, edit.range.start.line, edit.range.start.character);
+                    let end = Self::position_to_byte_offset(&new_content, edit.range.end.line, edit.range.end.character);
+                    new_content = format!(
+                        "{}{}{}",
+                        &new_content[..start],
+                        edit.new_text,
+                        &new_content[end..]
+                    );
+                }
+
+                self.set(&filename, &new_content).await;
+            }
+        }
+    }
+
+    /// Get the current content of an open file.
+    pub fn content(&self, filename: &str) -> &str {
+        let (content, _) = self.buffers.get(filename).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: File '{}' is not open. Call open() before content().",
+                filename
+            )
+        });
+        content
+    }
+
+    // ─── Internal Helpers ────────────────────────────────────────────
+
     /// Convert a filename to a virtual URI.
     pub(super) fn filename_to_uri(filename: &str) -> Url {
         Url::parse(&format!("file:///{}", filename)).expect("Invalid virtual URI")
     }
 
-    /// Index a file using FileProcessor.
-    fn index_file(&self, uri: &Url, content: &str) {
-        let indexer = FileProcessor::new(self.server.index.clone());
-        let options = ProcessingOptions {
-            index_definitions: true,
-            index_references: true,
-            resolve_mixins: true,
-            include_local_vars: true,
+    /// Assert a file is open, panicking with a clear message if not.
+    fn assert_open(&self, filename: &str, method: &str) {
+        assert!(
+            self.buffers.contains_key(filename),
+            "INVARIANT VIOLATED: File '{}' is not open. Call open() before {}().",
+            filename,
+            method
+        );
+    }
+
+    /// Convert a 0-indexed (line, character) position to a byte offset in content.
+    fn position_to_byte_offset(content: &str, line: u32, character: u32) -> usize {
+        let mut offset = 0;
+        for (i, line_str) in content.split('\n').enumerate() {
+            if i == line as usize {
+                return offset + (character as usize).min(line_str.len());
+            }
+            offset += line_str.len() + 1; // +1 for '\n'
+        }
+        content.len()
+    }
+
+    /// Internal: completion with arbitrary context.
+    async fn complete_with_context(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+        context: Option<CompletionContext>,
+    ) -> Vec<CompletionItem> {
+        self.assert_open(filename, "complete_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context,
         };
-        let _ = indexer.process_file(uri, content, &self.server, options);
+        match self.server.completion(params).await {
+            Ok(Some(CompletionResponse::Array(items))) => items,
+            Ok(Some(CompletionResponse::List(list))) => list.items,
+            _ => vec![],
+        }
     }
 }
