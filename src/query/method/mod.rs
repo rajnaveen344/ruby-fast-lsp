@@ -147,6 +147,7 @@ impl IndexQuery {
                 method_name,
             } => self.resolve_method_call_receiver(inner_receiver, method_name, position),
 
+            MethodReceiver::Literal(t) => self.convert_type_to_namespace(t),
             MethodReceiver::Expression => None, // No type info available
         }
     }

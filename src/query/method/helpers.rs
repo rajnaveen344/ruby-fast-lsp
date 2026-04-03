@@ -82,6 +82,7 @@ pub fn receiver_to_string(receiver: &MethodReceiver) -> String {
             inner_receiver,
             method_name,
         } => format!("{}.{}", receiver_to_string(inner_receiver), method_name),
+        MethodReceiver::Literal(t) => format!("<literal:{:?}>", t),
         MethodReceiver::Expression => "<expr>".to_string(),
     }
 }

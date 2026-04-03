@@ -383,6 +383,18 @@ arr.first.a$0
     .await;
 }
 
+#[tokio::test]
+async fn chain_array_literal_methods() {
+    // Direct literal receiver: [1,2,3].first should resolve to Integer
+    check(
+        r#"
+[1, 2, 3].first.a$0
+<complete items="abs">
+"#,
+    )
+    .await;
+}
+
 // ─── 9. YARD Return Types ───
 
 #[tokio::test]

@@ -500,6 +500,7 @@ fn resolve_receiver_type(
             )
             .unwrap_or(RubyType::Unknown)
         }
+        MethodReceiver::Literal(t) => t.clone(),
         MethodReceiver::Expression => RubyType::Unknown,
     }
 }

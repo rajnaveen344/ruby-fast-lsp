@@ -41,6 +41,8 @@ pub enum MethodReceiver {
         /// The method name being called
         method_name: String,
     },
+    /// Literal expression receiver with known type, e.g., `[1,2,3]` or `"hello"`
+    Literal(crate::inferrer::r#type::ruby::RubyType),
     /// Complex expression receiver that can't be statically analyzed, e.g., `(a + b).method`
     Expression,
 }

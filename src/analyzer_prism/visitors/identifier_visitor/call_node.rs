@@ -3,6 +3,7 @@ use ruby_prism::{CallNode, Node};
 use crate::{
     analyzer_prism::{utils, Identifier, MethodReceiver},
     indexer::entry::NamespaceKind,
+    inferrer::r#type::ruby::RubyType,
     types::{ruby_method::RubyMethod, ruby_namespace::RubyConstant},
 };
 
@@ -52,9 +53,43 @@ fn extract_receiver_from_node(node: &Node) -> MethodReceiver {
             inner_receiver: Box::new(inner_receiver),
             method_name: inner_method_name,
         }
+    } else if let Some(literal_type) = infer_literal_receiver_type(node) {
+        MethodReceiver::Literal(literal_type)
     } else {
         MethodReceiver::Expression
     }
+}
+
+/// Infer the RubyType from a literal AST node used as a receiver
+fn infer_literal_receiver_type(node: &Node) -> Option<RubyType> {
+    use crate::inferrer::r#type::literal::LiteralAnalyzer;
+
+    if node.as_string_node().is_some() || node.as_interpolated_string_node().is_some() {
+        return Some(RubyType::string());
+    }
+    if node.as_integer_node().is_some() {
+        return Some(RubyType::integer());
+    }
+    if node.as_float_node().is_some() {
+        return Some(RubyType::float());
+    }
+    if node.as_symbol_node().is_some() {
+        return Some(RubyType::symbol());
+    }
+    if node.as_array_node().is_some() || node.as_hash_node().is_some() {
+        let analyzer = LiteralAnalyzer::new();
+        return analyzer.analyze_literal(node);
+    }
+    if node.as_true_node().is_some() {
+        return Some(RubyType::true_class());
+    }
+    if node.as_false_node().is_some() {
+        return Some(RubyType::false_class());
+    }
+    if node.as_nil_node().is_some() {
+        return Some(RubyType::nil_class());
+    }
+    None
 }
 
 impl IdentifierVisitor {

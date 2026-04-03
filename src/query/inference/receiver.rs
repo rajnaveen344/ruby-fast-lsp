@@ -52,6 +52,7 @@ impl<'a> ReceiverResolver<'a> {
                 inner_receiver,
                 method_name,
             } => self.resolve_method_chain(inner_receiver, method_name, position, content),
+            MethodReceiver::Literal(t) => Some(t.clone()),
             MethodReceiver::Expression => None,
         }
     }

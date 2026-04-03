@@ -601,6 +601,7 @@ fn resolve_method_receiver_type(
                 None,
             )
         }
+        MethodReceiver::Literal(ty) => Some(ty.clone()),
         _ => None,
     }
 }
@@ -720,8 +721,10 @@ fn infer_literal_type_from_expression(text: &str) -> Option<crate::inferrer::r#t
     }
 
     // Array literal ending: ...]
-    if trimmed.ends_with(']') {
-        return Some(RubyType::Array(vec![RubyType::Unknown]));
+    if trimmed.ends_with(']') && trimmed.starts_with('[') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        let element_types = infer_array_element_types(inner);
+        return Some(RubyType::Array(element_types));
     }
 
     // Hash literal ending: ...}
@@ -742,6 +745,42 @@ fn infer_literal_type_from_expression(text: &str) -> Option<crate::inferrer::r#t
     }
 
     None
+}
+
+/// Infer element types from array literal content (e.g., "1, 2, 3" → [Integer])
+fn infer_array_element_types(inner: &str) -> Vec<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+
+    let mut types = Vec::new();
+    for element in inner.split(',') {
+        let el = element.trim();
+        if el.is_empty() {
+            continue;
+        }
+        let ty = if el.starts_with('"') || el.starts_with('\'') {
+            RubyType::string()
+        } else if el.starts_with(':') {
+            RubyType::symbol()
+        } else if el.parse::<i64>().is_ok() {
+            RubyType::integer()
+        } else if el.parse::<f64>().is_ok() {
+            RubyType::float()
+        } else if el == "true" || el == "false" {
+            RubyType::true_class()
+        } else if el == "nil" {
+            RubyType::nil_class()
+        } else {
+            RubyType::Unknown
+        };
+        if ty != RubyType::Unknown && !types.contains(&ty) {
+            types.push(ty);
+        }
+    }
+    if types.is_empty() {
+        vec![RubyType::Unknown]
+    } else {
+        types
+    }
 }
 
 /// Infer type from a literal expression
