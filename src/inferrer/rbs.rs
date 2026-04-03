@@ -47,6 +47,123 @@ pub fn get_rbs_method_return_type_as_ruby_type(
     Some(rbs_type_to_ruby_type(&rbs_type))
 }
 
+/// Get the return type of a method from RBS with generic type substitution.
+///
+/// For example, `Array[Integer]#first` returns `Elem` in RBS, but with
+/// `type_args = [Integer]` we substitute `Elem` → `Integer`.
+pub fn get_rbs_method_return_type_with_type_args(
+    class_name: &str,
+    method_name: &str,
+    is_singleton: bool,
+    type_args: &[RubyType],
+) -> Option<RubyType> {
+    let loader = RBS_LOADER.read();
+    let rbs_type = loader
+        .get_method_return_type(class_name, method_name, is_singleton)?
+        .clone();
+
+    // Build substitution map from class type_params to actual type_args
+    let substitutions = if let Some(class) = loader.get_class(class_name) {
+        build_substitution_map(&class.type_params, type_args)
+    } else if let Some(module) = loader.get_module(class_name) {
+        build_substitution_map(&module.type_params, type_args)
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    if substitutions.is_empty() {
+        Some(rbs_type_to_ruby_type(&rbs_type))
+    } else {
+        Some(rbs_type_to_ruby_type_with_substitutions(&rbs_type, &substitutions))
+    }
+}
+
+/// Build a map from type parameter names to concrete RubyTypes.
+/// Handles type param names that include modifiers like "unchecked out Elem" → "Elem".
+fn build_substitution_map(
+    type_params: &[rbs_parser::TypeParam],
+    type_args: &[RubyType],
+) -> std::collections::HashMap<String, RubyType> {
+    type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(param, arg)| {
+            // Strip modifiers: "unchecked out Elem" → "Elem"
+            let name = param
+                .name
+                .rsplit_once(' ')
+                .map(|(_, name)| name)
+                .unwrap_or(&param.name);
+            (name.to_string(), arg.clone())
+        })
+        .collect()
+}
+
+/// Convert an RbsType to a RubyType, substituting type variables with concrete types
+fn rbs_type_to_ruby_type_with_substitutions(
+    rbs_type: &RbsType,
+    substitutions: &std::collections::HashMap<String, RubyType>,
+) -> RubyType {
+    match rbs_type {
+        RbsType::TypeVar(name) => {
+            substitutions
+                .get(name)
+                .cloned()
+                .unwrap_or(RubyType::Unknown)
+        }
+        // The RBS parser sometimes represents type variables as Class("Elem")
+        // instead of TypeVar("Elem"). Check substitutions for class names too.
+        RbsType::Class(name) => {
+            if let Some(substituted) = substitutions.get(name) {
+                return substituted.clone();
+            }
+            class_name_to_ruby_type(name)
+        }
+        // For compound types, recurse with substitutions
+        RbsType::Union(types) => {
+            let ruby_types: Vec<RubyType> = types
+                .iter()
+                .map(|t| rbs_type_to_ruby_type_with_substitutions(t, substitutions))
+                .collect();
+            if ruby_types.len() == 1 {
+                ruby_types.into_iter().next().unwrap()
+            } else {
+                RubyType::Union(ruby_types)
+            }
+        }
+        RbsType::Optional(inner) => {
+            let inner_type = rbs_type_to_ruby_type_with_substitutions(inner, substitutions);
+            RubyType::Union(vec![inner_type, RubyType::nil_class()])
+        }
+        RbsType::ClassInstance { name, args } => {
+            let clean_name = name.strip_prefix("::").unwrap_or(name);
+            match clean_name {
+                "Array" => {
+                    let element_types: Vec<RubyType> = args
+                        .iter()
+                        .map(|t| rbs_type_to_ruby_type_with_substitutions(t, substitutions))
+                        .collect();
+                    RubyType::Array(element_types)
+                }
+                "Hash" => {
+                    let key_types: Vec<RubyType> = args
+                        .first()
+                        .map(|t| vec![rbs_type_to_ruby_type_with_substitutions(t, substitutions)])
+                        .unwrap_or_default();
+                    let value_types: Vec<RubyType> = args
+                        .get(1)
+                        .map(|t| vec![rbs_type_to_ruby_type_with_substitutions(t, substitutions)])
+                        .unwrap_or_default();
+                    RubyType::Hash(key_types, value_types)
+                }
+                _ => class_name_to_ruby_type(clean_name),
+            }
+        }
+        // For all other types, fall back to the non-substitution version
+        _ => rbs_type_to_ruby_type(rbs_type),
+    }
+}
+
 /// Convert a class name string to RubyType, handling special cases and leading ::
 fn class_name_to_ruby_type(name: &str) -> RubyType {
     // Strip leading :: for absolute references
@@ -611,6 +728,38 @@ mod tests {
         assert!(
             method_names.contains(&"tap"),
             "Should have Kernel#tap (inherited)"
+        );
+    }
+
+    #[test]
+    fn test_generic_type_substitution_array_first() {
+        let type_args = vec![RubyType::integer()];
+        let result =
+            get_rbs_method_return_type_with_type_args("Array", "first", false, &type_args);
+        assert!(
+            result.is_some(),
+            "Array#first with type_args should return a type"
+        );
+        let rt = result.unwrap();
+        assert_eq!(
+            rt,
+            RubyType::integer(),
+            "Array[Integer]#first should return Integer"
+        );
+    }
+
+    #[test]
+    fn test_generic_type_substitution_hash_keys() {
+        let type_args = vec![RubyType::symbol(), RubyType::string()];
+        let result =
+            get_rbs_method_return_type_with_type_args("Hash", "keys", false, &type_args);
+        assert!(result.is_some(), "Hash#keys should return a type");
+        let rt = result.unwrap();
+        // Hash[Symbol, String]#keys should return Array[Symbol]
+        assert_eq!(
+            rt,
+            RubyType::Array(vec![RubyType::symbol()]),
+            "Hash[Symbol, String]#keys should return Array[Symbol]"
         );
     }
 }

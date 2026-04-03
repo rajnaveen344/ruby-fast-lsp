@@ -372,7 +372,6 @@ User.new.name.u$0
 }
 
 #[tokio::test]
-#[ignore] // Array#first returns generic Elem, can't resolve to Integer without generics support
 async fn chain_array_methods() {
     check(
         r#"

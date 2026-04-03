@@ -14,10 +14,47 @@ use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type;
+use crate::inferrer::rbs::{
+    get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
+};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
+
+/// Extract type arguments from a receiver type for generic substitution.
+/// For `Array[Integer]` returns `[Integer]`, for `Hash[Symbol, String]` returns `[Symbol, String]`.
+fn get_type_args_for_receiver(receiver_type: &RubyType) -> Vec<RubyType> {
+    match receiver_type {
+        RubyType::Array(element_types) => {
+            if element_types.is_empty() {
+                vec![]
+            } else if element_types.len() == 1 {
+                vec![element_types[0].clone()]
+            } else {
+                // Multiple element types → union as single Elem arg
+                vec![RubyType::union(element_types.clone())]
+            }
+        }
+        RubyType::Hash(key_types, value_types) => {
+            let key = if key_types.len() == 1 {
+                key_types[0].clone()
+            } else if key_types.is_empty() {
+                RubyType::Unknown
+            } else {
+                RubyType::union(key_types.clone())
+            };
+            let value = if value_types.len() == 1 {
+                value_types[0].clone()
+            } else if value_types.is_empty() {
+                RubyType::Unknown
+            } else {
+                RubyType::union(value_types.clone())
+            };
+            vec![key, value]
+        }
+        _ => vec![],
+    }
+}
 
 /// Resolves method calls to their return types
 pub struct MethodResolver {
@@ -204,8 +241,23 @@ impl MethodResolver {
             }
         }
 
-        // Fall back to RBS type definitions for built-in methods
-        get_rbs_method_return_type_as_ruby_type(class_name.as_deref()?, method_name, is_singleton)
+        // Fall back to RBS type definitions for built-in methods.
+        // Pass type args for generic types (Array[Integer], Hash[Symbol, String], etc.)
+        let type_args = get_type_args_for_receiver(receiver_type);
+        if !type_args.is_empty() {
+            get_rbs_method_return_type_with_type_args(
+                class_name.as_deref()?,
+                method_name,
+                is_singleton,
+                &type_args,
+            )
+        } else {
+            get_rbs_method_return_type_as_ruby_type(
+                class_name.as_deref()?,
+                method_name,
+                is_singleton,
+            )
+        }
     }
 
     /// Static helper to get class name for RBS lookup.
@@ -884,5 +936,29 @@ mod tests {
         let result = resolver.lookup_instance_variable_type("@name");
         assert!(result.is_some(), "Should find instance variable '@name'");
         assert_eq!(result.unwrap(), RubyType::string());
+    }
+
+    #[test]
+    fn test_array_first_returns_element_type() {
+        let index = create_test_index();
+
+        // Array[Integer]#first should return Integer (via generic substitution)
+        let array_type = RubyType::Array(vec![RubyType::integer()]);
+        let result = MethodResolver::resolve_method_return_type(
+            &*index.lock(),
+            &array_type,
+            "first",
+        );
+        assert!(
+            result.is_some(),
+            "Array[Integer]#first should have a return type"
+        );
+        // Should be Integer (or Optional[Integer]), not Unknown
+        let rt = result.unwrap();
+        assert_eq!(
+            rt,
+            RubyType::integer(),
+            "Array[Integer]#first should return Integer via generic substitution"
+        );
     }
 }
