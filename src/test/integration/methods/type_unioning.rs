@@ -23,8 +23,8 @@ foo<hover label="Integer | String">
 
 #[tokio::test]
 async fn test_multiple_modules_union() {
-    // Current behavior: Returns one of them.
-    // Desired behavior: Returns (Integer | String)
+    // Ruby MRO: last include wins. C.ancestors = [C, B, A, ...]
+    // So C.new.foo calls B#foo, returning Integer.
     check(
         r#"
 module A
@@ -43,7 +43,7 @@ class C
 end
 
 c = C.new
-c.foo<hover label="Integer | String">
+c.foo<hover label="Integer">
 "#,
     )
     .await;

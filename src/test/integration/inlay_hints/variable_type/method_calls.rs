@@ -288,3 +288,42 @@ b<hint label="Integer"> = 2.abs"#,
         )
         .await;
 }
+
+/// Chained method call: [1,2,3].first.abs should return Integer, not (Integer | Numeric)
+#[tokio::test]
+async fn chained_method_stops_at_first_ancestor_match() {
+    check(
+        r#"
+a<hint label="Integer"> = [1, 2, 3].first.abs
+"#,
+    )
+    .await;
+}
+
+/// Method resolver should stop at the first (most specific) ancestor that defines the method.
+/// When both a child class and parent class define the same method, only the child's return type
+/// should be used — not a union of both.
+#[tokio::test]
+async fn method_resolver_stops_at_most_specific_ancestor() {
+    check(
+        r#"
+class Animal
+  # @return [String]
+  def sound
+    "..."
+  end
+end
+
+class Dog < Animal
+  # @return [Symbol]
+  def sound
+    :bark
+  end
+end
+
+dog<hint label="Dog"> = Dog.new
+result<hint label="Symbol"> = dog.sound
+"#,
+    )
+    .await;
+}

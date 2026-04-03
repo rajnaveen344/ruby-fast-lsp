@@ -220,29 +220,31 @@ impl MethodResolver {
                 }
             }
 
-            // Search for method in all FQNs and collect return types
-            let mut found_return_types = Vec::new();
-
+            // Search for method in FQNs, stopping at the first (most specific) match.
+            // all_fqns_to_search is ordered: owner first, then ancestors.
+            // If Integer defines `abs`, we use that and don't continue to Numeric.
             if let Ok(ruby_method) = RubyMethod::new(method_name) {
                 if let Some(entries) = index.get_methods_by_name(&ruby_method) {
-                    for entry in entries {
-                        if let EntryKind::Method(data) = &entry.kind {
-                            if all_fqns_to_search.contains(&data.owner) {
-                                if let Some(rt) = &data.return_type {
-                                    // Ignore Unknown types so we fall back to source inference
-                                    if !found_return_types.contains(rt) && *rt != RubyType::Unknown
-                                    {
-                                        found_return_types.push(rt.clone());
+                    for fqn in &all_fqns_to_search {
+                        let mut found_return_types = Vec::new();
+                        for entry in &entries {
+                            if let EntryKind::Method(data) = &entry.kind {
+                                if &data.owner == fqn {
+                                    if let Some(rt) = &data.return_type {
+                                        if *rt != RubyType::Unknown
+                                            && !found_return_types.contains(rt)
+                                        {
+                                            found_return_types.push(rt.clone());
+                                        }
                                     }
                                 }
                             }
                         }
+                        if !found_return_types.is_empty() {
+                            return Some(RubyType::union(found_return_types));
+                        }
                     }
                 }
-            }
-
-            if !found_return_types.is_empty() {
-                return Some(RubyType::union(found_return_types));
             }
         }
 
