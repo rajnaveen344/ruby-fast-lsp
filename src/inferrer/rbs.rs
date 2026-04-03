@@ -188,75 +188,232 @@ pub struct RbsMethodInfo {
     pub params: Vec<String>,
 }
 
-/// Get all methods for a class from RBS definitions
+/// Get all methods for a class from RBS definitions, including inherited methods
+/// from the ancestor chain (superclass + included modules).
 pub fn get_rbs_class_methods(class_name: &str, include_singleton: bool) -> Vec<RbsMethodInfo> {
     let loader = RBS_LOADER.read();
     let mut methods = Vec::new();
+    let mut seen_methods = std::collections::HashSet::new();
+    let mut visited = std::collections::HashSet::new();
 
-    if let Some(class) = loader.get_class(class_name) {
-        for method in &class.methods {
-            let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
-
-            // Skip singleton methods if not requested
-            if is_singleton && !include_singleton {
-                continue;
-            }
-
-            // Get parameter names from first overload
-            let params: Vec<String> = method
-                .overloads
-                .first()
-                .map(|o| {
-                    o.params
-                        .iter()
-                        .map(|p| p.name.clone().unwrap_or_default())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let return_type = method.return_type().map(rbs_type_to_ruby_type);
-
-            methods.push(RbsMethodInfo {
-                name: method.name.clone(),
-                return_type,
-                is_singleton,
-                params,
-            });
-        }
-    }
-
-    // Also check modules (for mixed-in methods)
-    if let Some(module) = loader.get_module(class_name) {
-        for method in &module.methods {
-            let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
-
-            if is_singleton && !include_singleton {
-                continue;
-            }
-
-            let params: Vec<String> = method
-                .overloads
-                .first()
-                .map(|o| {
-                    o.params
-                        .iter()
-                        .map(|p| p.name.clone().unwrap_or_default())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let return_type = method.return_type().map(rbs_type_to_ruby_type);
-
-            methods.push(RbsMethodInfo {
-                name: method.name.clone(),
-                return_type,
-                is_singleton,
-                params,
-            });
-        }
-    }
+    collect_rbs_methods_recursive(
+        &loader,
+        class_name,
+        include_singleton,
+        &mut methods,
+        &mut seen_methods,
+        &mut visited,
+    );
 
     methods
+}
+
+/// Extract a class/module name from an RbsType (used for ancestor resolution)
+fn rbs_type_to_class_name(rbs_type: &RbsType) -> Option<String> {
+    match rbs_type {
+        RbsType::Class(name) => Some(name.strip_prefix("::").unwrap_or(name).to_string()),
+        RbsType::ClassInstance { name, .. } => {
+            Some(name.strip_prefix("::").unwrap_or(name).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Recursively collect methods from a class/module and its ancestors
+fn collect_rbs_methods_recursive(
+    loader: &Loader,
+    class_name: &str,
+    include_singleton: bool,
+    methods: &mut Vec<RbsMethodInfo>,
+    seen_methods: &mut std::collections::HashSet<String>,
+    visited: &mut std::collections::HashSet<String>,
+) {
+    // Prevent infinite recursion from circular inheritance
+    if !visited.insert(class_name.to_string()) {
+        return;
+    }
+
+    // Collect methods from this class
+    if let Some(class) = loader.get_class(class_name) {
+        collect_methods_from_decl(
+            &class.methods,
+            include_singleton,
+            methods,
+            seen_methods,
+        );
+
+        // Process aliases (e.g., `alias object_id __id__`)
+        collect_aliases_from_members(
+            &class.members,
+            &class.methods,
+            include_singleton,
+            methods,
+            seen_methods,
+        );
+
+        // Walk included modules (instance methods become available)
+        for member in &class.members {
+            if let rbs_parser::Member::Include(module_type) = member {
+                if let Some(module_name) = rbs_type_to_class_name(module_type) {
+                    collect_rbs_methods_recursive(
+                        loader,
+                        &module_name,
+                        include_singleton,
+                        methods,
+                        seen_methods,
+                        visited,
+                    );
+                }
+            }
+        }
+
+        // Walk superclass
+        if let Some(superclass) = &class.superclass {
+            if let Some(parent_name) = rbs_type_to_class_name(superclass) {
+                collect_rbs_methods_recursive(
+                    loader,
+                    &parent_name,
+                    include_singleton,
+                    methods,
+                    seen_methods,
+                    visited,
+                );
+            }
+        } else if class_name != "BasicObject" {
+            // Implicit superclass is Object (unless we're BasicObject)
+            collect_rbs_methods_recursive(
+                loader,
+                "Object",
+                include_singleton,
+                methods,
+                seen_methods,
+                visited,
+            );
+        }
+    }
+
+    // Also check modules (for when class_name is a module, or for mixed-in methods)
+    if let Some(module) = loader.get_module(class_name) {
+        collect_methods_from_decl(
+            &module.methods,
+            include_singleton,
+            methods,
+            seen_methods,
+        );
+
+        // Process aliases in module
+        collect_aliases_from_members(
+            &module.members,
+            &module.methods,
+            include_singleton,
+            methods,
+            seen_methods,
+        );
+
+        // Walk included modules within this module
+        for member in &module.members {
+            if let rbs_parser::Member::Include(module_type) = member {
+                if let Some(module_name) = rbs_type_to_class_name(module_type) {
+                    collect_rbs_methods_recursive(
+                        loader,
+                        &module_name,
+                        include_singleton,
+                        methods,
+                        seen_methods,
+                        visited,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Collect methods from a list of MethodDecl into the methods vec, skipping duplicates
+fn collect_methods_from_decl(
+    method_decls: &[rbs_parser::MethodDecl],
+    include_singleton: bool,
+    methods: &mut Vec<RbsMethodInfo>,
+    seen_methods: &mut std::collections::HashSet<String>,
+) {
+    for method in method_decls {
+        let is_singleton = method.kind == rbs_parser::MethodKind::Singleton;
+
+        if is_singleton && !include_singleton {
+            continue;
+        }
+
+        if !seen_methods.insert(method.name.clone()) {
+            continue; // Already seen — subclass method takes priority
+        }
+
+        let params: Vec<String> = method
+            .overloads
+            .first()
+            .map(|o| {
+                o.params
+                    .iter()
+                    .map(|p| p.name.clone().unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let return_type = method.return_type().map(rbs_type_to_ruby_type);
+
+        methods.push(RbsMethodInfo {
+            name: method.name.clone(),
+            return_type,
+            is_singleton,
+            params,
+        });
+    }
+}
+
+/// Process alias declarations from class/module members.
+/// For `alias object_id __id__`, creates a method entry for `object_id`
+/// with the same signature as `__id__`.
+fn collect_aliases_from_members(
+    members: &[rbs_parser::Member],
+    method_decls: &[rbs_parser::MethodDecl],
+    include_singleton: bool,
+    methods: &mut Vec<RbsMethodInfo>,
+    seen_methods: &mut std::collections::HashSet<String>,
+) {
+    for member in members {
+        if let rbs_parser::Member::Alias(alias) = member {
+            if alias.is_singleton && !include_singleton {
+                continue;
+            }
+            if !seen_methods.insert(alias.new_name.clone()) {
+                continue;
+            }
+
+            // Look up the target method to copy its signature
+            let target = method_decls.iter().find(|m| m.name == alias.old_name);
+            let (return_type, params) = if let Some(target_method) = target {
+                let rt = target_method.return_type().map(rbs_type_to_ruby_type);
+                let ps: Vec<String> = target_method
+                    .overloads
+                    .first()
+                    .map(|o| {
+                        o.params
+                            .iter()
+                            .map(|p| p.name.clone().unwrap_or_default())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (rt, ps)
+            } else {
+                (None, vec![])
+            };
+
+            methods.push(RbsMethodInfo {
+                name: alias.new_name.clone(),
+                return_type,
+                is_singleton: alias.is_singleton,
+                params,
+            });
+        }
+    }
 }
 
 /// Get the number of loaded RBS declarations
@@ -380,5 +537,80 @@ mod tests {
         // Also test the RubyType conversion
         let ruby_type = get_rbs_method_return_type_as_ruby_type("String", "chars", false);
         println!("String#chars as RubyType: {:?}", ruby_type);
+    }
+
+    #[test]
+    fn test_nil_class_inherits_object_methods() {
+        let methods = get_rbs_class_methods("NilClass", false);
+        let method_names: Vec<&str> = methods.iter().map(|m| m.name.as_str()).collect();
+
+        // NilClass's own methods
+        assert!(method_names.contains(&"nil?"), "Should have NilClass#nil?");
+        assert!(method_names.contains(&"to_s"), "Should have NilClass#to_s");
+        assert!(
+            method_names.contains(&"inspect"),
+            "Should have NilClass#inspect"
+        );
+
+        // Inherited from Object/Kernel/BasicObject
+        assert!(
+            method_names.contains(&"class"),
+            "Should have Object#class (inherited)"
+        );
+        assert!(
+            method_names.contains(&"is_a?"),
+            "Should have Kernel#is_a? (inherited)"
+        );
+        assert!(
+            method_names.contains(&"freeze"),
+            "Should have Object#freeze (inherited)"
+        );
+        assert!(
+            method_names.contains(&"respond_to?"),
+            "Should have Kernel#respond_to? (inherited)"
+        );
+        assert!(
+            method_names.contains(&"tap"),
+            "Should have Kernel#tap (inherited)"
+        );
+        assert!(
+            method_names.contains(&"public_send"),
+            "Should have Kernel#public_send (inherited)"
+        );
+        // Aliases should also be resolved
+        assert!(
+            method_names.contains(&"object_id"),
+            "Should have Kernel#object_id (alias of __id__)"
+        );
+    }
+
+    #[test]
+    fn test_string_inherits_object_methods() {
+        let methods = get_rbs_class_methods("String", false);
+        let method_names: Vec<&str> = methods.iter().map(|m| m.name.as_str()).collect();
+
+        // String's own methods
+        assert!(
+            method_names.contains(&"upcase"),
+            "Should have String#upcase"
+        );
+        assert!(
+            method_names.contains(&"length"),
+            "Should have String#length"
+        );
+
+        // Inherited from Object/Kernel
+        assert!(
+            method_names.contains(&"class"),
+            "Should have Object#class (inherited)"
+        );
+        assert!(
+            method_names.contains(&"is_a?"),
+            "Should have Kernel#is_a? (inherited)"
+        );
+        assert!(
+            method_names.contains(&"tap"),
+            "Should have Kernel#tap (inherited)"
+        );
     }
 }
