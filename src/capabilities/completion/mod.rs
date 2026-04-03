@@ -16,6 +16,7 @@ use crate::{
     indexer::entry::NamespaceKind,
     query::IndexQuery,
     server::RubyLanguageServer,
+    utils::{ast::is_in_statement_position, position_to_offset},
 };
 
 pub use completion_ranker::CompletionRanker;
@@ -296,18 +297,27 @@ pub async fn find_completion_at_position(
         completions.extend(top_level_methods);
 
         // Add snippet completions with context awareness
-        // Only include snippets if not triggered by a dot character
+        // Only include snippets in statement positions (not in value positions like
+        // arguments, array elements, hash values, string interpolations, etc.)
         if !is_dot_trigger {
-            let snippet_context = snippets::RubySnippets::determine_context_with_position(
-                &partial_name,
-                line_text,
-                position.character,
-            );
+            let byte_offset = position_to_offset(&document.content, position);
+            let parse_result = ruby_prism::parse(document.content.as_bytes());
+            let root = parse_result.node();
 
-            let snippet_completions =
-                RubySnippets::get_matching_snippets_with_context(&partial_string, snippet_context);
+            if is_in_statement_position(&root, byte_offset) {
+                let snippet_context = snippets::RubySnippets::determine_context_with_position(
+                    &partial_name,
+                    line_text,
+                    position.character,
+                );
 
-            completions.extend(snippet_completions);
+                let snippet_completions = RubySnippets::get_matching_snippets_with_context(
+                    &partial_string,
+                    snippet_context,
+                );
+
+                completions.extend(snippet_completions);
+            }
         }
     }
 
