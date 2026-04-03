@@ -586,5 +586,36 @@ top$0
     .await;
 }
 
-// TODO: Bare method call as receiver (e.g., `top_level.to_s`)
-// needs inference pipeline to resolve method return types on-the-fly
+// ─── 16. Bare method call as receiver ───
+
+#[tokio::test]
+async fn bare_method_call_with_yard_return_type() {
+    check(
+        r#"
+# @return [String]
+def top_level
+  "hello"
+end
+
+top_level.u$0
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn bare_method_call_without_yard() {
+    // Without YARD, return type comes from source-level inference
+    check(
+        r#"
+def top_level
+  "hello"
+end
+
+top_level.u$0
+<complete items="upcase">
+"#,
+    )
+    .await;
+}
