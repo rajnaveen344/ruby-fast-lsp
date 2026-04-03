@@ -187,3 +187,104 @@ b<hint label="Integer"> = 2.abs
     )
     .await;
 }
+
+/// After re-indexing (simulating edit), types should still be correct
+#[tokio::test]
+async fn generic_types_survive_reindex() {
+    use crate::test::harness::FakeEditor;
+
+    let mut editor = FakeEditor::new().await;
+    let code = "a = [1, 2, 3].first\nb = 2.abs";
+
+    // First indexing
+    editor.open("test.rb", code);
+    editor
+        .check(
+            "test.rb",
+            r#"a<hint label="Integer"> = [1, 2, 3].first
+b<hint label="Integer"> = 2.abs"#,
+        )
+        .await;
+
+    // Simulate edit (same content, triggers re-indexing)
+    editor.set("test.rb", code);
+    editor
+        .check(
+            "test.rb",
+            r#"a<hint label="Integer"> = [1, 2, 3].first
+b<hint label="Integer"> = 2.abs"#,
+        )
+        .await;
+}
+
+/// Matches the user's exact scenario from the screenshot
+#[tokio::test]
+async fn generic_types_survive_reindex_with_class() {
+    use crate::test::harness::FakeEditor;
+
+    let mut editor = FakeEditor::new().await;
+    let code = r#"class UserA
+  def namea -> NilClass
+  end def namea
+end class UserA
+
+a = UserA.new.namea
+
+a = [1,2,3].first
+
+b = 2.abs"#;
+
+    // First indexing
+    editor.open("test.rb", code);
+    editor
+        .check(
+            "test.rb",
+            r#"class UserA
+  def namea -> NilClass
+  end def namea
+end class UserA
+
+a<hint label="NilClass"> = UserA.new.namea
+
+a<hint label="Integer"> = [1,2,3].first
+
+b<hint label="Integer"> = 2.abs"#,
+        )
+        .await;
+
+    // Simulate edit (triggers re-indexing)
+    editor.set("test.rb", code);
+    editor
+        .check(
+            "test.rb",
+            r#"class UserA
+  def namea -> NilClass
+  end def namea
+end class UserA
+
+a<hint label="NilClass"> = UserA.new.namea
+
+a<hint label="Integer"> = [1,2,3].first
+
+b<hint label="Integer"> = 2.abs"#,
+        )
+        .await;
+
+    // Third edit — still correct
+    editor.set("test.rb", code);
+    editor
+        .check(
+            "test.rb",
+            r#"class UserA
+  def namea -> NilClass
+  end def namea
+end class UserA
+
+a<hint label="NilClass"> = UserA.new.namea
+
+a<hint label="Integer"> = [1,2,3].first
+
+b<hint label="Integer"> = 2.abs"#,
+        )
+        .await;
+}
