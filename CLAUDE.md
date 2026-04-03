@@ -89,6 +89,94 @@ cargo build --release         # Release build
 - `src/inferrer/` - Type inference
 - `src/analyzer_prism/` - AST analysis
 
+## Testing
+
+### Tag-Based Test Harness (`check()`)
+
+Single-file tests use `check()` with inline tags. No fixtures needed:
+
+```rust
+use crate::test::harness::check;
+
+#[tokio::test]
+async fn my_test() {
+    check(r#"
+class User
+  def name
+    "hello"
+  end
+end
+
+user = User.new
+user.n$0
+<complete items="name">
+"#).await;
+}
+```
+
+**Supported tags:**
+
+| Tag | Requires `$0` | Purpose |
+|-----|---------------|---------|
+| `<complete items="a,b" excludes="c">` | Yes | Completion items at cursor |
+| `<hint label="...">` | No | Inlay hint at position |
+| `<def>...</def>` | Yes | Goto definition range |
+| `<ref>...</ref>` | Yes | Reference range |
+| `<type>...</type>` | Yes | Expected type at cursor |
+| `<err>...</err>` | No | Expected error diagnostic |
+| `<err none>...</err>` | No | Assert NO errors in range |
+| `<warn>...</warn>` | No | Expected warning diagnostic |
+| `<lens title="...">` | No | Expected code lens |
+| `<th supertypes="A,B" subtypes="C,D">` | Yes | Type hierarchy |
+
+Multi-file tests use `check_multi_file(&[("main.rb", "..."), ("other.rb", "...")])`.
+
+### FakeEditor (Lifecycle/Re-indexing Tests)
+
+Use `FakeEditor` to test behavior across edits — simulates open/edit/save cycle:
+
+```rust
+use crate::test::harness::FakeEditor;
+
+#[tokio::test]
+async fn types_survive_reindex() {
+    let mut editor = FakeEditor::new().await;
+    let code = "a = [1, 2, 3].first";
+
+    // First indexing
+    editor.open("test.rb", code);
+    editor.check("test.rb", r#"a<hint label="Integer"> = [1, 2, 3].first"#).await;
+
+    // Simulate edit (re-indexes)
+    editor.set("test.rb", code);
+    editor.check("test.rb", r#"a<hint label="Integer"> = [1, 2, 3].first"#).await;
+}
+```
+
+**Key methods:**
+- `editor.open("file.rb", content)` — first open + index
+- `editor.set("file.rb", new_content)` — edit + re-index (bumps version)
+- `editor.check("file.rb", fixture)` — assert with tags (content must match)
+- `editor.close("file.rb")` — close file
+
+**When to use FakeEditor vs check():**
+- `check()` — single indexing pass, sufficient for most feature tests
+- `FakeEditor` — when behavior differs between initial indexing and re-indexing (e.g., user index state changes after workspace indexing completes)
+
+### Type Inference Architecture
+
+**Two code paths for method return types:**
+1. **User index** (`MethodResolver` path 1) — searches user-defined methods in ancestor chain
+2. **RBS fallback** (`MethodResolver` path 2) — built-in Ruby types from RBS definitions
+
+For generic types (`Array`, `Hash`), the user index is **skipped** and RBS is used directly.
+RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
+
+**Key files:**
+- `src/inferrer/method/resolver.rs` — `resolve_method_return_type()` orchestrates both paths
+- `src/inferrer/rbs.rs` — RBS type lookup with generic substitution
+- `src/capabilities/completion/method.rs` — method completion with ancestor chain walking
+
 ## TDD Workflow
 
 When the user provides a code scenario/example, follow this strict TDD process:
