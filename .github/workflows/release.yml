@@ -65,6 +65,7 @@ jobs:
         run: |
           mkdir -p npm/${{ matrix.npm-pkg }}/bin
           cp target/${{ matrix.target }}/release/${{ matrix.bin }} npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
+          chmod +x npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
 
       - name: Copy binary to VSIX
         shell: bash
