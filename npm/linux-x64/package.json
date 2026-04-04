@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "ruby-fast-lsp binary for Linux x64",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajnaveen344/ruby-fast-lsp"
+  },
   "os": ["linux"],
   "cpu": ["x64"],
   "files": [

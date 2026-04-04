@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "ruby-fast-lsp binary for macOS x64 (Intel)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajnaveen344/ruby-fast-lsp"
+  },
   "os": ["darwin"],
   "cpu": ["x64"],
   "files": [
