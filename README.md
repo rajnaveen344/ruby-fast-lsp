@@ -1,119 +1,56 @@
 # Ruby Fast LSP
 
-A high-performance Ruby Language Server written in Rust, delivering fast and accurate code navigation, syntax highlighting, and intelligent code insights for Ruby developers across entire projects.
+A high-performance Ruby Language Server written in Rust, built to power both AI coding agents and traditional editors with fast, accurate code intelligence.
 
-## Features
+## Why Ruby Fast LSP
 
-### Feature Status vs Competitors
+AI coding agents like Claude Code, Cursor, and Windsurf rely on Language Server Protocol features to understand codebases, validate their own edits, and navigate code with precision. Ruby deserves a language server that treats these agent workflows as first-class.
 
-| **Feature**                | ruby-fast-lsp | ruby-lsp | Solargraph |
-| -------------------------- | :-----------: | :------: | :--------: |
-| **Syntax Highlighting**    |      ✅       |    ✅    |     ❌     |
-| **Workspace Indexing**     |      ✅       |    ✅    |     ✅     |
-| **Go to Definition**       |      ✅       |    ✅    |     ✅     |
-| **Find References**        |    ✅ / 🚧    |    ✅    |     ✅     |
-| **Code Completion**        |      ✅       |    ✅    |     ✅     |
-| **Hover**                  |      ✅       |    ✅    |     ✅     |
-| **Document Symbols**       |      ✅       |    ✅    |     ✅     |
-| **Workspace Symbols**      |      ✅       |    ✅    |     ✅     |
-| **Type Hierarchy**         |      ✅       |    ✅    |     ❌     |
-| **Inlay Hints**            |      ✅       |    ✅    |     ❌     |
-| **Code Folding**           |      ✅       |    ✅    |     ✅     |
-| **Diagnostics**            |      ✅       |    ✅    |     ✅     |
-| **Semantic Tokens**        |      ✅       |    ✅    |     ❌     |
-| **Code Lens**              |      ✅       |    ✅    |     ❌     |
-| **On-Type Formatting**     |      ✅       |    ✅    |     ❌     |
-| **Rename (local vars)**    |      ✅       |    ✅    |     ✅     |
-| **Signature Help**         |      ❌       |    ✅    |     ✅     |
-| **Code Actions**           |      ❌       |    ✅    |     ❌     |
-| **Document Highlight**     |      ❌       |    ✅    |     ✅     |
-| **Selection Range**        |      ❌       |    ✅    |     ❌     |
-| **Call Hierarchy**         |      ❌       |   🚧    |     ❌     |
-| **Cross-file Rename**      |      ❌       |    ✅    |     ✅     |
-| **Formatting (RuboCop)**   |      ❌       |    ✅    |     ✅     |
-| **Rails Support**          |      ❌       |    ✅    |     🚧     |
-| **Metaprogramming / DSLs** |      ❌       |    ✅    |     🚧     |
-| **YARD Docs in Hover**     |      ❌       |    ✅    |     ✅     |
-| **ERB / HAML Support**     |      ❌       |    ✅    |     ❌     |
+Ruby Fast LSP is designed around the features that matter most for agent-assisted development:
 
-### Navigation Details
+- **Diagnostics** that catch errors in real time, so agents can self-correct without running a build
+- **Go to Definition** and **Find References** for precise, type-aware navigation instead of text search
+- **Hover** with type signatures, so agents understand what they're working with
+- **Workspace Symbols** for systematic codebase exploration
 
-- **Go to Definition**: Modules ✅ · Classes ✅ · Constants ✅ · Local variables ✅ · Methods ✅ · Instance/Class/Global variables 🚧
-- **Find References**: Modules ✅ · Classes ✅ · Constants ✅ · Local variables ✅ · Methods 🚧 (limited coverage)
+Written in Rust with millisecond response times, it handles large Ruby codebases without becoming a bottleneck.
 
-### What's Working Well
+## Type Inference
 
-- **16 LSP features implemented** — strong core feature set
-- **Performance** — Rust-native with sub-millisecond completions via trie lookups
-- **Type inference engine** — RBS-backed with generic substitution (e.g., `Array[Integer]#first` → `Integer`)
-- **Semantic tokens** and **inlay hints** — features competitors often lack
+At the core of Ruby Fast LSP is Yard & RBS backed type inference engine that gives diagnostics and navigation real accuracy, not just syntax awareness.
 
-### Known Limitations
+- Resolves standard library types through RBS definitions
+- Handles generic substitution (e.g., `Array[Integer]#first` resolves to `Integer`)
+- Walks ancestor chains across includes, prepends, and inheritance
+- Validates return types against YARD and RBS annotations
+- Understands union types (eg. `User, nil`) for accurate nullability and branch analysis
+- Powers unresolved method and constant detection
 
-- **Method references** — incomplete; may miss matches across files
-- **Type inference** — expanding but not yet comprehensive (no flow-sensitive typing, limited YARD)
-- **Rename** — local variables only, no cross-file rename for methods/constants
-- **No metaprogramming awareness** — `attr_accessor`, `define_method`, `method_missing`, Rails DSLs not recognized
-- **No formatter integration** — no RuboCop/Standard delegation
-- **No signature help** — no parameter hints on method calls
+You can guide the engine with simple YARD annotations on your methods:
 
-### Roadmap
+```ruby
+# @param name [String]
+# @return [User, nil]
+def find_by_name(name)
+  # ...
+end
+```
 
-**High Priority** (biggest impact for daily use):
-- Signature help (parameter hints)
-- Document highlight (same-symbol occurrences)
-- Cross-file rename (methods, constants, classes)
-- YARD documentation in hover
+This is enough for the LSP to resolve return types, validate callers, and propagate types through method chains. No separate type files or complex setup required.
 
-**Medium Priority** (competitive parity):
-- Code actions / Quick fixes
-- Formatting integration (RuboCop/Standard)
-- Metaprogramming support (`attr_accessor`, `define_method`)
-- Selection range (expand/shrink selection)
+This is what makes the difference between a language server that can grep and one that can reason about Ruby code.
 
-**Future** (differentiation):
-- Rails support (routes, associations, callbacks, ERB)
-- Call hierarchy (incoming/outgoing calls)
-- Flow-sensitive type narrowing (`is_a?`, `nil?` guards)
-- Run/Debug support
+## Installation
 
-## Getting Started
+### npm (recommended)
 
-1. Install the extension from the VS Code marketplace
-2. Open a Ruby project folder in VS Code
-3. The LSP will automatically:
-   - Start up and index your workspace
-   - Provide language features as you type
-   - Support navigation across your entire project
+Install the language server binary globally:
 
-### Requirements
+```bash
+npm install -g @ruby-fast/lsp
+```
 
-- VS Code 1.86.0 or later
-- Ruby project (single file or workspace)
-
-## Configuration
-
-The extension supports the following settings:
-
-- `ruby-fast-lsp.codeLensModulesEnabled` - Enable/disable code lens for module mixin counts (default: true)
-
-## Performance
-
-Ruby Fast LSP is designed for speed:
-
-- Written in Rust for native performance
-- Incremental indexing on file changes
-- Efficient symbol lookups using trie data structures
-- Optimized for large codebases
-
-## Known Issues
-
-- Method references may be incomplete across files
-- Metaprogramming constructs (`attr_accessor`, `define_method`, etc.) are not indexed
-- Large workspaces may take time for initial indexing
-- Some Ruby edge cases (complex splatting, pattern matching) may not be fully supported
-
-## Development
+This makes the `ruby-fast-lsp` binary available in your PATH.
 
 ### Building from Source
 
@@ -121,39 +58,64 @@ Ruby Fast LSP is designed for speed:
 cargo build --release
 ```
 
-### Running Tests
+The binary will be at `target/release/ruby-fast-lsp`.
 
-```bash
-# Run all tests
-cargo test
+## Setup
 
-# Run simulation tests (property-based fuzzing)
-cargo test sim --release
+### Claude Code
 
-# Run soak test (overnight fuzzing, Ctrl+C to stop)
-cargo test soak --release -- --nocapture --ignored
+1. Install the binary globally via npm (see above).
+
+2. Add the language server to your Claude Code settings. Edit `~/.claude/settings.json`:
+
+```json
+{
+  "lspServers": {
+    "ruby": {
+      "command": "ruby-fast-lsp",
+      "args": ["--stdio"],
+      "extensionToLanguage": {
+        ".rb": "ruby",
+        ".rake": "ruby",
+        ".gemspec": "ruby"
+      }
+    }
+  }
+}
 ```
 
-See [docs/testing.md](docs/testing.md) for detailed testing documentation.
+3. Restart Claude Code. The language server will start automatically when you work with Ruby files, providing diagnostics, navigation, and type information.
 
-### Project Structure
+For project-specific configuration, add the same `lspServers` block to `.claude/settings.json` in your project root instead.
 
-- `src/` - Main LSP server implementation
-- `src/capabilities/` - LSP feature handlers (completion, hover, definitions, etc.)
-- `src/indexer/` - Project indexing and symbol management
-- `src/inferrer/` - Type inference engine
-- `src/analyzer_prism/` - Ruby code analysis using Prism
-- `src/types/` - Core data structures and representation
-- `src/handlers/` - Request and notification routing
-- `src/test/simulation/` - Property-based simulation tests
-- `crates/ast-visualizer/` - Web-based AST visualization tool
-- `crates/rbs-parser/` - RBS type signature parser
-- `crates/lsp-repl/` - LSP REPL for debugging
-- `vsix/` - VS Code extension packaging
+### VS Code
+
+1. Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=naveenraj.ruby-fast-lsp).
+2. Open a Ruby project. The server starts automatically and indexes your workspace.
+
+### Cursor, Windsurf, and Other VS Code Forks
+
+Editors based on VS Code that use the [Open VSX Registry](https://open-vsx.org/) can install the extension from:
+
+[open-vsx.org/extension/naveenraj/ruby-fast-lsp](https://open-vsx.org/extension/naveenraj/ruby-fast-lsp)
+
+### Other Editors
+
+Any editor that supports LSP can use Ruby Fast LSP. Start the server with:
+
+```bash
+ruby-fast-lsp --stdio
+```
+
+Configure your editor's LSP client to connect via stdio with language ID `ruby`.
+
+## See Also
+
+- [Ruby Fast Cop](https://github.com/rajnaveen344/ruby-fast-cop) - A high-performance Ruby linter written in Rust, designed as a companion to Ruby Fast LSP.
 
 ## Contributing
 
-Please report any issues or feature requests on our [GitHub repository](https://github.com/rajnaveen344/ruby-fast-lsp).
+Issues and feature requests welcome on [GitHub](https://github.com/rajnaveen344/ruby-fast-lsp).
 
 ## License
 

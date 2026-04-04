@@ -111,6 +111,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
+          # Resolve README symlink to real file (npm doesn't follow symlinks)
+          if [ -L npm/ruby-fast-lsp/README.md ]; then
+            cp --remove-destination "$(readlink -f npm/ruby-fast-lsp/README.md)" npm/ruby-fast-lsp/README.md
+          fi
+
           # Copy built binaries into npm package dirs
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             cp -r artifacts/npm-${pkg}/* npm/${pkg}/
