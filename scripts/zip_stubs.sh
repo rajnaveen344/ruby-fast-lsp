@@ -65,9 +65,9 @@ for version_dir in "$STUBS_DIR"/rubystubs*; do
             original_size=$(du -sk "$version_dir" | cut -f1)
             zip_size=$(du -sk "$output_file" | cut -f1)
             echo "    $version_name: ${original_size}KB -> ${zip_size}KB"
-            ((zipped_count++))
+            zipped_count=$((zipped_count + 1))
         else
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
         fi
     fi
 done
