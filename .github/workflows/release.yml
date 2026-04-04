@@ -160,8 +160,24 @@ jobs:
 
       - name: Prepare VSIX
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          # VSIX uses CalVer: YYYY.WW.PATCH (e.g., 2026.14.0)
+          YEAR=$(date -u +%Y)
+          WEEK=$(date -u +%-V)
+          # Check if this year.week already exists, increment patch if so
+          EXISTING=$(npx @vscode/vsce show naveenraj.ruby-fast-lsp --json 2>/dev/null | node -e "
+            const d = require('fs').readFileSync('/dev/stdin','utf8');
+            try {
+              const v = JSON.parse(d).versions.map(v=>v.version);
+              const matches = v.filter(x=>x.startsWith('${YEAR}.${WEEK}.'));
+              if (matches.length) {
+                const patches = matches.map(x=>parseInt(x.split('.')[2]));
+                console.log(Math.max(...patches)+1);
+              } else { console.log(0); }
+            } catch(e) { console.log(0); }
+          " || echo "0")
+          VSIX_VERSION="${YEAR}.${WEEK}.${EXISTING}"
+          echo "VSIX_VERSION=${VSIX_VERSION}" >> $GITHUB_ENV
+          echo "VSIX version: ${VSIX_VERSION}"
 
           # Move binaries into place
           for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
@@ -171,7 +187,7 @@ jobs:
           rm -rf vsix/bin-artifacts
 
           # Sync version in VSIX package.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" vsix/package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"${VSIX_VERSION}\"/" vsix/package.json
 
           # Pre-zip stubs if script exists
           if [ -f "./scripts/zip_stubs.sh" ]; then

@@ -5,17 +5,22 @@ description: "Release a new version of ruby-fast-lsp. Bumps version in Cargo.tom
 
 # Release
 
-Bump version, commit, tag, and push. CI handles the rest (npm, VSIX, GitHub Release).
+Bump version, commit, tag, and push. CI handles the rest.
+
+## Versioning
+
+- **Cargo.toml + npm**: SemVer (e.g., `0.2.1`). This is the version you bump.
+- **VS Code extension**: CalVer `YYYY.WW.PATCH` (e.g., `2026.14.0`). Computed automatically by CI from the current date. You don't manage this.
 
 ## Process
 
 1. Ask the user: **patch**, **minor**, or **major**? (or accept if already specified)
 2. Read current version from `Cargo.toml` (line starting with `version =`)
-3. Compute new version using SemVer rules
+3. Compute new SemVer version
 4. Update `Cargo.toml` with the new version
 5. Show the user:
    - Current version → New version
-   - What CI will publish: npm (`@ruby-fast/lsp`), VS Code Marketplace, Open VSX, GitHub Release
+   - What CI will publish: npm (`@ruby-fast/lsp`), VS Code Marketplace (CalVer), Open VSX (CalVer), GitHub Release
    - Ask for confirmation before proceeding
 6. On confirmation:
    ```bash
@@ -29,7 +34,7 @@ Bump version, commit, tag, and push. CI handles the rest (npm, VSIX, GitHub Rele
 
 ## Rules
 
-- **Only edit `Cargo.toml`** — npm and VSIX versions are synced by CI from the git tag
+- **Only edit `Cargo.toml`** — npm versions are synced by CI from the git tag, VSIX version is CalVer computed by CI
 - Never push without explicit user confirmation
 - If there are uncommitted changes besides Cargo.toml, warn the user and ask how to proceed
 - Use `git tag` not `git tag -a` (lightweight tags)
