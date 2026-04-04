@@ -21,21 +21,25 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             npm-pkg: darwin-arm64
+            vsix-platform: darwin-arm64
             bin: ruby-fast-lsp
 
           - os: macos-latest
             target: x86_64-apple-darwin
             npm-pkg: darwin-x64
+            vsix-platform: darwin-x64
             bin: ruby-fast-lsp
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             npm-pkg: linux-x64
+            vsix-platform: linux-x64
             bin: ruby-fast-lsp
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             npm-pkg: win32-x64
+            vsix-platform: win32-x64
             bin: ruby-fast-lsp.exe
 
     runs-on: ${{ matrix.os }}
@@ -62,13 +66,25 @@ jobs:
           mkdir -p npm/${{ matrix.npm-pkg }}/bin
           cp target/${{ matrix.target }}/release/${{ matrix.bin }} npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
 
-      - name: Upload artifact
+      - name: Copy binary to VSIX
+        shell: bash
+        run: |
+          mkdir -p vsix/bin/${{ matrix.vsix-platform }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
+
+      - name: Upload npm artifact
         uses: actions/upload-artifact@v4
         with:
           name: npm-${{ matrix.npm-pkg }}
           path: npm/${{ matrix.npm-pkg }}
 
-  publish:
+      - name: Upload VSIX binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-bin-${{ matrix.vsix-platform }}
+          path: vsix/bin/${{ matrix.vsix-platform }}
+
+  publish-npm:
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -83,9 +99,10 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Download all artifacts
+      - name: Download all npm artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: npm-*
           path: artifacts
 
       - name: Prepare packages
@@ -122,6 +139,70 @@ jobs:
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
           cd npm/ruby-fast-lsp
           npm publish --access public
+
+  publish-vsix:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download all VSIX binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-bin-*
+          path: vsix/bin-artifacts
+
+      - name: Prepare VSIX
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+          # Move binaries into place
+          for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            mkdir -p vsix/bin/${platform}
+            cp -r vsix/bin-artifacts/vsix-bin-${platform}/* vsix/bin/${platform}/
+          done
+          rm -rf vsix/bin-artifacts
+
+          # Sync version in VSIX package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" vsix/package.json
+
+          # Pre-zip stubs if script exists
+          if [ -f "./scripts/zip_stubs.sh" ]; then
+            ./scripts/zip_stubs.sh
+          fi
+
+      - name: Install VSIX dependencies
+        run: |
+          cd vsix
+          npm install
+
+      - name: Package VSIX
+        run: |
+          cd vsix
+          npx @vscode/vsce package
+
+      - name: Publish to VS Code Marketplace
+        run: |
+          cd vsix
+          npx @vscode/vsce publish -p ${{ secrets.VSCE_TOKEN }}
+
+      - name: Publish to Open VSX
+        run: |
+          cd vsix
+          npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
+
+  create-release:
+    needs: [publish-npm, publish-vsix]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
