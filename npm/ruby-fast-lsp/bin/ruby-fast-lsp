@@ -47,6 +47,11 @@ function getBinaryPath() {
 
 const binPath = getBinaryPath();
 
+// Ensure binary is executable (npm may strip permissions)
+try {
+  fs.chmodSync(binPath, 0o755);
+} catch {}
+
 try {
   execFileSync(binPath, process.argv.slice(2), {
     stdio: "inherit",
