@@ -1,0 +1,11 @@
+{
+  "name": "@ruby-fast-lsp/linux-x64",
+  "version": "0.1.0",
+  "description": "ruby-fast-lsp binary for Linux x64",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": [
+    "bin/ruby-fast-lsp"
+  ]
+}

@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            npm-pkg: darwin-arm64
+            bin: ruby-fast-lsp
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            npm-pkg: darwin-x64
+            bin: ruby-fast-lsp
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            npm-pkg: linux-x64
+            bin: ruby-fast-lsp
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            npm-pkg: win32-x64
+            bin: ruby-fast-lsp.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Copy binary to npm package
+        shell: bash
+        run: |
+          mkdir -p npm/${{ matrix.npm-pkg }}/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.npm-pkg }}
+          path: npm/${{ matrix.npm-pkg }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+          # Copy built binaries into npm package dirs
+          for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            cp -r artifacts/npm-${pkg}/* npm/${pkg}/
+          done
+
+          # Sync version in all package.json files
+          for pkg in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" npm/${pkg}/package.json
+          done
+
+          # Sync optionalDependencies versions
+          for dep in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            sed -i "s|\"@ruby-fast-lsp/${dep}\": \".*\"|\"@ruby-fast-lsp/${dep}\": \"${VERSION}\"|" npm/ruby-fast-lsp/package.json
+          done
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            echo "Publishing @ruby-fast-lsp/${pkg}@${VERSION}..."
+            cd npm/${pkg}
+            npm publish --access public
+            cd ../..
+          done
+
+      - name: Publish main CLI package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "Publishing ruby-fast-lsp@${VERSION}..."
+          cd npm/ruby-fast-lsp
+          npm publish --access public
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

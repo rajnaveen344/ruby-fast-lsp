@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+const PLATFORMS = {
+  "darwin-arm64": "@ruby-fast-lsp/darwin-arm64",
+  "darwin-x64": "@ruby-fast-lsp/darwin-x64",
+  "linux-x64": "@ruby-fast-lsp/linux-x64",
+  "win32-x64": "@ruby-fast-lsp/win32-x64",
+};
+
+function getBinaryPath() {
+  const platformKey = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORMS[platformKey];
+
+  if (!pkg) {
+    console.error(
+      `Unsupported platform: ${process.platform}-${process.arch}\n` +
+        `Supported: ${Object.keys(PLATFORMS).join(", ")}`
+    );
+    process.exit(1);
+  }
+
+  try {
+    const pkgPath = require.resolve(`${pkg}/package.json`);
+    const pkgDir = path.dirname(pkgPath);
+    const binName =
+      process.platform === "win32" ? "ruby-fast-lsp.exe" : "ruby-fast-lsp";
+    const binPath = path.join(pkgDir, "bin", binName);
+
+    if (!fs.existsSync(binPath)) {
+      console.error(`Binary not found at ${binPath}`);
+      process.exit(1);
+    }
+
+    return binPath;
+  } catch {
+    console.error(
+      `Platform package ${pkg} is not installed.\n` +
+        `Run: npm install ${pkg}`
+    );
+    process.exit(1);
+  }
+}
+
+const binPath = getBinaryPath();
+
+try {
+  execFileSync(binPath, process.argv.slice(2), {
+    stdio: "inherit",
+    env: process.env,
+  });
+} catch (err) {
+  if (err.status !== null) {
+    process.exit(err.status);
+  }
+  throw err;
+}
