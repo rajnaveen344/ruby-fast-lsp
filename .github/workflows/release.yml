@@ -22,7 +22,7 @@ jobs:
             npm-pkg: darwin-arm64
             bin: ruby-fast-lsp
 
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
             npm-pkg: darwin-x64
             bin: ruby-fast-lsp
@@ -46,8 +46,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER: clang
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 
       - name: Copy binary to npm package
         shell: bash
