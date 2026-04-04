@@ -16,14 +16,14 @@ fi
 
 # Platform packages first (order matters — main package depends on these)
 for PKG in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-  echo "Publishing @ruby-fast-lsp/${PKG}..."
+  echo "Publishing @ruby-fast/lsp-${PKG}..."
   cd "$SCRIPT_DIR/$PKG"
   npm publish --access public $DRY_RUN
   cd "$SCRIPT_DIR"
 done
 
 # Main CLI package last
-echo "Publishing ruby-fast-lsp..."
+echo "Publishing @ruby-fast/lsp..."
 cd "$SCRIPT_DIR/ruby-fast-lsp"
 npm publish --access public $DRY_RUN
 

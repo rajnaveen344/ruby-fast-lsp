@@ -1,11 +1,11 @@
 {
-  "name": "ruby-fast-lsp",
+  "name": "@ruby-fast/lsp",
   "version": "0.1.0",
   "description": "A fast Language Server Protocol implementation for Ruby",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/poudels14/ruby-fast-lsp"
+    "url": "https://github.com/rajnaveen344/ruby-fast-lsp"
   },
   "bin": {
     "ruby-fast-lsp": "bin/ruby-fast-lsp"
@@ -15,9 +15,9 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@ruby-fast-lsp/darwin-arm64": "0.1.0",
-    "@ruby-fast-lsp/darwin-x64": "0.1.0",
-    "@ruby-fast-lsp/linux-x64": "0.1.0",
-    "@ruby-fast-lsp/win32-x64": "0.1.0"
+    "@ruby-fast/lsp-darwin-arm64": "0.1.0",
+    "@ruby-fast/lsp-darwin-x64": "0.1.0",
+    "@ruby-fast/lsp-linux-x64": "0.1.0",
+    "@ruby-fast/lsp-win32-x64": "0.1.0"
   }
 }

@@ -101,7 +101,7 @@ jobs:
 
           # Sync optionalDependencies versions
           for dep in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            sed -i "s|\"@ruby-fast-lsp/${dep}\": \".*\"|\"@ruby-fast-lsp/${dep}\": \"${VERSION}\"|" npm/ruby-fast-lsp/package.json
+            sed -i "s|\"@ruby-fast/lsp-${dep}\": \".*\"|\"@ruby-fast/lsp-${dep}\": \"${VERSION}\"|" npm/ruby-fast-lsp/package.json
           done
 
       - name: Publish platform packages
@@ -109,7 +109,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            echo "Publishing @ruby-fast-lsp/${pkg}@${VERSION}..."
+            echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
             cd npm/${pkg}
             npm publish --access public
             cd ../..
@@ -119,7 +119,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "Publishing ruby-fast-lsp@${VERSION}..."
+          echo "Publishing @ruby-fast/lsp@${VERSION}..."
           cd npm/ruby-fast-lsp
           npm publish --access public
 

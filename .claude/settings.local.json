@@ -25,7 +25,9 @@
       "Bash(./create_vsix.sh:*)",
       "Skill(ruby-index)",
       "Bash(xargs:*)",
-      "Bash(cargo clean:*)"
+      "Bash(cargo clean:*)",
+      "Bash(git -C /Users/naveenraj/sources/devtools/ruby-fast-lsp log --oneline -10)",
+      "WebFetch(domain:likec4.dev)"
     ]
   }
 }

@@ -13,3 +13,5 @@ src/test/simulation/soak_failures.log
 vsix/stubs-zipped/
 # LikeC4 snapshots
 .likec4
+# npm platform binaries (built by CI)
+npm/*/bin/

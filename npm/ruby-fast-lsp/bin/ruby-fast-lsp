@@ -5,10 +5,10 @@ const path = require("path");
 const fs = require("fs");
 
 const PLATFORMS = {
-  "darwin-arm64": "@ruby-fast-lsp/darwin-arm64",
-  "darwin-x64": "@ruby-fast-lsp/darwin-x64",
-  "linux-x64": "@ruby-fast-lsp/linux-x64",
-  "win32-x64": "@ruby-fast-lsp/win32-x64",
+  "darwin-arm64": "@ruby-fast/lsp-darwin-arm64",
+  "darwin-x64": "@ruby-fast/lsp-darwin-x64",
+  "linux-x64": "@ruby-fast/lsp-linux-x64",
+  "win32-x64": "@ruby-fast/lsp-win32-x64",
 };
 
 function getBinaryPath() {

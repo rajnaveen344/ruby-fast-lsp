@@ -58,8 +58,8 @@ done
 
 # Sync optionalDependencies versions in main package
 for DEP in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-  sed -i '' "s|\"@ruby-fast-lsp/${DEP}\": \".*\"|\"@ruby-fast-lsp/${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json" 2>/dev/null || \
-  sed -i "s|\"@ruby-fast-lsp/${DEP}\": \".*\"|\"@ruby-fast-lsp/${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json"
+  sed -i '' "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json" 2>/dev/null || \
+  sed -i "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json"
 done
 
 echo ""
