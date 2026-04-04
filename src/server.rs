@@ -65,7 +65,8 @@ fn is_process_alive(pid: u32) -> bool {
         windows_sys::Win32::Foundation::CloseHandle(handle);
 
         // STILL_ACTIVE (259) means the process is still running
-        result != 0 && exit_code == windows_sys::Win32::System::Threading::STILL_ACTIVE
+        const STILL_ACTIVE: u32 = 259;
+        result != 0 && exit_code == STILL_ACTIVE
     }
 }
 
