@@ -109,6 +109,8 @@ jobs:
           done
 
       - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
@@ -118,6 +120,8 @@ jobs:
           done
 
       - name: Publish main CLI package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
           cd npm/ruby-fast-lsp
