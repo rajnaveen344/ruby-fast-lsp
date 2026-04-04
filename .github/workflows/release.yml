@@ -78,9 +78,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Download all artifacts
@@ -109,23 +109,19 @@ jobs:
           done
 
       - name: Publish platform packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
             cd npm/${pkg}
-            npm publish --access public --provenance
+            npm publish --access public
             cd ../..
           done
 
       - name: Publish main CLI package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
           cd npm/ruby-fast-lsp
-          npm publish --access public --provenance
+          npm publish --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
