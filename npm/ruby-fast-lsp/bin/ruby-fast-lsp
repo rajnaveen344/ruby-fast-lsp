@@ -35,6 +35,11 @@ function getBinaryPath() {
       process.exit(1);
     }
 
+    // npm strips execute permissions from published files
+    if (process.platform !== "win32") {
+      fs.chmodSync(binPath, 0o755);
+    }
+
     return binPath;
   } catch {
     console.error(
