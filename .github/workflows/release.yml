@@ -130,7 +130,7 @@ jobs:
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
             cd npm/${pkg}
-            npm publish --access public
+            npm publish --access public || echo "Already published, skipping"
             cd ../..
           done
 
@@ -138,7 +138,7 @@ jobs:
         run: |
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
           cd npm/ruby-fast-lsp
-          npm publish --access public
+          npm publish --access public || echo "Already published, skipping"
 
   publish-vsix:
     needs: build
@@ -199,6 +199,7 @@ jobs:
 
   create-release:
     needs: [publish-npm, publish-vsix]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
 
     steps:
