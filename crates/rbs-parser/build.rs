@@ -92,7 +92,7 @@ fn collect_rbs_files(base_path: &Path, current_path: &Path, files: &mut Vec<(Str
                 if let Ok(content) = fs::read(&path) {
                     // Get relative path from base
                     let relative = path.strip_prefix(base_path).unwrap_or(&path);
-                    let name = relative.to_string_lossy().to_string();
+                    let name = relative.to_string_lossy().replace('\\', "/");
                     files.push((name, content));
                 }
             }
