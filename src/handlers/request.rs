@@ -5,7 +5,8 @@
 
 use crate::capabilities::{
     code_lens, completion, debug, definitions, document_symbols, folding_range, formatting, hover,
-    inlay_hints, namespace_tree, references, rename, semantic_tokens, type_hierarchy, workspace_symbols,
+    implementation, inlay_hints, namespace_tree, references, rename, semantic_tokens, type_hierarchy,
+    workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info, trace};
@@ -32,6 +33,35 @@ pub async fn handle_goto_definition(
         }
         None => {
             info!("No definition found for position {:?}", position);
+            Ok(None)
+        }
+    }
+}
+
+pub async fn handle_goto_implementation(
+    lang_server: &RubyLanguageServer,
+    params: GotoDefinitionParams,
+) -> LspResult<Option<GotoDefinitionResponse>> {
+    let uri = params
+        .text_document_position_params
+        .text_document
+        .uri
+        .clone();
+    let position = params.text_document_position_params.position;
+
+    let implementations =
+        implementation::find_implementation_at_position(lang_server, uri, position).await;
+
+    match implementations {
+        Some(locations) => {
+            trace!(
+                "Returning {} implementation locations",
+                locations.len()
+            );
+            Ok(Some(GotoDefinitionResponse::Array(locations)))
+        }
+        None => {
+            info!("No implementations found for position {:?}", position);
             Ok(None)
         }
     }

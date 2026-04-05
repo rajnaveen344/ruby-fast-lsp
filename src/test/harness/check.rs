@@ -62,6 +62,7 @@ use crate::handlers::request;
 /// All supported tag names for extraction.
 pub(super) const ALL_TAGS: &[&str] = &[
     "def", "ref", "type", "hint", "lens", "err", "warn", "hover", "th", "rename", "complete",
+    "impl",
 ];
 
 /// Strip all markers ($0 and tags) from fixture text, returning clean Ruby source.
@@ -106,9 +107,10 @@ pub(super) async fn run_checks_on_fixture(
     // Extract all tags in one pass
     let (all_tags, _content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
 
-    // Also extract simple tags for def/ref (they don't use attributes)
+    // Also extract simple tags for def/ref/impl (they don't use attributes)
     let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
     let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
+    let (impl_ranges, _) = extract_tags(&text_without_cursor, "impl");
 
     // Recompute cursor position in clean-text coordinates by stripping tags first,
     // then finding cursor. This avoids tag characters inflating the cursor offset.
@@ -169,6 +171,12 @@ pub(super) async fn run_checks_on_fixture(
     if cursor.is_some() && !ref_ranges.is_empty() {
         run_references_check(server, uri, cursor.unwrap(), &ref_ranges).await;
         checks_run.push("references");
+    }
+
+    // Run implementation check if we have cursor and impl tags
+    if cursor.is_some() && !impl_ranges.is_empty() {
+        run_implementation_check(server, uri, cursor.unwrap(), &impl_ranges).await;
+        checks_run.push("implementation");
     }
 
     // Run type check if we have type tags (no cursor needed - uses tag position)
@@ -346,6 +354,61 @@ async fn run_goto_check(
         assert!(
             actual_ranges.iter().any(|r| ranges_match(r, expected)),
             "Expected definition at {:?} not found.\nActual: {:?}",
+            expected,
+            actual_ranges
+        );
+    }
+}
+
+/// Run implementation check.
+async fn run_implementation_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    cursor: Position,
+    expected_impls: &[Range],
+) {
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: cursor,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = request::handle_goto_implementation(server, params)
+        .await
+        .expect("Goto implementation request failed");
+
+    let locations: Vec<_> = match result {
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Array(locs)) => locs,
+        Some(tower_lsp::lsp_types::GotoDefinitionResponse::Link(links)) => links
+            .into_iter()
+            .map(|l| tower_lsp::lsp_types::Location {
+                uri: l.target_uri,
+                range: l.target_selection_range,
+            })
+            .collect(),
+        None => vec![],
+    };
+
+    let actual_ranges: Vec<Range> = locations.iter().map(|l| l.range).collect();
+
+    assert_eq!(
+        actual_ranges.len(),
+        expected_impls.len(),
+        "Expected {} implementations, got {}.\nExpected: {:?}\nActual: {:?}",
+        expected_impls.len(),
+        actual_ranges.len(),
+        expected_impls,
+        actual_ranges
+    );
+
+    for expected in expected_impls {
+        assert!(
+            actual_ranges.iter().any(|r| ranges_match(r, expected)),
+            "Expected implementation at {:?} not found.\nActual: {:?}",
             expected,
             actual_ranges
         );

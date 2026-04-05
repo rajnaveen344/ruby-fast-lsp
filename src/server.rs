@@ -386,6 +386,29 @@ impl LanguageServer for RubyLanguageServer {
         result
     }
 
+    async fn goto_implementation(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> LspResult<Option<GotoDefinitionResponse>> {
+        info!(
+            "Goto implementation request received for {:?}",
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .path()
+        );
+        let start_time = Instant::now();
+        let result = request::handle_goto_implementation(self, params).await;
+
+        info!(
+            "[PERF] Goto implementation completed in {:?}",
+            start_time.elapsed()
+        );
+
+        result
+    }
+
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         info!(
             "References request received for {:?}",

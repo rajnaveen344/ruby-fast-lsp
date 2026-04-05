@@ -21,6 +21,7 @@ mod completion;
 mod debug;
 mod definition;
 pub mod diagnostics;
+mod implementation;
 mod hover;
 pub mod inference;
 mod inlay_hints;

@@ -7,6 +7,7 @@ pub mod document_symbols;
 pub mod folding_range;
 pub mod formatting;
 pub mod hover;
+pub mod implementation;
 pub mod indexing;
 pub mod inlay_hints;
 pub mod namespace_tree;

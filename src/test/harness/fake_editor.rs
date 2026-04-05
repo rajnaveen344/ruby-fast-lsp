@@ -355,6 +355,37 @@ impl FakeEditor {
         }
     }
 
+    /// Returns all implementation locations at a 0-indexed position.
+    pub async fn goto_impl_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<Location> {
+        self.assert_open(filename, "goto_impl_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        match self.server.goto_implementation(params).await {
+            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => vec![loc],
+            Ok(Some(GotoDefinitionResponse::Array(locs))) => locs,
+            Ok(Some(GotoDefinitionResponse::Link(links))) => links
+                .into_iter()
+                .map(|link| Location {
+                    uri: link.target_uri,
+                    range: link.target_range,
+                })
+                .collect(),
+            _ => vec![],
+        }
+    }
+
     /// Returns all references at a 0-indexed position.
     pub async fn references_at(
         &self,

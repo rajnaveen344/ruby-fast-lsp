@@ -284,7 +284,7 @@ impl IndexQuery {
     }
 
     /// Resolve constant FQN from path.
-    fn resolve_constant_fqn(
+    pub(crate) fn resolve_constant_fqn(
         &self,
         constant_path: &[RubyConstant],
         ancestors: &[RubyConstant],
