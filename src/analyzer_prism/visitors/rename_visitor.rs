@@ -106,8 +106,7 @@ impl RenameVisitor {
     }
 
     fn cursor_in_location(&self, location: &ruby_prism::Location) -> bool {
-        self.cursor_offset >= location.start_offset()
-            && self.cursor_offset < location.end_offset()
+        self.cursor_offset >= location.start_offset() && self.cursor_offset < location.end_offset()
     }
 
     /// Process a local variable node (read, write, target, compound assignment).
@@ -124,11 +123,8 @@ impl RenameVisitor {
 
         match self.phase {
             Phase::FindTarget => {
-                if self.target_name.is_none()
-                    && self.cursor_in_location(name_range_location)
-                {
-                    self.target_name =
-                        Some(String::from_utf8_lossy(name_bytes).to_string());
+                if self.target_name.is_none() && self.cursor_in_location(name_range_location) {
+                    self.target_name = Some(String::from_utf8_lossy(name_bytes).to_string());
                     self.target_scope_id = Some(defining_scope);
                 }
             }
@@ -137,11 +133,10 @@ impl RenameVisitor {
                     (&self.target_name, self.target_scope_id)
                 {
                     let name = String::from_utf8_lossy(name_bytes);
-                    if name.as_ref() == target_name.as_str()
-                        && defining_scope == target_scope
-                    {
-                        let range =
-                            self.document.prism_location_to_lsp_range(name_range_location);
+                    if name.as_ref() == target_name.as_str() && defining_scope == target_scope {
+                        let range = self
+                            .document
+                            .prism_location_to_lsp_range(name_range_location);
                         self.rename_ranges.push(range);
                     }
                 }
@@ -225,10 +220,7 @@ impl Visit<'_> for RenameVisitor {
         visit_local_variable_or_write_node(self, node);
     }
 
-    fn visit_local_variable_operator_write_node(
-        &mut self,
-        node: &LocalVariableOperatorWriteNode,
-    ) {
+    fn visit_local_variable_operator_write_node(&mut self, node: &LocalVariableOperatorWriteNode) {
         self.process_local_var(node.name().as_slice(), node.depth(), &node.name_loc());
         visit_local_variable_operator_write_node(self, node);
     }

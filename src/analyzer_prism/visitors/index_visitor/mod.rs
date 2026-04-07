@@ -144,10 +144,7 @@ impl IndexVisitor {
 
     /// Helper to get the type of a local variable by name at a given location.
     fn get_local_var_type(&self, var_name: &str, location: &Location) -> Option<RubyType> {
-        let position = self
-            .document
-            .prism_location_to_lsp_range(location)
-            .start;
+        let position = self.document.prism_location_to_lsp_range(location).start;
 
         // Use VariableScopes tree for type lookup
         let scope_id = self

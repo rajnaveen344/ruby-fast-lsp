@@ -944,12 +944,7 @@ mod tests {
         println!("a = [1,2,3].first => {:?}", result);
         assert!(result.is_some(), "Should infer type for a = [1,2,3].first");
         let ty = result.unwrap();
-        assert_eq!(
-            ty,
-            RubyType::integer(),
-            "Expected Integer, got {:?}",
-            ty
-        );
+        assert_eq!(ty, RubyType::integer(), "Expected Integer, got {:?}", ty);
     }
 
     #[test]
@@ -962,11 +957,6 @@ mod tests {
         println!("b = 2.abs => {:?}", result);
         assert!(result.is_some(), "Should infer type for b = 2.abs");
         let ty = result.unwrap();
-        assert_eq!(
-            ty,
-            RubyType::integer(),
-            "Expected Integer, got {:?}",
-            ty
-        );
+        assert_eq!(ty, RubyType::integer(), "Expected Integer, got {:?}", ty);
     }
 }

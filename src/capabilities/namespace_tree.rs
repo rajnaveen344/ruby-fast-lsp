@@ -28,10 +28,7 @@ pub async fn handle_namespace_tree(
         let cache = lang_server.namespace_tree_cache.lock();
         if let Some((cached_hash, cached_response)) = cache.as_ref() {
             if *cached_hash == index_hash {
-                debug!(
-                    "[NAMESPACE_TREE] Cache hit in {:?}",
-                    start_time.elapsed()
-                );
+                debug!("[NAMESPACE_TREE] Cache hit in {:?}", start_time.elapsed());
                 return cached_response.clone();
             }
         }

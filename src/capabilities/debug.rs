@@ -278,7 +278,6 @@ pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> Met
     query.debug_methods(&params.class)
 }
 
-
 // ============================================================================
 // Inference Stats Types
 // ============================================================================

@@ -951,11 +951,8 @@ mod tests {
 
         // Array[Integer]#first should return Integer (via generic substitution)
         let array_type = RubyType::Array(vec![RubyType::integer()]);
-        let result = MethodResolver::resolve_method_return_type(
-            &*index.lock(),
-            &array_type,
-            "first",
-        );
+        let result =
+            MethodResolver::resolve_method_return_type(&*index.lock(), &array_type, "first");
         assert!(
             result.is_some(),
             "Array[Integer]#first should have a return type"

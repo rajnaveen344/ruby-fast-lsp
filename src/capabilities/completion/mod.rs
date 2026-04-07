@@ -266,11 +266,8 @@ pub async fn find_completion_at_position(
             };
 
             let query = IndexQuery::new(server.index.clone());
-            let method_completions = query.find_method_completions(
-                &receiver_type,
-                &partial_string,
-                kind,
-            );
+            let method_completions =
+                query.find_method_completions(&receiver_type, &partial_string, kind);
             completions.extend(method_completions);
         }
     } else {
@@ -282,18 +279,13 @@ pub async fn find_completion_at_position(
 
         // Add constant completions
         let query = IndexQuery::new(server.index.clone());
-        let constant_completions = query.find_constant_completions(
-            &analyzer,
-            position,
-            partial_string.clone(),
-        );
+        let constant_completions =
+            query.find_constant_completions(&analyzer, position, partial_string.clone());
         completions.extend(constant_completions);
 
         // Add top-level method completions (methods defined outside any class/module)
-        let top_level_methods = method::find_top_level_method_completions(
-            &server.index,
-            &partial_string,
-        );
+        let top_level_methods =
+            method::find_top_level_method_completions(&server.index, &partial_string);
         completions.extend(top_level_methods);
 
         // Add snippet completions with context awareness
@@ -369,11 +361,16 @@ fn get_receiver_type_from_snapshots(
     // e.g., User.new.name -> Constant(User) + "new" -> Class(User) instance, then lookup "name"
     // e.g., user.name.upcase -> Variable("user") + "name" -> infer return type of name
     if let Some(Identifier::RubyMethod {
-        receiver: MethodReceiver::MethodCall { inner_receiver, method_name },
+        receiver:
+            MethodReceiver::MethodCall {
+                inner_receiver,
+                method_name,
+            },
         ..
     }) = identifier
     {
-        let inner_type = resolve_method_receiver_type(server, uri, content, position, inner_receiver);
+        let inner_type =
+            resolve_method_receiver_type(server, uri, content, position, inner_receiver);
         if let Some(inner_type) = inner_type {
             // Special case: .new on a ClassReference returns an instance of that class
             if method_name == "new" {
@@ -488,10 +485,11 @@ fn get_receiver_type_from_snapshots(
                 .find_scope_for_variable_at(receiver_text, receiver_position)
                 .or_else(|| doc.variable_scopes().scope_at_position(receiver_position))
             {
-                if let Some(ty) = doc
-                    .variable_scopes()
-                    .get_type_at_position(receiver_text, scope_id, receiver_position)
-                {
+                if let Some(ty) = doc.variable_scopes().get_type_at_position(
+                    receiver_text,
+                    scope_id,
+                    receiver_position,
+                ) {
                     if *ty != RubyType::Unknown {
                         return Some(ty.clone());
                     }
@@ -536,12 +534,9 @@ fn get_receiver_type_from_snapshots(
 
         // Try source-level inference with the method FQN
         if let Some(fqn) = method_fqn {
-            if let Some(rt) = crate::inferrer::return_type::infer_method_return_type(
-                &mut index,
-                &fqn,
-                None,
-                None,
-            ) {
+            if let Some(rt) =
+                crate::inferrer::return_type::infer_method_return_type(&mut index, &fqn, None, None)
+            {
                 return Some(rt);
             }
         }
@@ -730,7 +725,9 @@ fn infer_type_from_constructor_assignment(
 /// Unlike `infer_literal_type` which works on a single token, this handles
 /// full expressions like `"hello"`, `[1, 2, 3]`, `{ a: 1 }` by looking
 /// at the trailing expression in the text.
-fn infer_literal_type_from_expression(text: &str) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+fn infer_literal_type_from_expression(
+    text: &str,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
     use crate::inferrer::r#type::ruby::RubyType;
 
     let trimmed = text.trim();
@@ -860,7 +857,6 @@ fn is_variable_name(text: &str) -> bool {
 
     text.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
-
 
 #[cfg(test)]
 mod tests {

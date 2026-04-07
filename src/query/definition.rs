@@ -72,7 +72,10 @@ impl IndexQuery {
             .find_scope_for_variable_at(name, position)
             .or_else(|| document.variable_scopes().scope_at_position(position))?;
 
-        if let Some((_sid, var)) = document.variable_scopes().find_variable(name, tree_scope_id) {
+        if let Some((_sid, var)) = document
+            .variable_scopes()
+            .find_variable(name, tree_scope_id)
+        {
             if var.definition_location.range.start < position {
                 return Some(vec![var.definition_location.clone()]);
             }

@@ -2,10 +2,7 @@ use ruby_prism::ClassNode;
 
 use crate::{
     analyzer_prism::{utils, Identifier},
-    types::{
-        ruby_namespace::RubyConstant,
-        scope::LVScopeKind,
-    },
+    types::{ruby_namespace::RubyConstant, scope::LVScopeKind},
 };
 
 use super::{IdentifierType, IdentifierVisitor};

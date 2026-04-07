@@ -393,10 +393,8 @@ impl IndexQuery {
         for root in &roots_to_search {
             let descendants = index.descendants(root);
             for descendant_fqn in descendants {
-                let method_fqn = FullyQualifiedName::method(
-                    descendant_fqn.namespace_parts(),
-                    method.clone(),
-                );
+                let method_fqn =
+                    FullyQualifiedName::method(descendant_fqn.namespace_parts(), method.clone());
                 let refs = index.references(&method_fqn);
                 if !refs.is_empty() {
                     all_references.extend(refs);

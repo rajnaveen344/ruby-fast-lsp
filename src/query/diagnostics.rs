@@ -202,8 +202,7 @@ pub fn generate_yard_diagnostics_inner(index: &RubyIndex, uri: &Url) -> Vec<Diag
                             && yard_ruby_types != rbs_type
                         {
                             if let Some(first_return) = yard_doc.returns.first() {
-                                if let Some(range) =
-                                    first_return.types_range.or(first_return.range)
+                                if let Some(range) = first_return.types_range.or(first_return.range)
                                 {
                                     diagnostics.push(Diagnostic {
                                         range,

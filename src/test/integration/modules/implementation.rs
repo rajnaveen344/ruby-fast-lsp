@@ -13,10 +13,9 @@ use crate::test::harness::{check, check_multi_file, FakeEditor};
 /// Cursor on a module name should find all classes that include it.
 #[tokio::test]
 async fn module_included_by_classes() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 module Serializable$0
   def to_json; end
 end
@@ -29,18 +28,16 @@ end</impl>
   include Serializable
 end</impl>
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
 /// Cursor on a module name should find classes that prepend it.
 #[tokio::test]
 async fn module_prepended_by_class() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 module Logging$0
   def log; end
 end
@@ -49,18 +46,16 @@ end
   prepend Logging
 end</impl>
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
 /// Cursor on a module name should find classes that extend it.
 #[tokio::test]
 async fn module_extended_by_class() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 module ClassMethods$0
   def find; end
 end
@@ -69,8 +64,7 @@ end
   extend ClassMethods
 end</impl>
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
@@ -81,10 +75,9 @@ end</impl>
 /// Cursor on a module method should find overrides in including classes.
 #[tokio::test]
 async fn method_overrides_in_includers() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 module Serializable
   def to_json$0; end
 end
@@ -103,18 +96,16 @@ class Post
   end</impl>
 end
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
 /// Cursor on a superclass method should find overrides in subclasses.
 #[tokio::test]
 async fn method_overrides_in_subclasses() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 class Animal
   def speak$0; end
 end
@@ -131,18 +122,16 @@ class Cat < Animal
   end</impl>
 end
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
 /// Subclass without override should NOT appear in results.
 #[tokio::test]
 async fn subclass_without_override_excluded() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 class Animal
   def speak$0; end
 end
@@ -156,18 +145,16 @@ end
 class Fish < Animal
 end
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 
 /// Deep inheritance — override in grandchild.
 #[tokio::test]
 async fn method_override_in_grandchild() {
-    check_multi_file(&[
-        (
-            "main.rb",
-            r#"
+    check_multi_file(&[(
+        "main.rb",
+        r#"
 class Base
   def render$0; end
 end
@@ -181,8 +168,7 @@ class Leaf < Middle
   end</impl>
 end
 "#,
-        ),
-    ])
+    )])
     .await;
 }
 

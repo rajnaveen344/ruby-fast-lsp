@@ -1,5 +1,7 @@
 use std::collections::HashSet;
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Position};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Position,
+};
 
 use crate::types::ruby_document::RubyDocument;
 

@@ -74,7 +74,10 @@ pub fn get_rbs_method_return_type_with_type_args(
     if substitutions.is_empty() {
         Some(rbs_type_to_ruby_type(&rbs_type))
     } else {
-        Some(rbs_type_to_ruby_type_with_substitutions(&rbs_type, &substitutions))
+        Some(rbs_type_to_ruby_type_with_substitutions(
+            &rbs_type,
+            &substitutions,
+        ))
     }
 }
 
@@ -105,12 +108,10 @@ fn rbs_type_to_ruby_type_with_substitutions(
     substitutions: &std::collections::HashMap<String, RubyType>,
 ) -> RubyType {
     match rbs_type {
-        RbsType::TypeVar(name) => {
-            substitutions
-                .get(name)
-                .cloned()
-                .unwrap_or(RubyType::Unknown)
-        }
+        RbsType::TypeVar(name) => substitutions
+            .get(name)
+            .cloned()
+            .unwrap_or(RubyType::Unknown),
         // The RBS parser sometimes represents type variables as Class("Elem")
         // instead of TypeVar("Elem"). Check substitutions for class names too.
         RbsType::Class(name) => {
@@ -352,12 +353,7 @@ fn collect_rbs_methods_recursive(
 
     // Collect methods from this class
     if let Some(class) = loader.get_class(class_name) {
-        collect_methods_from_decl(
-            &class.methods,
-            include_singleton,
-            methods,
-            seen_methods,
-        );
+        collect_methods_from_decl(&class.methods, include_singleton, methods, seen_methods);
 
         // Process aliases (e.g., `alias object_id __id__`)
         collect_aliases_from_members(
@@ -411,12 +407,7 @@ fn collect_rbs_methods_recursive(
 
     // Also check modules (for when class_name is a module, or for mixed-in methods)
     if let Some(module) = loader.get_module(class_name) {
-        collect_methods_from_decl(
-            &module.methods,
-            include_singleton,
-            methods,
-            seen_methods,
-        );
+        collect_methods_from_decl(&module.methods, include_singleton, methods, seen_methods);
 
         // Process aliases in module
         collect_aliases_from_members(
@@ -734,8 +725,7 @@ mod tests {
     #[test]
     fn test_generic_type_substitution_array_first() {
         let type_args = vec![RubyType::integer()];
-        let result =
-            get_rbs_method_return_type_with_type_args("Array", "first", false, &type_args);
+        let result = get_rbs_method_return_type_with_type_args("Array", "first", false, &type_args);
         assert!(
             result.is_some(),
             "Array#first with type_args should return a type"
@@ -751,8 +741,7 @@ mod tests {
     #[test]
     fn test_generic_type_substitution_hash_keys() {
         let type_args = vec![RubyType::symbol(), RubyType::string()];
-        let result =
-            get_rbs_method_return_type_with_type_args("Hash", "keys", false, &type_args);
+        let result = get_rbs_method_return_type_with_type_args("Hash", "keys", false, &type_args);
         assert!(result.is_some(), "Hash#keys should return a type");
         let rt = result.unwrap();
         // Hash[Symbol, String]#keys should return Array[Symbol]

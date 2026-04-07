@@ -344,14 +344,22 @@ end
     fn test_class_rbs_loads() {
         let files: Vec<_> = embedded::core_rbs_files().collect();
         let class_rbs = files.iter().find(|(name, _)| *name == "class.rbs");
-        assert!(class_rbs.is_some(), "class.rbs should be in embedded core files");
+        assert!(
+            class_rbs.is_some(),
+            "class.rbs should be in embedded core files"
+        );
 
         let (_, content) = class_rbs.unwrap();
         let mut parser = Parser::new();
         let decls = parser.parse(content).expect("class.rbs should parse");
-        assert!(!decls.is_empty(), "class.rbs should produce at least one declaration");
+        assert!(
+            !decls.is_empty(),
+            "class.rbs should produce at least one declaration"
+        );
 
-        let class_decl = decls.iter().find(|d| matches!(d, Declaration::Class(c) if c.name == "Class"));
+        let class_decl = decls
+            .iter()
+            .find(|d| matches!(d, Declaration::Class(c) if c.name == "Class"));
         assert!(class_decl.is_some(), "Should find Class declaration");
     }
 }

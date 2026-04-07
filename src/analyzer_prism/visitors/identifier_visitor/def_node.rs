@@ -4,10 +4,7 @@ use ruby_prism::DefNode;
 use crate::{
     analyzer_prism::{utils, Identifier, MethodReceiver},
     indexer::entry::NamespaceKind,
-    types::{
-        ruby_method::RubyMethod,
-        scope::LVScopeKind,
-    },
+    types::{ruby_method::RubyMethod, scope::LVScopeKind},
 };
 
 use super::{IdentifierType, IdentifierVisitor};

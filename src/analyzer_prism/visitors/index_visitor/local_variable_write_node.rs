@@ -216,10 +216,7 @@ mod tests {
     }
 
     /// Helper to check that a variable exists in VariableScopes
-    fn find_var_in_scopes(
-        visitor: &IndexVisitor,
-        name: &str,
-    ) -> bool {
+    fn find_var_in_scopes(visitor: &IndexVisitor, name: &str) -> bool {
         let scopes = visitor.document.variable_scopes();
         scopes
             .get_all_definitions()

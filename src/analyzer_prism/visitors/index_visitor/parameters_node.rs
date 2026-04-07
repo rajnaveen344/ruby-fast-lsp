@@ -88,8 +88,7 @@ impl IndexVisitor {
         let current_scope = 0usize;
 
         // Create a fully qualified name for the parameter (local variable)
-        let fqn =
-            FullyQualifiedName::local_variable(param_name.to_string()).unwrap();
+        let fqn = FullyQualifiedName::local_variable(param_name.to_string()).unwrap();
 
         // Create an entry with EntryKind::LocalVariable
         let entry = {

@@ -20,7 +20,7 @@ pub struct DocumentSymbolsVisitor<'a> {
     visibility_stack: Vec<MethodVisibility>, // Stack of visibility states for nested scopes
     scope_tracker: ScopeTracker,
     scope_to_symbol_index: HashMap<usize, usize>, // scope_id -> symbol_index
-    scope_id_stack: Vec<usize>,                    // Stack of scope_ids for hierarchy building
+    scope_id_stack: Vec<usize>,                   // Stack of scope_ids for hierarchy building
 }
 
 impl<'a> DocumentSymbolsVisitor<'a> {
