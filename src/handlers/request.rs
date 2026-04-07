@@ -4,9 +4,9 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::capabilities::{
-    code_lens, completion, debug, definitions, document_symbols, folding_range, formatting, hover,
-    implementation, inlay_hints, namespace_tree, references, rename, semantic_tokens, type_hierarchy,
-    workspace_symbols,
+    call_hierarchy, code_lens, completion, debug, definitions, document_symbols, folding_range,
+    formatting, hover, implementation, inlay_hints, namespace_tree, references, rename,
+    semantic_tokens, type_hierarchy, workspace_symbols,
 };
 use crate::server::RubyLanguageServer;
 use log::{debug, info, trace};
@@ -54,10 +54,7 @@ pub async fn handle_goto_implementation(
 
     match implementations {
         Some(locations) => {
-            trace!(
-                "Returning {} implementation locations",
-                locations.len()
-            );
+            trace!("Returning {} implementation locations", locations.len());
             Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
         None => {
@@ -311,16 +308,69 @@ pub async fn handle_subtypes(
     Ok(result)
 }
 
+pub async fn handle_prepare_call_hierarchy(
+    lang_server: &RubyLanguageServer,
+    params: CallHierarchyPrepareParams,
+) -> LspResult<Option<Vec<CallHierarchyItem>>> {
+    info!(
+        "Prepare call hierarchy request received for {:?}",
+        params
+            .text_document_position_params
+            .text_document
+            .uri
+            .path()
+    );
+    let start_time = std::time::Instant::now();
+    let result = call_hierarchy::handle_prepare_call_hierarchy(lang_server, params).await;
+    info!(
+        "[PERF] Prepare call hierarchy completed in {:?}",
+        start_time.elapsed()
+    );
+    Ok(result)
+}
+
+pub async fn handle_incoming_calls(
+    lang_server: &RubyLanguageServer,
+    params: CallHierarchyIncomingCallsParams,
+) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
+    info!("Incoming calls request received for: {}", params.item.name);
+    let start_time = std::time::Instant::now();
+    let result = call_hierarchy::handle_incoming_calls(lang_server, params).await;
+    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
+    info!(
+        "[PERF] Incoming calls completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        count
+    );
+    Ok(result)
+}
+
+pub async fn handle_outgoing_calls(
+    lang_server: &RubyLanguageServer,
+    params: CallHierarchyOutgoingCallsParams,
+) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
+    info!("Outgoing calls request received for: {}", params.item.name);
+    let start_time = std::time::Instant::now();
+    let result = call_hierarchy::handle_outgoing_calls(lang_server, params).await;
+    let count = result.as_ref().map(|v| v.len()).unwrap_or(0);
+    info!(
+        "[PERF] Outgoing calls completed in {:?}, returned {} items",
+        start_time.elapsed(),
+        count
+    );
+    Ok(result)
+}
+
 pub async fn handle_rename(
     lang_server: &RubyLanguageServer,
     params: RenameParams,
 ) -> LspResult<Option<WorkspaceEdit>> {
-    info!("Rename request received for: {:?}", params.text_document_position);
+    info!(
+        "Rename request received for: {:?}",
+        params.text_document_position
+    );
     let start_time = std::time::Instant::now();
     let result = rename::handle_rename(lang_server, params).await;
-    info!(
-        "[PERF] Rename completed in {:?}",
-        start_time.elapsed()
-    );
+    info!("[PERF] Rename completed in {:?}", start_time.elapsed());
     Ok(result)
 }

@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use log::debug;
 use slotmap::{new_key_type, SlotMap};
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::{Location, Range, Url};
 
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::entry_kind::EntryKind;
@@ -53,6 +53,8 @@ pub struct RubyIndex {
     by_uri: HashMap<Url, Vec<EntryId>>,
     by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
     by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
+    /// Maps caller method FQN → all Reference entries made from within that method (for outgoing calls)
+    by_caller: HashMap<FullyQualifiedName, Vec<EntryId>>,
 
     // Interned storage for compact IDs
     files: Interner<FileId, Url>,
@@ -81,6 +83,7 @@ impl RubyIndex {
             by_uri: HashMap::new(),
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
+            by_caller: HashMap::new(),
 
             // Interned storage
             files: Interner::new(),
@@ -338,6 +341,7 @@ impl RubyIndex {
             HashSet::with_capacity(ids_to_remove.len() / 4);
         let mut unique_method_names: HashSet<RubyMethod> =
             HashSet::with_capacity(ids_to_remove.len() / 100);
+        let mut unique_caller_fqns: HashSet<FullyQualifiedName> = HashSet::new();
         let mut removed_ids_set: HashSet<_> = HashSet::with_capacity(ids_to_remove.len());
 
         // 1. Remove entries and collect metadata
@@ -347,8 +351,14 @@ impl RubyIndex {
                 if let Some(fqn) = self.get_fqn(entry.fqn_id) {
                     unique_fqns.insert(fqn.clone());
                 }
-                if let EntryKind::Method(data) = entry.kind {
-                    unique_method_names.insert(data.name);
+                match &entry.kind {
+                    EntryKind::Method(data) => {
+                        unique_method_names.insert(data.name.clone());
+                    }
+                    EntryKind::Reference(Some(data)) => {
+                        unique_caller_fqns.insert(data.caller_fqn.clone());
+                    }
+                    _ => {}
                 }
             }
         }
@@ -369,6 +379,16 @@ impl RubyIndex {
                 ids.retain(|id| !removed_ids_set.contains(id));
                 if ids.is_empty() {
                     self.by_method_name.remove(method_name);
+                }
+            }
+        }
+
+        // 4. Clean up by_caller index
+        for caller_fqn in &unique_caller_fqns {
+            if let Some(ids) = self.by_caller.get_mut(caller_fqn) {
+                ids.retain(|id| !removed_ids_set.contains(id));
+                if ids.is_empty() {
+                    self.by_caller.remove(caller_fqn);
                 }
             }
         }
@@ -491,7 +511,7 @@ impl RubyIndex {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
                     // Only return definitions, not references
-                    .filter(|e| !matches!(e.kind, EntryKind::Reference))
+                    .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
                     .collect()
             })
             .filter(|v: &Vec<&Entry>| !v.is_empty())
@@ -504,11 +524,63 @@ impl RubyIndex {
             .map(|ids| {
                 ids.iter()
                     .filter_map(|id| self.entries.get(*id))
-                    .filter(|e| matches!(e.kind, EntryKind::Reference))
+                    .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
                     .filter_map(|e| self.to_lsp_location(&e.location))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Get incoming calls for a method: all call sites grouped by calling method.
+    /// Returns Vec of (caller_fqn, call_site_ranges) for building CallHierarchyIncomingCall.
+    pub fn incoming_calls(
+        &self,
+        callee_fqn: &FullyQualifiedName,
+    ) -> Vec<(FullyQualifiedName, Vec<Range>)> {
+        let mut by_caller: HashMap<FullyQualifiedName, Vec<Range>> = HashMap::new();
+
+        if let Some(ids) = self.by_fqn.get(callee_fqn) {
+            for id in ids {
+                if let Some(entry) = self.entries.get(*id) {
+                    if let EntryKind::Reference(Some(data)) = &entry.kind {
+                        if let Some(loc) = self.to_lsp_location(&entry.location) {
+                            by_caller
+                                .entry(data.caller_fqn.clone())
+                                .or_default()
+                                .push(loc.range);
+                        }
+                    }
+                }
+            }
+        }
+
+        by_caller.into_iter().collect()
+    }
+
+    /// Get outgoing calls from a method: all methods called from within this method.
+    /// Returns Vec of (callee_fqn, call_site_ranges) for building CallHierarchyOutgoingCall.
+    pub fn outgoing_calls(
+        &self,
+        caller_fqn: &FullyQualifiedName,
+    ) -> Vec<(FullyQualifiedName, Vec<Range>)> {
+        let mut by_callee: HashMap<FullyQualifiedName, Vec<Range>> = HashMap::new();
+
+        if let Some(ids) = self.by_caller.get(caller_fqn) {
+            for id in ids {
+                if let Some(entry) = self.entries.get(*id) {
+                    if let Some(callee_fqn) = self.get_fqn(entry.fqn_id) {
+                        if let Some(loc) = self.to_lsp_location(&entry.location) {
+                            by_callee
+                                .entry(callee_fqn.clone())
+                                .or_default()
+                                .push(loc.range);
+                        }
+                    }
+                }
+            }
+        }
+
+        by_callee.into_iter().collect()
     }
 
     /// Check if FQN has any definitions
@@ -519,7 +591,7 @@ impl RubyIndex {
                 ids.iter().any(|id| {
                     self.entries
                         .get(*id)
-                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference))
+                        .map_or(false, |e| !matches!(e.kind, EntryKind::Reference(_)))
                 })
             })
             .unwrap_or(false)
@@ -535,7 +607,7 @@ impl RubyIndex {
             let entries: Vec<&Entry> = ids
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
-                .filter(|e| !matches!(e.kind, EntryKind::Reference))
+                .filter(|e| !matches!(e.kind, EntryKind::Reference(_)))
                 .collect();
             if entries.is_empty() {
                 None
@@ -673,7 +745,7 @@ impl RubyIndex {
             let locations: Vec<Location> = ids
                 .iter()
                 .filter_map(|id| self.entries.get(*id))
-                .filter(|e| matches!(e.kind, EntryKind::Reference))
+                .filter(|e| matches!(e.kind, EntryKind::Reference(_)))
                 .filter_map(|e| self.to_lsp_location(&e.location))
                 .collect();
             if !locations.is_empty() {
@@ -696,7 +768,7 @@ impl RubyIndex {
                 EntryKind::InstanceVariable(_) => "InstanceVariable",
                 EntryKind::ClassVariable(_) => "ClassVariable",
                 EntryKind::GlobalVariable(_) => "GlobalVariable",
-                EntryKind::Reference => "Reference",
+                EntryKind::Reference(_) => "Reference",
             };
             *counts.entry(type_name).or_insert(0) += 1;
         }
@@ -707,8 +779,13 @@ impl RubyIndex {
     // Reference Management
     // ========================================================================
 
-    /// Add a reference to a FQN
-    pub fn add_reference(&mut self, fqn: FullyQualifiedName, location: Location) {
+    /// Add a reference to a FQN, optionally recording the calling method for call hierarchy.
+    pub fn add_reference(
+        &mut self,
+        fqn: FullyQualifiedName,
+        location: Location,
+        caller_fqn: Option<FullyQualifiedName>,
+    ) {
         // Convert Location to CompactLocation
         let file_id = self.get_or_insert_file(&location.uri);
         let compact_location =
@@ -718,9 +795,13 @@ impl RubyIndex {
         let entry = Entry {
             fqn_id,
             location: compact_location,
-            kind: EntryKind::new_reference(),
+            kind: EntryKind::new_reference(caller_fqn.clone()),
         };
-        self.add_entry(entry);
+        let entry_id = self.add_entry(entry);
+
+        if let Some(caller) = caller_fqn {
+            self.by_caller.entry(caller).or_default().push(entry_id);
+        }
     }
 
     /// Remove all references for a URI - Now handled by remove_entries_for_uri
@@ -1151,7 +1232,7 @@ impl RubyIndex {
 
     fn add_to_prefix_tree(&mut self, entry: &Entry) {
         // Do not index references in the prefix tree (too many, and not useful for completion)
-        if matches!(entry.kind, EntryKind::Reference) {
+        if matches!(entry.kind, EntryKind::Reference(_)) {
             return;
         }
 

@@ -133,7 +133,7 @@ fn entry_kind_to_symbol_kind(kind: &EntryKind) -> SymbolKind {
         | EntryKind::InstanceVariable(_)
         | EntryKind::ClassVariable(_)
         | EntryKind::GlobalVariable(_) => SymbolKind::VARIABLE,
-        EntryKind::Reference => SymbolKind::KEY,
+        EntryKind::Reference(_) => SymbolKind::KEY,
     }
 }
 

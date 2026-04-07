@@ -47,95 +47,94 @@ impl IndexQuery {
                         let lookup_entries: Vec<LookupEntry> = entries
                             .iter()
                             .map(|entry| {
-                                let (kind, visibility, return_type, parameters) =
-                                    match &entry.kind {
-                                        EntryKind::Class(data) => {
-                                            let superclass = data
-                                                .superclass
-                                                .as_ref()
-                                                .map(|s| format!(" < {}", format_mixin_ref(s)))
-                                                .unwrap_or_default();
-                                            (format!("Class{}", superclass), None, None, None)
-                                        }
-                                        EntryKind::Module(_) => {
-                                            ("Module".to_string(), None, None, None)
-                                        }
-                                        EntryKind::Method(data) => {
-                                            let vis = format!("{:?}", data.visibility);
-                                            let ret =
-                                                data.return_type.as_ref().map(|t| t.to_string());
-                                            let params: Vec<String> =
-                                                data.params.iter().map(|p| p.name.clone()).collect();
-                                            // Get kind from owner namespace
-                                            let kind = data.owner.namespace_kind().unwrap_or(
-                                                crate::indexer::entry::NamespaceKind::Instance,
-                                            );
-                                            (
-                                                format!("Method({:?})", kind),
-                                                Some(vis),
-                                                ret,
-                                                if params.is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(params)
-                                                },
-                                            )
-                                        }
-                                        EntryKind::Constant(data) => {
-                                            let vis =
-                                                data.visibility.as_ref().map(|v| format!("{:?}", v));
-                                            ("Constant".to_string(), vis, None, None)
-                                        }
-                                        EntryKind::InstanceVariable(data) => {
-                                            let type_str = if data.r#type
+                                let (kind, visibility, return_type, parameters) = match &entry.kind
+                                {
+                                    EntryKind::Class(data) => {
+                                        let superclass = data
+                                            .superclass
+                                            .as_ref()
+                                            .map(|s| format!(" < {}", format_mixin_ref(s)))
+                                            .unwrap_or_default();
+                                        (format!("Class{}", superclass), None, None, None)
+                                    }
+                                    EntryKind::Module(_) => {
+                                        ("Module".to_string(), None, None, None)
+                                    }
+                                    EntryKind::Method(data) => {
+                                        let vis = format!("{:?}", data.visibility);
+                                        let ret = data.return_type.as_ref().map(|t| t.to_string());
+                                        let params: Vec<String> =
+                                            data.params.iter().map(|p| p.name.clone()).collect();
+                                        // Get kind from owner namespace
+                                        let kind = data.owner.namespace_kind().unwrap_or(
+                                            crate::indexer::entry::NamespaceKind::Instance,
+                                        );
+                                        (
+                                            format!("Method({:?})", kind),
+                                            Some(vis),
+                                            ret,
+                                            if params.is_empty() {
+                                                None
+                                            } else {
+                                                Some(params)
+                                            },
+                                        )
+                                    }
+                                    EntryKind::Constant(data) => {
+                                        let vis =
+                                            data.visibility.as_ref().map(|v| format!("{:?}", v));
+                                        ("Constant".to_string(), vis, None, None)
+                                    }
+                                    EntryKind::InstanceVariable(data) => {
+                                        let type_str = if data.r#type
+                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
+                                        {
+                                            Some(data.r#type.to_string())
+                                        } else {
+                                            None
+                                        };
+                                        ("InstanceVariable".to_string(), None, type_str, None)
+                                    }
+                                    EntryKind::ClassVariable(data) => {
+                                        let type_str = if data.r#type
+                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
+                                        {
+                                            Some(data.r#type.to_string())
+                                        } else {
+                                            None
+                                        };
+                                        ("ClassVariable".to_string(), None, type_str, None)
+                                    }
+                                    EntryKind::GlobalVariable(data) => {
+                                        let type_str = if data.r#type
+                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
+                                        {
+                                            Some(data.r#type.to_string())
+                                        } else {
+                                            None
+                                        };
+                                        ("GlobalVariable".to_string(), None, type_str, None)
+                                    }
+                                    EntryKind::LocalVariable(data) => {
+                                        let type_str = if let Some(last_assignment) =
+                                            data.assignments.last()
+                                        {
+                                            if last_assignment.r#type
                                                 != crate::inferrer::r#type::ruby::RubyType::Unknown
                                             {
-                                                Some(data.r#type.to_string())
+                                                Some(last_assignment.r#type.to_string())
                                             } else {
                                                 None
-                                            };
-                                            ("InstanceVariable".to_string(), None, type_str, None)
-                                        }
-                                        EntryKind::ClassVariable(data) => {
-                                            let type_str = if data.r#type
-                                                != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                            {
-                                                Some(data.r#type.to_string())
-                                            } else {
-                                                None
-                                            };
-                                            ("ClassVariable".to_string(), None, type_str, None)
-                                        }
-                                        EntryKind::GlobalVariable(data) => {
-                                            let type_str = if data.r#type
-                                                != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                            {
-                                                Some(data.r#type.to_string())
-                                            } else {
-                                                None
-                                            };
-                                            ("GlobalVariable".to_string(), None, type_str, None)
-                                        }
-                                        EntryKind::LocalVariable(data) => {
-                                            let type_str = if let Some(last_assignment) =
-                                                data.assignments.last()
-                                            {
-                                                if last_assignment.r#type
-                                                    != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                                {
-                                                    Some(last_assignment.r#type.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            };
-                                            ("LocalVariable".to_string(), None, type_str, None)
-                                        }
-                                        EntryKind::Reference => {
-                                            ("Reference".to_string(), None, None, None)
-                                        }
-                                    };
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        ("LocalVariable".to_string(), None, type_str, None)
+                                    }
+                                    EntryKind::Reference(_) => {
+                                        ("Reference".to_string(), None, None, None)
+                                    }
+                                };
 
                                 // Get location string - return full URI for proper navigation
                                 let location = index
@@ -205,7 +204,7 @@ impl IndexQuery {
                 EntryKind::ClassVariable(_) => {}
                 EntryKind::GlobalVariable(_) => {}
                 EntryKind::LocalVariable(_) => {}
-                EntryKind::Reference => {}
+                EntryKind::Reference(_) => {}
             }
         }
 

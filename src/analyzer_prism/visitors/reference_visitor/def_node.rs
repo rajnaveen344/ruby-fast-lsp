@@ -4,8 +4,7 @@ use ruby_prism::DefNode;
 use crate::analyzer_prism::utils;
 use crate::indexer::entry::NamespaceKind;
 use crate::types::{
-    ruby_method::RubyMethod,
-    scope::LVScopeKind,
+    fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, scope::LVScopeKind,
 };
 
 use super::ReferenceVisitor;
@@ -32,17 +31,21 @@ impl ReferenceVisitor {
             .enter_child_scope(body_loc.range);
 
         let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let method = RubyMethod::new(name.as_str());
-
-        // Mark namespace_kind as intentionally unused for now
-        let _ = namespace_kind;
-
-        if method.is_err() {
-            warn!("Skipping invalid method name: {}", name);
+        match RubyMethod::new(name.as_str()) {
+            Ok(method) => {
+                let ns = self.scope_tracker.get_ns_stack();
+                let method_fqn = FullyQualifiedName::method(ns, method);
+                self.scope_tracker.push_method_fqn(Some(method_fqn));
+            }
+            Err(_) => {
+                warn!("Skipping invalid method name: {}", name);
+                self.scope_tracker.push_method_fqn(None);
+            }
         }
     }
 
     pub fn process_def_node_exit(&mut self, _node: &DefNode) {
+        self.scope_tracker.pop_method_fqn();
         self.scope_tracker.pop_scope_kind();
         self.document.variable_scopes_mut().exit_scope();
     }

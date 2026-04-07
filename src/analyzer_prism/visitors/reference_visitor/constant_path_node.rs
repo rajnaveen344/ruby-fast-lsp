@@ -63,7 +63,7 @@ impl ReferenceVisitor {
                     .document
                     .prism_location_to_lsp_location(&node.location());
 
-                index.add_reference(namespace_fqn, location);
+                index.add_reference(namespace_fqn, location, None);
 
                 found_any = true;
                 // Once found, we stop searching up the ancestor chain
@@ -77,7 +77,7 @@ impl ReferenceVisitor {
                     .document
                     .prism_location_to_lsp_location(&node.location());
 
-                index.add_reference(constant_fqn, location);
+                index.add_reference(constant_fqn, location, None);
 
                 found_any = true;
                 break;

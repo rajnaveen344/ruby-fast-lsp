@@ -40,29 +40,26 @@
 //! ```
 
 use tower_lsp::lsp_types::{
-    CodeLensParams, CompletionParams, CompletionResponse, DiagnosticSeverity,
-    GotoDefinitionParams, InlayHintParams, PartialResultParams, Position, Range, ReferenceContext,
-    ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
-    WorkDoneProgressParams,
+    CodeLensParams, CompletionParams, CompletionResponse, DiagnosticSeverity, GotoDefinitionParams,
+    InlayHintParams, PartialResultParams, Position, Range, ReferenceContext, ReferenceParams,
+    TextDocumentIdentifier, TextDocumentPositionParams, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkDoneProgressParams,
 };
 
 use super::fake_editor::FakeEditor;
-use super::fixture::{
-    extract_cursor, extract_tags, extract_tags_with_attributes, Tag,
-};
+use super::fixture::{extract_cursor, extract_tags, extract_tags_with_attributes, Tag};
 use super::inlay_hints::get_hint_label;
 use crate::capabilities::code_lens::handle_code_lens;
 use crate::capabilities::diagnostics::generate_diagnostics;
-use crate::query::generate_yard_diagnostics_inner;
 use crate::capabilities::inlay_hints::handle_inlay_hints;
 use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
+use crate::query::generate_yard_diagnostics_inner;
 
 /// All supported tag names for extraction.
 pub(super) const ALL_TAGS: &[&str] = &[
     "def", "ref", "type", "hint", "lens", "err", "warn", "hover", "th", "rename", "complete",
-    "impl",
+    "impl", "incoming", "outgoing",
 ];
 
 /// Strip all markers ($0 and tags) from fixture text, returning clean Ruby source.
@@ -107,10 +104,12 @@ pub(super) async fn run_checks_on_fixture(
     // Extract all tags in one pass
     let (all_tags, _content) = extract_tags_with_attributes(&text_without_cursor, ALL_TAGS);
 
-    // Also extract simple tags for def/ref/impl (they don't use attributes)
+    // Also extract simple tags for def/ref/impl/incoming/outgoing (they don't use attributes)
     let (def_ranges, _) = extract_tags(&text_without_cursor, "def");
     let (ref_ranges, _) = extract_tags(&text_without_cursor, "ref");
     let (impl_ranges, _) = extract_tags(&text_without_cursor, "impl");
+    let (incoming_ranges, _) = extract_tags(&text_without_cursor, "incoming");
+    let (outgoing_ranges, _) = extract_tags(&text_without_cursor, "outgoing");
 
     // Recompute cursor position in clean-text coordinates by stripping tags first,
     // then finding cursor. This avoids tag characters inflating the cursor offset.
@@ -118,8 +117,7 @@ pub(super) async fn run_checks_on_fixture(
         // Use a sentinel to track the cursor through tag removal
         let sentinel = "\x00CURSOR\x00";
         let text_with_sentinel = fixture_text.replace("$0", sentinel);
-        let (_, clean_with_sentinel) =
-            extract_tags_with_attributes(&text_with_sentinel, ALL_TAGS);
+        let (_, clean_with_sentinel) = extract_tags_with_attributes(&text_with_sentinel, ALL_TAGS);
         let sentinel_byte_pos = clean_with_sentinel
             .find(sentinel)
             .expect("Sentinel should be present after tag removal");
@@ -177,6 +175,18 @@ pub(super) async fn run_checks_on_fixture(
     if cursor.is_some() && !impl_ranges.is_empty() {
         run_implementation_check(server, uri, cursor.unwrap(), &impl_ranges).await;
         checks_run.push("implementation");
+    }
+
+    // Run incoming calls check if we have cursor and incoming tags
+    if cursor.is_some() && !incoming_ranges.is_empty() {
+        run_incoming_calls_check(server, uri, cursor.unwrap(), &incoming_ranges).await;
+        checks_run.push("incoming_calls");
+    }
+
+    // Run outgoing calls check if we have cursor and outgoing tags
+    if cursor.is_some() && !outgoing_ranges.is_empty() {
+        run_outgoing_calls_check(server, uri, cursor.unwrap(), &outgoing_ranges).await;
+        checks_run.push("outgoing_calls");
     }
 
     // Run type check if we have type tags (no cursor needed - uses tag position)
@@ -409,6 +419,136 @@ async fn run_implementation_check(
         assert!(
             actual_ranges.iter().any(|r| ranges_match(r, expected)),
             "Expected implementation at {:?} not found.\nActual: {:?}",
+            expected,
+            actual_ranges
+        );
+    }
+}
+
+/// Run incoming calls check — verifies that the method at cursor has callers
+/// whose definitions match the expected ranges.
+async fn run_incoming_calls_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    cursor: Position,
+    expected_caller_ranges: &[Range],
+) {
+    use tower_lsp::lsp_types::CallHierarchyPrepareParams;
+
+    // Step 1: Prepare call hierarchy at cursor
+    let prepare_params = CallHierarchyPrepareParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: cursor,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+
+    let items = request::handle_prepare_call_hierarchy(server, prepare_params)
+        .await
+        .expect("Prepare call hierarchy request failed")
+        .unwrap_or_default();
+
+    assert!(
+        !items.is_empty(),
+        "prepareCallHierarchy returned no items at {:?}",
+        cursor
+    );
+
+    // Step 2: Get incoming calls
+    let incoming_params = tower_lsp::lsp_types::CallHierarchyIncomingCallsParams {
+        item: items[0].clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let incoming = request::handle_incoming_calls(server, incoming_params)
+        .await
+        .expect("Incoming calls request failed")
+        .unwrap_or_default();
+
+    // Collect the caller method definition ranges
+    let actual_ranges: Vec<Range> = incoming.iter().map(|c| c.from.range).collect();
+
+    assert_eq!(
+        actual_ranges.len(),
+        expected_caller_ranges.len(),
+        "Expected {} incoming callers, got {}.\nExpected: {:?}\nActual: {:?}",
+        expected_caller_ranges.len(),
+        actual_ranges.len(),
+        expected_caller_ranges,
+        actual_ranges
+    );
+
+    for expected in expected_caller_ranges {
+        assert!(
+            actual_ranges.iter().any(|r| ranges_match(r, expected)),
+            "Expected caller at {:?} not found.\nActual: {:?}",
+            expected,
+            actual_ranges
+        );
+    }
+}
+
+/// Run outgoing calls check — verifies that the method at cursor calls methods
+/// whose definitions match the expected ranges.
+async fn run_outgoing_calls_check(
+    server: &crate::server::RubyLanguageServer,
+    uri: &Url,
+    cursor: Position,
+    expected_callee_ranges: &[Range],
+) {
+    use tower_lsp::lsp_types::CallHierarchyPrepareParams;
+
+    // Step 1: Prepare call hierarchy at cursor
+    let prepare_params = CallHierarchyPrepareParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: cursor,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+
+    let items = request::handle_prepare_call_hierarchy(server, prepare_params)
+        .await
+        .expect("Prepare call hierarchy request failed")
+        .unwrap_or_default();
+
+    assert!(
+        !items.is_empty(),
+        "prepareCallHierarchy returned no items at {:?}",
+        cursor
+    );
+
+    // Step 2: Get outgoing calls
+    let outgoing_params = tower_lsp::lsp_types::CallHierarchyOutgoingCallsParams {
+        item: items[0].clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let outgoing = request::handle_outgoing_calls(server, outgoing_params)
+        .await
+        .expect("Outgoing calls request failed")
+        .unwrap_or_default();
+
+    // Collect the callee method definition ranges
+    let actual_ranges: Vec<Range> = outgoing.iter().map(|c| c.to.range).collect();
+
+    assert_eq!(
+        actual_ranges.len(),
+        expected_callee_ranges.len(),
+        "Expected {} outgoing callees, got {}.\nExpected: {:?}\nActual: {:?}",
+        expected_callee_ranges.len(),
+        actual_ranges.len(),
+        expected_callee_ranges,
+        actual_ranges
+    );
+
+    for expected in expected_callee_ranges {
+        assert!(
+            actual_ranges.iter().any(|r| ranges_match(r, expected)),
+            "Expected callee at {:?} not found.\nActual: {:?}",
             expected,
             actual_ranges
         );
@@ -1244,9 +1384,7 @@ async fn run_rename_check(
         )
     });
     let changes = edit.changes.expect("WorkspaceEdit should have changes");
-    let uri_edits = changes
-        .get(uri)
-        .expect("Should have changes for this URI");
+    let uri_edits = changes.get(uri).expect("Should have changes for this URI");
 
     // Verify exact count
     assert_eq!(
@@ -1262,9 +1400,7 @@ async fn run_rename_check(
     // Verify each expected range is found in the actual edits
     for expected in &expected_ranges {
         assert!(
-            uri_edits
-                .iter()
-                .any(|e| ranges_match(&e.range, expected)),
+            uri_edits.iter().any(|e| ranges_match(&e.range, expected)),
             "Expected rename at {:?} not found in actual edits: {:?}",
             expected,
             uri_edits.iter().map(|e| &e.range).collect::<Vec<_>>()
@@ -1503,14 +1639,24 @@ Greet$0
     async fn test_fake_editor_lifecycle() {
         let mut editor = FakeEditor::new().await;
         editor.open("lifecycle.rb", "class Foo; end").await;
-        editor.set("lifecycle.rb", "class Foo\n  def greet\n    \"hi\"\n  end\nend").await;
-        editor.check("lifecycle.rb", r#"
+        editor
+            .set(
+                "lifecycle.rb",
+                "class Foo\n  def greet\n    \"hi\"\n  end\nend",
+            )
+            .await;
+        editor
+            .check(
+                "lifecycle.rb",
+                r#"
 class Foo
   def greet
     "hi"
   end
 end
-"#).await;
+"#,
+            )
+            .await;
     }
 
     #[tokio::test]
@@ -1521,23 +1667,38 @@ end
         editor.open("a.rb", "a = [1,2,3].").await;
         let items = editor.complete_with_trigger("a.rb", 0, 12, ".").await;
         assert!(!items.is_empty(), "Expected completions for `a = [1,2,3].`");
-        assert!(items.iter().any(|i| i.label == "first"), "Expected `first` in Array completions");
+        assert!(
+            items.iter().any(|i| i.label == "first"),
+            "Expected `first` in Array completions"
+        );
 
         // String literal after assignment
         editor.open("b.rb", r#"b = "hello"."#).await;
         let items = editor.complete_with_trigger("b.rb", 0, 12, ".").await;
-        assert!(!items.is_empty(), "Expected completions for `b = \"hello\".`");
-        assert!(items.iter().any(|i| i.label == "upcase"), "Expected `upcase` in String completions");
+        assert!(
+            !items.is_empty(),
+            "Expected completions for `b = \"hello\".`"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "upcase"),
+            "Expected `upcase` in String completions"
+        );
 
         // Hash literal after assignment
         editor.open("c.rb", "c = {a: 1}.").await;
         let items = editor.complete_with_trigger("c.rb", 0, 11, ".").await;
-        assert!(!items.is_empty(), "Expected completions for hash literal dot completion");
+        assert!(
+            !items.is_empty(),
+            "Expected completions for hash literal dot completion"
+        );
 
         // Integer literal after assignment
         editor.open("d.rb", "d = 42.").await;
         let items = editor.complete_with_trigger("d.rb", 0, 7, ".").await;
         assert!(!items.is_empty(), "Expected completions for `d = 42.`");
-        assert!(items.iter().any(|i| i.label == "abs"), "Expected `abs` in Integer completions");
+        assert!(
+            items.iter().any(|i| i.label == "abs"),
+            "Expected `abs` in Integer completions"
+        );
     }
 }

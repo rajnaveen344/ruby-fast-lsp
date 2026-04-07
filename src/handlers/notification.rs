@@ -129,9 +129,22 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
             })),
         };
 
-        match client.register_capability(vec![registration]).await {
-            Ok(_) => info!("Successfully registered type hierarchy capability"),
-            Err(e) => warn!("Failed to register type hierarchy capability: {:?}", e),
+        let call_hierarchy_registration = Registration {
+            id: "call-hierarchy".to_string(),
+            method: "textDocument/prepareCallHierarchy".to_string(),
+            register_options: Some(serde_json::json!({
+                "documentSelector": [
+                    { "language": "ruby" }
+                ]
+            })),
+        };
+
+        match client
+            .register_capability(vec![registration, call_hierarchy_registration])
+            .await
+        {
+            Ok(_) => info!("Successfully registered type/call hierarchy capabilities"),
+            Err(e) => warn!("Failed to register hierarchy capabilities: {:?}", e),
         }
     }
 

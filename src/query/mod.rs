@@ -16,13 +16,14 @@
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 
+pub mod call_hierarchy;
 mod code_lens;
 mod completion;
 mod debug;
 mod definition;
 pub mod diagnostics;
-mod implementation;
 mod hover;
+mod implementation;
 pub mod inference;
 mod inlay_hints;
 mod method;

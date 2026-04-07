@@ -3,7 +3,9 @@ use ruby_prism::Node;
 use crate::{
     analyzer_prism::utils,
     indexer::entry::NamespaceKind,
-    types::{ruby_namespace::RubyConstant, scope::LVScopeKind},
+    types::{
+        fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant, scope::LVScopeKind,
+    },
 };
 
 /// Tracks namespace context and scope kinds during AST traversal.
@@ -22,6 +24,10 @@ pub struct ScopeTracker {
 
     /// Lightweight scope kind stack for `current_method_context()`
     scope_kind_stack: Vec<LVScopeKind>,
+
+    /// Stack of enclosing method FQNs for call hierarchy tracking.
+    /// None entries represent non-method scopes (class body, blocks).
+    method_fqn_stack: Vec<Option<FullyQualifiedName>>,
 }
 
 /// Mixed scope frame – either a namespace or a `class << self` marker
@@ -46,6 +52,7 @@ impl ScopeTracker {
             frames: Vec::new(),
             // Start with a Constant scope kind (file-level)
             scope_kind_stack: vec![LVScopeKind::Constant],
+            method_fqn_stack: Vec::new(),
         }
     }
 }
@@ -116,6 +123,24 @@ impl ScopeTracker {
 
     pub fn pop_scope_kind(&mut self) {
         self.scope_kind_stack.pop();
+    }
+
+    // ---------- method FQN helpers (call hierarchy) ----------
+    pub fn push_method_fqn(&mut self, fqn: Option<FullyQualifiedName>) {
+        self.method_fqn_stack.push(fqn);
+    }
+
+    pub fn pop_method_fqn(&mut self) {
+        self.method_fqn_stack.pop();
+    }
+
+    /// Returns the FQN of the innermost enclosing method, if any.
+    /// Walks the stack in reverse, skipping None entries (blocks, class bodies).
+    pub fn current_method_fqn(&self) -> Option<&FullyQualifiedName> {
+        self.method_fqn_stack
+            .iter()
+            .rev()
+            .find_map(|entry| entry.as_ref())
     }
 
     // ---------- singleton helpers ----------

@@ -48,11 +48,13 @@
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
     CompletionResponse, CompletionTriggerKind, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InlayHint, InlayHintParams,
-    InitializeParams, Location, PartialResultParams, Position, Range, ReferenceContext,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
+    InlayHintParams, Location, PartialResultParams, Position, Range, ReferenceContext,
     ReferenceParams, RenameParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
     TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
     WorkDoneProgressParams, WorkspaceEdit,
@@ -306,12 +308,7 @@ impl FakeEditor {
     }
 
     /// Returns hover information at a 0-indexed position.
-    pub async fn hover_at(
-        &self,
-        filename: &str,
-        line: u32,
-        character: u32,
-    ) -> Option<Hover> {
+    pub async fn hover_at(&self, filename: &str, line: u32, character: u32) -> Option<Hover> {
         self.assert_open(filename, "hover_at");
         let uri = Self::filename_to_uri(filename);
         let params = HoverParams {
@@ -325,12 +322,7 @@ impl FakeEditor {
     }
 
     /// Returns goto-definition locations at a 0-indexed position.
-    pub async fn goto_def_at(
-        &self,
-        filename: &str,
-        line: u32,
-        character: u32,
-    ) -> Vec<Location> {
+    pub async fn goto_def_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
         self.assert_open(filename, "goto_def_at");
         let uri = Self::filename_to_uri(filename);
         let params = GotoDefinitionParams {
@@ -356,12 +348,7 @@ impl FakeEditor {
     }
 
     /// Returns all implementation locations at a 0-indexed position.
-    pub async fn goto_impl_at(
-        &self,
-        filename: &str,
-        line: u32,
-        character: u32,
-    ) -> Vec<Location> {
+    pub async fn goto_impl_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
         self.assert_open(filename, "goto_impl_at");
         let uri = Self::filename_to_uri(filename);
         let params = GotoDefinitionParams {
@@ -386,13 +373,68 @@ impl FakeEditor {
         }
     }
 
-    /// Returns all references at a 0-indexed position.
-    pub async fn references_at(
+    /// Prepares call hierarchy at a 0-indexed position, returning the CallHierarchyItem.
+    pub async fn prepare_call_hierarchy_at(
         &self,
         filename: &str,
         line: u32,
         character: u32,
-    ) -> Vec<Location> {
+    ) -> Vec<CallHierarchyItem> {
+        self.assert_open(filename, "prepare_call_hierarchy_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = CallHierarchyPrepareParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.server
+            .prepare_call_hierarchy(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns incoming calls for a CallHierarchyItem.
+    pub async fn incoming_calls_for(
+        &self,
+        item: CallHierarchyItem,
+    ) -> Vec<CallHierarchyIncomingCall> {
+        let params = CallHierarchyIncomingCallsParams {
+            item,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        self.server
+            .incoming_calls(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns outgoing calls for a CallHierarchyItem.
+    pub async fn outgoing_calls_for(
+        &self,
+        item: CallHierarchyItem,
+    ) -> Vec<CallHierarchyOutgoingCall> {
+        let params = CallHierarchyOutgoingCallsParams {
+            item,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        self.server
+            .outgoing_calls(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns all references at a 0-indexed position.
+    pub async fn references_at(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
         self.assert_open(filename, "references_at");
         let uri = Self::filename_to_uri(filename);
         let params = ReferenceParams {
@@ -535,8 +577,16 @@ impl FakeEditor {
                 });
 
                 for edit in &sorted_edits {
-                    let start = Self::position_to_byte_offset(&new_content, edit.range.start.line, edit.range.start.character);
-                    let end = Self::position_to_byte_offset(&new_content, edit.range.end.line, edit.range.end.character);
+                    let start = Self::position_to_byte_offset(
+                        &new_content,
+                        edit.range.start.line,
+                        edit.range.start.character,
+                    );
+                    let end = Self::position_to_byte_offset(
+                        &new_content,
+                        edit.range.end.line,
+                        edit.range.end.character,
+                    );
                     new_content = format!(
                         "{}{}{}",
                         &new_content[..start],

@@ -99,7 +99,8 @@ impl ReferenceVisitor {
 
         // Add the reference to the index (use full call location for references)
         let mut index = self.index.lock();
-        index.add_reference(method_fqn.clone(), call_location);
+        let caller_fqn = self.scope_tracker.current_method_fqn().cloned();
+        index.add_reference(method_fqn.clone(), call_location, caller_fqn);
 
         // Track unresolved method calls if enabled (use message location for diagnostics)
         if self.track_unresolved {
@@ -389,8 +390,7 @@ impl ReferenceVisitor {
             let inner_type = if let Some(inner_receiver) = call.receiver() {
                 if let Some(constant_read) = inner_receiver.as_constant_read_node() {
                     // Constant receiver: Foo.bar → ClassReference(Foo)
-                    let name =
-                        String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                    let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
                     Some(RubyType::ClassReference(FullyQualifiedName::Constant(
                         vec![RubyConstant::new(&name).ok()?],
                     )))
@@ -431,11 +431,7 @@ impl ReferenceVisitor {
                     let rhs = rest.trim();
                     if let Some(new_pos) = rhs.find(".new") {
                         let class_part = rhs[..new_pos].trim();
-                        if !class_part
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_uppercase())
-                        {
+                        if !class_part.chars().next().is_some_and(|c| c.is_uppercase()) {
                             continue;
                         }
 

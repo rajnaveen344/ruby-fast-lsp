@@ -38,7 +38,7 @@ impl ReferenceVisitor {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                index.add_reference(namespace_fqn, location);
+                index.add_reference(namespace_fqn, location, None);
                 return;
             }
 
@@ -48,7 +48,7 @@ impl ReferenceVisitor {
                 let location = self
                     .document
                     .prism_location_to_lsp_location(&node.location());
-                index.add_reference(constant_fqn, location);
+                index.add_reference(constant_fqn, location, None);
                 return;
             }
         }

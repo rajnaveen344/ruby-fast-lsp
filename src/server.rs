@@ -2,11 +2,11 @@ use crate::capabilities::debug::{
     AncestorsParams, AncestorsResponse, ListCommandsResponse, LookupParams, LookupResponse,
     MethodsParams, MethodsResponse, StatsParams, StatsResponse,
 };
-use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::config::RubyFastLspConfig;
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
+use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};
@@ -18,15 +18,17 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CodeLens, CodeLensParams, CompletionItem, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
     FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams,
-    RenameParams, SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit,
-    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Url, WorkspaceEdit, WorkspaceSymbolParams,
+    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, RenameParams,
+    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, TypeHierarchyItem,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -623,10 +625,28 @@ impl LanguageServer for RubyLanguageServer {
         request::handle_subtypes(self, params).await
     }
 
-    async fn rename(
+    async fn prepare_call_hierarchy(
         &self,
-        params: RenameParams,
-    ) -> LspResult<Option<WorkspaceEdit>> {
+        params: CallHierarchyPrepareParams,
+    ) -> LspResult<Option<Vec<CallHierarchyItem>>> {
+        request::handle_prepare_call_hierarchy(self, params).await
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> LspResult<Option<Vec<CallHierarchyIncomingCall>>> {
+        request::handle_incoming_calls(self, params).await
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> LspResult<Option<Vec<CallHierarchyOutgoingCall>>> {
+        request::handle_outgoing_calls(self, params).await
+    }
+
+    async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
         request::handle_rename(self, params).await
     }
 }
