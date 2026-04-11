@@ -12,7 +12,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! let query = IndexQuery::new(server.index.clone());
+//! let query = IndexQuery::new(server.index_for_uri(&uri));
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 

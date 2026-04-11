@@ -42,8 +42,8 @@ fn main() -> anyhow::Result<()> {
         // Initialize the server
         let server = RubyLanguageServer::default();
 
-        // Configure the workspace URI
-        server.set_workspace_uri(Some(workspace_uri.clone()));
+        // Register the workspace so init_workspace routes the index correctly.
+        server.add_workspace(workspace_uri.clone());
 
         // We don't have a real client, so we can't easily capture progress notifications
         // but the server logs should show what's happening.
@@ -51,19 +51,18 @@ fn main() -> anyhow::Result<()> {
         // Trigger indexing directly
         info!("Taking snapshot of heap before indexing...");
 
-        // Use the indexing module directly if possible, or via server
-        // server.index.clone() returns the index, but we want to trigger the process.
-        // `indexing::init_workspace` is what we want.
+        // `indexing::init_workspace` runs the coordinator against the
+        // workspace's own index (routed via `server.index_for_uri`).
 
         info!("Starting workspace initialization...");
         let start_time = std::time::Instant::now();
 
-        match indexing::init_workspace(&server, workspace_uri).await {
+        match indexing::init_workspace(&server, workspace_uri.clone()).await {
             Ok(_) => {
                 info!("Indexing completed successfully!");
                 info!(
                     "Total definitions: {}",
-                    server.index.lock().definitions_len()
+                    server.index_for_uri(&workspace_uri).lock().definitions_len()
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

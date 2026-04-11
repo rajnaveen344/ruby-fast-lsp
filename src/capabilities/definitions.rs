@@ -24,8 +24,9 @@ pub async fn find_definition_at_position(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // Create unified query with document context (no lock held here)
-    let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
+    // Create unified query with document context (no lock held here).
+    // Route the index lookup by URI so multi-root workspaces stay isolated.
+    let query = IndexQuery::with_doc(server.index_for_uri(&uri), doc_arc);
 
     // query.find_definitions_at_position already checks YARD and uses analyzer
     // AND now handles local variables via self.doc

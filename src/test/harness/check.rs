@@ -648,7 +648,7 @@ async fn run_type_check(
         let (identifier_opt, _, _ancestors, _scope_stack, _namespace_kind) =
             analyzer.get_identifier(position);
 
-        let type_query = TypeQuery::new(server.index.clone(), uri, content.as_bytes());
+        let type_query = TypeQuery::new(server.index_for_uri(&uri), uri, content.as_bytes());
 
         // Determine actual kind based on identifier type
         let (inferred_type, actual_kind): (Option<RubyType>, &str) = if let Some(identifier) =
@@ -687,7 +687,7 @@ async fn run_type_check(
                                 });
 
                         if let Some(fqn) = method_fqn {
-                            let mut index = server.index.lock();
+                            let mut index = server.index_for_uri(&uri).lock_arc();
                             crate::inferrer::return_type::infer_method_return_type(
                                 &mut index,
                                 &fqn,
@@ -725,7 +725,7 @@ async fn run_type_check(
                             _ => RubyType::Unknown,
                         };
 
-                        let mut index = server.index.lock();
+                        let mut index = server.index_for_uri(&uri).lock_arc();
                         crate::inferrer::return_type::infer_method_call(
                             &mut index,
                             &receiver_type,
@@ -736,7 +736,7 @@ async fn run_type_check(
                     (ty, "return")
                 }
                 crate::analyzer_prism::Identifier::RubyInstanceVariable { name, .. } => {
-                    let index = server.index.lock();
+                    let index = server.index_for_uri(&uri).lock_arc();
                     let ty = index.file_entries(uri).iter().find_map(|entry| {
                         if let crate::indexer::entry::entry_kind::EntryKind::InstanceVariable(
                             data,
@@ -751,7 +751,7 @@ async fn run_type_check(
                     (ty, "var")
                 }
                 crate::analyzer_prism::Identifier::RubyClassVariable { name, .. } => {
-                    let index = server.index.lock();
+                    let index = server.index_for_uri(&uri).lock_arc();
                     let ty = index.file_entries(uri).iter().find_map(|entry| {
                         if let crate::indexer::entry::entry_kind::EntryKind::ClassVariable(data) =
                             &entry.kind
@@ -765,7 +765,7 @@ async fn run_type_check(
                     (ty, "var")
                 }
                 crate::analyzer_prism::Identifier::RubyGlobalVariable { name, .. } => {
-                    let index = server.index.lock();
+                    let index = server.index_for_uri(&uri).lock_arc();
                     let ty = index.file_entries(uri).iter().find_map(|entry| {
                         if let crate::indexer::entry::entry_kind::EntryKind::GlobalVariable(data) =
                             &entry.kind
@@ -913,7 +913,7 @@ async fn run_diagnostics_check(
 
     let mut diagnostics = generate_diagnostics(&parse_result, &document);
     {
-        let index = server.index.lock();
+        let index = server.index_for_uri(uri).lock_arc();
         diagnostics.extend(generate_yard_diagnostics_inner(&index, uri));
     }
 
@@ -922,7 +922,7 @@ async fn run_diagnostics_check(
     {
         use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
         use ruby_prism::Visit;
-        let mut visitor = IndexVisitor::new(server.index.clone(), document.clone());
+        let mut visitor = IndexVisitor::new(server.index_for_uri(uri), document.clone());
         visitor.visit(&parse_result.node());
         diagnostics.extend(visitor.diagnostics);
     }

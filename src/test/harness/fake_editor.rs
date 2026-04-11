@@ -88,6 +88,35 @@ impl FakeEditor {
         }
     }
 
+    /// Register a workspace folder with the underlying server.
+    ///
+    /// Use this to test multi-root behavior. Files opened with paths under
+    /// `root` (e.g. `add_workspace("workspace_a"); open("workspace_a/foo.rb", ..)`)
+    /// will route to that workspace's index instead of the orphan index.
+    pub fn add_workspace(&self, root: &str) {
+        let uri = Url::parse(&format!("file:///{}/", root.trim_end_matches('/')))
+            .expect("Invalid workspace URI");
+        self.server.add_workspace(uri);
+    }
+
+    /// Remove a previously added workspace folder.
+    pub fn remove_workspace(&self, root: &str) {
+        let uri = Url::parse(&format!("file:///{}/", root.trim_end_matches('/')))
+            .expect("Invalid workspace URI");
+        self.server.remove_workspace(&uri);
+    }
+
+    /// Number of registered workspaces (excluding orphan).
+    pub fn workspace_count(&self) -> usize {
+        self.server.list_workspaces().len()
+    }
+
+    /// Look up the workspace handle (index, root, indexing_complete) for a file path.
+    pub fn workspace_for(&self, filename: &str) -> Option<crate::server::Workspace> {
+        let uri = Self::filename_to_uri(filename);
+        self.server.workspace_for_uri(&uri)
+    }
+
     /// Open a file in the editor with the given content.
     ///
     /// Routes through the real `handle_did_open` handler.
@@ -507,13 +536,13 @@ impl FakeEditor {
 
         // Add YARD diagnostics
         {
-            let index = self.server.index.lock();
+            let index = self.server.index_for_uri(&uri).lock_arc();
             diagnostics.extend(crate::query::generate_yard_diagnostics_inner(&index, &uri));
         }
 
         // Add unresolved entry diagnostics
         {
-            let query = crate::query::IndexQuery::new(self.server.index.clone());
+            let query = crate::query::IndexQuery::new(self.server.index_for_uri(&uri));
             diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         }
 

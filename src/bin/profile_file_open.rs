@@ -77,12 +77,12 @@ fn main() {
     let rt = Runtime::new().expect("Failed to create runtime");
     rt.block_on(async {
         let server = RubyLanguageServer::default();
-        server.set_workspace_uri(Some(workspace_uri.clone()));
+        server.add_workspace(workspace_uri.clone());
 
         // Phase 1: Index workspace
         info!("\n=== PHASE 1: Indexing Workspace ===");
         let start = std::time::Instant::now();
-        if let Err(e) = indexing::init_workspace(&server, workspace_uri).await {
+        if let Err(e) = indexing::init_workspace(&server, workspace_uri.clone()).await {
             info!("Indexing failed: {}", e);
             return;
         }
@@ -102,7 +102,10 @@ fn main() {
             "  Total allocations: {} blocks",
             stats_after_index.total_blocks
         );
-        info!("  Index entries: {}", server.index.lock().entries_len());
+        info!(
+            "  Index entries: {}",
+            server.index_for_uri(&workspace_uri).lock().entries_len()
+        );
 
         // Phase 2: Simulate file open
         info!("\n=== PHASE 2: Opening File ===");
@@ -121,7 +124,7 @@ fn main() {
         );
 
         let stats_before_open = dhat::HeapStats::get();
-        let entries_before = server.index.lock().entries_len();
+        let entries_before = server.index_for_uri(&file_uri).lock().entries_len();
 
         // Simulate handle_did_open
         {
@@ -133,7 +136,7 @@ fn main() {
                 .insert(file_uri.clone(), Arc::new(RwLock::new(document)));
 
             // Process file (index definitions/references)
-            let indexer = FileProcessor::new(server.index.clone());
+            let indexer = FileProcessor::new(server.index_for_uri(&file_uri));
             let options = ProcessingOptions {
                 index_definitions: true,
                 index_references: true,
@@ -144,7 +147,7 @@ fn main() {
         }
 
         let stats_after_open = dhat::HeapStats::get();
-        let entries_after_open = server.index.lock().entries_len();
+        let entries_after_open = server.index_for_uri(&file_uri).lock().entries_len();
 
         info!("\n=== RESULTS ===");
         info!("Before file open:");
@@ -177,7 +180,7 @@ fn main() {
         }
 
         let stats_after_close = dhat::HeapStats::get();
-        let entries_after_close = server.index.lock().entries_len();
+        let entries_after_close = server.index_for_uri(&file_uri).lock().entries_len();
         info!("After file close:");
         info!(
             "  Current memory: {:.1} MB",
@@ -211,7 +214,7 @@ fn main() {
             }
             drop(docs);
 
-            let indexer = FileProcessor::new(server.index.clone());
+            let indexer = FileProcessor::new(server.index_for_uri(&file_uri));
             let options = ProcessingOptions {
                 index_definitions: true,
                 index_references: true,
@@ -222,7 +225,7 @@ fn main() {
         }
 
         let stats_after_reopen = dhat::HeapStats::get();
-        let entries_after_reopen = server.index.lock().entries_len();
+        let entries_after_reopen = server.index_for_uri(&file_uri).lock().entries_len();
         let reopen_jump =
             stats_after_reopen.curr_bytes as i64 - stats_before_reopen.curr_bytes as i64;
         info!(

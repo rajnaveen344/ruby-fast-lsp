@@ -10,7 +10,12 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
-/// Initialize workspace and run complete indexing
+/// Initialize workspace and run complete indexing.
+///
+/// Routes the workspace's index by URI: the matching `Workspace` (registered
+/// via `server.add_workspace`) supplies the `Index<Unlocked>` that the
+/// coordinator writes into. Files outside any registered workspace fall back
+/// to `server.orphan_index`.
 pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> anyhow::Result<()> {
     let workspace_path = folder_uri
         .to_file_path()
@@ -18,7 +23,9 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
 
     info!("Initializing workspace: {:?}", workspace_path);
 
-    let mut coordinator = IndexingCoordinator::new(workspace_path, server.config.lock().clone());
+    let index = server.index_for_uri(&folder_uri);
+    let mut coordinator =
+        IndexingCoordinator::new(workspace_path, server.config.lock().clone(), index);
     coordinator.run_complete_indexing(server).await?;
 
     Ok(())
@@ -43,8 +50,10 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     }
     debug!("Doc cache size: {}", server.docs.lock().len());
 
-    // Process file with unified FileProcessor::process_file
-    let indexer = FileProcessor::new(server.index.clone());
+    // Process file with unified FileProcessor::process_file. Route the index
+    // by URI so the file lands in its workspace's own index.
+    let workspace_index = server.index_for_uri(&uri);
+    let indexer = FileProcessor::new(workspace_index.clone());
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
@@ -63,7 +72,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
     // Add unresolved entry diagnostics and YARD diagnostics (no re-parsing needed)
-    let query = IndexQuery::new(server.index.clone());
+    let query = IndexQuery::new(workspace_index);
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
@@ -101,8 +110,10 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         }
     }
 
-    // Full processing on every change - includes unresolved diagnostics
-    let indexer = FileProcessor::new(server.index.clone());
+    // Full processing on every change - includes unresolved diagnostics.
+    // Route by URI so the file's workspace index is the one updated.
+    let workspace_index = server.index_for_uri(&uri);
+    let indexer = FileProcessor::new(workspace_index.clone());
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
@@ -117,7 +128,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         };
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
-    let query = IndexQuery::new(server.index.clone());
+    let query = IndexQuery::new(workspace_index);
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
 
     debug!(
@@ -159,8 +170,10 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
         }
     };
 
-    // On save: do full indexing with unresolved tracking (for cross-file diagnostics)
-    let indexer = FileProcessor::new(server.index.clone());
+    // On save: do full indexing with unresolved tracking (for cross-file
+    // diagnostics). Route by URI for multi-workspace correctness.
+    let workspace_index = server.index_for_uri(&uri);
+    let indexer = FileProcessor::new(workspace_index.clone());
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
@@ -178,7 +191,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     server.invalidate_namespace_tree_cache_debounced();
 
     // Add unresolved diagnostics and YARD diagnostics (no re-parsing needed)
-    let query = IndexQuery::new(server.index.clone());
+    let query = IndexQuery::new(workspace_index);
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
@@ -204,8 +217,10 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", server.docs.lock().len());
 
-    // Keep unresolved entry diagnostics visible (project-wide diagnostics)
-    let query = IndexQuery::new(server.index.clone());
+    // Keep unresolved entry diagnostics visible (project-wide diagnostics).
+    // Use the file's workspace index so we don't surface diagnostics from
+    // other workspaces.
+    let query = IndexQuery::new(server.index_for_uri(&uri));
     let diagnostics = query.get_unresolved_diagnostics(&uri);
     server.publish_diagnostics(uri, diagnostics).await;
 }

@@ -21,8 +21,9 @@ pub async fn find_references_at_position(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // Create unified query with document context
-    let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
+    // Create unified query with document context. Route by URI so references
+    // are scoped to the file's workspace, not all workspaces.
+    let query = IndexQuery::with_doc(server.index_for_uri(uri), doc_arc);
 
     query.find_references_at_position(uri, position, &content)
 }

@@ -172,7 +172,7 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async {
         let server = RubyLanguageServer::default();
-        server.set_workspace_uri(Some(workspace_uri.clone()));
+        server.add_workspace(workspace_uri.clone());
 
         let total_start = Instant::now();
 
@@ -261,7 +261,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
 
     // Get all methods needing inference, grouped by file
     let methods_by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> = {
-        let index = server.index.lock();
+        let index = server.primary_index().lock_arc();
         let methods = index.get_methods_needing_inference();
         let total = methods.len();
         info!("Found {} methods needing return type inference", total);
@@ -307,7 +307,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
         // Infer each method in this file
         for (entry_id, line) in methods {
             if let Some(def_node) = find_def_node_at_line(&node, line, file_content_str) {
-                let mut index = server.index.lock();
+                let mut index = server.index_for_uri(&file_url).lock_arc();
                 if let Some(inferred_ty) =
                     infer_return_type_for_node(&mut index, &file_content, &def_node, None, None)
                 {
@@ -328,7 +328,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
 }
 
 fn print_stats(server: &RubyLanguageServer) {
-    let index = server.index.lock();
+    let index = server.primary_index().lock_arc();
 
     info!("=== INDEX STATS ===");
     info!("Total entries: {}", index.entries_len());

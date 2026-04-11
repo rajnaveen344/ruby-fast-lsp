@@ -41,7 +41,7 @@ rbs-parser = { path = "crates/rbs-parser" }
 walkdir = "2.4.0"
 
 # Utils
-parking_lot = "0.12.4"
+parking_lot = { version = "0.12.4", features = ["arc_lock"] }
 once_cell = "1.19"
 unicode-ident = "1.0.18"
 lazy_static = "1.4.0"

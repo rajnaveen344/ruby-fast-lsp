@@ -28,7 +28,7 @@
 //! }
 //! ```
 
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{ArcMutexGuard, Mutex, MutexGuard};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -83,13 +83,35 @@ impl Index<Unlocked> {
         }
     }
 
-    /// Lock the index and return a locked handle.
+    /// Lock the index and return a borrowed locked handle.
     ///
-    /// The lock is held until the returned `LockedIndex` is dropped.
+    /// **Hot path** — used by indexing visitors, file processors, and
+    /// any code that already holds a long-lived `Index<Unlocked>` (e.g. a
+    /// struct field). Zero-cost: just wraps a `MutexGuard`.
+    ///
+    /// The returned `LockedIndex` borrows from `self`, so the caller must
+    /// keep the `Index<Unlocked>` alive. If you need to chain
+    /// `server.index_for_uri(&uri).lock()`, use [`lock_arc`] instead, or
+    /// bind the index to a `let` first.
     #[inline]
     pub fn lock(&self) -> LockedIndex<'_> {
         LockedIndex {
             guard: self.inner.lock(),
+        }
+    }
+
+    /// Lock the index and return an owned locked handle.
+    ///
+    /// Slower than [`lock`] (clones the inner `Arc` per call), but the
+    /// returned guard is `'static`, so it can outlive the `Index<Unlocked>`
+    /// that produced it. Use this when chaining
+    /// `server.index_for_uri(&uri).lock_arc()` — the temporary
+    /// `Index<Unlocked>` is dropped immediately, but the guard keeps the
+    /// underlying `Arc<Mutex<RubyIndex>>` alive on its own.
+    #[inline]
+    pub fn lock_arc(&self) -> ArcLockedIndex {
+        ArcLockedIndex {
+            guard: Mutex::lock_arc(&self.inner),
         }
     }
 
@@ -164,6 +186,32 @@ impl<'a> std::ops::DerefMut for LockedIndex<'a> {
     }
 }
 
+/// Owned-guard variant of [`LockedIndex`]. Returned by
+/// [`Index::<Unlocked>::lock_arc`] for callers that need a `'static` guard
+/// (e.g. chained `server.index_for_uri(&uri).lock_arc()`).
+///
+/// Slower than `LockedIndex` because each lock acquisition clones the
+/// underlying `Arc<Mutex<RubyIndex>>`. Prefer [`LockedIndex`] in hot paths.
+pub struct ArcLockedIndex {
+    guard: ArcMutexGuard<parking_lot::RawMutex, RubyIndex>,
+}
+
+impl std::ops::Deref for ArcLockedIndex {
+    type Target = RubyIndex;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl std::ops::DerefMut for ArcLockedIndex {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -203,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_pass_locked_to_function() {
-        fn use_index(index: &LockedIndex) -> usize {
+        fn use_index(index: &LockedIndex<'_>) -> usize {
             index.definitions_len()
         }
 

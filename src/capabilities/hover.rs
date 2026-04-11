@@ -33,8 +33,9 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // Create unified query with document context
-    let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
+    // Create unified query with document context. Route by URI so each
+    // workspace's hover info comes from its own index.
+    let query = IndexQuery::with_doc(server.index_for_uri(&uri), doc_arc);
 
     // Get hover info from query layer
     let hover_info = query.get_hover_at_position(&uri, position, &content)?;

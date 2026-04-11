@@ -22,6 +22,6 @@ pub async fn find_implementation_at_position(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    let query = IndexQuery::with_doc(server.index.clone(), doc_arc);
+    let query = IndexQuery::with_doc(server.index_for_uri(&uri), doc_arc);
     query.find_implementations_at_position(&uri, position, &content)
 }

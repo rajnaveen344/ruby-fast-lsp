@@ -47,8 +47,8 @@ pub async fn handle_inlay_hints(
         }
     };
 
-    // Create query context
-    let query = IndexQuery::with_doc(server.index.clone(), doc_arc.clone());
+    // Create query context. Route by URI for multi-workspace isolation.
+    let query = IndexQuery::with_doc(server.index_for_uri(&uri), doc_arc.clone());
 
     // Get document for query
     let document = doc_arc.read();

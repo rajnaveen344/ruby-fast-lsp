@@ -22,3 +22,6 @@ mod constants;
 mod methods;
 mod modules;
 mod variables;
+
+// Multi-workspace routing
+mod workspaces;

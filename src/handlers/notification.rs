@@ -8,6 +8,8 @@ use crate::config::RubyFastLspConfig;
 use crate::server::RubyLanguageServer;
 use crate::utils::detect_system_ruby_version;
 use log::{debug, info, warn};
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 
@@ -47,21 +49,23 @@ pub async fn handle_initialize(
         }
     }
 
-    // Store the workspace folder/root URI for later use in initialized
-    if let Some(folder) = workspace_folders.and_then(|folders| folders.first().cloned()) {
-        info!(
-            "Will index workspace folder after initialization: {:?}",
-            folder.uri.as_str()
-        );
-        lang_server.set_workspace_uri(Some(folder.uri.clone()));
+    // Register every workspace folder. Each folder gets its own RubyIndex
+    // and is indexed independently in handle_initialized. Multi-root VS Code
+    // workspaces, Solargraph-style — folders do not bleed into one another.
+    let folders: Vec<WorkspaceFolder> = workspace_folders.unwrap_or_default();
+    if !folders.is_empty() {
+        for folder in &folders {
+            info!(
+                "Registering workspace folder for indexing: {}",
+                folder.uri.as_str()
+            );
+            lang_server.add_workspace(folder.uri.clone());
+        }
     } else if let Some(root) = root_uri {
-        info!(
-            "Will index workspace folder after initialization: {:?}",
-            root.as_str()
-        );
-        lang_server.set_workspace_uri(Some(root.clone()));
+        info!("Registering workspace root for indexing: {}", root.as_str());
+        lang_server.add_workspace(root.clone());
     } else {
-        warn!("No workspace folder or root URI provided. A workspace folder is required to function properly");
+        warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
 
     // Build static capabilities
@@ -100,6 +104,15 @@ pub async fn handle_initialize(
             capabilities::formatting::get_document_on_type_formatting_options(),
         ),
         rename_provider: Some(OneOf::Left(true)),
+        // Advertise multi-root workspace support so clients send
+        // `workspace/didChangeWorkspaceFolders` for runtime add/remove.
+        workspace: Some(WorkspaceServerCapabilities {
+            workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                supported: Some(true),
+                change_notifications: Some(OneOf::Left(true)),
+            }),
+            file_operations: None,
+        }),
         ..ServerCapabilities::default()
     };
 
@@ -163,74 +176,94 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
 
     info!("Using Ruby version: {}.{}", ruby_version.0, ruby_version.1);
 
-    // Run workspace indexing in the background
-    if let Some(workspace_uri) = server.get_workspace_uri() {
-        let server_clone = server.clone();
-        tokio::spawn(async move {
-            info!("Starting background workspace indexing");
+    // Spawn one coordinator per registered workspace. Each coordinator owns
+    // a per-workspace `Index<Unlocked>` (created in `add_workspace`) and runs
+    // independently. They share the server only for client notifications,
+    // config, and document state.
+    let workspaces = server.list_workspaces();
+    if workspaces.is_empty() {
+        info!("No workspaces registered; skipping background indexing");
+        return;
+    }
 
-            // Send progress begin notification
-            if let Some(client) = &server_clone.client {
-                let _ = client
-                    .send_notification::<notification::Progress>(ProgressParams {
-                        token: NumberOrString::String("indexing".to_string()),
-                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                            WorkDoneProgressBegin {
-                                title: "Ruby Fast LSP".to_string(),
-                                message: Some("Indexing workspace...".to_string()),
-                                percentage: Some(0),
-                                cancellable: Some(false),
-                            },
-                        )),
-                    })
-                    .await;
-            }
+    if let Some(client) = &server.client {
+        let _ = client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: NumberOrString::String("indexing".to_string()),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title: "Ruby Fast LSP".to_string(),
+                        message: Some(format!("Indexing {} workspace(s)...", workspaces.len())),
+                        percentage: Some(0),
+                        cancellable: Some(false),
+                    },
+                )),
+            })
+            .await;
+    }
+
+    let total = workspaces.len();
+    let remaining = Arc::new(AtomicUsize::new(total));
+
+    for ws in workspaces {
+        let server_clone = server.clone();
+        let remaining_clone = remaining.clone();
+        tokio::spawn(async move {
+            let workspace_uri = ws.root_uri.clone();
+            info!(
+                "Starting background indexing for workspace: {}",
+                workspace_uri.as_str()
+            );
 
             let result = indexing::init_workspace(&server_clone, workspace_uri.clone()).await;
 
-            // Send completion notification
-            if let Some(client) = &server_clone.client {
-                match result {
-                    Ok(_) => {
-                        info!("Background workspace indexing completed successfully");
-                        server_clone.set_indexing_complete();
-                        let _ = client
-                            .send_notification::<notification::Progress>(ProgressParams {
-                                token: NumberOrString::String("indexing".to_string()),
-                                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                    WorkDoneProgressEnd {
-                                        message: Some("Indexing complete".to_string()),
-                                    },
-                                )),
-                            })
-                            .await;
+            match result {
+                Ok(_) => {
+                    info!(
+                        "Background indexing completed for workspace: {}",
+                        workspace_uri.as_str()
+                    );
+                    ws.indexing_complete
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(e) => {
+                    warn!(
+                        "Background indexing failed for workspace {}: {}",
+                        workspace_uri.as_str(),
+                        e
+                    );
+                }
+            }
 
-                        let _ = client
-                            .show_message(
-                                MessageType::INFO,
-                                "Ruby Fast LSP: Workspace indexing complete",
-                            )
-                            .await;
-                    }
-                    Err(e) => {
-                        warn!("Background workspace indexing failed: {}", e);
-                        let _ = client
-                            .send_notification::<notification::Progress>(ProgressParams {
-                                token: NumberOrString::String("indexing".to_string()),
-                                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                                    WorkDoneProgressEnd {
-                                        message: Some(format!("Indexing failed: {}", e)),
-                                    },
-                                )),
-                            })
-                            .await;
-                    }
+            // Last workspace to finish closes out the progress notification.
+            let prev = remaining_clone.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            if prev == 1 {
+                if let Some(client) = &server_clone.client {
+                    let _ = client
+                        .send_notification::<notification::Progress>(ProgressParams {
+                            token: NumberOrString::String("indexing".to_string()),
+                            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                                WorkDoneProgressEnd {
+                                    message: Some("Indexing complete".to_string()),
+                                },
+                            )),
+                        })
+                        .await;
+                    let _ = client
+                        .show_message(
+                            MessageType::INFO,
+                            "Ruby Fast LSP: Workspace indexing complete",
+                        )
+                        .await;
                 }
             }
         });
-
-        info!("Background workspace indexing task spawned, LSP is now ready for requests");
     }
+
+    info!(
+        "Background indexing tasks spawned for {} workspace(s); LSP is now ready for requests",
+        total
+    );
 }
 
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
@@ -254,6 +287,55 @@ pub async fn handle_did_change_watched_files(
     params: DidChangeWatchedFilesParams,
 ) {
     indexing::handle_watched_files_changed(server, params).await;
+}
+
+/// Add or remove workspace folders at runtime in response to
+/// `workspace/didChangeWorkspaceFolders`. Each added folder gets its own
+/// `RubyIndex` and a freshly spawned indexing coordinator. Removed folders
+/// have their index dropped (any outstanding `Index<Unlocked>` clones keep
+/// the underlying `Arc` alive until they go out of scope).
+pub async fn handle_did_change_workspace_folders(
+    server: &RubyLanguageServer,
+    params: DidChangeWorkspaceFoldersParams,
+) {
+    for removed in &params.event.removed {
+        info!("Removing workspace folder: {}", removed.uri.as_str());
+        server.remove_workspace(&removed.uri);
+    }
+
+    for added in params.event.added {
+        info!("Adding workspace folder: {}", added.uri.as_str());
+        let workspace = server.add_workspace(added.uri.clone());
+
+        // Spawn coordinator for the new workspace. Mirrors the per-workspace
+        // task spawned in `handle_initialized`, but for runtime additions.
+        let server_clone = server.clone();
+        let workspace_uri = workspace.root_uri.clone();
+        let indexing_complete_flag = workspace.indexing_complete.clone();
+        tokio::spawn(async move {
+            info!(
+                "Starting background indexing for newly added workspace: {}",
+                workspace_uri.as_str()
+            );
+            match indexing::init_workspace(&server_clone, workspace_uri.clone()).await {
+                Ok(_) => {
+                    info!(
+                        "Background indexing completed for added workspace: {}",
+                        workspace_uri.as_str()
+                    );
+                    indexing_complete_flag
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(e) => {
+                    warn!(
+                        "Background indexing failed for added workspace {}: {}",
+                        workspace_uri.as_str(),
+                        e
+                    );
+                }
+            }
+        });
+    }
 }
 
 pub async fn handle_did_change_configuration(

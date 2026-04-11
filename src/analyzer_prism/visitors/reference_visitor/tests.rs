@@ -48,7 +48,7 @@ fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, conten
 
     let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
     let parse_result = document.parse();
-    let mut visitor = IndexVisitor::new(server.index.clone(), document.clone());
+    let mut visitor = IndexVisitor::new(server.index_for_uri(&uri), document.clone());
     visitor.visit(&parse_result.node());
 
     // Persist the document with LocalVariable entries back to server.docs
@@ -79,9 +79,9 @@ fn process_content_for_references(
     let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
 
     let mut visitor = if include_local_vars {
-        ReferenceVisitor::new(server.index.clone(), document)
+        ReferenceVisitor::new(server.index_for_uri(&uri), document)
     } else {
-        ReferenceVisitor::with_options(server.index.clone(), document, false)
+        ReferenceVisitor::with_options(server.index_for_uri(&uri), document, false)
     };
     visitor.visit(&parse_result.node());
 }
@@ -158,7 +158,7 @@ my_method
     );
 
     // Verify LocalVariables are NOT in global index
-    let index = server.index.lock();
+    let index = server.index_for_uri(&uri).lock_arc();
     let entries = index.file_entries(&uri);
     let local_var_entries: Vec<_> = entries
         .iter()

@@ -229,7 +229,7 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let query = IndexQuery::new(server.index.clone());
+        let query = IndexQuery::new(server.index_for_uri(&uri));
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string);
         completions.extend(constant_completions);
@@ -265,7 +265,7 @@ pub async fn find_completion_at_position(
                 NamespaceKind::Instance
             };
 
-            let query = IndexQuery::new(server.index.clone());
+            let query = IndexQuery::new(server.index_for_uri(&uri));
             let method_completions =
                 query.find_method_completions(&receiver_type, &partial_string, kind);
             completions.extend(method_completions);
@@ -278,14 +278,15 @@ pub async fn find_completion_at_position(
         completions.extend(variable_completions);
 
         // Add constant completions
-        let query = IndexQuery::new(server.index.clone());
+        let query = IndexQuery::new(server.index_for_uri(&uri));
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string.clone());
         completions.extend(constant_completions);
 
-        // Add top-level method completions (methods defined outside any class/module)
+        // Add top-level method completions (methods defined outside any class/module).
+        // Route by URI so the file's workspace index supplies the methods.
         let top_level_methods =
-            method::find_top_level_method_completions(&server.index, &partial_string);
+            method::find_top_level_method_completions(&server.index_for_uri(&uri), &partial_string);
         completions.extend(top_level_methods);
 
         // Add snippet completions with context awareness
@@ -380,7 +381,7 @@ fn get_receiver_type_from_snapshots(
             }
 
             // General case: look up the method's return type
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
             let return_type = crate::inferrer::return_type::infer_method_call(
                 &mut index,
                 &inner_type,
@@ -506,7 +507,7 @@ fn get_receiver_type_from_snapshots(
     // Fallback: receiver might be a bare method call (e.g., `top_level.to_s`)
     // Look up method in the index, infer return type from source if needed
     if let Ok(ruby_method) = crate::types::ruby_method::RubyMethod::new(receiver_text) {
-        let mut index = server.index.lock();
+        let mut index = server.index_for_uri(&uri).lock_arc();
 
         // First check stored return type, then collect FQN for inference
         let method_fqn = if let Some(entries) = index.get_methods_by_name(&ruby_method) {
@@ -608,7 +609,7 @@ fn resolve_method_receiver_type(
                     return Some(RubyType::Class(fqn.clone()));
                 }
             }
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
             crate::inferrer::return_type::infer_method_call(
                 &mut index,
                 &inner_type,
@@ -636,7 +637,7 @@ fn lookup_variable_type_from_index(
     use crate::indexer::entry::entry_kind::EntryKind;
     use crate::inferrer::r#type::ruby::RubyType;
 
-    let index = server.index.lock();
+    let index = server.index_for_uri(&uri).lock_arc();
     // Search entries for this file to find the variable with matching name and type
     for entry in index.file_entries(uri) {
         match (&entry.kind, receiver) {
@@ -922,7 +923,7 @@ end
         server.docs.lock().insert(uri.clone(), doc_arc);
 
         // Process for definitions (which includes local variables)
-        let indexer = FileProcessor::new(server.index.clone());
+        let indexer = FileProcessor::new(server.index_for_uri(&uri));
         let options = ProcessingOptions {
             index_definitions: true,
             ..ProcessingOptions::default()
@@ -980,7 +981,7 @@ end"#;
 
         // Add some test entries to the index after opening the document
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Add String class - use a simple name that should match
             let string_entry = create_test_entry(
@@ -1086,7 +1087,7 @@ end
 
         // Add String class to index
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             let string_entry = create_test_entry(
                 &mut *index,
@@ -1162,7 +1163,7 @@ end
 
         // Manually add multiple entries for the same constant to simulate the duplicate issue
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Use the same FQN structure as the indexed constant (TestClass::MY_CONSTANT)
 
@@ -1246,7 +1247,7 @@ end
 
         // Add some top-level constants to the index after opening the document
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Create top-level entries
             let string_entry = create_test_entry(
@@ -1359,7 +1360,7 @@ end
 
         // Add complex nested module structure to the index
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Top-level modules and classes
             let outer_module_entry =
@@ -1541,7 +1542,7 @@ end
 
             // Add some test entries to the index
             {
-                let mut index = server.index.lock();
+                let mut index = server.index_for_uri(&uri).lock_arc();
 
                 let string_entry = create_test_entry(
                     &mut *index,
@@ -1618,7 +1619,7 @@ A::
 
         // Add the modules to the index manually to ensure they're available
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             let a_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
             index.add_entry(a_entry);
@@ -1702,7 +1703,7 @@ end
 
         // Add deeply nested structure to the index
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Create the full nested hierarchy
             let modules = vec![
@@ -1821,7 +1822,7 @@ end
 
         // Add entries to the index
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             let my_module_entry =
                 create_test_entry(&mut *index, "MyModule", EntryKind::new_module());
@@ -1903,7 +1904,7 @@ A::B::"#;
 
         // Add entries to the index
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Add the A module and its nested modules
             let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());
@@ -2013,7 +2014,7 @@ A::"#;
 
         // Add entries to the index that match what would be available in a real Rails app
         {
-            let mut index = server.index.lock();
+            let mut index = server.index_for_uri(&uri).lock_arc();
 
             // Add the A module and its nested modules
             let a_module_entry = create_test_entry(&mut *index, "A", EntryKind::new_module());

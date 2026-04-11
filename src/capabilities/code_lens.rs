@@ -37,8 +37,8 @@ pub async fn handle_code_lens(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // 3. Create query with document context.
-    let query = IndexQuery::with_doc(lang_server.index.clone(), doc_arc);
+    // 3. Create query with document context. Route by URI for multi-workspace.
+    let query = IndexQuery::with_doc(lang_server.index_for_uri(uri), doc_arc);
 
     // 4. Delegate to query layer.
     let lens_data = query.get_code_lenses(uri, &content);
