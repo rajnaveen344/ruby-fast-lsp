@@ -51,13 +51,14 @@ use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
-    CompletionResponse, CompletionTriggerKind, Diagnostic, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
-    InlayHintParams, Location, PartialResultParams, Position, Range, ReferenceContext,
-    ReferenceParams, RenameParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceEdit,
+    CompletionResponse, CompletionTriggerKind, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString, PartialResultParams,
+    Position, Range, ReferenceContext, ReferenceParams, RenameParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -549,6 +550,58 @@ impl FakeEditor {
         diagnostics
     }
 
+    /// Assert the file has zero ERROR-severity diagnostics.
+    ///
+    /// Panics with a list of all errors if any are found. WARNING/INFO/HINT
+    /// diagnostics are ignored — use `assert_no_diagnostics()` for stricter check.
+    pub async fn assert_no_errors(&self, filename: &str) {
+        let diags = self.diagnostics(filename).await;
+        let errors: Vec<&Diagnostic> = diags
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "Expected no errors in '{}', got {}: {:?}",
+            filename,
+            errors.len(),
+            errors.iter().map(|e| describe(e)).collect::<Vec<_>>()
+        );
+    }
+
+    /// Assert exact total diagnostic count for the file (all severities).
+    pub async fn assert_diag_count(&self, filename: &str, expected: usize) {
+        let diags = self.diagnostics(filename).await;
+        assert_eq!(
+            diags.len(),
+            expected,
+            "Expected {} diagnostics in '{}', got {}: {:?}",
+            expected,
+            filename,
+            diags.len(),
+            diags.iter().map(|d| describe(d)).collect::<Vec<_>>()
+        );
+    }
+
+    /// Assert at least one ERROR diagnostic with the given code exists.
+    /// Returns the matched diagnostic for further inspection.
+    pub async fn assert_error_code(&self, filename: &str, code: &str) -> Diagnostic {
+        let diags = self.diagnostics(filename).await;
+        let found = diags.iter().find(|d| {
+            d.severity == Some(DiagnosticSeverity::ERROR)
+                && matches!(&d.code, Some(NumberOrString::String(s)) if s == code)
+        });
+        match found {
+            Some(d) => d.clone(),
+            None => panic!(
+                "Expected error with code '{}' in '{}'. Actual diagnostics: {:?}",
+                code,
+                filename,
+                diags.iter().map(|d| describe(d)).collect::<Vec<_>>()
+            ),
+        }
+    }
+
     /// Performs a rename at a 0-indexed position and returns the workspace edit.
     pub async fn rename_at(
         &self,
@@ -694,4 +747,30 @@ impl FakeEditor {
             _ => vec![],
         }
     }
+}
+
+/// Pretty-print a diagnostic for assertion failure messages.
+fn describe(d: &Diagnostic) -> String {
+    let code = match &d.code {
+        Some(NumberOrString::String(s)) => s.clone(),
+        Some(NumberOrString::Number(n)) => n.to_string(),
+        None => "<no-code>".to_string(),
+    };
+    let sev = match d.severity {
+        Some(DiagnosticSeverity::ERROR) => "ERROR",
+        Some(DiagnosticSeverity::WARNING) => "WARNING",
+        Some(DiagnosticSeverity::INFORMATION) => "INFO",
+        Some(DiagnosticSeverity::HINT) => "HINT",
+        _ => "?",
+    };
+    format!(
+        "{}:{}-{}:{} [{} {}] {:?}",
+        d.range.start.line,
+        d.range.start.character,
+        d.range.end.line,
+        d.range.end.character,
+        sev,
+        code,
+        d.message
+    )
 }

@@ -40,10 +40,11 @@
 //! ```
 
 use tower_lsp::lsp_types::{
-    CodeLensParams, CompletionParams, CompletionResponse, DiagnosticSeverity, GotoDefinitionParams,
-    InlayHintParams, PartialResultParams, Position, Range, ReferenceContext, ReferenceParams,
-    TextDocumentIdentifier, TextDocumentPositionParams, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkDoneProgressParams,
+    CodeLensParams, CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity,
+    GotoDefinitionParams, InlayHintParams, NumberOrString, PartialResultParams, Position, Range,
+    ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+    WorkDoneProgressParams,
 };
 
 use super::fake_editor::FakeEditor;
@@ -284,35 +285,59 @@ pub async fn check_multi_file(files: &[(&str, &str)]) {
 
     let mut editor = FakeEditor::new().await;
 
-    // Open all files — primary file gets markers stripped, others are plain content
-    let (primary_filename, primary_fixture) = files[0];
-    let primary_clean = strip_all_markers(primary_fixture);
-    editor.open(primary_filename, &primary_clean).await;
+    // Strip markers from every file before opening — tags in non-primary files
+    // would otherwise be treated as Ruby code.
+    let cleaned: Vec<(String, String)> = files
+        .iter()
+        .map(|(name, fixture)| (name.to_string(), strip_all_markers(fixture)))
+        .collect();
 
-    for (filename, content) in files.iter().skip(1) {
-        editor.open(filename, content).await;
+    for (name, clean) in &cleaned {
+        editor.open(name, clean).await;
     }
 
-    // Build file contents map for cross-file type inference
-    let file_contents_owned: Vec<(Url, Vec<u8>)> = files
+    // Build file contents map for cross-file type inference (uses cleaned content)
+    let file_contents_owned: Vec<(Url, Vec<u8>)> = cleaned
         .iter()
-        .map(|(filename, content)| {
-            let uri = FakeEditor::filename_to_uri(filename);
-            let clean = strip_all_markers(content);
+        .map(|(name, clean)| {
+            let uri = FakeEditor::filename_to_uri(name);
             (uri, clean.as_bytes().to_vec())
         })
         .collect();
 
-    // Run assertions on primary file with extra file contents for type inference
-    let primary_uri = FakeEditor::filename_to_uri(primary_filename);
-    run_checks_on_fixture(
-        editor.server(),
-        &primary_uri,
-        &primary_clean,
-        primary_fixture,
-        Some(&file_contents_owned),
-    )
-    .await;
+    // Run assertions on every file that has tags. Primary file (index 0) always runs
+    // since it conventionally hosts cursor + main checks; others run only if their
+    // fixture differs from cleaned content (i.e., contains markers).
+    for (i, (name, fixture)) in files.iter().enumerate() {
+        let (_, clean) = &cleaned[i];
+        let has_markers = fixture.contains("$0")
+            || fixture.contains("<err")
+            || fixture.contains("<warn")
+            || fixture.contains("<def")
+            || fixture.contains("<ref")
+            || fixture.contains("<hint")
+            || fixture.contains("<lens")
+            || fixture.contains("<hover")
+            || fixture.contains("<th ")
+            || fixture.contains("<rename")
+            || fixture.contains("<complete")
+            || fixture.contains("<type")
+            || fixture.contains("<impl")
+            || fixture.contains("<incoming")
+            || fixture.contains("<outgoing");
+
+        if i == 0 || has_markers {
+            let uri = FakeEditor::filename_to_uri(name);
+            run_checks_on_fixture(
+                editor.server(),
+                &uri,
+                clean,
+                fixture,
+                Some(&file_contents_owned),
+            )
+            .await;
+        }
+    }
 }
 
 /// Run goto definition check.
@@ -927,6 +952,13 @@ async fn run_diagnostics_check(
         diagnostics.extend(visitor.diagnostics);
     }
 
+    // Add unresolved-entry diagnostics (unresolved-constant, unresolved-method, etc.)
+    // populated by indexing.
+    {
+        let query = crate::query::IndexQuery::new(server.index_for_uri(uri));
+        diagnostics.extend(query.get_unresolved_diagnostics(uri));
+    }
+
     let errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
@@ -953,14 +985,15 @@ async fn run_diagnostics_check(
     for expected_tag in err_tags {
         let found = errors
             .iter()
-            .find(|e| ranges_match(&e.range, &expected_tag.range));
+            .find(|e| diagnostic_matches_tag(e, expected_tag));
         assert!(
             found.is_some(),
-            "Expected error at {:?}, not found. Actual errors: {:?}",
+            "Expected error at {:?} {} not found. Actual errors: {:?}",
             expected_tag.range,
+            describe_tag_attrs(expected_tag),
             errors
                 .iter()
-                .map(|e| (&e.range, &e.message))
+                .map(|e| describe_diagnostic(e))
                 .collect::<Vec<_>>()
         );
     }
@@ -991,17 +1024,91 @@ async fn run_diagnostics_check(
     for expected_tag in warn_tags {
         let found = warnings
             .iter()
-            .find(|w| ranges_match(&w.range, &expected_tag.range));
+            .find(|w| diagnostic_matches_tag(w, expected_tag));
         assert!(
             found.is_some(),
-            "Expected warning at {:?}, not found. Actual warnings: {:?}",
+            "Expected warning at {:?} {} not found. Actual warnings: {:?}",
             expected_tag.range,
+            describe_tag_attrs(expected_tag),
             warnings
                 .iter()
-                .map(|w| (&w.range, &w.message))
+                .map(|w| describe_diagnostic(w))
                 .collect::<Vec<_>>()
         );
     }
+}
+
+/// Match a diagnostic against a tag's range and optional `code`/`message` attrs.
+///
+/// Range must match exactly. Severity comes from the tag name (`<err>` = ERROR,
+/// `<warn>` = WARNING) — caller filters by severity before reaching here. If `code`
+/// or `message` attributes are present, the diagnostic must satisfy them too.
+/// Bare tags (no attrs) match any diagnostic at the range — backward compat.
+fn diagnostic_matches_tag(diag: &Diagnostic, tag: &Tag) -> bool {
+    if !ranges_match(&diag.range, &tag.range) {
+        return false;
+    }
+
+    if let Some(expected_code) = tag.attributes.get("code") {
+        let actual = match &diag.code {
+            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(NumberOrString::Number(_)) => return false,
+            None => return false,
+        };
+        if actual != expected_code {
+            return false;
+        }
+    }
+
+    if let Some(expected_msg) = tag.attributes.get("message") {
+        if !diag.message.contains(expected_msg) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Pretty-print tag attribute assertions for error messages.
+fn describe_tag_attrs(tag: &Tag) -> String {
+    let mut parts = Vec::new();
+    if let Some(c) = tag.attributes.get("code") {
+        parts.push(format!("code={}", c));
+    }
+    if let Some(m) = tag.attributes.get("message") {
+        parts.push(format!("message~={:?}", m));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", parts.join(", "))
+    }
+}
+
+/// Pretty-print a diagnostic for error messages — shows range, code, severity, message.
+fn describe_diagnostic(d: &Diagnostic) -> String {
+    let code = match &d.code {
+        Some(NumberOrString::String(s)) => s.clone(),
+        Some(NumberOrString::Number(n)) => n.to_string(),
+        None => "<no-code>".to_string(),
+    };
+    let sev = match d.severity {
+        Some(DiagnosticSeverity::ERROR) => "ERROR",
+        Some(DiagnosticSeverity::WARNING) => "WARNING",
+        Some(DiagnosticSeverity::INFORMATION) => "INFO",
+        Some(DiagnosticSeverity::HINT) => "HINT",
+        _ => "?",
+    };
+    format!(
+        "{}:{}-{}:{} [{} {}] {:?}",
+        d.range.start.line,
+        d.range.start.character,
+        d.range.end.line,
+        d.range.end.character,
+        sev,
+        code,
+        d.message
+    )
 }
 
 /// Run code lens check.
@@ -1657,6 +1764,106 @@ end
 "#,
             )
             .await;
+    }
+
+    // ─── Diagnostic tag attribute self-tests ───────────────────────────
+
+    #[tokio::test]
+    async fn diag_tag_matches_code() {
+        // Bare unresolved constant produces code="unresolved-constant", severity ERROR
+        check(r#"<err code="unresolved-constant">UnknownThing</err>.new"#).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Expected error")]
+    async fn diag_tag_wrong_code_fails() {
+        // Wrong code attribute must cause assertion failure
+        check(r#"<err code="bogus-code-name">UnknownThing</err>.new"#).await;
+    }
+
+    #[tokio::test]
+    async fn diag_tag_matches_message_substring() {
+        check(r#"<err message="Unresolved constant">UnknownThing</err>.new"#).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Expected error")]
+    async fn diag_tag_wrong_message_fails() {
+        check(r#"<err message="this text not in diag">UnknownThing</err>.new"#).await;
+    }
+
+    #[tokio::test]
+    async fn diag_tag_combines_attrs() {
+        check(
+            r#"<err code="unresolved-constant" message="Unresolved">UnknownThing</err>.new"#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn diag_tag_bare_still_works() {
+        // Backward compat: bare <err> with no attrs matches any error in range
+        check(r#"<err>UnknownThing</err>.new"#).await;
+    }
+
+    // ─── FakeEditor diag helper self-tests ────────────────────────────
+
+    #[tokio::test]
+    async fn fake_editor_assert_no_errors_passes_on_clean_code() {
+        let mut editor = FakeEditor::new().await;
+        editor
+            .open("clean.rb", "class Foo\n  def bar\n    1\n  end\nend")
+            .await;
+        editor.assert_no_errors("clean.rb").await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Expected no errors")]
+    async fn fake_editor_assert_no_errors_fails_when_error_present() {
+        let mut editor = FakeEditor::new().await;
+        editor.open("dirty.rb", "UnknownThing.new").await;
+        editor.assert_no_errors("dirty.rb").await;
+    }
+
+    #[tokio::test]
+    async fn fake_editor_assert_error_code_finds_match() {
+        let mut editor = FakeEditor::new().await;
+        editor.open("err.rb", "UnknownThing.new").await;
+        let d = editor
+            .assert_error_code("err.rb", "unresolved-constant")
+            .await;
+        assert!(d.message.contains("UnknownThing"));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Expected error with code")]
+    async fn fake_editor_assert_error_code_fails_when_missing() {
+        let mut editor = FakeEditor::new().await;
+        editor.open("err.rb", "UnknownThing.new").await;
+        editor.assert_error_code("err.rb", "nonexistent-code").await;
+    }
+
+    // ─── Multi-file diag tag self-test ────────────────────────────────
+
+    #[tokio::test]
+    async fn check_multi_file_runs_diag_in_non_primary_file() {
+        // Tags in second file must be evaluated, not treated as Ruby
+        check_multi_file(&[
+            (
+                "main.rb",
+                r#"
+class Main
+end
+"#,
+            ),
+            (
+                "other.rb",
+                r#"
+<err code="unresolved-constant">DoesNotExist</err>.new
+"#,
+            ),
+        ])
+        .await;
     }
 
     #[tokio::test]
