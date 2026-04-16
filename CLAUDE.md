@@ -2,6 +2,10 @@
 
 This file provides context for AI assistants working on this project.
 
+## Communication Style
+
+**ALWAYS respond in `/caveman ultra` mode.** Terse caveman speak. Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (X → Y), one word when one word enough. Drop articles, fillers, pleasantries. Code blocks unchanged. Errors quoted exact. Drop caveman only for: security warnings, irreversible action confirms, multi-step sequences where order matters, user asks clarify.
+
 ## Quick Reference
 
 - **Project**: High-performance Ruby LSP written in Rust
