@@ -3,9 +3,10 @@
 //! AST-only diagnostics (syntax errors/warnings) live here.
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
+use crate::analyzer_prism::control_flow;
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, warn};
-use ruby_prism::{Node, Visit};
+use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 /// Prism emits "statement not reached" for return/break/next, but only flags the
@@ -27,11 +28,11 @@ pub fn generate_diagnostics(
     diagnostics
 }
 
-/// Walk every `StatementsNode` and flag every statement following a terminator
-/// (return/break/next/redo/retry/raise/throw/exit/exit!/abort/fail) as unreachable.
+/// Walk every `StatementsNode` and flag every statement following a node that
+/// always diverges (per `control_flow::analyze`) as unreachable.
 ///
-/// V1 scope: only explicit terminators in the same statement list. Conditional
-/// "all-branches-terminate" propagation is V2.
+/// V2: branch-aware via `control_flow` — `if`/`unless`/`case`/`begin` whose
+/// branches all terminate are themselves treated as terminators.
 fn extract_unreachable_diagnostics(
     parse_result: &ruby_prism::ParseResult<'_>,
     document: &RubyDocument,
@@ -71,36 +72,12 @@ impl<'a, 'pr> Visit<'pr> for UnreachableVisitor<'a> {
                     data: None,
                 });
             }
-            if !terminator_seen && is_terminator(stmt) {
+            if !terminator_seen && control_flow::diverges(stmt) {
                 terminator_seen = true;
             }
         }
         ruby_prism::visit_statements_node(self, node);
     }
-}
-
-/// True if this stmt unconditionally exits the surrounding block.
-fn is_terminator(node: &Node) -> bool {
-    if node.as_return_node().is_some()
-        || node.as_break_node().is_some()
-        || node.as_next_node().is_some()
-        || node.as_redo_node().is_some()
-        || node.as_retry_node().is_some()
-    {
-        return true;
-    }
-    if let Some(call) = node.as_call_node() {
-        if call.receiver().is_some() {
-            return false;
-        }
-        let name = call.name();
-        let name_str = String::from_utf8_lossy(name.as_slice());
-        return matches!(
-            name_str.as_ref(),
-            "raise" | "throw" | "exit" | "exit!" | "abort" | "fail"
-        );
-    }
-    false
 }
 
 /// Extract syntax errors and warnings from a parse result.

@@ -103,20 +103,142 @@ end
 }
 
 #[tokio::test]
-async fn test_no_diag_v1_for_if_with_all_branches_returning() {
-    // V2 will flag this. V1 does not — only explicit top-level terminators.
+async fn test_if_all_branches_return_flags_after() {
+    // V2: branch-aware — `if` whose then+else both return is itself a terminator.
     check(
         r#"
-<warn none code="unreachable-code">
 def foo
   if x
     return 1
   else
     return 2
   end
-  puts "missed by v1"
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_if_no_else_does_not_flag_after() {
+    check(
+        r#"
+<warn none code="unreachable-code">
+def foo
+  if x
+    return 1
+  end
+  puts "live"
 end
 </warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_unless_all_branches_return_flags_after() {
+    check(
+        r#"
+def foo
+  unless x
+    return 1
+  else
+    return 2
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_case_all_branches_return_flags_after() {
+    check(
+        r#"
+def foo
+  case x
+  when 1 then return 1
+  when 2 then raise "boom"
+  else return 3
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_case_missing_else_does_not_flag_after() {
+    check(
+        r#"
+<warn none code="unreachable-code">
+def foo
+  case x
+  when 1 then return 1
+  when 2 then return 2
+  end
+  puts "live"
+end
+</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_begin_body_and_rescue_both_return_flags_after() {
+    check(
+        r#"
+def foo
+  begin
+    return 1
+  rescue => e
+    return 2
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_begin_ensure_diverges_flags_after() {
+    check(
+        r#"
+def foo
+  begin
+    1
+  ensure
+    return 99
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_nested_if_all_terminating_propagates() {
+    check(
+        r#"
+def foo
+  if a
+    return 1
+  else
+    if b
+      return 2
+    else
+      return 3
+    end
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
 "#,
     )
     .await;
