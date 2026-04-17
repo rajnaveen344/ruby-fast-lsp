@@ -463,11 +463,12 @@ impl ReferenceVisitor {
     /// Inspect the first argument of a bare `raise` call and return an
     /// `UnresolvedEntry::RaiseNonException` when the argument is provably
     /// not an Exception subclass. Returns `None` when uncertain.
-    fn check_raise_call(
-        &self,
-        index: &crate::indexer::index::RubyIndex,
-        node: &CallNode,
-    ) -> Option<UnresolvedEntry> {
+    // MUST be called with the index mutex NOT held. This method builds a
+    // `MethodResolver` which locks the index internally — holding the guard
+    // across the call causes a re-entrant deadlock (parking_lot `Mutex` is
+    // not reentrant). Callers in `process_call_node_entry` drop their guard
+    // before invoking.
+    fn check_raise_call(&self, node: &CallNode) -> Option<UnresolvedEntry> {
         let args = node.arguments()?;
         let first_arg = args.arguments().iter().next()?;
 
@@ -499,7 +500,8 @@ impl ReferenceVisitor {
         // Constant reference (e.g., `raise MyError`).
         if let Some(const_read) = first_arg.as_constant_read_node() {
             let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
-            if !Self::is_exception_class(index, &name) {
+            let index = self.index.lock();
+            if !Self::is_exception_class(&index, &name) {
                 return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
             }
             return None;
@@ -509,7 +511,8 @@ impl ReferenceVisitor {
         if let Some(_const_path) = first_arg.as_constant_path_node() {
             let full_name = self.build_constant_path_name(&first_arg);
             let last_segment = full_name.split("::").last().unwrap_or(&full_name);
-            if !Self::is_exception_class(index, last_segment) {
+            let index = self.index.lock();
+            if !Self::is_exception_class(&index, last_segment) {
                 return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
             }
             return None;
@@ -526,7 +529,8 @@ impl ReferenceVisitor {
                 .or_else(|| scopes.scope_at_position(var_pos));
             if let Some(sid) = scope_id {
                 if let Some(ty) = scopes.get_type_at_position(&var_name, sid, var_pos) {
-                    if !Self::classify_raise_type(index, ty) {
+                    let index = self.index.lock();
+                    if !Self::classify_raise_type(&index, ty) {
                         return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
                     }
                     return None;
@@ -539,7 +543,8 @@ impl ReferenceVisitor {
         // CallNode argument (e.g., `raise foo()` or `raise obj.method`) — resolve return type.
         if let Some(inner_call) = first_arg.as_call_node() {
             let ty = if inner_call.receiver().is_some() {
-                // Has receiver — use MethodResolver chain.
+                // Has receiver — use MethodResolver chain. Must NOT hold the
+                // index mutex here: MethodResolver locks internally.
                 let resolver = MethodResolver::with_namespace(
                     self.index.clone(),
                     self.scope_tracker.get_ns_stack(),
@@ -549,10 +554,12 @@ impl ReferenceVisitor {
                 // Bare method call (no receiver) — look up by name in current namespace.
                 let method_name =
                     String::from_utf8_lossy(inner_call.name().as_slice()).to_string();
-                self.resolve_bare_call_return_type(index, &method_name)
+                let index = self.index.lock();
+                self.resolve_bare_call_return_type(&index, &method_name)
             };
             if let Some(ty) = ty {
-                if !Self::classify_raise_type(index, &ty) {
+                let index = self.index.lock();
+                if !Self::classify_raise_type(&index, &ty) {
                     return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
                 }
                 return None;
@@ -828,11 +835,21 @@ impl ReferenceVisitor {
             }
         }
 
-        // Raise-non-exception check: bare `raise` with provably non-Exception arg.
-        if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
-            if let Some(entry) = self.check_raise_call(&index, node) {
-                index.add_unresolved_entry(self.document.uri.clone(), entry);
-            }
+        // Raise-non-exception check: bare `raise` with provably non-Exception
+        // arg. Must release the index mutex before calling — `check_raise_call`
+        // constructs a `MethodResolver` that locks internally (non-reentrant
+        // `parking_lot::Mutex` would deadlock otherwise).
+        let raise_entry =
+            if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
+                drop(index);
+                let entry = self.check_raise_call(node);
+                index = self.index.lock();
+                entry
+            } else {
+                None
+            };
+        if let Some(entry) = raise_entry {
+            index.add_unresolved_entry(self.document.uri.clone(), entry);
         }
 
         // Bad-splat check: *expr must be Array-like; **expr must be Hash-like.
@@ -907,6 +924,7 @@ impl ReferenceVisitor {
             }
         }
 
+        let target_len = target.len();
         let mut best: Option<(String, usize)> = None;
         for (ruby_method, entries) in index.methods_by_name() {
             let candidate = ruby_method.get_name();
@@ -914,11 +932,17 @@ impl ReferenceVisitor {
             if candidate == target {
                 continue;
             }
-            let dist = levenshtein(&candidate, target);
-            if dist > threshold {
+            // Triangle inequality: |len(a) - len(b)| <= levenshtein(a, b).
+            // A length delta greater than the threshold means the edit
+            // distance must exceed it too — skip the expensive DP. This
+            // prunes the vast majority of the N×M comparisons on large
+            // indexes (measured: Mastodon phase 2 from 130s → <10s).
+            if candidate.len().abs_diff(target_len) > threshold {
                 continue;
             }
             // Confirm at least one entry's owner is in our search set.
+            // Check ownership BEFORE levenshtein — cheaper than DP when
+            // most index-wide candidates live in unrelated namespaces.
             let belongs = entries.iter().any(|e| {
                 if let EntryKind::Method(data) = &e.kind {
                     search.contains(&data.owner)
@@ -927,6 +951,10 @@ impl ReferenceVisitor {
                 }
             });
             if !belongs {
+                continue;
+            }
+            let dist = levenshtein(&candidate, target);
+            if dist > threshold {
                 continue;
             }
             match &best {
