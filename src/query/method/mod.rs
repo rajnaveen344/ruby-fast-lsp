@@ -12,7 +12,6 @@
 //! ```
 
 mod helpers;
-mod type_inference;
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;

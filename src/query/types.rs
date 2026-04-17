@@ -935,8 +935,6 @@ mod tests {
     #[test]
     fn test_infer_array_first_from_assignment() {
         use crate::indexer::index::RubyIndex;
-        use parking_lot::Mutex;
-        use std::sync::Arc;
 
         let index = RubyIndex::new();
         let code = r#"a = [1, 2, 3].first"#;
