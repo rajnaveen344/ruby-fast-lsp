@@ -10,8 +10,8 @@ use ruby_prism::*;
 
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::NamespaceKind;
-use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
+use crate::indexer::symbol_table::SymbolTable;
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::{
@@ -92,7 +92,7 @@ impl MethodResolver {
     /// This method searches through the ancestor chain of the receiver type, and for modules,
     /// also searches through all classes that include the module to find method implementations.
     pub fn resolve_method_return_type(
-        index: &RubyIndex,
+        index: &dyn SymbolTable,
         receiver_type: &RubyType,
         method_name: &str,
     ) -> Option<RubyType> {
@@ -653,6 +653,7 @@ mod tests {
     use super::*;
     use crate::indexer::entry::entry_builder::EntryBuilder;
     use crate::indexer::entry::{MethodOrigin, MethodVisibility};
+    use crate::indexer::index::RubyIndex;
     use parking_lot::{Mutex, RwLock};
     use std::sync::Arc;
     use tower_lsp::lsp_types::{Location, Position, Range, Url};

@@ -20,6 +20,6 @@ impl<'a> ReturnTypeResolver<'a> {
     /// Resolve the return type of a method called on a receiver type
     pub fn resolve(&self, receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
         let index = self.index.lock();
-        MethodResolver::resolve_method_return_type(&index, receiver_type, method_name)
+        MethodResolver::resolve_method_return_type(&*index, receiver_type, method_name)
     }
 }

@@ -1222,7 +1222,7 @@ impl ReferenceVisitor {
             // Now resolve the method's return type. Pure read — use the
             // shared guard so multiple workers can recurse in parallel.
             let index = self.index.read();
-            return MethodResolver::resolve_method_return_type(&index, &inner_type, &inner_method);
+            return MethodResolver::resolve_method_return_type(&*index, &inner_type, &inner_method);
         }
 
         None

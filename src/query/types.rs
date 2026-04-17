@@ -604,7 +604,7 @@ impl<'a> TypeQuery<'a> {
         method_name: &str,
     ) -> Option<RubyType> {
         let index = self.index.lock();
-        MethodResolver::resolve_method_return_type(&index, receiver_type, method_name)
+        MethodResolver::resolve_method_return_type(&*index, receiver_type, method_name)
     }
 
     /// Get return type for a method definition at a position (with on-demand inference).

@@ -1568,6 +1568,13 @@ impl crate::indexer::symbol_table::SymbolTable for RubyIndex {
     fn contains_method(&self, method: &RubyMethod) -> bool {
         RubyIndex::contains_method(self, method)
     }
+
+    fn including_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<(FullyQualifiedName, Vec<FullyQualifiedName>)> {
+        RubyIndex::including_classes(self, module_fqn)
+    }
 }
 
 // ============================================================================

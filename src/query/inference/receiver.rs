@@ -97,7 +97,7 @@ impl<'a> ReceiverResolver<'a> {
     ) -> Option<RubyType> {
         let inner_type = self.resolve(inner_receiver, position, content)?;
         let index = self.index.lock();
-        MethodResolver::resolve_method_return_type(&index, &inner_type, method_name)
+        MethodResolver::resolve_method_return_type(&*index, &inner_type, method_name)
     }
 
     /// Infer type from constructor assignment pattern (e.g., x = Foo.new)
@@ -159,7 +159,7 @@ impl<'a> ReceiverResolver<'a> {
                             }
 
                             if let Some(return_type) = MethodResolver::resolve_method_return_type(
-                                &index,
+                                &*index,
                                 &current_type,
                                 method_name,
                             ) {

@@ -31,4 +31,11 @@ pub trait SymbolTable {
 
     /// Definitions for `fqn` (filters out Reference entries). None if empty.
     fn get(&self, fqn: &FullyQualifiedName) -> Option<Vec<&Entry>>;
+
+    /// Classes that include the given module, each paired with the
+    /// `via` chain (modules through which the inclusion flows).
+    fn including_classes(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<(FullyQualifiedName, Vec<FullyQualifiedName>)>;
 }

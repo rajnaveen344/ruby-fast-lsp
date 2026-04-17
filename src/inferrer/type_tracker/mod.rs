@@ -591,7 +591,7 @@ impl<'a> TypeTracker<'a> {
 
         // Use MethodResolver to look up return type from index and RBS
         let index = self.index.lock();
-        MethodResolver::resolve_method_return_type(&index, &receiver_type, &method_name)
+        MethodResolver::resolve_method_return_type(&*index, &receiver_type, &method_name)
             .unwrap_or(RubyType::Unknown)
     }
 

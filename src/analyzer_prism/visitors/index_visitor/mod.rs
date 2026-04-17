@@ -133,7 +133,7 @@ impl IndexVisitor {
             // Resolve method return type
             let index = self.index.lock();
             if let Some(return_type) =
-                MethodResolver::resolve_method_return_type(&index, &receiver_type, &method_name)
+                MethodResolver::resolve_method_return_type(&*index, &receiver_type, &method_name)
             {
                 return return_type;
             }
