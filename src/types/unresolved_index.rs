@@ -46,6 +46,18 @@ pub enum UnresolvedEntry {
         /// `None` when no candidate is within threshold.
         suggestion: Option<String>,
     },
+    /// A keyword argument at a callsite that the method doesn't declare
+    /// (and the method doesn't accept `**kwargs`).
+    UnknownKwarg {
+        /// The method name
+        method: String,
+        /// The unknown keyword arg name (without trailing colon)
+        kwarg: String,
+        /// Closest matching declared keyword name (Levenshtein-derived)
+        suggestion: Option<String>,
+        /// Location of the keyword arg name at the callsite
+        location: Location,
+    },
     /// A method call with wrong number of positional arguments
     WrongArity {
         /// The method name
@@ -88,6 +100,22 @@ impl std::hash::Hash for UnresolvedEntry {
                 1u8.hash(state); // discriminant
                 name.hash(state);
                 receiver_type.hash(state);
+                suggestion.hash(state);
+                location.uri.hash(state);
+                location.range.start.line.hash(state);
+                location.range.start.character.hash(state);
+                location.range.end.line.hash(state);
+                location.range.end.character.hash(state);
+            }
+            UnresolvedEntry::UnknownKwarg {
+                method,
+                kwarg,
+                suggestion,
+                location,
+            } => {
+                3u8.hash(state); // discriminant
+                method.hash(state);
+                kwarg.hash(state);
                 suggestion.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
@@ -182,12 +210,28 @@ impl UnresolvedEntry {
         }
     }
 
+    /// Create an unknown-kwarg entry
+    pub fn unknown_kwarg(
+        method: String,
+        kwarg: String,
+        suggestion: Option<String>,
+        location: Location,
+    ) -> Self {
+        Self::UnknownKwarg {
+            method,
+            kwarg,
+            suggestion,
+            location,
+        }
+    }
+
     /// Get the location of this unresolved entry
     pub fn location(&self) -> &Location {
         match self {
             Self::Constant { location, .. } => location,
             Self::Method { location, .. } => location,
             Self::WrongArity { location, .. } => location,
+            Self::UnknownKwarg { location, .. } => location,
         }
     }
 
@@ -197,6 +241,7 @@ impl UnresolvedEntry {
             Self::Constant { name, .. } => name,
             Self::Method { name, .. } => name,
             Self::WrongArity { name, .. } => name,
+            Self::UnknownKwarg { method, .. } => method,
         }
     }
 

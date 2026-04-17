@@ -19,13 +19,14 @@ use crate::{
 
 use super::ReferenceVisitor;
 
-/// Positional arity model derived from a method's parameter list.
-/// Keyword/keyword-rest/block params don't affect positional arity.
-#[derive(Debug, Clone, Copy)]
+/// Positional + keyword signature derived from a method's parameter list.
+#[derive(Debug, Clone)]
 struct MethodArity {
     required: usize,
     optional: usize,
     has_rest: bool,
+    keyword_names: Vec<String>,
+    has_kwrest: bool,
 }
 
 impl MethodArity {
@@ -33,21 +34,74 @@ impl MethodArity {
         let mut required = 0usize;
         let mut optional = 0usize;
         let mut has_rest = false;
+        let mut keyword_names = Vec::new();
+        let mut has_kwrest = false;
         for p in params {
             match p.kind {
                 ParamKind::Required => required += 1,
                 ParamKind::Optional => optional += 1,
                 ParamKind::Rest => has_rest = true,
-                // Kwargs/block don't constrain positional arity in V1.
-                ParamKind::Keyword | ParamKind::KeywordRest | ParamKind::Block => {}
+                ParamKind::Keyword => keyword_names.push(p.name.clone()),
+                ParamKind::KeywordRest => has_kwrest = true,
+                ParamKind::Block => {}
             }
         }
         Self {
             required,
             optional,
             has_rest,
+            keyword_names,
+            has_kwrest,
         }
     }
+}
+
+/// Extracts unknown kwargs from a callsite. Returns `(kwarg_name, name_loc)`
+/// for each kwarg passed at `node` whose name is not declared on `arity` and
+/// the method does not accept `**kwargs`. Skips when callsite uses `**opts`
+/// splat (unknown keys). `name_loc` is the prism byte range of the key name.
+fn collect_unknown_kwargs<'a>(
+    node: &ruby_prism::CallNode<'a>,
+    arity: &MethodArity,
+) -> Option<Vec<(String, ruby_prism::Location<'a>)>> {
+    if arity.has_kwrest {
+        return Some(Vec::new());
+    }
+    let args = node.arguments()?;
+    // The keyword args in Ruby calls are bundled into a single trailing
+    // `KeywordHashNode` element. Find it.
+    let mut kw_hash = None;
+    for arg in args.arguments().iter() {
+        if let Some(kh) = arg.as_keyword_hash_node() {
+            kw_hash = Some(kh);
+        }
+    }
+    let kw_hash = kw_hash?;
+    let mut unknown = Vec::new();
+    for elem in kw_hash.elements().iter() {
+        // **opts splat in the kwarg position → unknown keys, punt entire check.
+        if elem.as_assoc_splat_node().is_some() {
+            return None;
+        }
+        let assoc = match elem.as_assoc_node() {
+            Some(a) => a,
+            None => continue,
+        };
+        let key = assoc.key();
+        let sym = match key.as_symbol_node() {
+            Some(s) => s,
+            None => continue, // dynamic key → can't validate
+        };
+        let value_loc = match sym.value_loc() {
+            Some(loc) => loc,
+            None => continue,
+        };
+        let name = String::from_utf8_lossy(value_loc.as_slice()).to_string();
+        if !arity.keyword_names.contains(&name) {
+            unknown.push((name, value_loc));
+        }
+    }
+    Some(unknown)
 }
 
 /// Returns `Some((min, max, actual))` if callsite positional arity is outside
@@ -115,6 +169,26 @@ fn levenshtein(a: &str, b: &str) -> usize {
         std::mem::swap(&mut prev, &mut curr);
     }
     prev[n]
+}
+
+/// Closest declared kwarg name within the suggestion threshold.
+fn closest_kwarg(target: &str, declared: &[String]) -> Option<String> {
+    let threshold = suggestion_threshold(target.len());
+    if threshold == 0 {
+        return None;
+    }
+    let mut best: Option<(String, usize)> = None;
+    for cand in declared {
+        let dist = levenshtein(cand, target);
+        if dist > threshold {
+            continue;
+        }
+        match &best {
+            Some((_, d)) if *d <= dist => {}
+            _ => best = Some((cand.clone(), dist)),
+        }
+    }
+    best.map(|(s, _)| s)
 }
 
 /// Suggestion threshold scales with name length: 1 for tiny names, up to 3 for long.
@@ -366,6 +440,22 @@ impl ReferenceVisitor {
                                 message_location.clone(),
                             ),
                         );
+                    }
+                    if let Some(unknowns) = collect_unknown_kwargs(node, &arity) {
+                        for (kwarg_name, kw_loc) in unknowns {
+                            let suggestion = closest_kwarg(&kwarg_name, &arity.keyword_names);
+                            let kw_lsp_loc =
+                                self.document.prism_location_to_lsp_location(&kw_loc);
+                            index.add_unresolved_entry(
+                                self.document.uri.clone(),
+                                UnresolvedEntry::unknown_kwarg(
+                                    method_name.clone(),
+                                    kwarg_name,
+                                    suggestion,
+                                    kw_lsp_loc,
+                                ),
+                            );
+                        }
                     }
                 }
             }

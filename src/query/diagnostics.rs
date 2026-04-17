@@ -79,6 +79,29 @@ impl IndexQuery {
                         }
                     }
                 }
+                UnresolvedEntry::UnknownKwarg {
+                    method,
+                    kwarg,
+                    suggestion,
+                    location,
+                } => {
+                    let mut message =
+                        format!("Unknown keyword argument `{}:` for `{}`", kwarg, method);
+                    if let Some(s) = suggestion {
+                        message.push_str(&format!(". Did you mean `{}:`?", s));
+                    }
+                    Diagnostic {
+                        range: location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unknown-kwarg".to_string())),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message,
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    }
+                }
                 UnresolvedEntry::WrongArity {
                     name,
                     expected_min,
