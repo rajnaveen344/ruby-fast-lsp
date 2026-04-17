@@ -22,6 +22,10 @@ path = "src/bin/check_size.rs"
 name = "profiler"
 path = "src/bin/profiler/main.rs"
 
+[[bin]]
+name = "ast"
+path = "src/bin/ast.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"
