@@ -26,6 +26,10 @@ path = "src/bin/profiler/main.rs"
 name = "ast"
 path = "src/bin/ast.rs"
 
+[[bin]]
+name = "bench_references"
+path = "src/bin/bench_references.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"
@@ -58,6 +62,10 @@ slotmap = "1.0"
 ustr = "1.0"
 dhat = "0.3.2"
 rayon = "1.10"
+
+# Perf corpus: tar.zst decode for bench/perf-test fixtures
+tar = "0.4"
+zstd = "0.13"
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]

@@ -12,7 +12,18 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Wall-clock timings captured by the coordinator during the most recent
+/// [`IndexingCoordinator::run_complete_indexing`] call. Consumed by the
+/// perf bench binary and perf regression tests.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PhaseTimings {
+    pub phase1: Duration,
+    pub phase2: Duration,
+    pub phase3: Duration,
+    pub total: Duration,
+}
 
 /// The IndexingCoordinator manages the entire indexing process.
 ///
@@ -53,6 +64,9 @@ pub struct IndexingCoordinator {
 
     // Where to find Ruby libraries on this system
     ruby_library_paths: Vec<PathBuf>,
+
+    /// Timings from the most recent `run_complete_indexing` call.
+    last_timings: PhaseTimings,
 }
 
 impl IndexingCoordinator {
@@ -81,7 +95,14 @@ impl IndexingCoordinator {
             stdlib_indexer: None,
             gem_indexer: None,
             ruby_library_paths: Vec::new(),
+            last_timings: PhaseTimings::default(),
         }
+    }
+
+    /// Returns the timings captured by the most recent call to
+    /// `run_complete_indexing`. All-zero before the first call.
+    pub fn last_timings(&self) -> PhaseTimings {
+        self.last_timings
     }
 
     /// Runs the complete indexing process from start to finish using two-phase approach.
@@ -133,7 +154,8 @@ impl IndexingCoordinator {
         info!("Resolving all mixin references across project, stdlib, and gems");
         self.index.lock().resolve_all_mixins();
 
-        info!("Phase 1 completed in {:?}", phase1_start.elapsed());
+        let phase1_dur = phase1_start.elapsed();
+        info!("Phase 1 completed in {:?}", phase1_dur);
 
         // PHASE 2: Index all references (now that definitions are available)
         info!("Phase 2: Indexing all references");
@@ -142,7 +164,8 @@ impl IndexingCoordinator {
         // Step 7: Index references from project files
         self.index_project_references(server).await?;
 
-        info!("Phase 2 completed in {:?}", phase2_start.elapsed());
+        let phase2_dur = phase2_start.elapsed();
+        info!("Phase 2 completed in {:?}", phase2_dur);
 
         // Per-workspace `indexing_complete` flag is flipped by the spawning
         // task in `handle_initialized`/`handle_did_change_workspace_folders`
@@ -150,13 +173,20 @@ impl IndexingCoordinator {
 
         // PHASE 3: Publish diagnostics for unresolved constants
         info!("Phase 3: Publishing diagnostics for unresolved constants");
+        let phase3_start = Instant::now();
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
         self.publish_unresolved_diagnostics(server).await;
+        let phase3_dur = phase3_start.elapsed();
 
-        info!(
-            "Complete two-phase indexing finished in {:?}",
-            start_time.elapsed()
-        );
+        let total_dur = start_time.elapsed();
+        info!("Complete two-phase indexing finished in {:?}", total_dur);
+
+        self.last_timings = PhaseTimings {
+            phase1: phase1_dur,
+            phase2: phase2_dur,
+            phase3: phase3_dur,
+            total: total_dur,
+        };
         Ok(())
     }
 
