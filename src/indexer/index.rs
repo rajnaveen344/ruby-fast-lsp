@@ -20,6 +20,7 @@ use crate::types::compact_location::CompactLocation;
 use crate::types::file_source::FileSource;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
+use crate::types::ruby_namespace::RubyConstant;
 
 /// Represents a single mixin usage with its type and location
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +35,39 @@ pub struct MixinUsage {
 
 // Re-export for backward compatibility
 pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
+
+/// Mixin edge kind used when deferring edges whose target FQN isn't yet in the index.
+///
+/// Each variant encodes the exact graph operation to retry once the target is resolvable.
+/// `source` on `UnresolvedMixinEdge` is always a resolved `FqnId` — it's the namespace
+/// being modified. The target is the raw constant path that couldn't be resolved yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnresolvedEdgeKind {
+    /// `include X` — `source` is the includer's Instance FqnId.
+    Include,
+    /// `prepend X` — `source` is the prepender's Instance FqnId.
+    Prepend,
+    /// `class A < B` instance chain — `source` is child's Instance FqnId; target resolves to parent's Instance.
+    Superclass,
+    /// `class A < B` singleton chain — `source` is child's Singleton FqnId; target resolves to parent's Singleton.
+    SuperclassSingleton,
+    /// `extend X` modeled as singleton-include — `source` is the extender's Singleton FqnId; target resolves to module's Instance.
+    ExtendAsInclude,
+}
+
+/// A mixin edge whose target could not be resolved at index time.
+///
+/// Retried after any `resolve_mixins_for_uri` call, in case the target namespace
+/// has since been indexed.
+#[derive(Debug, Clone)]
+pub struct UnresolvedMixinEdge {
+    pub source: FqnId,
+    pub target_parts: Vec<RubyConstant>,
+    pub absolute: bool,
+    pub context_fqn: FullyQualifiedName,
+    pub kind: UnresolvedEdgeKind,
+    pub file_id: FileId,
+}
 
 // ============================================================================
 // Types
@@ -71,6 +105,11 @@ pub struct RubyIndex {
 
     // Unresolved entries index
     pub unresolved: UnresolvedIndex,
+
+    /// Mixin edges whose target FQN wasn't indexed yet. Keyed by source file so
+    /// re-indexing a file cleanly drops its pending edges before re-inserting.
+    /// Retried after `resolve_mixins_for_uri` and `resolve_all_mixins`.
+    unresolved_mixin_edges: HashMap<FileId, Vec<UnresolvedMixinEdge>>,
 }
 
 impl RubyIndex {
@@ -98,6 +137,7 @@ impl RubyIndex {
             // Other indexes
             prefix_tree: PrefixTree::new(),
             unresolved: UnresolvedIndex::new(),
+            unresolved_mixin_edges: HashMap::new(),
         }
     }
 
@@ -400,9 +440,48 @@ impl RubyIndex {
             .cloned()
             .collect();
 
+        // Collect URIs of files whose mixin edges pointed to the namespaces we're
+        // about to remove. After removal, these files have dangling MixinRefs that
+        // should be tracked as unresolved so they re-wire if the target is re-added.
+        // Must be collected BEFORE graph.remove_node() wipes the reverse edges.
+        let mut dependent_uris: HashSet<Url> = HashSet::new();
+        for fqn in &removed_fqns {
+            if let Some(fqn_id) = self.fqns.get_id(fqn).copied() {
+                if let Some(node) = self.graph.get_node(fqn_id) {
+                    let dep_ids: Vec<FqnId> = node
+                        .included_by
+                        .iter()
+                        .chain(node.prepended_by.iter())
+                        .chain(node.children.iter())
+                        .copied()
+                        .collect();
+                    for dep_id in dep_ids {
+                        let Some(dep_fqn) = self.fqns.get(dep_id).cloned() else {
+                            continue;
+                        };
+                        let Some(entry_ids) = self.by_fqn.get(&dep_fqn) else {
+                            continue;
+                        };
+                        for eid in entry_ids {
+                            if let Some(entry) = self.entries.get(*eid) {
+                                if let Some(dep_uri) =
+                                    self.files.get(entry.location.file_id).cloned()
+                                {
+                                    if dep_uri != *uri {
+                                        dependent_uris.insert(dep_uri);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Remove edges from the inheritance graph for this file
         if let Some(file_id) = self.files.get_id(uri).copied() {
             self.graph.remove_edges_from_file(file_id);
+            self.clear_unresolved_for_file(file_id);
         }
 
         // Remove nodes from inheritance graph for completely removed FQNs
@@ -418,6 +497,14 @@ impl RubyIndex {
             if !key.is_empty() {
                 self.prefix_tree.delete(&key);
             }
+        }
+
+        // Demote dependent edges back to unresolved so they re-wire when the
+        // target is re-added. Calls resolve_mixins_for_uri which re-runs resolution
+        // against the current (post-removal) index state and records unresolvable
+        // refs as pending.
+        for dep_uri in dependent_uris {
+            self.resolve_mixins_for_uri(&dep_uri);
         }
 
         removed_fqns
@@ -907,10 +994,15 @@ impl RubyIndex {
             }
         }
 
+        // Retry once — refs indexed out-of-order may now resolve against entries
+        // added later in this same batch.
+        self.retry_unresolved_mixin_edges();
+
         debug!("Inheritance graph built successfully");
     }
 
-    /// Helper to resolve mixin refs and add edges to the inheritance graph
+    /// Helper to resolve mixin refs and add edges to the inheritance graph.
+    /// Refs that fail to resolve are recorded in `unresolved_mixin_edges` for later retry.
     fn resolve_and_add_edges(
         &mut self,
         fqn_id: FqnId,
@@ -921,90 +1013,212 @@ impl RubyIndex {
         prepends: &[MixinRef],
         extends: &[MixinRef],
     ) {
-        // Process superclass - add edges for both Instance and Singleton chains
+        let context_parts = context_fqn.namespace_parts();
+        let singleton_fqn =
+            FullyQualifiedName::Namespace(context_parts.clone(), NamespaceKind::Singleton);
+        let singleton_id = self.get_fqn_id(&singleton_fqn);
+
+        // Superclass: two edges (instance chain + singleton chain).
         if let Some(superclass_ref) = superclass {
-            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+            let resolved = utils::resolve_constant_fqn_from_parts(
                 self,
                 &superclass_ref.parts,
                 superclass_ref.absolute,
                 context_fqn,
-            ) {
-                let parent_parts = resolved_fqn.namespace_parts();
-
-                // Instance chain: Child (Instance) → Parent (Instance)
+            );
+            // Instance chain
+            let instance_done = resolved.as_ref().and_then(|r| {
                 let parent_instance =
-                    FullyQualifiedName::Namespace(parent_parts.clone(), NamespaceKind::Instance);
-                if let Some(parent_id) = self.get_fqn_id(&parent_instance) {
+                    FullyQualifiedName::Namespace(r.namespace_parts(), NamespaceKind::Instance);
+                self.get_fqn_id(&parent_instance).map(|parent_id| {
                     self.graph.set_superclass(fqn_id, parent_id, file_id);
-                }
+                })
+            });
+            if instance_done.is_none() {
+                self.push_unresolved(UnresolvedMixinEdge {
+                    source: fqn_id,
+                    target_parts: superclass_ref.parts.clone(),
+                    absolute: superclass_ref.absolute,
+                    context_fqn: context_fqn.clone(),
+                    kind: UnresolvedEdgeKind::Superclass,
+                    file_id,
+                });
+            }
 
-                // Singleton chain: Child (Singleton) → Parent (Singleton)
-                // Find the singleton entry for the current class and add its superclass edge
-                let context_parts = context_fqn.namespace_parts();
-                let singleton_fqn =
-                    FullyQualifiedName::Namespace(context_parts, NamespaceKind::Singleton);
+            // Singleton chain
+            let singleton_done = resolved.as_ref().and_then(|r| {
                 let parent_singleton =
-                    FullyQualifiedName::Namespace(parent_parts, NamespaceKind::Singleton);
-
-                if let (Some(singleton_id), Some(parent_singleton_id)) = (
-                    self.get_fqn_id(&singleton_fqn),
-                    self.get_fqn_id(&parent_singleton),
-                ) {
-                    self.graph
-                        .set_superclass(singleton_id, parent_singleton_id, file_id);
+                    FullyQualifiedName::Namespace(r.namespace_parts(), NamespaceKind::Singleton);
+                match (singleton_id, self.get_fqn_id(&parent_singleton)) {
+                    (Some(s), Some(p)) => {
+                        self.graph.set_superclass(s, p, file_id);
+                        Some(())
+                    }
+                    _ => None,
+                }
+            });
+            if singleton_done.is_none() {
+                if let Some(s) = singleton_id {
+                    self.push_unresolved(UnresolvedMixinEdge {
+                        source: s,
+                        target_parts: superclass_ref.parts.clone(),
+                        absolute: superclass_ref.absolute,
+                        context_fqn: context_fqn.clone(),
+                        kind: UnresolvedEdgeKind::SuperclassSingleton,
+                        file_id,
+                    });
                 }
             }
         }
 
-        // Process includes
+        // Includes
         for mixin_ref in includes {
-            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+            if let Some(module_id) = utils::resolve_constant_fqn_from_parts(
                 self,
                 &mixin_ref.parts,
                 mixin_ref.absolute,
                 context_fqn,
-            ) {
-                if let Some(module_id) = self.get_fqn_id(&resolved_fqn) {
-                    self.graph.add_include(fqn_id, module_id, file_id);
-                }
+            )
+            .and_then(|fqn| self.get_fqn_id(&fqn))
+            {
+                self.graph.add_include(fqn_id, module_id, file_id);
+            } else {
+                self.push_unresolved(UnresolvedMixinEdge {
+                    source: fqn_id,
+                    target_parts: mixin_ref.parts.clone(),
+                    absolute: mixin_ref.absolute,
+                    context_fqn: context_fqn.clone(),
+                    kind: UnresolvedEdgeKind::Include,
+                    file_id,
+                });
             }
         }
 
-        // Process prepends
+        // Prepends
         for mixin_ref in prepends {
-            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+            if let Some(module_id) = utils::resolve_constant_fqn_from_parts(
                 self,
                 &mixin_ref.parts,
                 mixin_ref.absolute,
                 context_fqn,
-            ) {
-                if let Some(module_id) = self.get_fqn_id(&resolved_fqn) {
-                    self.graph.add_prepend(fqn_id, module_id, file_id);
-                }
+            )
+            .and_then(|fqn| self.get_fqn_id(&fqn))
+            {
+                self.graph.add_prepend(fqn_id, module_id, file_id);
+            } else {
+                self.push_unresolved(UnresolvedMixinEdge {
+                    source: fqn_id,
+                    target_parts: mixin_ref.parts.clone(),
+                    absolute: mixin_ref.absolute,
+                    context_fqn: context_fqn.clone(),
+                    kind: UnresolvedEdgeKind::Prepend,
+                    file_id,
+                });
             }
         }
 
-        // Process extends - add to Singleton namespace (extends add methods to singleton class)
-        // Find the singleton entry for the current class to add extend edges
-        let context_parts = context_fqn.namespace_parts();
-        let singleton_fqn = FullyQualifiedName::Namespace(context_parts, NamespaceKind::Singleton);
-
+        // Extends → modeled as singleton including module's instance namespace.
         for mixin_ref in extends {
-            if let Some(resolved_fqn) = utils::resolve_constant_fqn_from_parts(
+            let resolved = utils::resolve_constant_fqn_from_parts(
                 self,
                 &mixin_ref.parts,
                 mixin_ref.absolute,
                 context_fqn,
-            ) {
-                // Extends resolve to Instance namespace modules (their instance methods become class methods)
-                // In the "two nodes per class" model, "extend Foo" is:
-                //   Singleton node includes Foo's Instance namespace
-                if let (Some(singleton_id), Some(module_id)) = (
-                    self.get_fqn_id(&singleton_fqn),
-                    self.get_fqn_id(&resolved_fqn),
-                ) {
-                    self.graph.add_include(singleton_id, module_id, file_id);
+            );
+            let done = match (singleton_id, resolved.as_ref().and_then(|r| self.get_fqn_id(r))) {
+                (Some(s), Some(m)) => {
+                    self.graph.add_include(s, m, file_id);
+                    true
                 }
+                _ => false,
+            };
+            if !done {
+                if let Some(s) = singleton_id {
+                    self.push_unresolved(UnresolvedMixinEdge {
+                        source: s,
+                        target_parts: mixin_ref.parts.clone(),
+                        absolute: mixin_ref.absolute,
+                        context_fqn: context_fqn.clone(),
+                        kind: UnresolvedEdgeKind::ExtendAsInclude,
+                        file_id,
+                    });
+                }
+            }
+        }
+    }
+
+    fn push_unresolved(&mut self, edge: UnresolvedMixinEdge) {
+        self.unresolved_mixin_edges
+            .entry(edge.file_id)
+            .or_default()
+            .push(edge);
+    }
+
+    /// Clear pending unresolved mixin edges originating from this file.
+    /// Called at the start of `resolve_mixins_for_uri` so a re-index doesn't
+    /// accumulate stale pending records.
+    fn clear_unresolved_for_file(&mut self, file_id: FileId) {
+        self.unresolved_mixin_edges.remove(&file_id);
+    }
+
+    /// Retry resolution of all pending mixin edges. Moves resolvable ones into the graph.
+    ///
+    /// Called after `resolve_mixins_for_uri` and `resolve_all_mixins`. A single pass
+    /// is correct: each edge either resolves against the current index or stays pending.
+    /// Resolving an edge does not add new FQNs to the index, so there are no in-batch
+    /// cascades.
+    pub fn retry_unresolved_mixin_edges(&mut self) {
+        if self.unresolved_mixin_edges.is_empty() {
+            return;
+        }
+        let pending: Vec<UnresolvedMixinEdge> = self
+            .unresolved_mixin_edges
+            .drain()
+            .flat_map(|(_, v)| v)
+            .collect();
+
+        for edge in pending {
+            let resolved_fqn = utils::resolve_constant_fqn_from_parts(
+                self,
+                &edge.target_parts,
+                edge.absolute,
+                &edge.context_fqn,
+            );
+            let applied = match (&resolved_fqn, edge.kind) {
+                (Some(rfqn), UnresolvedEdgeKind::Include) => self
+                    .get_fqn_id(rfqn)
+                    .map(|m| self.graph.add_include(edge.source, m, edge.file_id))
+                    .is_some(),
+                (Some(rfqn), UnresolvedEdgeKind::Prepend) => self
+                    .get_fqn_id(rfqn)
+                    .map(|m| self.graph.add_prepend(edge.source, m, edge.file_id))
+                    .is_some(),
+                (Some(rfqn), UnresolvedEdgeKind::Superclass) => {
+                    let parent_instance = FullyQualifiedName::Namespace(
+                        rfqn.namespace_parts(),
+                        NamespaceKind::Instance,
+                    );
+                    self.get_fqn_id(&parent_instance)
+                        .map(|p| self.graph.set_superclass(edge.source, p, edge.file_id))
+                        .is_some()
+                }
+                (Some(rfqn), UnresolvedEdgeKind::SuperclassSingleton) => {
+                    let parent_singleton = FullyQualifiedName::Namespace(
+                        rfqn.namespace_parts(),
+                        NamespaceKind::Singleton,
+                    );
+                    self.get_fqn_id(&parent_singleton)
+                        .map(|p| self.graph.set_superclass(edge.source, p, edge.file_id))
+                        .is_some()
+                }
+                (Some(rfqn), UnresolvedEdgeKind::ExtendAsInclude) => self
+                    .get_fqn_id(rfqn)
+                    .map(|m| self.graph.add_include(edge.source, m, edge.file_id))
+                    .is_some(),
+                (None, _) => false,
+            };
+            if !applied {
+                self.push_unresolved(edge);
             }
         }
     }
@@ -1017,6 +1231,9 @@ impl RubyIndex {
         let Some(file_id) = self.files.get_id(uri).copied() else {
             return;
         };
+
+        // Drop this file's stale pending edges before re-resolving.
+        self.clear_unresolved_for_file(file_id);
 
         // Collect entries from this file
         let entries_data: Vec<(FqnId, Entry)> = self
@@ -1062,6 +1279,10 @@ impl RubyIndex {
                 _ => {}
             }
         }
+
+        // Retry pending — this file may have just added the namespace that
+        // unlocks edges from earlier-indexed files.
+        self.retry_unresolved_mixin_edges();
     }
 
     /// Get all classes that include this module (transitively through intermediate modules),
