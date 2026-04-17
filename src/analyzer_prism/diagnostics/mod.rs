@@ -4,6 +4,7 @@
 
 pub mod bad_splat;
 pub mod raise_non_exception;
+pub mod signature_mismatch;
 pub mod unresolved_method;
 
 /// Information about the receiver of a method call, used by the unresolved-method diagnostic.
