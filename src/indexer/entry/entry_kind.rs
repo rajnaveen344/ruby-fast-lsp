@@ -29,9 +29,12 @@ pub enum ParamKind {
     Optional,
     /// Rest/splat parameter: `def foo(*args)`
     Rest,
-    /// Keyword parameter: `def foo(name:)` or `def foo(name: "default")`
+    /// Required keyword parameter: `def foo(name:)`
     /// Already has a colon, so inlay hint should NOT add another
-    Keyword,
+    RequiredKeyword,
+    /// Optional keyword parameter with default: `def foo(name: "default")`
+    /// Already has a colon, so inlay hint should NOT add another
+    OptionalKeyword,
     /// Keyword rest/double-splat: `def foo(**kwargs)`
     KeywordRest,
     /// Block parameter: `def foo(&block)`
@@ -60,7 +63,7 @@ impl MethodParamInfo {
 
     /// Returns true if this parameter already has a colon (keyword params)
     pub fn has_colon(&self) -> bool {
-        self.kind == ParamKind::Keyword
+        matches!(self.kind, ParamKind::RequiredKeyword | ParamKind::OptionalKeyword)
     }
 }
 

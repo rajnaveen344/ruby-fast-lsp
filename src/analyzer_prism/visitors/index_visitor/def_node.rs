@@ -329,7 +329,7 @@ impl IndexVisitor {
                 params.push(MethodParamInfo::new(
                     param_name,
                     end_pos,
-                    ParamKind::Keyword,
+                    ParamKind::RequiredKeyword,
                 ));
             } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
@@ -341,7 +341,7 @@ impl IndexVisitor {
                 params.push(MethodParamInfo::new(
                     param_name,
                     end_pos,
-                    ParamKind::Keyword,
+                    ParamKind::OptionalKeyword,
                 ));
             }
         }

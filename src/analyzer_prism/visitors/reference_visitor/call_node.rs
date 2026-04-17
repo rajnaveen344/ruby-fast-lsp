@@ -25,7 +25,8 @@ struct MethodArity {
     required: usize,
     optional: usize,
     has_rest: bool,
-    keyword_names: Vec<String>,
+    required_keywords: Vec<String>,
+    optional_keywords: Vec<String>,
     has_kwrest: bool,
 }
 
@@ -34,14 +35,16 @@ impl MethodArity {
         let mut required = 0usize;
         let mut optional = 0usize;
         let mut has_rest = false;
-        let mut keyword_names = Vec::new();
+        let mut required_keywords = Vec::new();
+        let mut optional_keywords = Vec::new();
         let mut has_kwrest = false;
         for p in params {
             match p.kind {
                 ParamKind::Required => required += 1,
                 ParamKind::Optional => optional += 1,
                 ParamKind::Rest => has_rest = true,
-                ParamKind::Keyword => keyword_names.push(p.name.clone()),
+                ParamKind::RequiredKeyword => required_keywords.push(p.name.clone()),
+                ParamKind::OptionalKeyword => optional_keywords.push(p.name.clone()),
                 ParamKind::KeywordRest => has_kwrest = true,
                 ParamKind::Block => {}
             }
@@ -50,7 +53,8 @@ impl MethodArity {
             required,
             optional,
             has_rest,
-            keyword_names,
+            required_keywords,
+            optional_keywords,
             has_kwrest,
         }
     }
@@ -97,7 +101,9 @@ fn collect_unknown_kwargs<'a>(
             None => continue,
         };
         let name = String::from_utf8_lossy(value_loc.as_slice()).to_string();
-        if !arity.keyword_names.contains(&name) {
+        let declared = arity.required_keywords.contains(&name)
+            || arity.optional_keywords.contains(&name);
+        if !declared {
             unknown.push((name, value_loc));
         }
     }
@@ -442,8 +448,14 @@ impl ReferenceVisitor {
                         );
                     }
                     if let Some(unknowns) = collect_unknown_kwargs(node, &arity) {
+                        let all_keyword_names: Vec<String> = arity
+                            .required_keywords
+                            .iter()
+                            .chain(arity.optional_keywords.iter())
+                            .cloned()
+                            .collect();
                         for (kwarg_name, kw_loc) in unknowns {
-                            let suggestion = closest_kwarg(&kwarg_name, &arity.keyword_names);
+                            let suggestion = closest_kwarg(&kwarg_name, &all_keyword_names);
                             let kw_lsp_loc =
                                 self.document.prism_location_to_lsp_location(&kw_loc);
                             index.add_unresolved_entry(
