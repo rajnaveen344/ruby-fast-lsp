@@ -250,6 +250,18 @@ impl IndexerProject {
 
         let file_processor = self.file_processor.clone();
 
+        // Enable per-file timing via `RUBY_FAST_LSP_TRACE=1` (env). Leaves the
+        // hot path branch-free when off (checked once up front).
+        let tracing_on = std::env::var("RUBY_FAST_LSP_TRACE")
+            .map(|v| v != "0" && !v.is_empty())
+            .unwrap_or(false);
+        let per_file_timings: Arc<Mutex<Vec<(PathBuf, std::time::Duration)>>> =
+            Arc::new(Mutex::new(Vec::with_capacity(if tracing_on {
+                total_files
+            } else {
+                0
+            })));
+
         // Process in batches for progress reporting
         for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
             // Report progress before each batch
@@ -264,6 +276,11 @@ impl IndexerProject {
 
             // Process batch in parallel with rayon
             let file_processor_ref = &file_processor;
+            let timings_ref = if tracing_on {
+                Some(&per_file_timings)
+            } else {
+                None
+            };
 
             batch.par_iter().for_each(|file_path| {
                 // Read file content
@@ -275,6 +292,8 @@ impl IndexerProject {
                     }
                 };
 
+                let start = timings_ref.map(|_| std::time::Instant::now());
+
                 // Index references
                 if let Ok(uri) = Url::from_file_path(file_path) {
                     if let Err(e) = file_processor_ref.index_references(&uri, &content) {
@@ -283,7 +302,29 @@ impl IndexerProject {
                 } else {
                     warn!("Failed to convert path to URI: {:?}", file_path);
                 }
+
+                if let (Some(start), Some(timings)) = (start, timings_ref) {
+                    let elapsed = start.elapsed();
+                    timings.lock().push((file_path.clone(), elapsed));
+                }
             });
+        }
+
+        // Dump top slow files if tracing was on. This is the simplest
+        // signal to identify pathological files that dominate Phase 2.
+        if tracing_on {
+            let mut timings = per_file_timings.lock();
+            timings.sort_by(|a, b| b.1.cmp(&a.1));
+            let total: std::time::Duration = timings.iter().map(|(_, d)| *d).sum();
+            info!(
+                "[trace] Phase 2 per-file sum: {:?} across {} files (wall < sum × worker count)",
+                total,
+                timings.len()
+            );
+            info!("[trace] Top 20 slowest files:");
+            for (path, dur) in timings.iter().take(20) {
+                info!("[trace]   {:>10.2?}  {}", dur, path.display());
+            }
         }
 
         // Final progress report

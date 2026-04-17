@@ -1,5 +1,5 @@
+use once_cell::unsync::OnceCell;
 use ruby_prism::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Url};
 
@@ -72,13 +72,12 @@ pub struct ReferenceVisitor {
     /// flushed under a single write lock by the file processor. See
     /// [`PendingWrites`] for the rationale.
     pub staged: PendingWrites,
-    /// Per-file cache for `infer_variable_type`. The inference does a naive
-    /// linear scan of the whole file content to find `varname = Class.new`
-    /// assignments; without memoization every expression-receiver call that
-    /// bottoms out in a local var re-scans the file. For goshposh-shape
-    /// (many chained `user.thing.other`) this was the dominant phase-2
-    /// self-time.
-    pub variable_type_cache: RefCell<HashMap<String, Option<RubyType>>>,
+    /// Per-file map of `varname` → inferred type from `varname = Class.new`
+    /// assignments. Built lazily on first lookup via a single pass over the
+    /// file content — 22k-line megafiles (goshposh/lib/platform/commerce.rb)
+    /// otherwise re-scan the file once per distinct variable referenced,
+    /// collapsing that to one scan total.
+    pub variable_types: OnceCell<HashMap<String, RubyType>>,
 }
 
 impl ReferenceVisitor {
@@ -99,7 +98,7 @@ impl ReferenceVisitor {
             include_local_vars,
             track_unresolved: false,
             staged: PendingWrites::default(),
-            variable_type_cache: RefCell::new(HashMap::new()),
+            variable_types: OnceCell::new(),
         }
     }
 
@@ -117,27 +116,65 @@ impl ReferenceVisitor {
             include_local_vars,
             track_unresolved: true,
             staged: PendingWrites::default(),
-            variable_type_cache: RefCell::new(HashMap::new()),
+            variable_types: OnceCell::new(),
         }
     }
 
-    /// Memoizing wrapper around [`infer_variable_type_uncached`]. The
-    /// underlying scan is O(file_lines) per call and fires many times per
-    /// file on chained receivers — caching by variable name per visit
-    /// collapses that to O(distinct_vars × file_lines).
+    /// O(1) lookup of a local variable's inferred type (from
+    /// `name = ClassName.new` assignments anywhere in the file). The first
+    /// call triggers one linear scan that populates the whole map; all
+    /// subsequent calls are HashMap lookups. See [`Self::variable_types`]
+    /// for the rationale.
     pub fn infer_variable_type_cached(&self, var_name: &str) -> Option<RubyType> {
-        {
-            let cache = self.variable_type_cache.borrow();
-            if let Some(v) = cache.get(var_name) {
-                return v.clone();
-            }
-        }
-        let ty = self.infer_variable_type_uncached(var_name);
-        self.variable_type_cache
-            .borrow_mut()
-            .insert(var_name.to_string(), ty.clone());
-        ty
+        let map = self
+            .variable_types
+            .get_or_init(|| build_variable_type_map(&self.document.content));
+        map.get(var_name).cloned()
     }
+}
+
+/// One-pass scan that extracts every `name = ClassName.new` assignment in
+/// the file. First assignment wins (matches the prior semantics of the
+/// linear scan it replaces). Called once per file on demand.
+fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
+    use crate::types::ruby_namespace::RubyConstant;
+
+    let mut map: HashMap<String, RubyType> = HashMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let Some(eq_idx) = trimmed.find('=') else {
+            continue;
+        };
+        let lhs = trimmed[..eq_idx].trim();
+        // Valid local-variable name: starts with lowercase/_, only word chars.
+        let mut chars = lhs.chars();
+        let first = match chars.next() {
+            Some(c) if c.is_lowercase() || c == '_' => c,
+            _ => continue,
+        };
+        let _ = first;
+        if !lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let rhs_full = trimmed[eq_idx + 1..].trim();
+        let Some(new_pos) = rhs_full.find(".new") else {
+            continue;
+        };
+        let class_part = rhs_full[..new_pos].trim();
+        if !class_part.chars().next().is_some_and(|c| c.is_uppercase()) {
+            continue;
+        }
+        let parts: Vec<_> = class_part
+            .split("::")
+            .filter_map(|s| RubyConstant::new(s.trim()).ok())
+            .collect();
+        if parts.is_empty() {
+            continue;
+        }
+        map.entry(lhs.to_string())
+            .or_insert_with(|| RubyType::Class(FullyQualifiedName::Constant(parts)));
+    }
+    map
 }
 
 impl Visit<'_> for ReferenceVisitor {
