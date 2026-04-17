@@ -261,13 +261,34 @@ impl ReferenceVisitor {
             }
         }
 
-        // Wrong-arity check (V1: NoReceiver + ConstantReceiver, positional only).
+        // Wrong-arity check (positional only). Skips splat callsites, kwargs, block.
         if self.track_unresolved {
             let owner_for_arity = match &receiver_info {
                 ReceiverInfo::NoReceiver | ReceiverInfo::ConstantReceiver(_) => {
                     Some((target_namespace.clone(), namespace_kind))
                 }
-                _ => None,
+                ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                    // Same gating as unresolved-method on expr receivers: only
+                    // when receiver class is user-defined (in the user index).
+                    // Stdlib types (String/Array) are RBS-backed → skip.
+                    if let Some(RubyType::Class(fqn) | RubyType::Module(fqn)) =
+                        &inferred_expr_type
+                    {
+                        let known = fqn
+                            .to_instance_namespace()
+                            .as_ref()
+                            .map(|ns_fqn| index.contains_fqn(ns_fqn))
+                            .unwrap_or(false);
+                        if known {
+                            Some((fqn.namespace_parts(), NamespaceKind::Instance))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                ReceiverInfo::SelfReceiver => None,
             };
             if let Some((owner, kind)) = owner_for_arity {
                 if let Some(arity) =

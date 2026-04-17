@@ -141,6 +141,69 @@ Foo.<warn code="wrong-arity">bar</warn>(1)
 }
 
 #[tokio::test]
+async fn expr_receiver_too_many_warns() {
+    check(
+        r#"
+class User
+  def name
+    "x"
+  end
+end
+
+u = User.new
+u.<warn code="wrong-arity">name</warn>(1, 2)
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn expr_receiver_too_few_warns() {
+    check(
+        r#"
+class User
+  def greet(name, age)
+    name
+  end
+end
+
+u = User.new
+u.<warn code="wrong-arity">greet</warn>("a")
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn expr_receiver_exact_no_warn() {
+    check(
+        r#"
+class User
+  def greet(name)
+    name
+  end
+end
+
+u = User.new
+<warn none code="wrong-arity">u.greet("a")</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn expr_receiver_unknown_class_no_warn() {
+    // String#upcase is RBS-backed, not in user index → skip arity check.
+    check(
+        r#"
+s = "hello"
+<warn none code="wrong-arity">s.upcase(1, 2)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn constant_receiver_exact_no_warn() {
     check(
         r#"
