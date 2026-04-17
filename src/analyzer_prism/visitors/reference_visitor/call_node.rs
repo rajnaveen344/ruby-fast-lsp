@@ -926,40 +926,32 @@ impl ReferenceVisitor {
 
         let target_len = target.len();
         let mut best: Option<(String, usize)> = None;
-        for (ruby_method, entries) in index.methods_by_name() {
-            let candidate = ruby_method.get_name();
-            // Skip the target itself (shouldn't happen, but defensive).
-            if candidate == target {
-                continue;
-            }
-            // Triangle inequality: |len(a) - len(b)| <= levenshtein(a, b).
-            // A length delta greater than the threshold means the edit
-            // distance must exceed it too — skip the expensive DP. This
-            // prunes the vast majority of the N×M comparisons on large
-            // indexes (measured: Mastodon phase 2 from 130s → <10s).
-            if candidate.len().abs_diff(target_len) > threshold {
-                continue;
-            }
-            // Confirm at least one entry's owner is in our search set.
-            // Check ownership BEFORE levenshtein — cheaper than DP when
-            // most index-wide candidates live in unrelated namespaces.
-            let belongs = entries.iter().any(|e| {
-                if let EntryKind::Method(data) = &e.kind {
-                    search.contains(&data.owner)
-                } else {
-                    false
+
+        // Walk ONLY methods defined on owners in the search set — the old
+        // code iterated every method in the index (stdlib + gems + project)
+        // and filtered by ownership inside the loop, which was O(total_methods)
+        // per unresolved call. The targeted iteration is bounded by the
+        // ancestor chain, typically a few dozen methods total.
+        for owner_fqn in &search {
+            for entry in index.methods_on_owner(owner_fqn) {
+                let EntryKind::Method(data) = &entry.kind else { continue };
+                let candidate = data.name.get_name();
+                if candidate == target {
+                    continue;
                 }
-            });
-            if !belongs {
-                continue;
-            }
-            let dist = levenshtein(&candidate, target);
-            if dist > threshold {
-                continue;
-            }
-            match &best {
-                Some((_, d)) if *d <= dist => {}
-                _ => best = Some((candidate.to_string(), dist)),
+                // Triangle inequality: |len(a) - len(b)| <= levenshtein(a, b).
+                // Skip the DP when the length delta alone exceeds the threshold.
+                if candidate.len().abs_diff(target_len) > threshold {
+                    continue;
+                }
+                let dist = levenshtein(&candidate, target);
+                if dist > threshold {
+                    continue;
+                }
+                match &best {
+                    Some((_, d)) if *d <= dist => {}
+                    _ => best = Some((candidate.to_string(), dist)),
+                }
             }
         }
         best.map(|(name, _)| name)

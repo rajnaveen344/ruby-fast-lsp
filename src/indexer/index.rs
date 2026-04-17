@@ -87,6 +87,10 @@ pub struct RubyIndex {
     by_uri: HashMap<Url, Vec<EntryId>>,
     by_fqn: HashMap<FullyQualifiedName, Vec<EntryId>>,
     by_method_name: HashMap<RubyMethod, Vec<EntryId>>,
+    /// Maps owner namespace FQN → Method entry IDs defined directly on that
+    /// owner. Used by `find_method_suggestion` to avoid scanning every method
+    /// in the index for each unresolved call.
+    by_method_owner: HashMap<FullyQualifiedName, Vec<EntryId>>,
     /// Maps caller method FQN → all Reference entries made from within that method (for outgoing calls)
     by_caller: HashMap<FullyQualifiedName, Vec<EntryId>>,
 
@@ -122,6 +126,7 @@ impl RubyIndex {
             by_uri: HashMap::new(),
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
+            by_method_owner: HashMap::new(),
             by_caller: HashMap::new(),
 
             // Interned storage
@@ -349,9 +354,13 @@ impl RubyIndex {
         }
         self.by_fqn.entry(fqn).or_default().push(id);
 
-        // Add to method name index if it's a method
+        // Add to method name + owner indexes if it's a method
         if let EntryKind::Method(data) = &entry.kind {
             self.by_method_name.entry(data.name).or_default().push(id);
+            self.by_method_owner
+                .entry(data.owner.clone())
+                .or_default()
+                .push(id);
         }
 
         // Add to prefix tree
@@ -381,6 +390,7 @@ impl RubyIndex {
             HashSet::with_capacity(ids_to_remove.len() / 4);
         let mut unique_method_names: HashSet<RubyMethod> =
             HashSet::with_capacity(ids_to_remove.len() / 100);
+        let mut unique_method_owners: HashSet<FullyQualifiedName> = HashSet::new();
         let mut unique_caller_fqns: HashSet<FullyQualifiedName> = HashSet::new();
         let mut removed_ids_set: HashSet<_> = HashSet::with_capacity(ids_to_remove.len());
 
@@ -394,6 +404,7 @@ impl RubyIndex {
                 match &entry.kind {
                     EntryKind::Method(data) => {
                         unique_method_names.insert(data.name.clone());
+                        unique_method_owners.insert(data.owner.clone());
                     }
                     EntryKind::Reference(Some(data)) => {
                         unique_caller_fqns.insert(data.caller_fqn.clone());
@@ -419,6 +430,16 @@ impl RubyIndex {
                 ids.retain(|id| !removed_ids_set.contains(id));
                 if ids.is_empty() {
                     self.by_method_name.remove(method_name);
+                }
+            }
+        }
+
+        // 3b. Clean up by_method_owner index
+        for owner in &unique_method_owners {
+            if let Some(ids) = self.by_method_owner.get_mut(owner) {
+                ids.retain(|id| !removed_ids_set.contains(id));
+                if ids.is_empty() {
+                    self.by_method_owner.remove(owner);
                 }
             }
         }
@@ -708,6 +729,16 @@ impl RubyIndex {
     pub fn file_entries(&self, uri: &Url) -> Vec<&Entry> {
         self.by_uri
             .get(uri)
+            .map(|ids| ids.iter().filter_map(|id| self.entries.get(*id)).collect())
+            .unwrap_or_default()
+    }
+
+    /// All Method entries defined directly on the given owner namespace.
+    /// `owner` must carry the correct namespace-kind (Instance / Singleton)
+    /// since method entries are keyed on the kind-qualified owner FQN.
+    pub fn methods_on_owner(&self, owner: &FullyQualifiedName) -> Vec<&Entry> {
+        self.by_method_owner
+            .get(owner)
             .map(|ids| ids.iter().filter_map(|id| self.entries.get(*id)).collect())
             .unwrap_or_default()
     }
