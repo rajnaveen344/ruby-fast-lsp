@@ -10,6 +10,7 @@
 //! type snapshots at each statement, with explicit offset ranges showing where
 //! each type is valid.
 
+use crate::analyzer_prism::control_flow;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::MethodResolver;
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
@@ -223,25 +224,28 @@ impl<'a> TypeTracker<'a> {
         let predicate = if_node.predicate();
         self.track_node(&predicate);
 
-        // Save the current environment before branching
         let env_before = self.vars.clone();
 
-        // Track the then branch
+        // Then branch
+        let then_diverges = if_node
+            .statements()
+            .map(|s| control_flow::diverges(&s.as_node()))
+            .unwrap_or(false);
         let then_type = if let Some(statements) = if_node.statements() {
             self.track_node(&statements.as_node())
         } else {
             RubyType::nil_class()
         };
-
-        // Save then branch state
         let then_env = self.vars.clone();
 
-        // Reset to pre-branch state for else branch
         self.vars = env_before.clone();
 
-        // Track the else branch
+        // Else branch
+        let else_diverges = if_node
+            .subsequent()
+            .map(|n| control_flow::diverges(&n))
+            .unwrap_or(false);
         let else_type = if let Some(subsequent) = if_node.subsequent() {
-            // subsequent could be ElseNode or another IfNode (elsif)
             match &subsequent {
                 _ if subsequent.as_else_node().is_some() => {
                     let else_node = subsequent.as_else_node().unwrap();
@@ -252,26 +256,29 @@ impl<'a> TypeTracker<'a> {
                     }
                 }
                 _ if subsequent.as_if_node().is_some() => {
-                    // Handle elsif as another if
                     let elsif_node = subsequent.as_if_node().unwrap();
                     self.track_if(&elsif_node)
                 }
                 _ => RubyType::nil_class(),
             }
         } else {
-            // No else branch - variables might be undefined
             RubyType::nil_class()
         };
-
-        // Save else branch state
         let else_env = self.vars.clone();
 
-        // Merge environments (var_types already has entries from both branches)
-        self.vars = then_env;
-        self.merge_env(&else_env, if_node.subsequent().is_none());
+        // Merge envs — diverging branches never reach the join point.
+        match (then_diverges, else_diverges) {
+            (true, true) => self.vars = env_before,
+            (true, false) => self.vars = else_env,
+            (false, true) => self.vars = then_env,
+            (false, false) => {
+                self.vars = then_env;
+                self.merge_env(&else_env, if_node.subsequent().is_none());
+            }
+        }
 
-        // Return type is union of both branches
-        RubyType::union(vec![then_type, else_type])
+        // Type union — exclude diverging branches.
+        join_branch_types(&[(then_type, then_diverges), (else_type, else_diverges)])
     }
 
     /// Track a case statement with branch merging
@@ -284,76 +291,74 @@ impl<'a> TypeTracker<'a> {
             self.track_node(&predicate);
         }
 
-        // Save the current environment before branching
         let env_before = self.vars.clone();
 
-        // Track all when branches and collect their environments
-        let mut branch_envs = Vec::new();
-        let mut branch_types = Vec::new();
+        // (env, type, diverges) per branch.
+        let mut branches: Vec<(HashMap<String, RubyType>, RubyType, bool)> = Vec::new();
 
         for condition in case_node.conditions().iter() {
             if let Some(when_node) = condition.as_when_node() {
-                // Reset to pre-branch state for this when clause
                 self.vars = env_before.clone();
-
-                // Track this when branch
+                let diverges = when_node
+                    .statements()
+                    .map(|s| control_flow::diverges(&s.as_node()))
+                    .unwrap_or(false);
                 let branch_type = if let Some(statements) = when_node.statements() {
                     self.track_node(&statements.as_node())
                 } else {
                     RubyType::nil_class()
                 };
-
-                // Save this branch's state
-                branch_envs.push(self.vars.clone());
-                branch_types.push(branch_type);
+                branches.push((self.vars.clone(), branch_type, diverges));
             }
         }
 
-        // Track the else clause if present
         let has_else = case_node.else_clause().is_some();
         if has_else {
-            // Reset to pre-branch state for else
             self.vars = env_before.clone();
-
-            let else_type = if let Some(else_clause) = case_node.else_clause() {
-                if let Some(statements) = else_clause.statements() {
-                    self.track_node(&statements.as_node())
-                } else {
-                    RubyType::nil_class()
-                }
+            let else_clause = case_node.else_clause().unwrap();
+            let diverges = else_clause
+                .statements()
+                .map(|s| control_flow::diverges(&s.as_node()))
+                .unwrap_or(false);
+            let else_type = if let Some(statements) = else_clause.statements() {
+                self.track_node(&statements.as_node())
             } else {
                 RubyType::nil_class()
             };
-
-            branch_envs.push(self.vars.clone());
-            branch_types.push(else_type);
+            branches.push((self.vars.clone(), else_type, diverges));
         }
 
-        // Merge all branches
-        if branch_envs.is_empty() {
-            // No when clauses - just return nil
+        if branches.is_empty() {
             return RubyType::nil_class();
         }
 
-        // Start with the first branch
-        self.vars = branch_envs[0].clone();
+        // Pick post-state from non-diverging branches only.
+        let surviving_envs: Vec<&HashMap<String, RubyType>> = branches
+            .iter()
+            .filter(|(_, _, d)| !*d)
+            .map(|(env, _, _)| env)
+            .collect();
 
-        // Merge all other branches
-        for i in 1..branch_envs.len() {
-            self.merge_env(&branch_envs[i], false);
-        }
-
-        // If there's no else clause, variables might be undefined
-        if !has_else {
-            // Add nil to all variables that were defined in any branch
-            for (var, ty) in self.vars.clone() {
-                let union = RubyType::union(vec![ty, RubyType::nil_class()]);
-                self.vars.insert(var, union);
+        if surviving_envs.is_empty() {
+            // All branches diverge — code after is unreachable. Keep pre-state.
+            self.vars = env_before;
+        } else {
+            self.vars = surviving_envs[0].clone();
+            for env in &surviving_envs[1..] {
+                self.merge_env(env, false);
+            }
+            if !has_else {
+                for (var, ty) in self.vars.clone() {
+                    let union = RubyType::union(vec![ty, RubyType::nil_class()]);
+                    self.vars.insert(var, union);
+                }
             }
         }
 
-        // Return type is union of all branches
-        RubyType::union(branch_types)
+        // Type union — exclude diverging branches.
+        let typed_branches: Vec<(RubyType, bool)> =
+            branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
+        join_branch_types(&typed_branches)
     }
 
     /// Track a while loop with limited iterations
@@ -419,23 +424,28 @@ impl<'a> TypeTracker<'a> {
         let predicate = unless_node.predicate();
         self.track_node(&predicate);
 
-        // Save the current environment before branching
         let env_before = self.vars.clone();
 
-        // Track the then branch (executes when predicate is false)
+        // Then branch (executes when predicate is false)
+        let then_diverges = unless_node
+            .statements()
+            .map(|s| control_flow::diverges(&s.as_node()))
+            .unwrap_or(false);
         let then_type = if let Some(statements) = unless_node.statements() {
             self.track_node(&statements.as_node())
         } else {
             RubyType::nil_class()
         };
-
-        // Save then branch state
         let then_env = self.vars.clone();
 
-        // Reset to pre-branch state for else branch
         self.vars = env_before.clone();
 
-        // Track the else branch
+        // Else branch
+        let else_diverges = unless_node
+            .else_clause()
+            .and_then(|e| e.statements())
+            .map(|s| control_flow::diverges(&s.as_node()))
+            .unwrap_or(false);
         let else_type = if let Some(else_clause) = unless_node.else_clause() {
             if let Some(statements) = else_clause.statements() {
                 self.track_node(&statements.as_node())
@@ -445,16 +455,19 @@ impl<'a> TypeTracker<'a> {
         } else {
             RubyType::nil_class()
         };
-
-        // Save else branch state
         let else_env = self.vars.clone();
 
-        // Merge environments (var_types already has entries from both branches)
-        self.vars = then_env;
-        self.merge_env(&else_env, unless_node.else_clause().is_none());
+        match (then_diverges, else_diverges) {
+            (true, true) => self.vars = env_before,
+            (true, false) => self.vars = else_env,
+            (false, true) => self.vars = then_env,
+            (false, false) => {
+                self.vars = then_env;
+                self.merge_env(&else_env, unless_node.else_clause().is_none());
+            }
+        }
 
-        // Return type is union of both branches
-        RubyType::union(vec![then_type, else_type])
+        join_branch_types(&[(then_type, then_diverges), (else_type, else_diverges)])
     }
 
     /// Infer the type of an expression
@@ -666,6 +679,25 @@ impl<'a> TypeTracker<'a> {
                 }
             }
         }
+    }
+}
+
+/// Join branch result types into the surrounding expression's type, excluding
+/// branches that always diverge (return/raise/break/...). The join point is
+/// never reached via a diverging branch, so its result type is irrelevant.
+///
+/// All branches diverge → `Unknown` (Bottom-equivalent; downstream consumers
+/// already treat this as "no information").
+fn join_branch_types(branches: &[(RubyType, bool)]) -> RubyType {
+    let surviving: Vec<RubyType> = branches
+        .iter()
+        .filter(|(_, diverges)| !*diverges)
+        .map(|(ty, _)| ty.clone())
+        .collect();
+    if surviving.is_empty() {
+        RubyType::Unknown
+    } else {
+        RubyType::union(surviving)
     }
 }
 
