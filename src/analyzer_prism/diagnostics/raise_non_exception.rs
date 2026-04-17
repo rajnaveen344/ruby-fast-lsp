@@ -1,5 +1,6 @@
 use ruby_prism::CallNode;
 
+use crate::analyzer_prism::utils;
 use crate::{
     indexer::{
         entry::entry_kind::EntryKind,
@@ -236,10 +237,10 @@ pub fn check(
 
     // Constant reference (e.g., `raise MyError`).
     if let Some(const_read) = first_arg.as_constant_read_node() {
-        let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+        let name = utils::utf8_str(const_read.name().as_slice());
         let guard = index.read();
         let symbols: &dyn SymbolTable = &*guard;
-        if !is_exception_class(symbols, &name) {
+        if !is_exception_class(symbols, name) {
             return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
         }
         return None;
@@ -259,12 +260,12 @@ pub fn check(
 
     // LocalVariableReadNode — look up inferred type via VariableScopes.
     if let Some(local) = first_arg.as_local_variable_read_node() {
-        let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+        let var_name = utils::utf8_str(local.name().as_slice());
         let var_loc = first_arg.location();
         let var_pos = document.offset_to_position(var_loc.start_offset());
         let scopes = document.variable_scopes();
         let scope_id = scopes
-            .find_scope_for_variable_at(&var_name, var_pos)
+            .find_scope_for_variable_at(var_name, var_pos)
             .or_else(|| scopes.scope_at_position(var_pos));
         if let Some(sid) = scope_id {
             if let Some(ty) = scopes.get_type_at_position(&var_name, sid, var_pos) {
@@ -292,11 +293,10 @@ pub fn check(
             resolver.resolve_call_type(&inner_call)
         } else {
             // Bare method call (no receiver) — look up by name in current namespace.
-            let method_name =
-                String::from_utf8_lossy(inner_call.name().as_slice()).to_string();
+            let method_name = utils::utf8_str(inner_call.name().as_slice());
             let guard = index.read();
             let symbols: &dyn SymbolTable = &*guard;
-            resolve_bare_call_return_type(symbols, current_namespace, &method_name)
+            resolve_bare_call_return_type(symbols, current_namespace, method_name)
         };
         if let Some(ty) = ty {
             let guard = index.read();

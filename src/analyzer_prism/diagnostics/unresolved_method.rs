@@ -154,14 +154,14 @@ fn find_suggestion(
             let EntryKind::Method(data) = &entry.kind else {
                 continue;
             };
-            let candidate = data.name.get_name();
+            let candidate = data.name.as_str();
             if candidate == target {
                 continue;
             }
             if candidate.len().abs_diff(target_len) > threshold {
                 continue;
             }
-            let dist = crate::analyzer_prism::utils::levenshtein(&candidate, target);
+            let dist = crate::analyzer_prism::utils::levenshtein(candidate, target);
             if dist > threshold {
                 continue;
             }

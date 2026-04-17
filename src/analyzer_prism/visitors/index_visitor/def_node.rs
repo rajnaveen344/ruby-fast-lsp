@@ -48,7 +48,7 @@ impl IndexVisitor {
         let mut method = RubyMethod::new(method_name_str.as_ref()).unwrap();
         let mut actual_namespace_kind = namespace_kind;
 
-        if method.get_name() == "initialize" {
+        if method.as_str() == "initialize" {
             method = RubyMethod::new("new").unwrap();
             actual_namespace_kind = NamespaceKind::Singleton;
         }

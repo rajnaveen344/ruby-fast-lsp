@@ -21,17 +21,16 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
         if let Some(parent_const_path) = parent.as_constant_path_node() {
             collect_namespaces(&parent_const_path, acc);
         } else if let Some(parent_const_read) = parent.as_constant_read_node() {
-            let parent_name =
-                String::from_utf8_lossy(parent_const_read.name().as_slice()).to_string();
-            if let Ok(constant) = RubyConstant::new(&parent_name) {
+            let parent_name = utf8_str(parent_const_read.name().as_slice());
+            if let Ok(constant) = RubyConstant::new(parent_name) {
                 acc.push(constant);
             }
         }
     }
 
     if let Some(name_node) = node.name() {
-        let name = String::from_utf8_lossy(name_node.as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
+        let name = utf8_str(name_node.as_slice());
+        if let Ok(constant) = RubyConstant::new(name) {
             acc.push(constant);
         }
     }
@@ -45,8 +44,8 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
 /// call was made (for CodeLens and other features that need to show the call site).
 pub fn mixin_ref_from_node(node: &Node, location: CompactLocation) -> Option<MixinRef> {
     if let Some(n) = node.as_constant_read_node() {
-        let name = String::from_utf8_lossy(n.name().as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
+        let name = utf8_str(n.name().as_slice());
+        if let Ok(constant) = RubyConstant::new(name) {
             Some(MixinRef {
                 parts: vec![constant],
                 absolute: false,
@@ -76,9 +75,9 @@ pub fn fqn_from_node(
     current_namespace: &[RubyConstant],
 ) -> Option<FullyQualifiedName> {
     if let Some(n) = node.as_constant_read_node() {
-        let name = String::from_utf8_lossy(n.name().as_slice()).to_string();
+        let name = utf8_str(n.name().as_slice());
         let mut fqn_parts = current_namespace.to_vec();
-        if let Ok(constant) = RubyConstant::new(&name) {
+        if let Ok(constant) = RubyConstant::new(name) {
             fqn_parts.push(constant);
             Some(FullyQualifiedName::Constant(fqn_parts))
         } else {
@@ -125,8 +124,8 @@ fn resolve_constant_read_fqn(
     node: &ConstantReadNode,
     current_fqn: &FullyQualifiedName,
 ) -> Option<FullyQualifiedName> {
-    let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-    let constant = RubyConstant::new(&name).ok()?;
+    let name = utf8_str(node.name().as_slice());
+    let constant = RubyConstant::new(name).ok()?;
 
     resolve_constant_fqn_from_parts(index, &[constant], false, current_fqn)
 }
@@ -240,11 +239,11 @@ pub fn get_method_namespace_kind(
         if receiver.as_self_node().is_some() {
             namespace_kind = NamespaceKind::Singleton;
         } else if let Some(read_node) = receiver.as_constant_read_node() {
-            let recv_name = String::from_utf8_lossy(read_node.name().as_slice()).to_string();
+            let recv_name = utf8_str(read_node.name().as_slice());
             // Current namespace last element (if any) should match receiver constant
             let last_ns = current_namespace.last();
             if let Some(last) = last_ns {
-                if last.to_string() == recv_name {
+                if last.as_str() == recv_name {
                     namespace_kind = NamespaceKind::Singleton;
                 } else {
                     skip_method = true;
@@ -283,6 +282,12 @@ pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKin
     } else {
         NamespaceKind::Instance
     }
+}
+
+/// Zero-alloc view of a prism byte slice as &str. Prism identifiers are
+/// expected to be valid UTF-8; any invalid bytes yield "".
+pub(crate) fn utf8_str(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or("")
 }
 
 /// Compute Levenshtein edit distance between two ASCII byte strings.
@@ -328,11 +333,9 @@ pub(crate) fn collect_constant_path_parts_for_name(node: &Node, parts: &mut Vec<
         }
         // Then add the name (right side)
         if let Some(name_bytes) = constant_path.name() {
-            let name = String::from_utf8_lossy(name_bytes.as_slice()).to_string();
-            parts.push(name);
+            parts.push(utf8_str(name_bytes.as_slice()).to_string());
         }
     } else if let Some(constant_read) = node.as_constant_read_node() {
-        let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-        parts.push(name);
+        parts.push(utf8_str(constant_read.name().as_slice()).to_string());
     }
 }

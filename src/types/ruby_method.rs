@@ -93,6 +93,12 @@ impl RubyMethod {
     pub fn get_name(&self) -> String {
         self.0.to_string()
     }
+
+    /// Zero-alloc view into the interned Ustr arena. The returned &str has
+    /// 'static lifetime since Ustr stores strings in a global arena.
+    pub fn as_str(&self) -> &'static str {
+        self.0.as_str()
+    }
 }
 
 impl fmt::Display for RubyMethod {

@@ -30,8 +30,8 @@ impl ReferenceVisitor {
             .variable_scopes_mut()
             .enter_child_scope(body_loc.range);
 
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        match RubyMethod::new(name.as_str()) {
+        let name = utils::utf8_str(node.name().as_slice());
+        match RubyMethod::new(name) {
             Ok(method) => {
                 let ns = self.scope_tracker.get_ns_stack();
                 let method_fqn = FullyQualifiedName::method(ns, method);

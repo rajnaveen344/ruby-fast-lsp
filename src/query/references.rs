@@ -66,7 +66,7 @@ impl IndexQuery {
         position: Position,
     ) -> Option<Vec<Location>> {
         // `def initialize` is indexed as `new` (singleton) — map accordingly
-        if method.get_name() == "initialize" {
+        if method.as_str() == "initialize" {
             if let Ok(new_method) = RubyMethod::new("new") {
                 let context_fqn = FullyQualifiedName::Constant(ancestors.to_vec());
                 return self.find_method_refs_with_receiver(&context_fqn, &new_method);

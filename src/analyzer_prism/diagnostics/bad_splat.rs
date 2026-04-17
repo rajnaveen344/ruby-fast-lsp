@@ -1,6 +1,7 @@
 use ruby_prism::{CallNode, Node};
 
 use crate::{
+    analyzer_prism::utils,
     indexer::index::UnresolvedEntry,
     inferrer::r#type::ruby::RubyType,
     types::ruby_document::RubyDocument,
@@ -77,14 +78,14 @@ fn is_definitely_non_array(expr: &Node, document: &RubyDocument) -> bool {
         return true;
     }
     if let Some(local) = expr.as_local_variable_read_node() {
-        let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+        let var_name = utils::utf8_str(local.name().as_slice());
         let pos = document.offset_to_position(expr.location().start_offset());
         let scopes = document.variable_scopes();
         let sid = scopes
-            .find_scope_for_variable_at(&var_name, pos)
+            .find_scope_for_variable_at(var_name, pos)
             .or_else(|| scopes.scope_at_position(pos));
         if let Some(sid) = sid {
-            if let Some(ty) = scopes.get_type_at_position(&var_name, sid, pos) {
+            if let Some(ty) = scopes.get_type_at_position(var_name, sid, pos) {
                 return is_type_definitely_non_array(ty);
             }
         }
@@ -113,14 +114,14 @@ fn is_definitely_non_hash(expr: &Node, document: &RubyDocument) -> bool {
         return true;
     }
     if let Some(local) = expr.as_local_variable_read_node() {
-        let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+        let var_name = utils::utf8_str(local.name().as_slice());
         let pos = document.offset_to_position(expr.location().start_offset());
         let scopes = document.variable_scopes();
         let sid = scopes
-            .find_scope_for_variable_at(&var_name, pos)
+            .find_scope_for_variable_at(var_name, pos)
             .or_else(|| scopes.scope_at_position(pos));
         if let Some(sid) = sid {
-            if let Some(ty) = scopes.get_type_at_position(&var_name, sid, pos) {
+            if let Some(ty) = scopes.get_type_at_position(var_name, sid, pos) {
                 return is_type_definitely_non_hash(ty);
             }
         }

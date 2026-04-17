@@ -28,6 +28,12 @@ impl RubyConstant {
         Ok(Self(Ustr::from(name)))
     }
 
+    /// Zero-alloc view into the interned Ustr arena. The returned &str has
+    /// 'static lifetime since Ustr stores strings in a global arena.
+    pub fn as_str(&self) -> &'static str {
+        self.0.as_str()
+    }
+
     /// Splits a "Foo::Bar::Baz" string into validated segments.
     pub fn from_qualified_name(fqn: &str) -> Result<Vec<Self>, &'static str> {
         fqn.split("::")

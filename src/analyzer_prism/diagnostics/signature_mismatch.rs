@@ -1,6 +1,8 @@
 use ruby_prism::CallNode;
 use tower_lsp::lsp_types::Location;
 
+use crate::analyzer_prism::utils;
+
 use crate::{
     analyzer_prism::diagnostics::ReceiverInfo,
     indexer::{
@@ -99,7 +101,7 @@ fn collect_unknown_kwargs<'a>(
             Some(loc) => loc,
             None => continue,
         };
-        let name = String::from_utf8_lossy(value_loc.as_slice()).to_string();
+        let name = utils::utf8_str(value_loc.as_slice()).to_string();
         let declared = arity.required_keywords.contains(&name)
             || arity.optional_keywords.contains(&name);
         if !declared {
@@ -134,8 +136,7 @@ fn collect_missing_required_kwargs<'a>(
                     if let Some(assoc) = elem.as_assoc_node() {
                         if let Some(sym) = assoc.key().as_symbol_node() {
                             if let Some(loc) = sym.value_loc() {
-                                let name =
-                                    String::from_utf8_lossy(loc.as_slice()).to_string();
+                                let name = utils::utf8_str(loc.as_slice()).to_string();
                                 supplied.push(name);
                             }
                         }

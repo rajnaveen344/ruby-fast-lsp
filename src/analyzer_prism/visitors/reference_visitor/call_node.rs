@@ -19,7 +19,7 @@ use super::ReferenceVisitor;
 
 impl ReferenceVisitor {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
-        let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let method_name = utils::utf8_str(node.name().as_slice());
 
         // Skip method names that don't follow Ruby method naming conventions
         if !RubyMethod::is_valid_ruby_method_name(&method_name) {
@@ -188,7 +188,7 @@ impl ReferenceVisitor {
             let (ns, kind) = self.handle_self_receiver(current_namespace);
             (ns, kind, ReceiverInfo::SelfReceiver, None)
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
-            let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+            let name = utils::utf8_str(constant_read.name().as_slice()).to_string();
             let (ns, kind) = self.handle_constant_read_receiver(&constant_read, current_namespace);
             (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
@@ -246,8 +246,8 @@ impl ReferenceVisitor {
         constant_read: &ruby_prism::ConstantReadNode,
         current_namespace: &Vec<RubyConstant>,
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-        if let Ok(constant) = RubyConstant::new(&name) {
+        let name = utils::utf8_str(constant_read.name().as_slice());
+        if let Ok(constant) = RubyConstant::new(name) {
             let mut receiver_namespace = current_namespace.clone();
             receiver_namespace.push(constant);
             (receiver_namespace, NamespaceKind::Singleton)
@@ -320,21 +320,21 @@ impl ReferenceVisitor {
     fn infer_expression_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
         // Case 1: Local variable (e.g., `user.name` where `user = User.new`)
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
-            let var_name = String::from_utf8_lossy(local_var.name().as_slice()).to_string();
-            return self.infer_variable_type_cached(&var_name);
+            let var_name = utils::utf8_str(local_var.name().as_slice());
+            return self.infer_variable_type_cached(var_name);
         }
 
         // Case 2: Method call chain (e.g., `team.leader.name`)
         if let Some(call) = receiver_node.as_call_node() {
-            let inner_method = String::from_utf8_lossy(call.name().as_slice()).to_string();
+            let inner_method = utils::utf8_str(call.name().as_slice());
 
             // First resolve the inner receiver's type
             let inner_type = if let Some(inner_receiver) = call.receiver() {
                 if let Some(constant_read) = inner_receiver.as_constant_read_node() {
                     // Constant receiver: Foo.bar → ClassReference(Foo)
-                    let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+                    let name = utils::utf8_str(constant_read.name().as_slice());
                     Some(RubyType::ClassReference(FullyQualifiedName::Constant(
-                        vec![RubyConstant::new(&name).ok()?],
+                        vec![RubyConstant::new(name).ok()?],
                     )))
                 } else {
                     // Recursive: try to infer inner receiver's type

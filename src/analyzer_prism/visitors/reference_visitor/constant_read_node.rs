@@ -1,6 +1,7 @@
 use log::trace;
 use ruby_prism::ConstantReadNode;
 
+use crate::analyzer_prism::utils;
 use crate::indexer::index::UnresolvedEntry;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
@@ -8,8 +9,8 @@ use super::ReferenceVisitor;
 
 impl ReferenceVisitor {
     pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
-        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
-        let constant = match RubyConstant::new(&name) {
+        let name = utils::utf8_str(node.name().as_slice());
+        let constant = match RubyConstant::new(name) {
             Ok(c) => c,
             Err(_) => {
                 trace!("Skipping invalid constant name: {}", name);
@@ -66,7 +67,7 @@ impl ReferenceVisitor {
                 current_namespace.iter().map(|c| c.to_string()).collect();
             self.staged.push_unresolved(
                 self.document.uri.clone(),
-                UnresolvedEntry::constant_with_context(name.clone(), namespace_context, location),
+                UnresolvedEntry::constant_with_context(name.to_string(), namespace_context, location),
             );
         }
     }
