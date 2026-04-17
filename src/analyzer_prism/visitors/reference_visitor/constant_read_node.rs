@@ -21,46 +21,50 @@ impl ReferenceVisitor {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let ns_len = current_namespace.len();
 
-        // Acquire lock once for all lookups (avoid lock thrashing)
-        let mut index = self.index.lock();
+        // Resolve under a SHARED read lock so other workers can run the
+        // same lookups in parallel. Writes land in `self.staged` and are
+        // flushed once per file by the file processor under a brief
+        // write lock.
+        let resolution = {
+            let index = self.index.read();
+            let mut resolved: Option<FullyQualifiedName> = None;
+            for depth in (0..=ns_len).rev() {
+                let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
+                combined_ns.push(constant.clone());
 
-        // Check from current namespace to root namespace
-        // Optimized ancestor search: avoid cloning in loop
-        // Instead of cloning Vec, we build FQN directly with slices
-        for depth in (0..=ns_len).rev() {
-            // Build namespace: current_namespace[0..depth] + constant
-            let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
-            combined_ns.push(constant.clone());
+                // Try as Namespace first (class/module definitions)
+                let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+                if index.contains_fqn(&namespace_fqn) {
+                    resolved = Some(namespace_fqn);
+                    break;
+                }
 
-            // Try as Namespace first (for class/module definitions)
-            let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
-            if index.contains_fqn(&namespace_fqn) {
-                let location = self
-                    .document
-                    .prism_location_to_lsp_location(&node.location());
-                index.add_reference(namespace_fqn, location, None);
-                return;
+                // Then try as Constant (value constants like VALUE = 42)
+                let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+                if index.contains_fqn(&constant_fqn) {
+                    resolved = Some(constant_fqn);
+                    break;
+                }
             }
+            resolved
+        };
 
-            // Then try as Constant (for value constants like VALUE = 42)
-            let constant_fqn = FullyQualifiedName::Constant(combined_ns);
-            if index.contains_fqn(&constant_fqn) {
-                let location = self
-                    .document
-                    .prism_location_to_lsp_location(&node.location());
-                index.add_reference(constant_fqn, location, None);
-                return;
-            }
+        if let Some(fqn) = resolution {
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            self.staged.push_reference(fqn, location, None);
+            return;
         }
 
-        // If tracking unresolved (constant not found anywhere)
+        // Not found anywhere → optionally record unresolved.
         if self.track_unresolved {
             let location = self
                 .document
                 .prism_location_to_lsp_location(&node.location());
             let namespace_context: Vec<String> =
                 current_namespace.iter().map(|c| c.to_string()).collect();
-            index.add_unresolved_entry(
+            self.staged.push_unresolved(
                 self.document.uri.clone(),
                 UnresolvedEntry::constant_with_context(name.clone(), namespace_context, location),
             );

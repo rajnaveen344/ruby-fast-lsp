@@ -781,9 +781,9 @@ end
     /// a brand-new index — no shared state across tests.
     fn fresh_test_index() -> Index<Unlocked> {
         use crate::indexer::index::RubyIndex;
-        use parking_lot::Mutex;
+        use parking_lot::{Mutex, RwLock};
         use std::sync::Arc;
-        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
     }
 
     #[tokio::test]

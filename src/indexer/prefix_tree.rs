@@ -5,7 +5,7 @@
 //!
 //! See https://en.wikipedia.org/wiki/Trie for more information.
 
-use std::cell::RefCell;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use trie_rs::map::{Trie, TrieBuilder};
 
@@ -66,17 +66,21 @@ use crate::indexer::entry::Entry;
 #[derive(Debug)]
 pub struct PrefixTree {
     // We maintain both a built trie for fast searches and a map for modifications
-    trie: RefCell<Option<Trie<u8, Entry>>>,
-    entries: RefCell<HashMap<String, Entry>>,
-    needs_rebuild: RefCell<bool>,
+    // RefCell was fine when RubyIndex lived behind a single Mutex, but now
+    // the index sits behind an RwLock so multiple read guards can exist
+    // concurrently — RefCell is !Sync and would UB. Use parking_lot::Mutex
+    // for cheap thread-safe interior mutability of the lazy-rebuild cache.
+    trie: Mutex<Option<Trie<u8, Entry>>>,
+    entries: Mutex<HashMap<String, Entry>>,
+    needs_rebuild: Mutex<bool>,
 }
 
 impl PrefixTree {
     pub fn new() -> Self {
         PrefixTree {
-            trie: RefCell::new(None),
-            entries: RefCell::new(HashMap::new()),
-            needs_rebuild: RefCell::new(false),
+            trie: Mutex::new(None),
+            entries: Mutex::new(HashMap::new()),
+            needs_rebuild: Mutex::new(false),
         }
     }
 
@@ -88,10 +92,10 @@ impl PrefixTree {
 
         if prefix.is_empty() {
             // Return all entries for empty prefix
-            self.entries.borrow().values().cloned().collect()
+            self.entries.lock().values().cloned().collect()
         } else {
             // Use trie's predictive search to find all entries with the given prefix
-            let trie_ref = self.trie.borrow();
+            let trie_ref = self.trie.lock();
             let trie = trie_ref.as_ref().unwrap();
             let results: Vec<(String, &Entry)> = trie.predictive_search(prefix).collect();
             results
@@ -106,22 +110,22 @@ impl PrefixTree {
         // This line is to allow a value to be overridden. When we are indexing files, we want to be able to update entries
         // for a given fully qualified name if we find more occurrences of it. Without being able to override, that would
         // not be possible
-        self.entries.borrow_mut().insert(key.to_string(), entry);
-        *self.needs_rebuild.borrow_mut() = true;
+        self.entries.lock().insert(key.to_string(), entry);
+        *self.needs_rebuild.lock() = true;
     }
 
     /// Deletes the entry identified by `key` from the tree. Notice that a partial match will still delete all entries
     /// that match it. For example, if the tree contains `foo` and we ask to delete `fo`, then `foo` will be deleted
     pub fn delete(&mut self, key: &str) {
-        if self.entries.borrow_mut().remove(key).is_some() {
-            *self.needs_rebuild.borrow_mut() = true;
+        if self.entries.lock().remove(key).is_some() {
+            *self.needs_rebuild.lock() = true;
         }
     }
 
     /// Ensure the trie is built if it needs rebuilding
     fn ensure_trie_built(&self) {
-        let needs_rebuild = *self.needs_rebuild.borrow();
-        let trie_is_none = self.trie.borrow().is_none();
+        let needs_rebuild = *self.needs_rebuild.lock();
+        let trie_is_none = self.trie.lock().is_none();
 
         if needs_rebuild || trie_is_none {
             self.rebuild_trie();
@@ -132,12 +136,12 @@ impl PrefixTree {
     fn rebuild_trie(&self) {
         let mut builder = TrieBuilder::new();
 
-        for (key, entry) in self.entries.borrow().iter() {
+        for (key, entry) in self.entries.lock().iter() {
             builder.push(key, entry.clone());
         }
 
-        *self.trie.borrow_mut() = Some(builder.build());
-        *self.needs_rebuild.borrow_mut() = false;
+        *self.trie.lock() = Some(builder.build());
+        *self.needs_rebuild.lock() = false;
     }
 }
 

@@ -43,49 +43,39 @@ impl ReferenceVisitor {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let ns_len = current_namespace.len();
 
-        let mut found_any = false;
+        // Resolve under a shared read lock; writes are staged for one flush.
+        let resolved = {
+            let index = self.index.read();
+            let mut found: Option<FullyQualifiedName> = None;
+            for depth in (0..=ns_len).rev() {
+                let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
+                combined_ns.extend(namespaces.iter().cloned());
 
-        // Acquire lock once for all lookups
-        let mut index = self.index.lock();
+                let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+                if index.contains_fqn(&namespace_fqn) {
+                    found = Some(namespace_fqn);
+                    break;
+                }
 
-        // Optimized ancestor search: avoid cloning in loop
-        // Check from current namespace down to root
-        for depth in (0..=ns_len).rev() {
-            // Build namespace: current_namespace[0..depth] + namespaces
-            // We slice the current namespace to the current depth and extend with the path namespaces
-            let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
-            combined_ns.extend(namespaces.iter().cloned());
-
-            // Try as Namespace first (for class/module definitions)
-            let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
-            if index.contains_fqn(&namespace_fqn) {
-                let location = self
-                    .document
-                    .prism_location_to_lsp_location(&node.location());
-
-                index.add_reference(namespace_fqn, location, None);
-
-                found_any = true;
-                // Once found, we stop searching up the ancestor chain
-                break;
+                let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+                if index.contains_fqn(&constant_fqn) {
+                    found = Some(constant_fqn);
+                    break;
+                }
             }
+            found
+        };
 
-            // Then try as Constant (for value constants like BETA = 100)
-            let constant_fqn = FullyQualifiedName::Constant(combined_ns);
-            if index.contains_fqn(&constant_fqn) {
-                let location = self
-                    .document
-                    .prism_location_to_lsp_location(&node.location());
-
-                index.add_reference(constant_fqn, location, None);
-
-                found_any = true;
-                break;
-            }
+        if let Some(fqn) = resolved {
+            let location = self
+                .document
+                .prism_location_to_lsp_location(&node.location());
+            self.staged.push_reference(fqn, location, None);
+            return;
         }
 
-        // If not found and tracking is enabled, add as unresolved
-        if !found_any && self.track_unresolved {
+        // Not found and tracking enabled → record unresolved.
+        if self.track_unresolved {
             let name = namespaces
                 .iter()
                 .map(|c| c.to_string())
@@ -101,7 +91,7 @@ impl ReferenceVisitor {
                 name,
                 namespace_context
             );
-            index.add_unresolved_entry(
+            self.staged.push_unresolved(
                 self.document.uri.clone(),
                 UnresolvedEntry::constant_with_context(name, namespace_context, location),
             );

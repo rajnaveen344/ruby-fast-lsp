@@ -78,12 +78,17 @@ fn process_content_for_references(
     // Create a temporary document since we're processing content directly
     let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
 
+    let index = server.index_for_uri(&uri);
     let mut visitor = if include_local_vars {
-        ReferenceVisitor::new(server.index_for_uri(&uri), document)
+        ReferenceVisitor::new(index.clone(), document)
     } else {
-        ReferenceVisitor::with_options(server.index_for_uri(&uri), document, false)
+        ReferenceVisitor::with_options(index.clone(), document, false)
     };
     visitor.visit(&parse_result.node());
+
+    // Flush staged writes (matches production path in FileProcessor).
+    let staged = std::mem::take(&mut visitor.staged);
+    staged.flush(&mut index.lock());
 }
 
 #[tokio::test]

@@ -186,13 +186,13 @@ mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::{Index, Unlocked};
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
     use ruby_prism::Visit;
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
 
     fn create_test_index() -> Index<Unlocked> {
-        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
     }
 
     fn create_test_visitor(content: &str) -> (IndexVisitor, ruby_prism::ParseResult<'_>) {

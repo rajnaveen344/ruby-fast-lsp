@@ -653,12 +653,12 @@ mod tests {
     use super::*;
     use crate::indexer::entry::entry_builder::EntryBuilder;
     use crate::indexer::entry::{MethodOrigin, MethodVisibility};
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
     use std::sync::Arc;
     use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
     fn create_test_index() -> Index<Unlocked> {
-        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
     }
 
     fn create_test_location() -> Location {

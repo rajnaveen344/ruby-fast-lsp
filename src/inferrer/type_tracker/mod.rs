@@ -735,14 +735,14 @@ pub fn get_var_type_at(
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
     use std::sync::Arc;
 
     fn create_test_tracker<'a>(
         source: &'a str,
         uri: &'a Url,
     ) -> (TypeTracker<'a>, Index<Unlocked>) {
-        let index = Index::new(Arc::new(Mutex::new(RubyIndex::new())));
+        let index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         let tracker = TypeTracker::new(source.as_bytes(), index.clone(), uri);
         (tracker, index)
     }

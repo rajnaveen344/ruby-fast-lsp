@@ -94,7 +94,7 @@ impl Workspace {
         Self {
             root_uri,
             root_path,
-            index: Index::new(Arc::new(Mutex::new(RubyIndex::new()))),
+            index: Index::new(Arc::new(RwLock::new(RubyIndex::new()))),
             indexing_complete: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -123,7 +123,7 @@ pub struct RubyLanguageServer {
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
-        let orphan_index = Index::new(Arc::new(Mutex::new(RubyIndex::new())));
+        let orphan_index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         let config = RubyFastLspConfig::default();
         Ok(Self {
             client: Some(client),
@@ -388,7 +388,7 @@ impl RubyLanguageServer {
 
 impl Default for RubyLanguageServer {
     fn default() -> Self {
-        let orphan_index = Index::new(Arc::new(Mutex::new(RubyIndex::new())));
+        let orphan_index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         Self {
             client: None,
             workspaces: Arc::new(RwLock::new(Vec::new())),

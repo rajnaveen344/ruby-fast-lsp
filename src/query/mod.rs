@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_index_query_creation() {
         let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(Mutex::new(index)));
+        let index_ref = Index::new(Arc::new(RwLock::new(index)));
         let query = IndexQuery::new(index_ref);
         assert!(query.uri().is_none());
         assert!(query.doc().is_none());
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_index_query_with_uri() {
         let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(Mutex::new(index)));
+        let index_ref = Index::new(Arc::new(RwLock::new(index)));
         let uri = Url::parse("file:///test.rb").unwrap();
         let query = IndexQuery::with_uri(index_ref, uri.clone());
         assert_eq!(query.uri(), Some(&uri));

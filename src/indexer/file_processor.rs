@@ -251,6 +251,10 @@ impl FileProcessor {
                 );
                 visitor.visit(&node);
 
+                // Flush staged writes under a single brief write lock.
+                let staged = std::mem::take(&mut visitor.staged);
+                staged.flush(&mut self.index.lock());
+
                 // Update the document with VariableScopes from visitor (includes references)
                 let docs = server.docs.lock();
                 if let Some(doc_arc) = docs.get(uri) {
@@ -325,11 +329,18 @@ impl FileProcessor {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        // Always track unresolved references now
+        // Visit under the index's shared read lock (visitor uses .read()
+        // internally) and buffer writes into `visitor.staged`.
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
         let mut visitor =
             ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
         visitor.visit(&node);
+
+        // Single write-lock per file: apply all staged references +
+        // unresolved entries. This is the only moment phase 2 serializes
+        // between rayon workers — keep it short.
+        let staged = std::mem::take(&mut visitor.staged);
+        staged.flush(&mut self.index.lock());
 
         debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
         Ok(())

@@ -1,5 +1,6 @@
 use log::trace;
 use ruby_prism::{CallNode, Node};
+use tower_lsp::lsp_types::Url;
 
 use crate::{
     analyzer_prism::utils,
@@ -626,15 +627,20 @@ impl ReferenceVisitor {
 
         let method_fqn = FullyQualifiedName::method(target_namespace.clone(), method);
 
-        let mut index = self.index.lock();
+        // Run all reference resolution + diagnostic lookups under a SHARED
+        // read lock. Writes are staged into `self.staged` and flushed under
+        // a single write lock at end-of-file. This is safe because Phase 2
+        // never mutates definitions — only references + unresolved entries,
+        // neither of which feed back into the read path.
+        let caller_fqn = self.scope_tracker.current_method_fqn().cloned();
         if !inference_failed {
             trace!(
                 "Adding method call reference: {} at {:?}",
                 method_fqn.to_string(),
                 call_location
             );
-            let caller_fqn = self.scope_tracker.current_method_fqn().cloned();
-            index.add_reference(method_fqn.clone(), call_location, caller_fqn);
+            self.staged
+                .push_reference(method_fqn.clone(), call_location, caller_fqn);
         } else {
             trace!(
                 "Skipping reference for unresolved expression receiver: .{}",
@@ -642,220 +648,219 @@ impl ReferenceVisitor {
             );
         }
 
-        // Track unresolved method calls if enabled (use message location for diagnostics)
-        if self.track_unresolved {
-            match &receiver_info {
-                ReceiverInfo::NoReceiver => {
-                    if !self.method_exists_in_index(
-                        &index,
-                        &method_name,
-                        &target_namespace,
-                        namespace_kind,
-                    ) {
-                        trace!("Adding unresolved method call: {}", method_name);
-                        let suggestion = self.find_method_suggestion(
+        // Collect everything we need from the index up-front under a read
+        // guard; drop the guard before pushing into `self.staged` so we
+        // never hold the read lock while also mutating `self`.
+        let diagnostics_to_stage: Vec<(Url, UnresolvedEntry)> = {
+            let index = self.index.read();
+            let mut out: Vec<(Url, UnresolvedEntry)> = Vec::new();
+
+            if self.track_unresolved {
+                match &receiver_info {
+                    ReceiverInfo::NoReceiver => {
+                        if !self.method_exists_in_index(
                             &index,
                             &method_name,
                             &target_namespace,
                             namespace_kind,
-                        );
-                        index.add_unresolved_entry(
-                            self.document.uri.clone(),
-                            UnresolvedEntry::method_with_suggestion(
-                                method_name.clone(),
-                                None,
-                                message_location.clone(),
-                                suggestion,
-                            ),
-                        );
-                    }
-                }
-                ReceiverInfo::ConstantReceiver(receiver_name) => {
-                    if !self.method_exists_in_index(
-                        &index,
-                        &method_name,
-                        &target_namespace,
-                        namespace_kind,
-                    ) {
-                        trace!(
-                            "Adding unresolved method call: {}.{}",
-                            receiver_name,
-                            method_name
-                        );
-                        let suggestion = self.find_method_suggestion(
-                            &index,
-                            &method_name,
-                            &target_namespace,
-                            namespace_kind,
-                        );
-                        index.add_unresolved_entry(
-                            self.document.uri.clone(),
-                            UnresolvedEntry::method_with_suggestion(
-                                method_name.clone(),
-                                Some(RubyType::class(&receiver_name)),
-                                message_location.clone(),
-                                suggestion,
-                            ),
-                        );
-                    }
-                }
-                ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
-                    // Only warn when receiver class is user-defined and method is missing.
-                    // Skip if:
-                    // - inferred type is unknown / non-class (downstream of broken chain),
-                    // - receiver class isn't in the user index (stdlib/RBS-backed types
-                    //   like String/Array — methods are defined in RBS, not user code).
-                    if let Some(class_type @ (RubyType::Class(fqn) | RubyType::Module(fqn))) =
-                        &inferred_expr_type
-                    {
-                        // Class/module entries are stored as Namespace(parts, Instance);
-                        // type inference returns Constant(parts). Normalize before lookup.
-                        let receiver_class_known_in_user_index = fqn
-                            .to_instance_namespace()
-                            .as_ref()
-                            .map(|ns_fqn| index.contains_fqn(ns_fqn))
-                            .unwrap_or(false);
-                        if receiver_class_known_in_user_index {
-                            let ns_parts = fqn.namespace_parts();
-                            if !self.method_exists_in_index(
+                        ) {
+                            trace!("Adding unresolved method call: {}", method_name);
+                            let suggestion = self.find_method_suggestion(
                                 &index,
                                 &method_name,
-                                &ns_parts,
-                                NamespaceKind::Instance,
-                            ) {
-                                trace!(
-                                    "Adding unresolved method call on inferred type: .{}",
-                                    method_name
-                                );
-                                let suggestion = self.find_method_suggestion(
+                                &target_namespace,
+                                namespace_kind,
+                            );
+                            out.push((
+                                self.document.uri.clone(),
+                                UnresolvedEntry::method_with_suggestion(
+                                    method_name.clone(),
+                                    None,
+                                    message_location.clone(),
+                                    suggestion,
+                                ),
+                            ));
+                        }
+                    }
+                    ReceiverInfo::ConstantReceiver(receiver_name) => {
+                        if !self.method_exists_in_index(
+                            &index,
+                            &method_name,
+                            &target_namespace,
+                            namespace_kind,
+                        ) {
+                            trace!(
+                                "Adding unresolved method call: {}.{}",
+                                receiver_name,
+                                method_name
+                            );
+                            let suggestion = self.find_method_suggestion(
+                                &index,
+                                &method_name,
+                                &target_namespace,
+                                namespace_kind,
+                            );
+                            out.push((
+                                self.document.uri.clone(),
+                                UnresolvedEntry::method_with_suggestion(
+                                    method_name.clone(),
+                                    Some(RubyType::class(&receiver_name)),
+                                    message_location.clone(),
+                                    suggestion,
+                                ),
+                            ));
+                        }
+                    }
+                    ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                        if let Some(class_type @ (RubyType::Class(fqn) | RubyType::Module(fqn))) =
+                            &inferred_expr_type
+                        {
+                            let receiver_class_known_in_user_index = fqn
+                                .to_instance_namespace()
+                                .as_ref()
+                                .map(|ns_fqn| index.contains_fqn(ns_fqn))
+                                .unwrap_or(false);
+                            if receiver_class_known_in_user_index {
+                                let ns_parts = fqn.namespace_parts();
+                                if !self.method_exists_in_index(
                                     &index,
                                     &method_name,
                                     &ns_parts,
                                     NamespaceKind::Instance,
-                                );
-                                index.add_unresolved_entry(
+                                ) {
+                                    trace!(
+                                        "Adding unresolved method call on inferred type: .{}",
+                                        method_name
+                                    );
+                                    let suggestion = self.find_method_suggestion(
+                                        &index,
+                                        &method_name,
+                                        &ns_parts,
+                                        NamespaceKind::Instance,
+                                    );
+                                    out.push((
+                                        self.document.uri.clone(),
+                                        UnresolvedEntry::method_with_suggestion(
+                                            method_name.clone(),
+                                            Some(class_type.clone()),
+                                            message_location.clone(),
+                                            suggestion,
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    ReceiverInfo::SelfReceiver => {
+                        // TODO: check method on current class (future work).
+                    }
+                }
+            }
+
+            // Wrong-arity check (positional only). Skips splat callsites, kwargs, block.
+            if self.track_unresolved {
+                let owner_for_arity = match &receiver_info {
+                    ReceiverInfo::NoReceiver | ReceiverInfo::ConstantReceiver(_) => {
+                        Some((target_namespace.clone(), namespace_kind))
+                    }
+                    ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                        if let Some(RubyType::Class(fqn) | RubyType::Module(fqn)) =
+                            &inferred_expr_type
+                        {
+                            let known = fqn
+                                .to_instance_namespace()
+                                .as_ref()
+                                .map(|ns_fqn| index.contains_fqn(ns_fqn))
+                                .unwrap_or(false);
+                            if known {
+                                Some((fqn.namespace_parts(), NamespaceKind::Instance))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    ReceiverInfo::SelfReceiver => None,
+                };
+                if let Some((owner, kind)) = owner_for_arity {
+                    if let Some(arity) =
+                        self.find_method_arity_strict(&index, &method_name, &owner, kind)
+                    {
+                        if let Some((min, max, actual)) = compute_arity_mismatch(node, &arity) {
+                            out.push((
+                                self.document.uri.clone(),
+                                UnresolvedEntry::wrong_arity(
+                                    method_name.clone(),
+                                    min,
+                                    max,
+                                    actual,
+                                    message_location.clone(),
+                                ),
+                            ));
+                        }
+                        if let Some(unknowns) = collect_unknown_kwargs(node, &arity) {
+                            let all_keyword_names: Vec<String> = arity
+                                .required_keywords
+                                .iter()
+                                .chain(arity.optional_keywords.iter())
+                                .cloned()
+                                .collect();
+                            for (kwarg_name, kw_loc) in unknowns {
+                                let suggestion =
+                                    closest_kwarg(&kwarg_name, &all_keyword_names);
+                                let kw_lsp_loc =
+                                    self.document.prism_location_to_lsp_location(&kw_loc);
+                                out.push((
                                     self.document.uri.clone(),
-                                    UnresolvedEntry::method_with_suggestion(
+                                    UnresolvedEntry::unknown_kwarg(
                                         method_name.clone(),
-                                        Some(class_type.clone()),
-                                        message_location.clone(),
+                                        kwarg_name,
                                         suggestion,
+                                        kw_lsp_loc,
                                     ),
-                                );
+                                ));
+                            }
+                        }
+                        if let Some(missing) = collect_missing_required_kwargs(node, &arity) {
+                            if !missing.is_empty() {
+                                out.push((
+                                    self.document.uri.clone(),
+                                    UnresolvedEntry::missing_kwarg(
+                                        method_name.clone(),
+                                        missing,
+                                        message_location.clone(),
+                                    ),
+                                ));
                             }
                         }
                     }
                 }
-                ReceiverInfo::SelfReceiver => {
-                    // TODO: check method on current class (future work).
-                }
             }
-        }
 
-        // Wrong-arity check (positional only). Skips splat callsites, kwargs, block.
-        if self.track_unresolved {
-            let owner_for_arity = match &receiver_info {
-                ReceiverInfo::NoReceiver | ReceiverInfo::ConstantReceiver(_) => {
-                    Some((target_namespace.clone(), namespace_kind))
-                }
-                ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
-                    // Same gating as unresolved-method on expr receivers: only
-                    // when receiver class is user-defined (in the user index).
-                    // Stdlib types (String/Array) are RBS-backed → skip.
-                    if let Some(RubyType::Class(fqn) | RubyType::Module(fqn)) =
-                        &inferred_expr_type
-                    {
-                        let known = fqn
-                            .to_instance_namespace()
-                            .as_ref()
-                            .map(|ns_fqn| index.contains_fqn(ns_fqn))
-                            .unwrap_or(false);
-                        if known {
-                            Some((fqn.namespace_parts(), NamespaceKind::Instance))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                ReceiverInfo::SelfReceiver => None,
-            };
-            if let Some((owner, kind)) = owner_for_arity {
-                if let Some(arity) =
-                    self.find_method_arity_strict(&index, &method_name, &owner, kind)
-                {
-                    if let Some((min, max, actual)) = compute_arity_mismatch(node, &arity) {
-                        index.add_unresolved_entry(
-                            self.document.uri.clone(),
-                            UnresolvedEntry::wrong_arity(
-                                method_name.clone(),
-                                min,
-                                max,
-                                actual,
-                                message_location.clone(),
-                            ),
-                        );
-                    }
-                    if let Some(unknowns) = collect_unknown_kwargs(node, &arity) {
-                        let all_keyword_names: Vec<String> = arity
-                            .required_keywords
-                            .iter()
-                            .chain(arity.optional_keywords.iter())
-                            .cloned()
-                            .collect();
-                        for (kwarg_name, kw_loc) in unknowns {
-                            let suggestion = closest_kwarg(&kwarg_name, &all_keyword_names);
-                            let kw_lsp_loc =
-                                self.document.prism_location_to_lsp_location(&kw_loc);
-                            index.add_unresolved_entry(
-                                self.document.uri.clone(),
-                                UnresolvedEntry::unknown_kwarg(
-                                    method_name.clone(),
-                                    kwarg_name,
-                                    suggestion,
-                                    kw_lsp_loc,
-                                ),
-                            );
-                        }
-                    }
-                    if let Some(missing) = collect_missing_required_kwargs(node, &arity) {
-                        if !missing.is_empty() {
-                            index.add_unresolved_entry(
-                                self.document.uri.clone(),
-                                UnresolvedEntry::missing_kwarg(
-                                    method_name.clone(),
-                                    missing,
-                                    message_location.clone(),
-                                ),
-                            );
-                        }
-                    }
-                }
-            }
+            out
+        };
+
+        for (uri, entry) in diagnostics_to_stage {
+            self.staged.push_unresolved(uri, entry);
         }
 
         // Raise-non-exception check: bare `raise` with provably non-Exception
-        // arg. Must release the index mutex before calling — `check_raise_call`
-        // constructs a `MethodResolver` that locks internally (non-reentrant
-        // `parking_lot::Mutex` would deadlock otherwise).
-        let raise_entry =
-            if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
-                drop(index);
-                let entry = self.check_raise_call(node);
-                index = self.index.lock();
-                entry
-            } else {
-                None
-            };
-        if let Some(entry) = raise_entry {
-            index.add_unresolved_entry(self.document.uri.clone(), entry);
+        // arg. `check_raise_call` internally acquires short-lived read locks
+        // (including one for `MethodResolver::resolve_call_type` on call-arg
+        // receivers) — no outer index guard is held here so no reentrancy.
+        if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
+            if let Some(entry) = self.check_raise_call(node) {
+                self.staged
+                    .push_unresolved(self.document.uri.clone(), entry);
+            }
         }
 
         // Bad-splat check: *expr must be Array-like; **expr must be Hash-like.
         if self.track_unresolved {
             for entry in self.check_splats(node) {
-                index.add_unresolved_entry(self.document.uri.clone(), entry);
+                self.staged
+                    .push_unresolved(self.document.uri.clone(), entry);
             }
         }
     }

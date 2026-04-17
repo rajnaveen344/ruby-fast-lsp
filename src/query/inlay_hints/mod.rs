@@ -213,13 +213,13 @@ mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::Index;
-    use parking_lot::Mutex;
+    use parking_lot::RwLock;
     use std::sync::Arc;
     use tower_lsp::lsp_types::{Position, Url};
 
     fn create_test_query() -> IndexQuery {
         let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(Mutex::new(index)));
+        let index_ref = Index::new(Arc::new(RwLock::new(index)));
         IndexQuery::new(index_ref)
     }
 

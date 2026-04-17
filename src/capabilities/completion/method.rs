@@ -339,11 +339,11 @@ fn create_method_completion_item(method_info: &RbsMethodInfo) -> CompletionItem 
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
     use std::sync::Arc;
 
     fn create_test_index() -> Index<Unlocked> {
-        Index::new(Arc::new(Mutex::new(RubyIndex::new())))
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Typestate pattern for RubyIndex access - compile-time deadlock prevention.
+//! Typestate pattern for RubyIndex access — compile-time deadlock prevention.
 //!
 //! # The Problem
 //! When a function holds `index.lock()` and calls another function that also
@@ -7,28 +7,21 @@
 //! # The Solution
 //! Use the typestate pattern to make double-locking a **compile-time error**.
 //!
-//! - `Index<Unlocked>` - can call `.lock()` to get access
-//! - `Index<Locked>` - already has access, `.lock()` doesn't exist
+//! - `Index<Unlocked>` — can call `.lock()` (write) or `.read()` (shared).
+//! - `Index<Locked>` — already has access, `.lock()` doesn't exist.
 //!
 //! Functions declare which state they need:
-//! - `fn needs_to_lock(index: Index<Unlocked>)` - will lock internally
-//! - `fn already_locked(index: Index<Locked>)` - expects pre-locked access
+//! - `fn needs_to_lock(index: Index<Unlocked>)` — will lock internally.
+//! - `fn already_locked(index: Index<Locked>)` — expects pre-locked access.
 //!
-//! # Example
-//! ```ignore
-//! // Entry point - starts unlocked
-//! fn handle_request(index: Index<Unlocked>) {
-//!     let locked = index.lock();  // Now Index<Locked>
-//!     process(&locked);           // Pass locked state
-//!     // locked.lock() would be a COMPILE ERROR - method doesn't exist!
-//! }
-//!
-//! fn process(index: &Index<Locked>) {
-//!     index.read(|idx| idx.definitions_len());  // Use the index
-//! }
-//! ```
+//! # Lock kind
+//! The underlying primitive is `parking_lot::RwLock` so that the many
+//! Phase-2 reference-indexing sites can acquire shared read locks in
+//! parallel. `.lock()` is kept as the write-lock entry point for
+//! backward compatibility with the many existing call sites that mutate
+//! the index; prefer `.read()` when only reading.
 
-use parking_lot::{ArcMutexGuard, Mutex, MutexGuard};
+use parking_lot::{ArcRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -47,16 +40,16 @@ pub struct Unlocked;
 pub struct Locked;
 
 // ============================================================================
-// Index<State> - The typestate wrapper
+// Index<State> — The typestate wrapper
 // ============================================================================
 
 /// A handle to RubyIndex with compile-time lock state tracking.
 ///
-/// - `Index<Unlocked>`: Can call `.lock()` to acquire the lock
-/// - `Index<Locked>`: Already locked, use `.read()` or `.write()` directly
+/// - `Index<Unlocked>`: Can call `.lock()` (write) / `.read()` (shared).
+/// - `Index<Locked>`: Already locked, use `.read()` or `.write()` directly.
 #[derive(Debug)]
 pub struct Index<State> {
-    inner: Arc<Mutex<RubyIndex>>,
+    inner: Arc<RwLock<RubyIndex>>,
     _state: PhantomData<State>,
 }
 
@@ -71,74 +64,80 @@ impl Clone for Index<Unlocked> {
 }
 
 // ============================================================================
-// Index<Unlocked> - Can lock
+// Index<Unlocked> — Can lock
 // ============================================================================
 
 impl Index<Unlocked> {
     /// Create a new unlocked index handle.
-    pub fn new(index: Arc<Mutex<RubyIndex>>) -> Self {
+    pub fn new(index: Arc<RwLock<RubyIndex>>) -> Self {
         Self {
             inner: index,
             _state: PhantomData,
         }
     }
 
-    /// Lock the index and return a borrowed locked handle.
+    /// Write-lock the index and return a borrowed locked handle.
     ///
-    /// **Hot path** — used by indexing visitors, file processors, and
-    /// any code that already holds a long-lived `Index<Unlocked>` (e.g. a
-    /// struct field). Zero-cost: just wraps a `MutexGuard`.
-    ///
-    /// The returned `LockedIndex` borrows from `self`, so the caller must
-    /// keep the `Index<Unlocked>` alive. If you need to chain
-    /// `server.index_for_uri(&uri).lock()`, use [`lock_arc`] instead, or
-    /// bind the index to a `let` first.
+    /// **Hot path** — used by indexing visitors, file processors, and any
+    /// code that needs to mutate the index. Prefer [`read`] for read-only
+    /// access so that multiple workers can read in parallel during Phase 2.
     #[inline]
     pub fn lock(&self) -> LockedIndex<'_> {
         LockedIndex {
-            guard: self.inner.lock(),
+            guard: self.inner.write(),
         }
     }
 
-    /// Lock the index and return an owned locked handle.
+    /// Shared read-lock the index. Multiple readers can hold shared locks
+    /// simultaneously; writers block until all readers release.
+    ///
+    /// Use this in code paths that only need to query the index
+    /// (`contains_fqn`, `methods_on_owner`, `get_ancestor_chain`, …).
+    /// A read guard cannot mutate.
+    #[inline]
+    pub fn read(&self) -> ReadLockedIndex<'_> {
+        ReadLockedIndex {
+            guard: self.inner.read(),
+        }
+    }
+
+    /// Write-lock the index and return an owned locked handle.
     ///
     /// Slower than [`lock`] (clones the inner `Arc` per call), but the
     /// returned guard is `'static`, so it can outlive the `Index<Unlocked>`
-    /// that produced it. Use this when chaining
-    /// `server.index_for_uri(&uri).lock_arc()` — the temporary
-    /// `Index<Unlocked>` is dropped immediately, but the guard keeps the
-    /// underlying `Arc<Mutex<RubyIndex>>` alive on its own.
+    /// that produced it.
     #[inline]
     pub fn lock_arc(&self) -> ArcLockedIndex {
         ArcLockedIndex {
-            guard: Mutex::lock_arc(&self.inner),
+            guard: RwLock::write_arc(&self.inner),
         }
     }
 
     /// Get the inner Arc for compatibility with existing code.
     ///
-    /// **Prefer using `.lock()` directly.** This exists for gradual migration.
-    pub fn as_arc(&self) -> &Arc<Mutex<RubyIndex>> {
+    /// **Prefer using `.lock()` / `.read()` directly.** Exists for
+    /// gradual migration.
+    pub fn as_arc(&self) -> &Arc<RwLock<RubyIndex>> {
         &self.inner
     }
 }
 
-impl From<Arc<Mutex<RubyIndex>>> for Index<Unlocked> {
-    fn from(index: Arc<Mutex<RubyIndex>>) -> Self {
+impl From<Arc<RwLock<RubyIndex>>> for Index<Unlocked> {
+    fn from(index: Arc<RwLock<RubyIndex>>) -> Self {
         Self::new(index)
     }
 }
 
 // ============================================================================
-// LockedIndex - RAII guard with locked state
+// LockedIndex — RAII write guard
 // ============================================================================
 
-/// A locked index handle. Provides direct access to `&RubyIndex`.
+/// A write-locked index handle. Provides mutable access to `&mut RubyIndex`.
 ///
-/// - No `.lock()` method exists - prevents double-locking at compile time!
+/// - No `.lock()` method exists — prevents double-locking at compile time!
 /// - Lock is automatically released when dropped.
 pub struct LockedIndex<'a> {
-    guard: MutexGuard<'a, RubyIndex>,
+    guard: RwLockWriteGuard<'a, RubyIndex>,
 }
 
 impl<'a> LockedIndex<'a> {
@@ -155,8 +154,6 @@ impl<'a> LockedIndex<'a> {
     }
 
     /// Get a reference to the underlying RubyIndex.
-    ///
-    /// Useful when you need to pass `&RubyIndex` to existing functions.
     #[inline]
     pub fn as_ref(&self) -> &RubyIndex {
         &self.guard
@@ -186,14 +183,36 @@ impl<'a> std::ops::DerefMut for LockedIndex<'a> {
     }
 }
 
+// ============================================================================
+// ReadLockedIndex — RAII read guard
+// ============================================================================
+
+/// A read-locked (shared) index handle. Read-only access only. Multiple
+/// readers can coexist; writers wait.
+pub struct ReadLockedIndex<'a> {
+    guard: RwLockReadGuard<'a, RubyIndex>,
+}
+
+impl<'a> ReadLockedIndex<'a> {
+    #[inline]
+    pub fn as_ref(&self) -> &RubyIndex {
+        &self.guard
+    }
+}
+
+impl<'a> std::ops::Deref for ReadLockedIndex<'a> {
+    type Target = RubyIndex;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
 /// Owned-guard variant of [`LockedIndex`]. Returned by
-/// [`Index::<Unlocked>::lock_arc`] for callers that need a `'static` guard
-/// (e.g. chained `server.index_for_uri(&uri).lock_arc()`).
-///
-/// Slower than `LockedIndex` because each lock acquisition clones the
-/// underlying `Arc<Mutex<RubyIndex>>`. Prefer [`LockedIndex`] in hot paths.
+/// [`Index::<Unlocked>::lock_arc`] for callers that need a `'static` guard.
 pub struct ArcLockedIndex {
-    guard: ArcMutexGuard<parking_lot::RawMutex, RubyIndex>,
+    guard: ArcRwLockWriteGuard<parking_lot::RawRwLock, RubyIndex>,
 }
 
 impl std::ops::Deref for ArcLockedIndex {
@@ -222,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_unlocked_can_lock() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = Arc::new(RwLock::new(RubyIndex::new()));
         let handle = Index::<Unlocked>::new(index);
 
         let locked = handle.lock();
@@ -230,8 +249,19 @@ mod tests {
     }
 
     #[test]
+    fn test_read_shared_access() {
+        let index = Arc::new(RwLock::new(RubyIndex::new()));
+        let handle = Index::<Unlocked>::new(index);
+
+        let r1 = handle.read();
+        let r2 = handle.read();
+        assert_eq!(r1.definitions_len(), 0);
+        assert_eq!(r2.definitions_len(), 0);
+    }
+
+    #[test]
     fn test_locked_provides_access() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = Arc::new(RwLock::new(RubyIndex::new()));
         let handle = Index::<Unlocked>::new(index);
 
         let locked = handle.lock();
@@ -241,11 +271,10 @@ mod tests {
 
     #[test]
     fn test_deref_works() {
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = Arc::new(RwLock::new(RubyIndex::new()));
         let handle = Index::<Unlocked>::new(index);
 
         let locked = handle.lock();
-        // Can use methods directly via Deref
         assert_eq!(locked.definitions_len(), 0);
     }
 
@@ -255,23 +284,11 @@ mod tests {
             index.definitions_len()
         }
 
-        let index = Arc::new(Mutex::new(RubyIndex::new()));
+        let index = Arc::new(RwLock::new(RubyIndex::new()));
         let handle = Index::<Unlocked>::new(index);
 
         let locked = handle.lock();
         let count = use_index(&locked);
         assert_eq!(count, 0);
     }
-
-    // This test demonstrates the compile-time safety:
-    // If you uncomment the following, it WON'T COMPILE because
-    // LockedIndex has no .lock() method!
-    //
-    // #[test]
-    // fn test_cannot_double_lock() {
-    //     let index = Arc::new(Mutex::new(RubyIndex::new()));
-    //     let handle = Index::<Unlocked>::new(index);
-    //     let locked = handle.lock();
-    //     let double_locked = locked.lock(); // COMPILE ERROR!
-    // }
 }
