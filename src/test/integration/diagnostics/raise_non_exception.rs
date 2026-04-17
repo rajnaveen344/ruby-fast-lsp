@@ -110,3 +110,87 @@ async fn raise_unknown_constant_with_error_suffix_no_warn() {
 "#)
     .await;
 }
+
+// V2: type-aware checks for LocalVariableRead and CallNode args.
+
+#[tokio::test]
+async fn raise_method_returning_integer_warns() {
+    check(r#"
+def get_error
+  42
+end
+
+raise <warn code="raise-non-exception">get_error</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_method_returning_string_no_warn() {
+    // String return → Ruby wraps in RuntimeError.
+    check(r#"
+def msg
+  "boom"
+end
+
+<warn none code="raise-non-exception">raise msg</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_method_returning_array_warns() {
+    check(r#"
+def stuff
+  [1, 2, 3]
+end
+
+raise <warn code="raise-non-exception">stuff</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_method_with_uncertain_return_no_warn() {
+    // Method returns Union/Unknown → skip (conservative).
+    check(r#"
+def maybe(cond)
+  if cond
+    StandardError
+  else
+    42
+  end
+end
+
+<warn none code="raise-non-exception">raise maybe(true)</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_local_var_assigned_integer_warns() {
+    check(r#"
+x = 42
+raise <warn code="raise-non-exception">x</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_local_var_assigned_array_warns() {
+    check(r#"
+errs = [1, 2]
+raise <warn code="raise-non-exception">errs</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn raise_local_var_uncertain_no_warn() {
+    // Variable type Unknown after unresolvable method call → skip.
+    check(r#"
+x = some_unknown_method
+<warn none code="raise-non-exception">raise x</warn>
+"#)
+    .await;
+}

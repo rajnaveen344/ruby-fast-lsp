@@ -347,6 +347,110 @@ impl ReferenceVisitor {
         true
     }
 
+    /// Stdlib non-exception types — provably unsafe to raise. Enumerated so we
+    /// never warn on unknown third-party types (conservative).
+    const NON_EXCEPTION_TYPES: &'static [&'static str] = &[
+        "Integer",
+        "Float",
+        "Rational",
+        "Complex",
+        "Numeric",
+        "Array",
+        "Hash",
+        "Symbol",
+        "Regexp",
+        "Range",
+        "Proc",
+        "Method",
+        "UnboundMethod",
+        "IO",
+        "File",
+        "Dir",
+        "Time",
+        "Struct",
+        "Encoding",
+        "Fiber",
+        "Thread",
+        "Mutex",
+        "Queue",
+        "TrueClass",
+        "FalseClass",
+        "NilClass",
+        "Binding",
+        "BasicObject",
+        "Object",
+    ];
+
+    /// Returns `true` when `ty` is safe to raise or uncertain (silent).
+    /// Returns `false` when `ty` is provably non-exception (warn).
+    ///
+    /// Conservative: Union/Unknown → silent (avoid FPs).
+    /// String → silent (Ruby wraps in RuntimeError, mirrors V1 literal behaviour).
+    fn classify_raise_type(index: &crate::indexer::index::RubyIndex, ty: &RubyType) -> bool {
+        match ty {
+            RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+                let name = fqn
+                    .namespace_parts()
+                    .last()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                // String → Ruby wraps in RuntimeError, same as V1 string-literal path.
+                if name == "String" {
+                    return true;
+                }
+                // Known stdlib non-exception types → provably not raiseable.
+                if Self::NON_EXCEPTION_TYPES.contains(&name.as_str()) {
+                    return false;
+                }
+                Self::is_exception_class(index, &name)
+            }
+            // Modules can't be raised.
+            RubyType::Module(_) | RubyType::ModuleReference(_) => false,
+            // Union/Unknown → uncertain, skip.
+            RubyType::Union(_) | RubyType::Unknown => true,
+            // Everything else (Array, Hash, Integer, etc.) → warn.
+            _ => false,
+        }
+    }
+
+    /// Look up the return type of a bare (no-receiver) method call in the index.
+    ///
+    /// Searches the current namespace and its ancestors for a matching method entry.
+    /// Returns `None` when the method is not found or has no inferred return type.
+    fn resolve_bare_call_return_type(
+        &self,
+        index: &crate::indexer::index::RubyIndex,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        let method = RubyMethod::new(method_name).ok()?;
+        let entries = index.get_methods_by_name(&method)?;
+        let current_ns = self.scope_tracker.get_ns_stack();
+
+        // Walk current namespace → parents → top-level (empty ns).
+        let mut search_ns: Vec<Vec<RubyConstant>> = Vec::new();
+        let mut ns = current_ns.clone();
+        loop {
+            search_ns.push(ns.clone());
+            if ns.is_empty() {
+                break;
+            }
+            ns.pop();
+        }
+
+        for candidate_ns in &search_ns {
+            for entry in entries.iter() {
+                if let EntryKind::Method(data) = &entry.kind {
+                    if data.owner.namespace_parts() == *candidate_ns {
+                        return Some(
+                            data.return_type.clone().unwrap_or(RubyType::Unknown),
+                        );
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Inspect the first argument of a bare `raise` call and return an
     /// `UnresolvedEntry::RaiseNonException` when the argument is provably
     /// not an Exception subclass. Returns `None` when uncertain.
@@ -402,7 +506,53 @@ impl ReferenceVisitor {
             return None;
         }
 
-        // Anything else (local var, method call, interpolation, etc.) → uncertain, skip.
+        // LocalVariableReadNode — look up inferred type via VariableScopes.
+        if let Some(local) = first_arg.as_local_variable_read_node() {
+            let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+            let var_loc = first_arg.location();
+            let var_pos = self.document.offset_to_position(var_loc.start_offset());
+            let scopes = self.document.variable_scopes();
+            let scope_id = scopes
+                .find_scope_for_variable_at(&var_name, var_pos)
+                .or_else(|| scopes.scope_at_position(var_pos));
+            if let Some(sid) = scope_id {
+                if let Some(ty) = scopes.get_type_at_position(&var_name, sid, var_pos) {
+                    if !Self::classify_raise_type(index, ty) {
+                        return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+                    }
+                    return None;
+                }
+            }
+            // Type unknown → uncertain, skip.
+            return None;
+        }
+
+        // CallNode argument (e.g., `raise foo()` or `raise obj.method`) — resolve return type.
+        if let Some(inner_call) = first_arg.as_call_node() {
+            let ty = if inner_call.receiver().is_some() {
+                // Has receiver — use MethodResolver chain.
+                let resolver = MethodResolver::with_namespace(
+                    self.index.clone(),
+                    self.scope_tracker.get_ns_stack(),
+                );
+                resolver.resolve_call_type(&inner_call)
+            } else {
+                // Bare method call (no receiver) — look up by name in current namespace.
+                let method_name =
+                    String::from_utf8_lossy(inner_call.name().as_slice()).to_string();
+                self.resolve_bare_call_return_type(index, &method_name)
+            };
+            if let Some(ty) = ty {
+                if !Self::classify_raise_type(index, &ty) {
+                    return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+                }
+                return None;
+            }
+            // Return type unknown → uncertain, skip.
+            return None;
+        }
+
+        // Anything else (interpolation, etc.) → uncertain, skip.
         None
     }
 
