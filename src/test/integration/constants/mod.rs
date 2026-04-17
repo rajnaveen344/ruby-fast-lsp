@@ -1,5 +1,3 @@
-//! Integration tests for constants.
+//! Constant-specific tests (YARD type annotations).
 
-mod goto;
-mod references;
 mod yard_types;

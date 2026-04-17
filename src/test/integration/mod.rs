@@ -1,28 +1,22 @@
-//! Integration tests organized by tested entity and feature.
-//!
-//! ## By Feature (preferred for hover/inlay_hints)
-//! - hover/ - Hover tests organized by AST node type
-//! - inlay_hints/ - Inlay hints tests organized by hint type
-//!
-//! ## By Entity (legacy organization)
-//! - classes/ - Tests for classes (goto, references)
-//! - constants/ - Tests for constants
-//! - methods/ - Tests for methods (goto, references, inference)
-//! - modules/ - Tests for modules (code lens for mixins)
-//! - variables/ - Tests for variables
+//! Integration tests organized by feature.
 
-// Feature-based organization (new)
+// Feature-based organization
+mod call_hierarchy;
+mod code_lens;
 mod completion;
 mod diagnostics;
+mod goto;
 mod hover;
+mod implementation;
 mod inlay_hints;
+mod inference;
+mod mixins;
+mod references;
+mod rename;
+mod type_hierarchy;
 
-// Entity-based organization (legacy)
-mod classes;
+// Domain-specific (YARD type annotations)
 mod constants;
-mod methods;
-mod modules;
-mod variables;
 
 // Multi-workspace routing
 mod workspaces;
