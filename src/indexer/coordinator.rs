@@ -19,8 +19,11 @@ use std::time::{Duration, Instant};
 /// perf bench binary and perf regression tests.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PhaseTimings {
+    /// Phase 1 — definitions (gems + stdlib + project) + mixin resolution.
     pub phase1: Duration,
+    /// Phase 2 — reference indexing + diagnostics collection.
     pub phase2: Duration,
+    /// Phase 3 — publish diagnostics to the client.
     pub phase3: Duration,
     pub total: Duration,
 }
@@ -167,12 +170,8 @@ impl IndexingCoordinator {
         let phase2_dur = phase2_start.elapsed();
         info!("Phase 2 completed in {:?}", phase2_dur);
 
-        // Per-workspace `indexing_complete` flag is flipped by the spawning
-        // task in `handle_initialized`/`handle_did_change_workspace_folders`
-        // once `run_complete_indexing` returns Ok.
-
-        // PHASE 3: Publish diagnostics for unresolved constants
-        info!("Phase 3: Publishing diagnostics for unresolved constants");
+        // PHASE 3: Publish diagnostics to the client.
+        info!("Phase 3: Publishing diagnostics");
         let phase3_start = Instant::now();
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
         self.publish_unresolved_diagnostics(server).await;

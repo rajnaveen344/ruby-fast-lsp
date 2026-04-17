@@ -207,17 +207,17 @@ fn print_timings(iter: usize, t: &PhaseTimings) {
     let p2_pct = pct(t.phase2, t.total);
     let p3_pct = pct(t.phase3, t.total);
     println!(
-        "\n  run {iter}: total {:>8.2?} | phase1 {:>8.2?} ({:>4.1}%) | phase2 {:>8.2?} ({:>4.1}%) | phase3 {:>8.2?} ({:>4.1}%)\n",
+        "\n  run {iter}: total {:>8.2?} | p1 defs {:>8.2?} ({:>4.1}%) | p2 refs+diag {:>8.2?} ({:>4.1}%) | p3 publish {:>8.2?} ({:>4.1}%)\n",
         t.total, t.phase1, p1_pct, t.phase2, p2_pct, t.phase3, p3_pct
     );
 }
 
 fn print_summary(runs: &[PhaseTimings]) {
     println!("\n=== SUMMARY over {} runs ===", runs.len());
-    print_stat("phase1", runs.iter().map(|t| t.phase1));
-    print_stat("phase2", runs.iter().map(|t| t.phase2));
-    print_stat("phase3", runs.iter().map(|t| t.phase3));
-    print_stat("total ", runs.iter().map(|t| t.total));
+    print_stat("p1 defs      ", runs.iter().map(|t| t.phase1));
+    print_stat("p2 refs+diag ", runs.iter().map(|t| t.phase2));
+    print_stat("p3 publish   ", runs.iter().map(|t| t.phase3));
+    print_stat("total        ", runs.iter().map(|t| t.total));
 }
 
 fn print_stat(label: &str, iter: impl Iterator<Item = Duration> + Clone) {

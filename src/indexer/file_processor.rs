@@ -314,31 +314,22 @@ impl FileProcessor {
         Ok(())
     }
 
-    /// Index references from Ruby content
+    /// Index references and unresolved diagnostic entries from Ruby content.
     pub fn index_references(&self, uri: &Url, content: &str) -> Result<()> {
         let start = Instant::now();
-        debug!(
-            "Indexing references for: {:?} (track_unresolved: true)",
-            uri
-        );
+        debug!("Indexing references for: {:?} (track_unresolved: true)", uri);
 
-        // Remove existing unresolved entries if tracking
+        // Remove stale unresolved entries
         self.index.lock().remove_unresolved_entries_for_uri(uri);
 
-        // Parse and visit AST for references
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        // Visit under the index's shared read lock (visitor uses .read()
-        // internally) and buffer writes into `visitor.staged`.
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
         let mut visitor =
             ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
         visitor.visit(&node);
 
-        // Single write-lock per file: apply all staged references +
-        // unresolved entries. This is the only moment phase 2 serializes
-        // between rayon workers — keep it short.
         let staged = std::mem::take(&mut visitor.staged);
         staged.flush(&mut self.index.lock());
 
