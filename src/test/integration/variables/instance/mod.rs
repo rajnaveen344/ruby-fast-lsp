@@ -1,1 +1,0 @@
-//! Instance variable tests.
