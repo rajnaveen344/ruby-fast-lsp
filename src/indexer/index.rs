@@ -1544,6 +1544,32 @@ impl Default for RubyIndex {
     }
 }
 
+impl crate::indexer::symbol_table::SymbolTable for RubyIndex {
+    fn get_ancestor_chain(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+        RubyIndex::get_ancestor_chain(self, fqn)
+    }
+
+    fn get(&self, fqn: &FullyQualifiedName) -> Option<Vec<&Entry>> {
+        RubyIndex::get(self, fqn)
+    }
+
+    fn contains_fqn(&self, fqn: &FullyQualifiedName) -> bool {
+        RubyIndex::contains_fqn(self, fqn)
+    }
+
+    fn methods_on_owner(&self, owner: &FullyQualifiedName) -> Vec<&Entry> {
+        RubyIndex::methods_on_owner(self, owner)
+    }
+
+    fn get_methods_by_name(&self, method: &RubyMethod) -> Option<Vec<&Entry>> {
+        RubyIndex::get_methods_by_name(self, method)
+    }
+
+    fn contains_method(&self, method: &RubyMethod) -> bool {
+        RubyIndex::contains_method(self, method)
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

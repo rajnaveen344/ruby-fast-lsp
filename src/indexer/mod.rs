@@ -31,4 +31,5 @@ pub mod indexer_stdlib;
 pub mod interner;
 pub mod prefix_tree;
 
+pub mod symbol_table;
 pub mod version;
