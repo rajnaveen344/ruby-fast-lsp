@@ -222,6 +222,42 @@ RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` become
 - `src/inferrer/rbs.rs` — RBS type lookup with generic substitution
 - `src/capabilities/completion/method.rs` — method completion with ancestor chain walking
 
+## Subagent Delegation
+
+**Use Sonnet background subagents for mechanical work.** Reserve Opus for tasks that need critical thinking (design decisions, novel architecture, ambiguous tradeoffs).
+
+**Mechanical = good fit for Sonnet:**
+
+- TDD wiring of a new diagnostic that mirrors an already-shipped one (enum variant + emit + visitor branch + tests)
+- Repetitive refactors across many files (renaming, splitting an enum variant, propagating a new field)
+- Following a fully-specified plan where the design is decided
+
+**Critical thinking = stay on Opus:**
+
+- Choosing between competing architectures
+- Designing a new abstraction or data model
+- Diagnosing root cause of an unfamiliar bug
+- Anything where the user's intent is ambiguous
+
+**When dispatching to Sonnet, the prompt MUST include:**
+
+1. Project root + reminder to read `CLAUDE.md`
+2. Recent commit SHA so it knows the baseline
+3. Exact data shapes (enum variants, struct fields)
+4. Skeleton implementations of helpers when shape is non-obvious
+5. Reference to a similar shipped pattern (`mirrors raise-non-exception V2 — see commit X`)
+6. All test cases written verbatim
+7. Wire location (which file, where in the function)
+8. Style reminders (TigerBeetle: assert!/panic!, no debug_assert!)
+9. Required test count target after the change
+10. Commit message
+11. Don'ts list (no push, no unrelated changes)
+12. **Tip: AST verification** — if Sonnet needs to verify Prism node names/accessors, point it at `cargo run --bin ast -- '<ruby snippet>'` (with optional `--loc` for byte offsets). Saves a roundtrip vs grepping the prism crate source.
+
+**Parallelism:** When dispatching multiple Sonnet agents in parallel on overlapping files, use `isolation: "worktree"` so each gets an isolated git worktree. Single-task dispatches don't need worktree.
+
+**Mid-flight diagnostics:** When Sonnet is wiring a new enum variant, expect transient non-exhaustive-match errors as it incrementally edits. These are normal and resolve when the agent finishes — don't treat them as the agent struggling.
+
 ## TDD Workflow
 
 When the user provides a code scenario/example, follow this strict TDD process:
