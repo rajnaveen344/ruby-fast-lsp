@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use log::debug;
+use parking_lot::Mutex;
 use slotmap::{new_key_type, SlotMap};
 use tower_lsp::lsp_types::{Location, Range, Url};
 
@@ -91,6 +92,14 @@ pub struct RubyIndex {
     /// owner. Used by `find_method_suggestion` to avoid scanning every method
     /// in the index for each unresolved call.
     by_method_owner: HashMap<FullyQualifiedName, Vec<EntryId>>,
+    /// Cache of `get_ancestor_chain` results. The MRO walk on a large
+    /// mixin graph (Rails apps hit this hard) costs ~μs and is called many
+    /// times per file; caching collapses it to an interned lookup. Interior
+    /// mutability so readers of a `&RubyIndex` (behind RwLock::read) can
+    /// populate the cache. Cleared at Phase boundaries that could change
+    /// the graph (`resolve_all_mixins`, `remove_entries_for_uri`, and
+    /// `add_entry` for namespace kinds).
+    ancestor_chain_cache: Mutex<HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>>,
     /// Maps caller method FQN → all Reference entries made from within that method (for outgoing calls)
     by_caller: HashMap<FullyQualifiedName, Vec<EntryId>>,
 
@@ -127,6 +136,7 @@ impl RubyIndex {
             by_fqn: HashMap::new(),
             by_method_name: HashMap::new(),
             by_method_owner: HashMap::new(),
+            ancestor_chain_cache: Mutex::new(HashMap::new()),
             by_caller: HashMap::new(),
 
             // Interned storage
@@ -252,6 +262,12 @@ impl RubyIndex {
             fqn
         );
 
+        // Fast path: return cached chain if we have one. Cache is populated
+        // on first miss below and invalidated on mixin/graph changes.
+        if let Some(cached) = self.ancestor_chain_cache.lock().get(fqn) {
+            return cached.clone();
+        }
+
         // Step 1: Special case for root namespace (top-level)
         // The root namespace (empty path) represents top-level Ruby code
         // It doesn't need to be indexed and has no ancestors
@@ -326,6 +342,11 @@ impl RubyIndex {
         let chain_str: Vec<String> = chain.iter().map(|f| f.to_string()).collect();
         debug!("[Ancestor Chain] {}: {}", fqn, chain_str.join(" → "));
 
+        // Populate cache for future queries.
+        self.ancestor_chain_cache
+            .lock()
+            .insert(fqn.clone(), chain.clone());
+
         chain
     }
 
@@ -363,6 +384,14 @@ impl RubyIndex {
                 .push(id);
         }
 
+        // Adding a class/module entry may change inheritance edges once
+        // mixins resolve — invalidate the ancestor chain cache
+        // conservatively. Methods/variables/references don't affect the
+        // graph so we skip the invalidation on them.
+        if matches!(&entry.kind, EntryKind::Class(_) | EntryKind::Module(_)) {
+            self.ancestor_chain_cache.lock().clear();
+        }
+
         // Add to prefix tree
         self.add_to_prefix_tree(&entry);
 
@@ -383,6 +412,10 @@ impl RubyIndex {
     ///    - Remove the stale IDs we just deleted.
     ///    - If a FQN has no more entries (definitions) left system-wide, it counts as "completely removed".
     pub fn remove_entries_for_uri(&mut self, uri: &Url) -> Vec<FullyQualifiedName> {
+        // Removing namespace/mixin entries can change the ancestor graph.
+        // Clear the cache before the mutation to keep lookups correct.
+        self.ancestor_chain_cache.lock().clear();
+
         let ids_to_remove = self.by_uri.remove(uri).unwrap_or_default();
 
         // Use HashSet for O(1) amortized dedup
@@ -976,6 +1009,9 @@ impl RubyIndex {
 
         debug!("Building inheritance graph from indexed entries");
 
+        // Graph edges are about to change — any cached ancestor chain is stale.
+        self.ancestor_chain_cache.lock().clear();
+
         // Collect ALL entries with their FQNs and file IDs first to avoid borrow conflicts.
         // Important: Ruby allows reopening classes/modules in multiple files, each with
         // different include/prepend/extend statements. We must process ALL entries,
@@ -1202,6 +1238,8 @@ impl RubyIndex {
         if self.unresolved_mixin_edges.is_empty() {
             return;
         }
+        // Any edge that resolves here changes inheritance; drop the cache.
+        self.ancestor_chain_cache.lock().clear();
         let pending: Vec<UnresolvedMixinEdge> = self
             .unresolved_mixin_edges
             .drain()
@@ -1257,6 +1295,8 @@ impl RubyIndex {
     /// Resolve mixin references only for entries in a specific file
     /// This is more efficient than resolve_all_mixins for incremental updates
     pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
+        // Graph edges may be added — invalidate cached ancestor chains.
+        self.ancestor_chain_cache.lock().clear();
         use crate::indexer::graph::NodeKind;
 
         let Some(file_id) = self.files.get_id(uri).copied() else {
