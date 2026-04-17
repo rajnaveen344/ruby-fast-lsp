@@ -1,5 +1,6 @@
 //! Diagnostics tests organized by diagnostic kind.
 
+mod bad_splat;
 mod expr_receiver_unresolved;
 mod inconsistent_return;
 mod missing_kwarg;

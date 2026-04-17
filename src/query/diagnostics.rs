@@ -168,6 +168,25 @@ impl IndexQuery {
                     tags: None,
                     data: None,
                 },
+                UnresolvedEntry::BadSplat {
+                    operator,
+                    arg_repr,
+                    expected,
+                    location,
+                } => Diagnostic {
+                    range: location.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("bad-splat".to_string())),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message: format!(
+                        "`{}{}` expected {} but got non-{} value",
+                        operator, arg_repr, expected, expected
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                },
             })
             .collect()
     }

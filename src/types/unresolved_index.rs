@@ -87,6 +87,18 @@ pub enum UnresolvedEntry {
         /// Location of the offending argument
         location: Location,
     },
+    /// A splat whose target is provably the wrong type.
+    /// `*expr` requires Array-like; `**expr` requires Hash-like.
+    BadSplat {
+        /// `"*"` or `"**"`
+        operator: String,
+        /// Argument expression as written (for the message)
+        arg_repr: String,
+        /// Expected type description (`"Array"` or `"Hash"`)
+        expected: String,
+        /// Location of the splat node (operator + target) for the underline
+        location: Location,
+    },
 }
 
 // Manual Hash implementation since Location from tower_lsp doesn't implement Hash
@@ -174,6 +186,22 @@ impl std::hash::Hash for UnresolvedEntry {
             UnresolvedEntry::RaiseNonException { arg_repr, location } => {
                 5u8.hash(state); // discriminant
                 arg_repr.hash(state);
+                location.uri.hash(state);
+                location.range.start.line.hash(state);
+                location.range.start.character.hash(state);
+                location.range.end.line.hash(state);
+                location.range.end.character.hash(state);
+            }
+            UnresolvedEntry::BadSplat {
+                operator,
+                arg_repr,
+                expected,
+                location,
+            } => {
+                6u8.hash(state); // discriminant
+                operator.hash(state);
+                arg_repr.hash(state);
+                expected.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -278,6 +306,21 @@ impl UnresolvedEntry {
         Self::RaiseNonException { arg_repr, location }
     }
 
+    /// Create a bad-splat entry
+    pub fn bad_splat(
+        operator: String,
+        arg_repr: String,
+        expected: String,
+        location: Location,
+    ) -> Self {
+        Self::BadSplat {
+            operator,
+            arg_repr,
+            expected,
+            location,
+        }
+    }
+
     /// Get the location of this unresolved entry
     pub fn location(&self) -> &Location {
         match self {
@@ -287,6 +330,7 @@ impl UnresolvedEntry {
             Self::UnknownKwarg { location, .. } => location,
             Self::MissingKwarg { location, .. } => location,
             Self::RaiseNonException { location, .. } => location,
+            Self::BadSplat { location, .. } => location,
         }
     }
 
@@ -299,6 +343,7 @@ impl UnresolvedEntry {
             Self::UnknownKwarg { method, .. } => method,
             Self::MissingKwarg { method, .. } => method,
             Self::RaiseNonException { arg_repr, .. } => arg_repr,
+            Self::BadSplat { arg_repr, .. } => arg_repr,
         }
     }
 
