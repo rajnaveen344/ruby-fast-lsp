@@ -10,6 +10,8 @@
 //! type snapshots at each statement, with explicit offset ranges showing where
 //! each type is valid.
 
+mod narrow;
+
 use crate::analyzer_prism::control_flow;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::MethodResolver;
@@ -269,8 +271,16 @@ impl<'a> TypeTracker<'a> {
         // Merge envs — diverging branches never reach the join point.
         match (then_diverges, else_diverges) {
             (true, true) => self.vars = env_before,
-            (true, false) => self.vars = else_env,
-            (false, true) => self.vars = then_env,
+            (true, false) => {
+                // then exited → predicate was false at the join.
+                self.vars = else_env;
+                narrow::narrow(&mut self.vars, &predicate, false);
+            }
+            (false, true) => {
+                // else exited → predicate was true at the join.
+                self.vars = then_env;
+                narrow::narrow(&mut self.vars, &predicate, true);
+            }
             (false, false) => {
                 self.vars = then_env;
                 self.merge_env(&else_env, if_node.subsequent().is_none());
@@ -459,8 +469,16 @@ impl<'a> TypeTracker<'a> {
 
         match (then_diverges, else_diverges) {
             (true, true) => self.vars = env_before,
-            (true, false) => self.vars = else_env,
-            (false, true) => self.vars = then_env,
+            (true, false) => {
+                // unless body (executes when predicate FALSE) exited → at join, predicate was true.
+                self.vars = else_env;
+                narrow::narrow(&mut self.vars, &predicate, true);
+            }
+            (false, true) => {
+                // else (executes when predicate TRUE) exited → at join, predicate was false.
+                self.vars = then_env;
+                narrow::narrow(&mut self.vars, &predicate, false);
+            }
             (false, false) => {
                 self.vars = then_env;
                 self.merge_env(&else_env, unless_node.else_clause().is_none());

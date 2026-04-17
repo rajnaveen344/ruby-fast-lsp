@@ -5,6 +5,7 @@
 pub mod constructors;
 pub mod diverging_branches;
 pub mod flow;
+pub mod guard_narrowing;
 pub mod literals;
 pub mod method_calls;
 pub mod unknown;
