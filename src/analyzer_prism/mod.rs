@@ -13,6 +13,7 @@ pub use visitors::identifier_visitor::IdentifierType;
 
 // Export the visitors module
 pub mod control_flow;
+pub mod diagnostics;
 pub mod scope_tracker;
 pub mod utils;
 pub mod visitors;

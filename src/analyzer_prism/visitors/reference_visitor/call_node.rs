@@ -278,301 +278,6 @@ enum ReceiverInfo {
 }
 
 impl ReferenceVisitor {
-    /// Stdlib exception class names that are always valid `raise` arguments.
-    const EXCEPTION_WHITELIST: &'static [&'static str] = &[
-        "Exception",
-        "StandardError",
-        "RuntimeError",
-        "ArgumentError",
-        "TypeError",
-        "NameError",
-        "NoMethodError",
-        "IOError",
-        "RangeError",
-        "NotImplementedError",
-        "ZeroDivisionError",
-        "IndexError",
-        "KeyError",
-        "StopIteration",
-        "SystemExit",
-        "Interrupt",
-        "ScriptError",
-        "SyntaxError",
-        "LoadError",
-        "LocalJumpError",
-        "FrozenError",
-        "EncodingError",
-        "RegexpError",
-        "SystemCallError",
-        "ThreadError",
-        "FiberError",
-        "SecurityError",
-        "SignalException",
-    ];
-
-    /// Check whether `name` resolves to an Exception subclass.
-    ///
-    /// Returns `true` (safe to raise) when:
-    /// - Name is in the stdlib whitelist, OR
-    /// - Name ends with "Error" / "Exception" (heuristic for unindexed user classes), OR
-    /// - Name is found in the user index and its ancestor chain includes a whitelist entry.
-    ///
-    /// Returns `false` (warn) only when the class is in the user index but its ancestors
-    /// do NOT include Exception. Unknown classes not in the index are treated as safe
-    /// (conservative — avoid false positives on third-party gems).
-    fn is_exception_class(
-        index: &crate::indexer::index::RubyIndex,
-        name: &str,
-    ) -> bool {
-        if Self::EXCEPTION_WHITELIST.contains(&name) {
-            return true;
-        }
-        // Suffix heuristic: unindexed UserDefinedError / FooException → treat as safe.
-        if name.ends_with("Error") || name.ends_with("Exception") {
-            return true;
-        }
-        // User index walk.
-        if let Ok(ruby_const) = RubyConstant::new(name) {
-            let ns_fqn = FullyQualifiedName::namespace_with_kind(
-                vec![ruby_const],
-                crate::indexer::entry::NamespaceKind::Instance,
-            );
-            if index.contains_fqn(&ns_fqn) {
-                for ancestor in index.get_ancestor_chain(&ns_fqn) {
-                    let last = ancestor
-                        .namespace_parts()
-                        .last()
-                        .map(|c| c.to_string());
-                    if let Some(n) = last {
-                        if Self::EXCEPTION_WHITELIST.contains(&n.as_str()) {
-                            return true;
-                        }
-                    }
-                }
-                // Class is indexed but no Exception ancestor found.
-                return false;
-            }
-        }
-        // Not in index and no suffix match → conservative, assume unknown/safe.
-        true
-    }
-
-    /// Stdlib non-exception types — provably unsafe to raise. Enumerated so we
-    /// never warn on unknown third-party types (conservative).
-    const NON_EXCEPTION_TYPES: &'static [&'static str] = &[
-        "Integer",
-        "Float",
-        "Rational",
-        "Complex",
-        "Numeric",
-        "Array",
-        "Hash",
-        "Symbol",
-        "Regexp",
-        "Range",
-        "Proc",
-        "Method",
-        "UnboundMethod",
-        "IO",
-        "File",
-        "Dir",
-        "Time",
-        "Struct",
-        "Encoding",
-        "Fiber",
-        "Thread",
-        "Mutex",
-        "Queue",
-        "TrueClass",
-        "FalseClass",
-        "NilClass",
-        "Binding",
-        "BasicObject",
-        "Object",
-    ];
-
-    /// Returns `true` when `ty` is safe to raise or uncertain (silent).
-    /// Returns `false` when `ty` is provably non-exception (warn).
-    ///
-    /// Conservative: Union/Unknown → silent (avoid FPs).
-    /// String → silent (Ruby wraps in RuntimeError, mirrors V1 literal behaviour).
-    fn classify_raise_type(index: &crate::indexer::index::RubyIndex, ty: &RubyType) -> bool {
-        match ty {
-            RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
-                let name = fqn
-                    .namespace_parts()
-                    .last()
-                    .map(|c| c.to_string())
-                    .unwrap_or_default();
-                // String → Ruby wraps in RuntimeError, same as V1 string-literal path.
-                if name == "String" {
-                    return true;
-                }
-                // Known stdlib non-exception types → provably not raiseable.
-                if Self::NON_EXCEPTION_TYPES.contains(&name.as_str()) {
-                    return false;
-                }
-                Self::is_exception_class(index, &name)
-            }
-            // Modules can't be raised.
-            RubyType::Module(_) | RubyType::ModuleReference(_) => false,
-            // Union/Unknown → uncertain, skip.
-            RubyType::Union(_) | RubyType::Unknown => true,
-            // Everything else (Array, Hash, Integer, etc.) → warn.
-            _ => false,
-        }
-    }
-
-    /// Look up the return type of a bare (no-receiver) method call in the index.
-    ///
-    /// Searches the current namespace and its ancestors for a matching method entry.
-    /// Returns `None` when the method is not found or has no inferred return type.
-    fn resolve_bare_call_return_type(
-        &self,
-        index: &crate::indexer::index::RubyIndex,
-        method_name: &str,
-    ) -> Option<RubyType> {
-        let method = RubyMethod::new(method_name).ok()?;
-        let entries = index.get_methods_by_name(&method)?;
-        let current_ns = self.scope_tracker.get_ns_stack();
-
-        // Walk current namespace → parents → top-level (empty ns).
-        let mut search_ns: Vec<Vec<RubyConstant>> = Vec::new();
-        let mut ns = current_ns.clone();
-        loop {
-            search_ns.push(ns.clone());
-            if ns.is_empty() {
-                break;
-            }
-            ns.pop();
-        }
-
-        for candidate_ns in &search_ns {
-            for entry in entries.iter() {
-                if let EntryKind::Method(data) = &entry.kind {
-                    if data.owner.namespace_parts() == *candidate_ns {
-                        return Some(
-                            data.return_type.clone().unwrap_or(RubyType::Unknown),
-                        );
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Inspect the first argument of a bare `raise` call and return an
-    /// `UnresolvedEntry::RaiseNonException` when the argument is provably
-    /// not an Exception subclass. Returns `None` when uncertain.
-    // MUST be called with the index mutex NOT held. This method builds a
-    // `MethodResolver` which locks the index internally — holding the guard
-    // across the call causes a re-entrant deadlock (parking_lot `Mutex` is
-    // not reentrant). Callers in `process_call_node_entry` drop their guard
-    // before invoking.
-    fn check_raise_call(&self, node: &CallNode) -> Option<UnresolvedEntry> {
-        let args = node.arguments()?;
-        let first_arg = args.arguments().iter().next()?;
-
-        let arg_loc = self
-            .document
-            .prism_location_to_lsp_location(&first_arg.location());
-        let arg_repr =
-            String::from_utf8_lossy(first_arg.location().as_slice()).to_string();
-
-        // String → Ruby wraps in RuntimeError, always OK.
-        if first_arg.as_string_node().is_some() {
-            return None;
-        }
-
-        // Definite non-exception literals.
-        if first_arg.as_integer_node().is_some()
-            || first_arg.as_float_node().is_some()
-            || first_arg.as_array_node().is_some()
-            || first_arg.as_hash_node().is_some()
-            || first_arg.as_symbol_node().is_some()
-            || first_arg.as_true_node().is_some()
-            || first_arg.as_false_node().is_some()
-            || first_arg.as_nil_node().is_some()
-            || first_arg.as_range_node().is_some()
-        {
-            return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
-        }
-
-        // Constant reference (e.g., `raise MyError`).
-        if let Some(const_read) = first_arg.as_constant_read_node() {
-            let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
-            let index = self.index.lock();
-            if !Self::is_exception_class(&index, &name) {
-                return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
-            }
-            return None;
-        }
-
-        // ConstantPath (e.g., `raise Foo::MyError`) — check last segment name.
-        if let Some(_const_path) = first_arg.as_constant_path_node() {
-            let full_name = self.build_constant_path_name(&first_arg);
-            let last_segment = full_name.split("::").last().unwrap_or(&full_name);
-            let index = self.index.lock();
-            if !Self::is_exception_class(&index, last_segment) {
-                return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
-            }
-            return None;
-        }
-
-        // LocalVariableReadNode — look up inferred type via VariableScopes.
-        if let Some(local) = first_arg.as_local_variable_read_node() {
-            let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
-            let var_loc = first_arg.location();
-            let var_pos = self.document.offset_to_position(var_loc.start_offset());
-            let scopes = self.document.variable_scopes();
-            let scope_id = scopes
-                .find_scope_for_variable_at(&var_name, var_pos)
-                .or_else(|| scopes.scope_at_position(var_pos));
-            if let Some(sid) = scope_id {
-                if let Some(ty) = scopes.get_type_at_position(&var_name, sid, var_pos) {
-                    let index = self.index.lock();
-                    if !Self::classify_raise_type(&index, ty) {
-                        return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
-                    }
-                    return None;
-                }
-            }
-            // Type unknown → uncertain, skip.
-            return None;
-        }
-
-        // CallNode argument (e.g., `raise foo()` or `raise obj.method`) — resolve return type.
-        if let Some(inner_call) = first_arg.as_call_node() {
-            let ty = if inner_call.receiver().is_some() {
-                // Has receiver — use MethodResolver chain. Must NOT hold the
-                // index mutex here: MethodResolver locks internally.
-                let resolver = MethodResolver::with_namespace(
-                    self.index.clone(),
-                    self.scope_tracker.get_ns_stack(),
-                );
-                resolver.resolve_call_type(&inner_call)
-            } else {
-                // Bare method call (no receiver) — look up by name in current namespace.
-                let method_name =
-                    String::from_utf8_lossy(inner_call.name().as_slice()).to_string();
-                let index = self.index.lock();
-                self.resolve_bare_call_return_type(&index, &method_name)
-            };
-            if let Some(ty) = ty {
-                let index = self.index.lock();
-                if !Self::classify_raise_type(&index, &ty) {
-                    return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
-                }
-                return None;
-            }
-            // Return type unknown → uncertain, skip.
-            return None;
-        }
-
-        // Anything else (interpolation, etc.) → uncertain, skip.
-        None
-    }
-
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
@@ -846,11 +551,15 @@ impl ReferenceVisitor {
         }
 
         // Raise-non-exception check: bare `raise` with provably non-Exception
-        // arg. `check_raise_call` internally acquires short-lived read locks
-        // (including one for `MethodResolver::resolve_call_type` on call-arg
-        // receivers) — no outer index guard is held here so no reentrancy.
+        // arg. The module acquires short-lived read locks internally — no outer
+        // index guard is held here so no reentrancy.
         if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
-            if let Some(entry) = self.check_raise_call(node) {
+            if let Some(entry) = crate::analyzer_prism::diagnostics::raise_non_exception::check(
+                node,
+                &self.index,
+                &self.document,
+                &self.scope_tracker.get_ns_stack(),
+            ) {
                 self.staged
                     .push_unresolved(self.document.uri.clone(), entry);
             }
@@ -1037,7 +746,7 @@ impl ReferenceVisitor {
             (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
             if self.is_valid_constant_path_receiver(receiver_node) {
-                let receiver_name = self.build_constant_path_name(receiver_node);
+                let receiver_name = crate::analyzer_prism::utils::build_constant_path_name(receiver_node);
                 let (ns, kind) = self.handle_constant_path_receiver(
                     &constant_path,
                     receiver_node,
@@ -1073,31 +782,6 @@ impl ReferenceVisitor {
 
         // Any other node type is invalid
         false
-    }
-
-    /// Build the full constant path name as a string (e.g., "Foo::Bar::Baz")
-    fn build_constant_path_name(&self, node: &Node) -> String {
-        let mut parts = Vec::new();
-        self.collect_constant_path_parts_for_name(node, &mut parts);
-        parts.join("::")
-    }
-
-    /// Recursively collect constant path parts for building the name
-    fn collect_constant_path_parts_for_name(&self, node: &Node, parts: &mut Vec<String>) {
-        if let Some(constant_path) = node.as_constant_path_node() {
-            // Process parent first (left side)
-            if let Some(parent) = constant_path.parent() {
-                self.collect_constant_path_parts_for_name(&parent, parts);
-            }
-            // Then add the name (right side)
-            if let Some(name_bytes) = constant_path.name() {
-                let name = String::from_utf8_lossy(name_bytes.as_slice()).to_string();
-                parts.push(name);
-            }
-        } else if let Some(constant_read) = node.as_constant_read_node() {
-            let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
-            parts.push(name);
-        }
     }
 
     /// Handle method calls with self receiver (e.g., `self.method_name`)

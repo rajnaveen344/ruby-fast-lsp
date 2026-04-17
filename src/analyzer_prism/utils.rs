@@ -284,3 +284,28 @@ pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKin
         NamespaceKind::Instance
     }
 }
+
+/// Build the full constant path name as a string (e.g., "Foo::Bar::Baz")
+pub(crate) fn build_constant_path_name(node: &Node) -> String {
+    let mut parts = Vec::new();
+    collect_constant_path_parts_for_name(node, &mut parts);
+    parts.join("::")
+}
+
+/// Recursively collect constant path parts for building the name
+pub(crate) fn collect_constant_path_parts_for_name(node: &Node, parts: &mut Vec<String>) {
+    if let Some(constant_path) = node.as_constant_path_node() {
+        // Process parent first (left side)
+        if let Some(parent) = constant_path.parent() {
+            collect_constant_path_parts_for_name(&parent, parts);
+        }
+        // Then add the name (right side)
+        if let Some(name_bytes) = constant_path.name() {
+            let name = String::from_utf8_lossy(name_bytes.as_slice()).to_string();
+            parts.push(name);
+        }
+    } else if let Some(constant_read) = node.as_constant_read_node() {
+        let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
+        parts.push(name);
+    }
+}
