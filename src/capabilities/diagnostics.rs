@@ -25,7 +25,132 @@ pub fn generate_diagnostics(
     let mut diagnostics = Vec::new();
     diagnostics.extend(extract_syntax_diagnostics(parse_result, document));
     diagnostics.extend(extract_unreachable_diagnostics(parse_result, document));
+    diagnostics.extend(extract_inconsistent_return_diagnostics(parse_result, document));
     diagnostics
+}
+
+/// `inconsistent-return`: method body falls through, has at least one explicit
+/// `return EXPR` with a non-nil value, AND the body's last statement is a
+/// "void" call (`puts`/`print`/`p`/`pp`/`warn`) — strongly suggesting a forgotten
+/// return on the fall-through path.
+///
+/// Conservative: silent when the last expression is a meaningful value.
+fn extract_inconsistent_return_diagnostics(
+    parse_result: &ruby_prism::ParseResult<'_>,
+    document: &RubyDocument,
+) -> Vec<Diagnostic> {
+    let mut visitor = InconsistentReturnVisitor {
+        document,
+        diagnostics: Vec::new(),
+    };
+    visitor.visit(&parse_result.node());
+    visitor.diagnostics
+}
+
+struct InconsistentReturnVisitor<'a> {
+    document: &'a RubyDocument,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl<'a> InconsistentReturnVisitor<'a> {
+    fn check_def(&mut self, def: &ruby_prism::DefNode<'_>) {
+        let Some(body) = def.body() else { return };
+        let Some(stmts) = body.as_statements_node() else {
+            return;
+        };
+        let body_nodes: Vec<_> = stmts.body().iter().collect();
+        if body_nodes.is_empty() {
+            return;
+        }
+
+        // Body must fall through.
+        if control_flow::analyze_statements(&stmts).is_diverges() {
+            return;
+        }
+
+        // Last statement must be a "void" call.
+        let last = body_nodes.last().unwrap();
+        if !is_void_call(last) {
+            return;
+        }
+
+        // Body must contain at least one explicit `return EXPR` with non-nil value
+        // (excluding returns inside nested defs/lambdas).
+        let mut finder = ValueReturnFinder { found: false };
+        ruby_prism::visit_statements_node(&mut finder, &stmts);
+        if !finder.found {
+            return;
+        }
+
+        let loc = def.location();
+        let start = self.document.offset_to_position(loc.start_offset());
+        let end = self.document.offset_to_position(loc.end_offset());
+        self.diagnostics.push(Diagnostic {
+            range: Range::new(start, end),
+            severity: Some(DiagnosticSeverity::WARNING),
+            code: Some(NumberOrString::String("inconsistent-return".to_string())),
+            code_description: None,
+            source: Some("ruby-fast-lsp".to_string()),
+            message: "Method has explicit `return` with a value on some paths but \
+                      falls through to a side-effect call on another path — \
+                      implicit `nil` return may be unintentional."
+                .to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
+}
+
+impl<'a, 'pr> Visit<'pr> for InconsistentReturnVisitor<'a> {
+    fn visit_def_node(&mut self, node: &ruby_prism::DefNode<'pr>) {
+        self.check_def(node);
+        // Recurse so nested defs (rare) are also checked.
+        ruby_prism::visit_def_node(self, node);
+    }
+}
+
+/// True if `node` is a fn-style call with no receiver, no block, and a name in the
+/// canonical "void / side-effect" set. These calls return `nil` and signal intent.
+fn is_void_call(node: &ruby_prism::Node<'_>) -> bool {
+    let Some(call) = node.as_call_node() else {
+        return false;
+    };
+    if call.receiver().is_some() || call.block().is_some() {
+        return false;
+    }
+    let name = call.name();
+    matches!(
+        name.as_slice(),
+        b"puts" | b"print" | b"p" | b"pp" | b"warn"
+    )
+}
+
+/// Visitor that finds any `return EXPR` where EXPR is present and not `nil` literal.
+/// Skips nested DefNode/LambdaNode/BlockNode bodies — returns there target a
+/// different method or block context.
+struct ValueReturnFinder {
+    found: bool,
+}
+
+impl<'pr> Visit<'pr> for ValueReturnFinder {
+    fn visit_return_node(&mut self, node: &ruby_prism::ReturnNode<'pr>) {
+        if self.found {
+            return;
+        }
+        if let Some(args) = node.arguments() {
+            let arg_nodes: Vec<_> = args.arguments().iter().collect();
+            for arg in &arg_nodes {
+                if arg.as_nil_node().is_none() {
+                    self.found = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    fn visit_def_node(&mut self, _node: &ruby_prism::DefNode<'pr>) {}
+    fn visit_lambda_node(&mut self, _node: &ruby_prism::LambdaNode<'pr>) {}
 }
 
 /// Walk every `StatementsNode` and flag every statement following a node that
