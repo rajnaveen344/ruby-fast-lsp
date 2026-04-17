@@ -158,7 +158,12 @@ fn collect_missing_required_kwargs<'a>(
 
 /// Returns `Some((min, max, actual))` if callsite positional arity is outside
 /// `[min, max]`. `max` is `None` when the method accepts `*args`. Returns `None`
-/// when arity matches OR when the callsite contains a splat (unknown count).
+/// when arity matches OR when the check is inconclusive.
+///
+/// Splat semantics: `*args` at the callsite expands to N >= 0 runtime args.
+/// Too-few check is disabled (splat could supply the missing args).
+/// Too-many check still fires when fixed args alone already exceed max — splat
+/// can only ADD more args, making an overflow guaranteed.
 fn compute_arity_mismatch(
     node: &CallNode,
     arity: &MethodArity,
@@ -178,15 +183,19 @@ fn compute_arity_mismatch(
             positional += 1;
         }
     }
-    if has_splat_at_callsite {
-        return None;
-    }
     let min = arity.required;
     let max = if arity.has_rest {
         None
     } else {
         Some(arity.required + arity.optional)
     };
+    if has_splat_at_callsite {
+        let too_many = max.map(|m| positional > m).unwrap_or(false);
+        if too_many {
+            return Some((min, max, positional));
+        }
+        return None;
+    }
     let too_few = positional < min;
     let too_many = max.map(|m| positional > m).unwrap_or(false);
     if too_few || too_many {

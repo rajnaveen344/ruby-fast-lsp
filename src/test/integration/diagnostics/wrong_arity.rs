@@ -218,3 +218,68 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn splat_with_fixed_args_under_max_silent() {
+    check(r#"
+def greet(name)
+  name
+end
+
+args = ["a", "b"]
+<warn none code="wrong-arity">greet(*args)</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn splat_with_fixed_args_at_max_silent() {
+    check(r#"
+def greet(name)
+  name
+end
+
+args = []
+<warn none code="wrong-arity">greet("a", *args)</warn>
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn splat_with_fixed_args_exceeding_max_warns() {
+    check(r#"
+def greet(name)
+  name
+end
+
+args = []
+<warn code="wrong-arity">greet</warn>("a", "b", *args)
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn splat_with_many_fixed_args_exceeding_max_warns() {
+    check(r#"
+def greet(name, age = 0)
+  name
+end
+
+args = []
+<warn code="wrong-arity">greet</warn>("a", 1, 2, *args)
+"#)
+    .await;
+}
+
+#[tokio::test]
+async fn splat_in_method_with_rest_silent() {
+    check(r#"
+def greet(*args)
+  args
+end
+
+xs = []
+<warn none code="wrong-arity">greet("a", "b", "c", *xs)</warn>
+"#)
+    .await;
+}
