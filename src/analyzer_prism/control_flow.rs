@@ -9,7 +9,7 @@
 //! - guard narrowing (future)
 //! - definite-return diagnostic (future)
 
-use ruby_prism::{IfNode, Node, StatementsNode, UnlessNode};
+use ruby_prism::{IfNode, Node, StatementsNode, UnlessNode, Visit};
 
 /// Reachability outcome for a node or statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +90,13 @@ pub fn analyze(node: &Node<'_>) -> Reachability {
 
     if let Some(call) = node.as_call_node() {
         if is_terminating_call(&call) {
+            return Diverges(ExitSet::one(Exit::Raise));
+        }
+        if is_diverging_loop(&call) {
+            // Treated as Raise — the call never returns to its caller.
+            // We don't introduce an `Exit::InfiniteLoop` kind; the only consumers
+            // that distinguish exits care about Return vs Raise vs loop-control,
+            // and "method never returns" maps cleanly onto Raise semantics.
             return Diverges(ExitSet::one(Exit::Raise));
         }
         return Falls;
@@ -318,6 +325,58 @@ fn analyze_rescue_chain(rescue_n: &ruby_prism::RescueNode<'_>) -> Reachability {
 
 // --- Terminating calls ---------------------------------------------------
 
+/// True for `loop do ... end` / `loop { ... }` whose block body contains no
+/// `break` that would exit *this* loop. Nested blocks/lambdas/while/until/for
+/// shield their own breaks.
+fn is_diverging_loop(call: &ruby_prism::CallNode<'_>) -> bool {
+    if call.receiver().is_some() {
+        return false;
+    }
+    let name = call.name();
+    if String::from_utf8_lossy(name.as_slice()) != "loop" {
+        return false;
+    }
+    let Some(block_node) = call.block() else {
+        return false;
+    };
+    let Some(block) = block_node.as_block_node() else {
+        return false;
+    };
+    let Some(body) = block.body() else {
+        // empty `loop {}` — no break, infinite loop.
+        return true;
+    };
+    !body_contains_breaking_break(&body)
+}
+
+/// True iff `body` contains a `break` not shielded by a nested block, lambda,
+/// or inner loop construct. Used by `is_diverging_loop`.
+fn body_contains_breaking_break(body: &Node<'_>) -> bool {
+    let mut finder = BreakFinder { found: false };
+    finder.visit(body);
+    finder.found
+}
+
+struct BreakFinder {
+    found: bool,
+}
+
+impl<'pr> ruby_prism::Visit<'pr> for BreakFinder {
+    fn visit_break_node(&mut self, _node: &ruby_prism::BreakNode<'pr>) {
+        self.found = true;
+    }
+
+    // Each of these introduces a new break-scope: a `break` inside them exits
+    // *that* construct, not the outer `loop` we're analyzing. Override the visit
+    // methods to NOT recurse, shielding nested breaks.
+
+    fn visit_block_node(&mut self, _node: &ruby_prism::BlockNode<'pr>) {}
+    fn visit_lambda_node(&mut self, _node: &ruby_prism::LambdaNode<'pr>) {}
+    fn visit_while_node(&mut self, _node: &ruby_prism::WhileNode<'pr>) {}
+    fn visit_until_node(&mut self, _node: &ruby_prism::UntilNode<'pr>) {}
+    fn visit_for_node(&mut self, _node: &ruby_prism::ForNode<'pr>) {}
+}
+
 /// Calls that never return: `raise`, `fail`, `throw`, `exit`, `exit!`, `abort`,
 /// and the `Process.exit*` / `Process.abort` family.
 fn is_terminating_call(call: &ruby_prism::CallNode<'_>) -> bool {
@@ -539,6 +598,71 @@ mod tests {
         let stmts = result.node().as_program_node().unwrap().statements();
         let raise_node = stmts.body().iter().next().unwrap();
         assert!(exits_method(&raise_node));
+    }
+
+    #[test]
+    fn loop_no_break_diverges() {
+        let r = analyze_src("loop { puts 1 }");
+        assert!(r.is_diverges());
+    }
+
+    #[test]
+    fn loop_with_break_falls() {
+        let r = analyze_src("loop { break 5 }");
+        assert_eq!(r, Reachability::Falls);
+    }
+
+    #[test]
+    fn loop_with_conditional_break_falls() {
+        let r = analyze_src("loop { break if cond }");
+        assert_eq!(r, Reachability::Falls);
+    }
+
+    #[test]
+    fn loop_with_nested_each_break_diverges() {
+        // The inner block's `break` exits the each, not the outer loop.
+        let r = analyze_src("loop { [1].each { break } }");
+        assert!(r.is_diverges());
+    }
+
+    #[test]
+    fn loop_with_nested_lambda_break_diverges() {
+        // Break inside lambda doesn't exit the outer loop.
+        let r = analyze_src("loop { lambda { break }.call }");
+        assert!(r.is_diverges());
+    }
+
+    #[test]
+    fn loop_with_nested_while_break_diverges() {
+        let r = analyze_src("loop { while x; break; end }");
+        assert!(r.is_diverges());
+    }
+
+    #[test]
+    fn loop_empty_body_diverges() {
+        let r = analyze_src("loop {}");
+        assert!(r.is_diverges());
+    }
+
+    #[test]
+    fn loop_with_method_receiver_falls() {
+        // `obj.loop { ... }` is not Kernel#loop — don't treat as diverging.
+        let r = analyze_src("obj.loop { puts 1 }");
+        assert_eq!(r, Reachability::Falls);
+    }
+
+    #[test]
+    fn for_loop_falls() {
+        // `for` may not iterate (empty collection) — body's terminator doesn't
+        // make the for itself diverge.
+        let r = analyze_src("for x in []\n  return\nend");
+        assert_eq!(r, Reachability::Falls);
+    }
+
+    #[test]
+    fn while_loop_falls() {
+        let r = analyze_src("while x\n  return\nend");
+        assert_eq!(r, Reachability::Falls);
     }
 
     #[test]

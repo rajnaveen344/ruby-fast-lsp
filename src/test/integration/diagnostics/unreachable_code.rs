@@ -224,6 +224,72 @@ end
 }
 
 #[tokio::test]
+async fn test_loop_no_break_flags_after() {
+    check(
+        r#"
+def foo
+  loop do
+    work
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_loop_with_break_does_not_flag_after() {
+    check(
+        r#"
+<warn none code="unreachable-code">
+def foo
+  loop do
+    break if cond
+  end
+  puts "live"
+end
+</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_loop_with_nested_each_break_flags_after() {
+    // Inner each's break does not exit the outer loop.
+    check(
+        r#"
+def foo
+  loop do
+    [1].each { break }
+  end
+  <warn code="unreachable-code">puts "dead"</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_for_loop_does_not_terminate_after() {
+    // for may not iterate (empty collection) → trailing stmt is live.
+    check(
+        r#"
+<warn none code="unreachable-code">
+def foo
+  for x in []
+    return
+  end
+  puts "live"
+end
+</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_nested_if_all_terminating_propagates() {
     check(
         r#"
