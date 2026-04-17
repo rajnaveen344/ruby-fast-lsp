@@ -6,7 +6,7 @@
 use crate::analyzer_prism::control_flow;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
-use log::{debug, warn};
+use log::debug;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
@@ -342,54 +342,6 @@ fn extract_syntax_diagnostics(
         diagnostics.len()
     );
     diagnostics
-}
-
-/// Validate that a diagnostic range is within document bounds.
-///
-/// Safety check to ensure we don't send invalid ranges to the client.
-fn _validate_diagnostic_range(document: &RubyDocument, range: &Range) -> bool {
-    let lines: Vec<&str> = document.content.lines().collect();
-    let line_count = lines.len();
-
-    if range.start.line as usize >= line_count {
-        warn!(
-            "Diagnostic start line {} exceeds document line count {}",
-            range.start.line, line_count
-        );
-        return false;
-    }
-
-    if range.end.line as usize >= line_count {
-        warn!(
-            "Diagnostic end line {} exceeds document line count {}",
-            range.end.line, line_count
-        );
-        return false;
-    }
-
-    if let Some(start_line) = lines.get(range.start.line as usize) {
-        if range.start.character as usize > start_line.len() {
-            warn!(
-                "Diagnostic start character {} exceeds line length {}",
-                range.start.character,
-                start_line.len()
-            );
-            return false;
-        }
-    }
-
-    if let Some(end_line) = lines.get(range.end.line as usize) {
-        if range.end.character as usize > end_line.len() {
-            warn!(
-                "Diagnostic end character {} exceeds line length {}",
-                range.end.character,
-                end_line.len()
-            );
-            return false;
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]
