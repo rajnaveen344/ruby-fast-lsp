@@ -3,7 +3,13 @@ use ruby_prism::{CallNode, Node};
 
 use crate::{
     analyzer_prism::utils,
-    indexer::{entry::NamespaceKind, index::UnresolvedEntry},
+    indexer::{
+        entry::{
+            entry_kind::{EntryKind, ParamKind},
+            NamespaceKind,
+        },
+        index::UnresolvedEntry,
+    },
     inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
@@ -12,6 +18,77 @@ use crate::{
 };
 
 use super::ReferenceVisitor;
+
+/// Positional arity model derived from a method's parameter list.
+/// Keyword/keyword-rest/block params don't affect positional arity.
+#[derive(Debug, Clone, Copy)]
+struct MethodArity {
+    required: usize,
+    optional: usize,
+    has_rest: bool,
+}
+
+impl MethodArity {
+    fn from_params(params: &[crate::indexer::entry::entry_kind::MethodParamInfo]) -> Self {
+        let mut required = 0usize;
+        let mut optional = 0usize;
+        let mut has_rest = false;
+        for p in params {
+            match p.kind {
+                ParamKind::Required => required += 1,
+                ParamKind::Optional => optional += 1,
+                ParamKind::Rest => has_rest = true,
+                // Kwargs/block don't constrain positional arity in V1.
+                ParamKind::Keyword | ParamKind::KeywordRest | ParamKind::Block => {}
+            }
+        }
+        Self {
+            required,
+            optional,
+            has_rest,
+        }
+    }
+}
+
+/// Returns `Some((min, max, actual))` if callsite positional arity is outside
+/// `[min, max]`. `max` is `None` when the method accepts `*args`. Returns `None`
+/// when arity matches OR when the callsite contains a splat (unknown count).
+fn compute_arity_mismatch(
+    node: &CallNode,
+    arity: &MethodArity,
+) -> Option<(usize, Option<usize>, usize)> {
+    let mut positional = 0usize;
+    let mut has_splat_at_callsite = false;
+    if let Some(args) = node.arguments() {
+        for arg in args.arguments().iter() {
+            if arg.as_splat_node().is_some() {
+                has_splat_at_callsite = true;
+                continue;
+            }
+            // Skip keyword hash and block-arg from positional count.
+            if arg.as_keyword_hash_node().is_some() || arg.as_block_argument_node().is_some() {
+                continue;
+            }
+            positional += 1;
+        }
+    }
+    if has_splat_at_callsite {
+        return None;
+    }
+    let min = arity.required;
+    let max = if arity.has_rest {
+        None
+    } else {
+        Some(arity.required + arity.optional)
+    };
+    let too_few = positional < min;
+    let too_many = max.map(|m| positional > m).unwrap_or(false);
+    if too_few || too_many {
+        Some((min, max, positional))
+    } else {
+        None
+    }
+}
 
 /// Information about the receiver of a method call
 #[derive(Debug, Clone)]
@@ -112,7 +189,7 @@ impl ReferenceVisitor {
                         trace!("Adding unresolved method call: {}", method_name);
                         index.add_unresolved_entry(
                             self.document.uri.clone(),
-                            UnresolvedEntry::method(method_name.clone(), None, message_location),
+                            UnresolvedEntry::method(method_name.clone(), None, message_location.clone()),
                         );
                     }
                 }
@@ -133,7 +210,7 @@ impl ReferenceVisitor {
                             UnresolvedEntry::method(
                                 method_name.clone(),
                                 Some(RubyType::class(&receiver_name)),
-                                message_location,
+                                message_location.clone(),
                             ),
                         );
                     }
@@ -171,7 +248,7 @@ impl ReferenceVisitor {
                                     UnresolvedEntry::method(
                                         method_name.clone(),
                                         Some(class_type.clone()),
-                                        message_location,
+                                        message_location.clone(),
                                     ),
                                 );
                             }
@@ -183,6 +260,71 @@ impl ReferenceVisitor {
                 }
             }
         }
+
+        // Wrong-arity check (V1: NoReceiver + ConstantReceiver, positional only).
+        if self.track_unresolved {
+            let owner_for_arity = match &receiver_info {
+                ReceiverInfo::NoReceiver | ReceiverInfo::ConstantReceiver(_) => {
+                    Some((target_namespace.clone(), namespace_kind))
+                }
+                _ => None,
+            };
+            if let Some((owner, kind)) = owner_for_arity {
+                if let Some(arity) =
+                    self.find_method_arity_strict(&index, &method_name, &owner, kind)
+                {
+                    if let Some((min, max, actual)) = compute_arity_mismatch(node, &arity) {
+                        index.add_unresolved_entry(
+                            self.document.uri.clone(),
+                            UnresolvedEntry::wrong_arity(
+                                method_name.clone(),
+                                min,
+                                max,
+                                actual,
+                                message_location.clone(),
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Strict ancestor-walk lookup. Returns the method's `(required, optional, has_rest)`
+    /// arity tuple if and only if a single matching `MethodData` is found on the
+    /// owner or one of its ancestors.
+    fn find_method_arity_strict(
+        &self,
+        index: &crate::indexer::index::RubyIndex,
+        method_name: &str,
+        owner: &[RubyConstant],
+        kind: NamespaceKind,
+    ) -> Option<MethodArity> {
+        let ruby_method = RubyMethod::new(method_name).ok()?;
+        let entries = index.get_methods_by_name(&ruby_method)?;
+
+        // Build owner + ancestors with namespace_kind, in resolution order.
+        let mut search: Vec<FullyQualifiedName> = Vec::new();
+        let owner_with_kind = FullyQualifiedName::namespace_with_kind(owner.to_vec(), kind);
+        search.push(owner_with_kind.clone());
+        for ancestor in index.get_ancestor_chain(&owner_with_kind) {
+            let with_kind =
+                FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
+            if !search.contains(&with_kind) {
+                search.push(with_kind);
+            }
+        }
+
+        for fqn in &search {
+            for entry in &entries {
+                if let EntryKind::Method(data) = &entry.kind {
+                    if &data.owner == fqn {
+                        return Some(MethodArity::from_params(&data.params));
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Check if a method exists in the index

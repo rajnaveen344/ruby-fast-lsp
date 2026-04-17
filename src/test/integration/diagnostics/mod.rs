@@ -4,3 +4,4 @@ mod expr_receiver_unresolved;
 mod inconsistent_return;
 mod nil_call;
 mod unreachable_code;
+mod wrong_arity;

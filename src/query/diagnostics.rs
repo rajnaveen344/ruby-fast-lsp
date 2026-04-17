@@ -75,6 +75,33 @@ impl IndexQuery {
                         }
                     }
                 }
+                UnresolvedEntry::WrongArity {
+                    name,
+                    expected_min,
+                    expected_max,
+                    actual,
+                    location,
+                } => {
+                    let expected = match expected_max {
+                        Some(max) if max == expected_min => format!("{}", expected_min),
+                        Some(max) => format!("{}..{}", expected_min, max),
+                        None => format!("{}+", expected_min),
+                    };
+                    Diagnostic {
+                        range: location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("wrong-arity".to_string())),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message: format!(
+                            "Wrong number of arguments for `{}` (expected {}, got {})",
+                            name, expected, actual
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    }
+                }
             })
             .collect()
     }

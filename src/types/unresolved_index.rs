@@ -43,6 +43,19 @@ pub enum UnresolvedEntry {
         /// Location where the method was called
         location: Location,
     },
+    /// A method call with wrong number of positional arguments
+    WrongArity {
+        /// The method name
+        name: String,
+        /// Minimum required positional args
+        expected_min: usize,
+        /// Maximum positional args (None = unbounded due to splat)
+        expected_max: Option<usize>,
+        /// Actual positional args at callsite
+        actual: usize,
+        /// Location where the method was called (message location)
+        location: Location,
+    },
 }
 
 // Manual Hash implementation since Location from tower_lsp doesn't implement Hash
@@ -71,6 +84,24 @@ impl std::hash::Hash for UnresolvedEntry {
                 1u8.hash(state); // discriminant
                 name.hash(state);
                 receiver_type.hash(state);
+                location.uri.hash(state);
+                location.range.start.line.hash(state);
+                location.range.start.character.hash(state);
+                location.range.end.line.hash(state);
+                location.range.end.character.hash(state);
+            }
+            UnresolvedEntry::WrongArity {
+                name,
+                expected_min,
+                expected_max,
+                actual,
+                location,
+            } => {
+                2u8.hash(state); // discriminant
+                name.hash(state);
+                expected_min.hash(state);
+                expected_max.hash(state);
+                actual.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -113,11 +144,29 @@ impl UnresolvedEntry {
         }
     }
 
+    /// Create a wrong-arity entry
+    pub fn wrong_arity(
+        name: String,
+        expected_min: usize,
+        expected_max: Option<usize>,
+        actual: usize,
+        location: Location,
+    ) -> Self {
+        Self::WrongArity {
+            name,
+            expected_min,
+            expected_max,
+            actual,
+            location,
+        }
+    }
+
     /// Get the location of this unresolved entry
     pub fn location(&self) -> &Location {
         match self {
             Self::Constant { location, .. } => location,
             Self::Method { location, .. } => location,
+            Self::WrongArity { location, .. } => location,
         }
     }
 
@@ -126,6 +175,7 @@ impl UnresolvedEntry {
         match self {
             Self::Constant { name, .. } => name,
             Self::Method { name, .. } => name,
+            Self::WrongArity { name, .. } => name,
         }
     }
 
