@@ -51,34 +51,26 @@ impl ReferenceVisitor {
 
         let current_namespace = self.scope_tracker.get_ns_stack();
 
-        // Determine the target namespace, namespace kind, and receiver info based on receiver
-        let (target_namespace, namespace_kind, receiver_info) = match node.receiver() {
-            Some(receiver_node) => {
-                let result =
-                    self.handle_receiver_node_with_info(&receiver_node, &current_namespace);
-                (result.0, result.1, result.2)
-            }
-            None => {
-                let (ns, kind) = self.handle_no_receiver(&current_namespace);
-                (ns, kind, ReceiverInfo::NoReceiver)
-            }
-        };
+        // Determine the target namespace, namespace kind, receiver info, and (for
+        // expression receivers) the inferred receiver type used for diagnostics.
+        let (target_namespace, namespace_kind, receiver_info, inferred_expr_type) =
+            match node.receiver() {
+                Some(receiver_node) => {
+                    self.handle_receiver_node_with_info(&receiver_node, &current_namespace)
+                }
+                None => {
+                    let (ns, kind) = self.handle_no_receiver(&current_namespace);
+                    (ns, kind, ReceiverInfo::NoReceiver, None)
+                }
+            };
 
-        // For expression receivers, skip indexing if type inference fails.
+        // For expression receivers, skip *reference indexing* if type inference failed.
         // Indexing under the wrong FQN causes false positives in find-references.
-        // It's better to miss a reference than to return incorrect results.
-        if matches!(
+        // Unresolved-method tracking still proceeds — we want to flag the call.
+        let inference_failed = matches!(
             receiver_info,
             ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath
-        ) && target_namespace == current_namespace
-        {
-            // Type inference didn't resolve the receiver — don't add this reference
-            trace!(
-                "Skipping method call with unresolved expression receiver: .{}",
-                method_name
-            );
-            return;
-        }
+        ) && target_namespace == current_namespace;
 
         // Create the method, handling potential validation errors gracefully
         let method = match RubyMethod::new(&method_name) {
@@ -91,23 +83,26 @@ impl ReferenceVisitor {
 
         let method_fqn = FullyQualifiedName::method(target_namespace.clone(), method);
 
-        trace!(
-            "Adding method call reference: {} at {:?}",
-            method_fqn.to_string(),
-            call_location
-        );
-
-        // Add the reference to the index (use full call location for references)
         let mut index = self.index.lock();
-        let caller_fqn = self.scope_tracker.current_method_fqn().cloned();
-        index.add_reference(method_fqn.clone(), call_location, caller_fqn);
+        if !inference_failed {
+            trace!(
+                "Adding method call reference: {} at {:?}",
+                method_fqn.to_string(),
+                call_location
+            );
+            let caller_fqn = self.scope_tracker.current_method_fqn().cloned();
+            index.add_reference(method_fqn.clone(), call_location, caller_fqn);
+        } else {
+            trace!(
+                "Skipping reference for unresolved expression receiver: .{}",
+                method_name
+            );
+        }
 
         // Track unresolved method calls if enabled (use message location for diagnostics)
         if self.track_unresolved {
-            // Only track methods without receiver or with constant receiver
             match &receiver_info {
                 ReceiverInfo::NoReceiver => {
-                    // Method without receiver - check if it exists in the index
                     if !self.method_exists_in_index(
                         &index,
                         &method_name,
@@ -122,7 +117,6 @@ impl ReferenceVisitor {
                     }
                 }
                 ReceiverInfo::ConstantReceiver(receiver_name) => {
-                    // Method with constant receiver - check if it exists
                     if !self.method_exists_in_index(
                         &index,
                         &method_name,
@@ -144,11 +138,48 @@ impl ReferenceVisitor {
                         );
                     }
                 }
-                ReceiverInfo::ExpressionReceiver
-                | ReceiverInfo::SelfReceiver
-                | ReceiverInfo::InvalidConstantPath => {
-                    // Skip tracking for expression receivers, self receivers, and invalid constant paths
-                    // as we can't determine the type statically
+                ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
+                    // Only warn when receiver class is user-defined and method is missing.
+                    // Skip if:
+                    // - inferred type is unknown / non-class (downstream of broken chain),
+                    // - receiver class isn't in the user index (stdlib/RBS-backed types
+                    //   like String/Array — methods are defined in RBS, not user code).
+                    if let Some(class_type @ (RubyType::Class(fqn) | RubyType::Module(fqn))) =
+                        &inferred_expr_type
+                    {
+                        // Class/module entries are stored as Namespace(parts, Instance);
+                        // type inference returns Constant(parts). Normalize before lookup.
+                        let receiver_class_known_in_user_index = fqn
+                            .to_instance_namespace()
+                            .as_ref()
+                            .map(|ns_fqn| index.contains_fqn(ns_fqn))
+                            .unwrap_or(false);
+                        if receiver_class_known_in_user_index {
+                            let ns_parts = fqn.namespace_parts();
+                            if !self.method_exists_in_index(
+                                &index,
+                                &method_name,
+                                &ns_parts,
+                                NamespaceKind::Instance,
+                            ) {
+                                trace!(
+                                    "Adding unresolved method call on inferred type: .{}",
+                                    method_name
+                                );
+                                index.add_unresolved_entry(
+                                    self.document.uri.clone(),
+                                    UnresolvedEntry::method(
+                                        method_name.clone(),
+                                        Some(class_type.clone()),
+                                        message_location,
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+                ReceiverInfo::SelfReceiver => {
+                    // TODO: check method on current class (future work).
                 }
             }
         }
@@ -212,21 +243,22 @@ impl ReferenceVisitor {
         (current_namespace.clone(), namespace_kind)
     }
 
-    /// Handle method calls with a receiver node (returns receiver info for diagnostics)
+    /// Handle method calls with a receiver node. Returns `(namespace, namespace_kind,
+    /// receiver_info, inferred_expr_type)` — `inferred_expr_type` is `Some(_)` only
+    /// for expression receivers where type inference returned a result.
     fn handle_receiver_node_with_info(
         &self,
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, NamespaceKind, ReceiverInfo) {
+    ) -> (Vec<RubyConstant>, NamespaceKind, ReceiverInfo, Option<RubyType>) {
         if receiver_node.as_self_node().is_some() {
             let (ns, kind) = self.handle_self_receiver(current_namespace);
-            (ns, kind, ReceiverInfo::SelfReceiver)
+            (ns, kind, ReceiverInfo::SelfReceiver, None)
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
             let name = String::from_utf8_lossy(constant_read.name().as_slice()).to_string();
             let (ns, kind) = self.handle_constant_read_receiver(&constant_read, current_namespace);
-            (ns, kind, ReceiverInfo::ConstantReceiver(name))
+            (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
-            // Check if the constant path is valid (all nodes are constant paths or constant reads)
             if self.is_valid_constant_path_receiver(receiver_node) {
                 let receiver_name = self.build_constant_path_name(receiver_node);
                 let (ns, kind) = self.handle_constant_path_receiver(
@@ -234,14 +266,16 @@ impl ReferenceVisitor {
                     receiver_node,
                     current_namespace,
                 );
-                (ns, kind, ReceiverInfo::ConstantReceiver(receiver_name))
+                (ns, kind, ReceiverInfo::ConstantReceiver(receiver_name), None)
             } else {
-                let (ns, kind) = self.handle_expression_receiver(receiver_node, current_namespace);
-                (ns, kind, ReceiverInfo::InvalidConstantPath)
+                let (ns, kind, inferred) =
+                    self.handle_expression_receiver(receiver_node, current_namespace);
+                (ns, kind, ReceiverInfo::InvalidConstantPath, inferred)
             }
         } else {
-            let (ns, kind) = self.handle_expression_receiver(receiver_node, current_namespace);
-            (ns, kind, ReceiverInfo::ExpressionReceiver)
+            let (ns, kind, inferred) =
+                self.handle_expression_receiver(receiver_node, current_namespace);
+            (ns, kind, ReceiverInfo::ExpressionReceiver, inferred)
         }
     }
 
@@ -362,16 +396,16 @@ impl ReferenceVisitor {
         &self,
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, NamespaceKind) {
-        // Try to infer the receiver's type
-        if let Some(resolved_type) = self.infer_expression_receiver_type(receiver_node) {
-            if let Some(ns) = self.type_to_namespace_parts(&resolved_type) {
-                return (ns, NamespaceKind::Instance);
+    ) -> (Vec<RubyConstant>, NamespaceKind, Option<RubyType>) {
+        let inferred = self.infer_expression_receiver_type(receiver_node);
+        if let Some(ref resolved_type) = inferred {
+            if let Some(ns) = self.type_to_namespace_parts(resolved_type) {
+                return (ns, NamespaceKind::Instance, Some(resolved_type.clone()));
             }
         }
 
         // Fallback — caller will detect that namespace didn't change and skip indexing
-        (current_namespace.clone(), NamespaceKind::Instance)
+        (current_namespace.clone(), NamespaceKind::Instance, inferred)
     }
 
     /// Try to infer the type of an expression receiver node.
