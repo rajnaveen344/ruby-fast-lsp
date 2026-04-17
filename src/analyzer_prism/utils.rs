@@ -285,6 +285,33 @@ pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKin
     }
 }
 
+/// Compute Levenshtein edit distance between two ASCII byte strings.
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
+    let m = a.len();
+    let n = b.len();
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
 /// Build the full constant path name as a string (e.g., "Foo::Bar::Baz")
 pub(crate) fn build_constant_path_name(node: &Node) -> String {
     let mut parts = Vec::new();

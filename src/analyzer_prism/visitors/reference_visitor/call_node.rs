@@ -3,7 +3,7 @@ use ruby_prism::{CallNode, Node};
 use tower_lsp::lsp_types::Url;
 
 use crate::{
-    analyzer_prism::utils,
+    analyzer_prism::{diagnostics::ReceiverInfo, utils},
     indexer::{
         entry::{
             entry_kind::{EntryKind, ParamKind},
@@ -206,33 +206,6 @@ fn compute_arity_mismatch(
     }
 }
 
-/// Compute Levenshtein edit distance between two ASCII byte strings.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let m = a.len();
-    let n = b.len();
-    if m == 0 {
-        return n;
-    }
-    if n == 0 {
-        return m;
-    }
-    let a = a.as_bytes();
-    let b = b.as_bytes();
-    let mut prev: Vec<usize> = (0..=n).collect();
-    let mut curr = vec![0usize; n + 1];
-    for i in 1..=m {
-        curr[0] = i;
-        for j in 1..=n {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[n]
-}
-
 /// Closest declared kwarg name within the suggestion threshold.
 fn closest_kwarg(target: &str, declared: &[String]) -> Option<String> {
     let threshold = suggestion_threshold(target.len());
@@ -241,7 +214,7 @@ fn closest_kwarg(target: &str, declared: &[String]) -> Option<String> {
     }
     let mut best: Option<(String, usize)> = None;
     for cand in declared {
-        let dist = levenshtein(cand, target);
+        let dist = crate::analyzer_prism::utils::levenshtein(cand, target);
         if dist > threshold {
             continue;
         }
@@ -256,25 +229,10 @@ fn closest_kwarg(target: &str, declared: &[String]) -> Option<String> {
 /// Suggestion threshold scales with name length: 1 for tiny names, up to 3 for long.
 fn suggestion_threshold(name_len: usize) -> usize {
     match name_len {
-        0..=2 => 0, // too short to suggest reliably
-        3..=8 => 2, // covers typo + adjacent-swap (e.g. "naem" -> "name", dist 2)
+        0..=2 => 0,
+        3..=8 => 2,
         _ => 3,
     }
-}
-
-/// Information about the receiver of a method call
-#[derive(Debug, Clone)]
-enum ReceiverInfo {
-    /// No receiver (e.g., `method_name`)
-    NoReceiver,
-    /// Self receiver (e.g., `self.method_name`)
-    SelfReceiver,
-    /// Constant receiver (e.g., `Foo.method` or `Foo::Bar.method`)
-    ConstantReceiver(String),
-    /// Expression receiver (e.g., `variable.method`)
-    ExpressionReceiver,
-    /// Invalid constant path (contains non-constant nodes)
-    InvalidConstantPath,
 }
 
 impl ReferenceVisitor {
@@ -361,104 +319,19 @@ impl ReferenceVisitor {
             let mut out: Vec<(Url, UnresolvedEntry)> = Vec::new();
 
             if self.track_unresolved {
-                match &receiver_info {
-                    ReceiverInfo::NoReceiver => {
-                        if !self.method_exists_in_index(
-                            &index,
-                            &method_name,
-                            &target_namespace,
-                            namespace_kind,
-                        ) {
-                            trace!("Adding unresolved method call: {}", method_name);
-                            let suggestion = self.find_method_suggestion(
-                                &index,
-                                &method_name,
-                                &target_namespace,
-                                namespace_kind,
-                            );
-                            out.push((
-                                self.document.uri.clone(),
-                                UnresolvedEntry::method_with_suggestion(
-                                    method_name.clone(),
-                                    None,
-                                    message_location.clone(),
-                                    suggestion,
-                                ),
-                            ));
-                        }
-                    }
-                    ReceiverInfo::ConstantReceiver(receiver_name) => {
-                        if !self.method_exists_in_index(
-                            &index,
-                            &method_name,
-                            &target_namespace,
-                            namespace_kind,
-                        ) {
-                            trace!(
-                                "Adding unresolved method call: {}.{}",
-                                receiver_name,
-                                method_name
-                            );
-                            let suggestion = self.find_method_suggestion(
-                                &index,
-                                &method_name,
-                                &target_namespace,
-                                namespace_kind,
-                            );
-                            out.push((
-                                self.document.uri.clone(),
-                                UnresolvedEntry::method_with_suggestion(
-                                    method_name.clone(),
-                                    Some(RubyType::class(&receiver_name)),
-                                    message_location.clone(),
-                                    suggestion,
-                                ),
-                            ));
-                        }
-                    }
-                    ReceiverInfo::ExpressionReceiver | ReceiverInfo::InvalidConstantPath => {
-                        if let Some(class_type @ (RubyType::Class(fqn) | RubyType::Module(fqn))) =
-                            &inferred_expr_type
-                        {
-                            let receiver_class_known_in_user_index = fqn
-                                .to_instance_namespace()
-                                .as_ref()
-                                .map(|ns_fqn| index.contains_fqn(ns_fqn))
-                                .unwrap_or(false);
-                            if receiver_class_known_in_user_index {
-                                let ns_parts = fqn.namespace_parts();
-                                if !self.method_exists_in_index(
-                                    &index,
-                                    &method_name,
-                                    &ns_parts,
-                                    NamespaceKind::Instance,
-                                ) {
-                                    trace!(
-                                        "Adding unresolved method call on inferred type: .{}",
-                                        method_name
-                                    );
-                                    let suggestion = self.find_method_suggestion(
-                                        &index,
-                                        &method_name,
-                                        &ns_parts,
-                                        NamespaceKind::Instance,
-                                    );
-                                    out.push((
-                                        self.document.uri.clone(),
-                                        UnresolvedEntry::method_with_suggestion(
-                                            method_name.clone(),
-                                            Some(class_type.clone()),
-                                            message_location.clone(),
-                                            suggestion,
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    ReceiverInfo::SelfReceiver => {
-                        // TODO: check method on current class (future work).
-                    }
+                if let Some(entry) =
+                    crate::analyzer_prism::diagnostics::unresolved_method::check(
+                        &receiver_info,
+                        inferred_expr_type.as_ref(),
+                        &method_name,
+                        &target_namespace,
+                        namespace_kind,
+                        &message_location,
+                        &*index,
+                    )
+                {
+                    trace!("Adding unresolved method call: {}", method_name);
+                    out.push((self.document.uri.clone(), entry));
                 }
             }
 
@@ -609,113 +482,6 @@ impl ReferenceVisitor {
             }
         }
         None
-    }
-
-    /// Find the closest matching method name on `owner` + ancestors with `kind`.
-    /// Returns the candidate method name when its Levenshtein distance to
-    /// `target` is within the threshold (and strictly less than other candidates).
-    fn find_method_suggestion(
-        &self,
-        index: &crate::indexer::index::RubyIndex,
-        target: &str,
-        owner: &[RubyConstant],
-        kind: NamespaceKind,
-    ) -> Option<String> {
-        let threshold = suggestion_threshold(target.len());
-        if threshold == 0 {
-            return None;
-        }
-
-        // Build owner + ancestors with namespace_kind, dedup.
-        let mut search: Vec<FullyQualifiedName> = Vec::new();
-        let owner_with_kind = FullyQualifiedName::namespace_with_kind(owner.to_vec(), kind);
-        search.push(owner_with_kind.clone());
-        for ancestor in index.get_ancestor_chain(&owner_with_kind) {
-            let with_kind =
-                FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
-            if !search.contains(&with_kind) {
-                search.push(with_kind);
-            }
-        }
-
-        let target_len = target.len();
-        let mut best: Option<(String, usize)> = None;
-
-        // Walk ONLY methods defined on owners in the search set — the old
-        // code iterated every method in the index (stdlib + gems + project)
-        // and filtered by ownership inside the loop, which was O(total_methods)
-        // per unresolved call. The targeted iteration is bounded by the
-        // ancestor chain, typically a few dozen methods total.
-        for owner_fqn in &search {
-            for entry in index.methods_on_owner(owner_fqn) {
-                let EntryKind::Method(data) = &entry.kind else { continue };
-                let candidate = data.name.get_name();
-                if candidate == target {
-                    continue;
-                }
-                // Triangle inequality: |len(a) - len(b)| <= levenshtein(a, b).
-                // Skip the DP when the length delta alone exceeds the threshold.
-                if candidate.len().abs_diff(target_len) > threshold {
-                    continue;
-                }
-                let dist = levenshtein(&candidate, target);
-                if dist > threshold {
-                    continue;
-                }
-                match &best {
-                    Some((_, d)) if *d <= dist => {}
-                    _ => best = Some((candidate.to_string(), dist)),
-                }
-            }
-        }
-        best.map(|(name, _)| name)
-    }
-
-    /// Check if a method exists in the index
-    fn method_exists_in_index(
-        &self,
-        index: &crate::indexer::index::RubyIndex,
-        method_name: &str,
-        target_namespace: &[RubyConstant],
-        _namespace_kind: NamespaceKind,
-    ) -> bool {
-        // Create a method to check
-        let method = match RubyMethod::new(method_name) {
-            Ok(m) => m,
-            Err(_) => return true, // If we can't create the method, assume it exists
-        };
-
-        // Check if the method exists by name (loose check)
-        if index.contains_method(&method) {
-            return true;
-        }
-
-        // Check the specific FQN
-        let method_fqn = FullyQualifiedName::method(target_namespace.to_vec(), method.clone());
-        if index.contains_fqn(&method_fqn) {
-            return true;
-        }
-
-        // For methods without receiver, also check if it might be inherited
-        // by checking the method name in any namespace
-        if target_namespace.is_empty() {
-            // Top-level method call - just check by name
-            return false;
-        }
-
-        // Check parent namespaces for inherited methods
-        let mut ancestors = target_namespace.to_vec();
-        while !ancestors.is_empty() {
-            if let Ok(m) = RubyMethod::new(method_name) {
-                let fqn = FullyQualifiedName::method(ancestors.clone(), m);
-                if index.contains_fqn(&fqn) {
-                    return true;
-                }
-            }
-            ancestors.pop();
-        }
-
-        false
     }
 
     /// Handle method calls without a receiver (e.g., `method_name`)
