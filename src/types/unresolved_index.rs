@@ -42,6 +42,9 @@ pub enum UnresolvedEntry {
         receiver_type: Option<RubyType>,
         /// Location where the method was called
         location: Location,
+        /// Closest matching method name on the receiver's ancestors (Levenshtein-derived).
+        /// `None` when no candidate is within threshold.
+        suggestion: Option<String>,
     },
     /// A method call with wrong number of positional arguments
     WrongArity {
@@ -80,10 +83,12 @@ impl std::hash::Hash for UnresolvedEntry {
                 name,
                 receiver_type,
                 location,
+                suggestion,
             } => {
                 1u8.hash(state); // discriminant
                 name.hash(state);
                 receiver_type.hash(state);
+                suggestion.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -141,6 +146,22 @@ impl UnresolvedEntry {
             name,
             receiver_type,
             location,
+            suggestion: None,
+        }
+    }
+
+    /// Create an unresolved method entry with a Levenshtein-derived suggestion
+    pub fn method_with_suggestion(
+        name: String,
+        receiver_type: Option<RubyType>,
+        location: Location,
+        suggestion: Option<String>,
+    ) -> Self {
+        Self::Method {
+            name,
+            receiver_type,
+            location,
+            suggestion,
         }
     }
 

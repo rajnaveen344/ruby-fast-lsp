@@ -38,6 +38,7 @@ impl IndexQuery {
                     name,
                     receiver_type,
                     location,
+                    suggestion,
                 } => {
                     if let Some(crate::inferrer::r#type::ruby::RubyType::Unknown) = receiver_type {
                         Diagnostic {
@@ -57,10 +58,13 @@ impl IndexQuery {
                             data: None,
                         }
                     } else {
-                        let message = match receiver_type {
+                        let mut message = match receiver_type {
                             Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
                             None => format!("Unresolved method `{}`", name),
                         };
+                        if let Some(s) = suggestion {
+                            message.push_str(&format!(". Did you mean `{}`?", s));
+                        }
 
                         Diagnostic {
                             range: location.range,

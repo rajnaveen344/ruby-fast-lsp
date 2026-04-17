@@ -90,6 +90,42 @@ fn compute_arity_mismatch(
     }
 }
 
+/// Compute Levenshtein edit distance between two ASCII byte strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let m = a.len();
+    let n = b.len();
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Suggestion threshold scales with name length: 1 for tiny names, up to 3 for long.
+fn suggestion_threshold(name_len: usize) -> usize {
+    match name_len {
+        0..=2 => 0, // too short to suggest reliably
+        3..=8 => 2, // covers typo + adjacent-swap (e.g. "naem" -> "name", dist 2)
+        _ => 3,
+    }
+}
+
 /// Information about the receiver of a method call
 #[derive(Debug, Clone)]
 enum ReceiverInfo {
@@ -187,9 +223,20 @@ impl ReferenceVisitor {
                         namespace_kind,
                     ) {
                         trace!("Adding unresolved method call: {}", method_name);
+                        let suggestion = self.find_method_suggestion(
+                            &index,
+                            &method_name,
+                            &target_namespace,
+                            namespace_kind,
+                        );
                         index.add_unresolved_entry(
                             self.document.uri.clone(),
-                            UnresolvedEntry::method(method_name.clone(), None, message_location.clone()),
+                            UnresolvedEntry::method_with_suggestion(
+                                method_name.clone(),
+                                None,
+                                message_location.clone(),
+                                suggestion,
+                            ),
                         );
                     }
                 }
@@ -205,12 +252,19 @@ impl ReferenceVisitor {
                             receiver_name,
                             method_name
                         );
+                        let suggestion = self.find_method_suggestion(
+                            &index,
+                            &method_name,
+                            &target_namespace,
+                            namespace_kind,
+                        );
                         index.add_unresolved_entry(
                             self.document.uri.clone(),
-                            UnresolvedEntry::method(
+                            UnresolvedEntry::method_with_suggestion(
                                 method_name.clone(),
                                 Some(RubyType::class(&receiver_name)),
                                 message_location.clone(),
+                                suggestion,
                             ),
                         );
                     }
@@ -243,12 +297,19 @@ impl ReferenceVisitor {
                                     "Adding unresolved method call on inferred type: .{}",
                                     method_name
                                 );
+                                let suggestion = self.find_method_suggestion(
+                                    &index,
+                                    &method_name,
+                                    &ns_parts,
+                                    NamespaceKind::Instance,
+                                );
                                 index.add_unresolved_entry(
                                     self.document.uri.clone(),
-                                    UnresolvedEntry::method(
+                                    UnresolvedEntry::method_with_suggestion(
                                         method_name.clone(),
                                         Some(class_type.clone()),
                                         message_location.clone(),
+                                        suggestion,
                                     ),
                                 );
                             }
@@ -346,6 +407,63 @@ impl ReferenceVisitor {
             }
         }
         None
+    }
+
+    /// Find the closest matching method name on `owner` + ancestors with `kind`.
+    /// Returns the candidate method name when its Levenshtein distance to
+    /// `target` is within the threshold (and strictly less than other candidates).
+    fn find_method_suggestion(
+        &self,
+        index: &crate::indexer::index::RubyIndex,
+        target: &str,
+        owner: &[RubyConstant],
+        kind: NamespaceKind,
+    ) -> Option<String> {
+        let threshold = suggestion_threshold(target.len());
+        if threshold == 0 {
+            return None;
+        }
+
+        // Build owner + ancestors with namespace_kind, dedup.
+        let mut search: Vec<FullyQualifiedName> = Vec::new();
+        let owner_with_kind = FullyQualifiedName::namespace_with_kind(owner.to_vec(), kind);
+        search.push(owner_with_kind.clone());
+        for ancestor in index.get_ancestor_chain(&owner_with_kind) {
+            let with_kind =
+                FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
+            if !search.contains(&with_kind) {
+                search.push(with_kind);
+            }
+        }
+
+        let mut best: Option<(String, usize)> = None;
+        for (ruby_method, entries) in index.methods_by_name() {
+            let candidate = ruby_method.get_name();
+            // Skip the target itself (shouldn't happen, but defensive).
+            if candidate == target {
+                continue;
+            }
+            let dist = levenshtein(&candidate, target);
+            if dist > threshold {
+                continue;
+            }
+            // Confirm at least one entry's owner is in our search set.
+            let belongs = entries.iter().any(|e| {
+                if let EntryKind::Method(data) = &e.kind {
+                    search.contains(&data.owner)
+                } else {
+                    false
+                }
+            });
+            if !belongs {
+                continue;
+            }
+            match &best {
+                Some((_, d)) if *d <= dist => {}
+                _ => best = Some((candidate.to_string(), dist)),
+            }
+        }
+        best.map(|(name, _)| name)
     }
 
     /// Check if a method exists in the index
