@@ -13,6 +13,7 @@
 
 // Feature-based organization (new)
 mod completion;
+mod diagnostics;
 mod hover;
 mod inlay_hints;
 

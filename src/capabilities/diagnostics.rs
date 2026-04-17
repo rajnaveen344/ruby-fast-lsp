@@ -5,7 +5,13 @@
 
 use crate::types::ruby_document::RubyDocument;
 use log::{debug, warn};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+use ruby_prism::{Node, Visit};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
+
+/// Prism emits "statement not reached" for return/break/next, but only flags the
+/// first dead stmt and lacks a code. We own this diagnostic — filter Prism's version
+/// out and let `extract_unreachable_diagnostics` produce our richer one.
+const PRISM_UNREACHABLE_MSG: &str = "statement not reached";
 
 /// Generate diagnostics from a parse result.
 ///
@@ -17,7 +23,84 @@ pub fn generate_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     diagnostics.extend(extract_syntax_diagnostics(parse_result, document));
+    diagnostics.extend(extract_unreachable_diagnostics(parse_result, document));
     diagnostics
+}
+
+/// Walk every `StatementsNode` and flag every statement following a terminator
+/// (return/break/next/redo/retry/raise/throw/exit/exit!/abort/fail) as unreachable.
+///
+/// V1 scope: only explicit terminators in the same statement list. Conditional
+/// "all-branches-terminate" propagation is V2.
+fn extract_unreachable_diagnostics(
+    parse_result: &ruby_prism::ParseResult<'_>,
+    document: &RubyDocument,
+) -> Vec<Diagnostic> {
+    let mut visitor = UnreachableVisitor {
+        document,
+        diagnostics: Vec::new(),
+    };
+    visitor.visit(&parse_result.node());
+    visitor.diagnostics
+}
+
+struct UnreachableVisitor<'a> {
+    document: &'a RubyDocument,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl<'a, 'pr> Visit<'pr> for UnreachableVisitor<'a> {
+    fn visit_statements_node(&mut self, node: &ruby_prism::StatementsNode<'pr>) {
+        let stmts: Vec<_> = node.body().iter().collect();
+        let mut terminator_seen = false;
+        for stmt in &stmts {
+            if terminator_seen {
+                let loc = stmt.location();
+                let start = self.document.offset_to_position(loc.start_offset());
+                let end = self.document.offset_to_position(loc.end_offset());
+                self.diagnostics.push(Diagnostic {
+                    range: Range::new(start, end),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unreachable-code".to_string())),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message: "Unreachable code: previous statement always exits this block."
+                        .to_string(),
+                    related_information: None,
+                    tags: Some(vec![tower_lsp::lsp_types::DiagnosticTag::UNNECESSARY]),
+                    data: None,
+                });
+            }
+            if !terminator_seen && is_terminator(stmt) {
+                terminator_seen = true;
+            }
+        }
+        ruby_prism::visit_statements_node(self, node);
+    }
+}
+
+/// True if this stmt unconditionally exits the surrounding block.
+fn is_terminator(node: &Node) -> bool {
+    if node.as_return_node().is_some()
+        || node.as_break_node().is_some()
+        || node.as_next_node().is_some()
+        || node.as_redo_node().is_some()
+        || node.as_retry_node().is_some()
+    {
+        return true;
+    }
+    if let Some(call) = node.as_call_node() {
+        if call.receiver().is_some() {
+            return false;
+        }
+        let name = call.name();
+        let name_str = String::from_utf8_lossy(name.as_slice());
+        return matches!(
+            name_str.as_ref(),
+            "raise" | "throw" | "exit" | "exit!" | "abort" | "fail"
+        );
+    }
+    false
 }
 
 /// Extract syntax errors and warnings from a parse result.
@@ -50,7 +133,10 @@ fn extract_syntax_diagnostics(
         }
     }
 
-    let warnings: Vec<_> = parse_result.warnings().collect();
+    let warnings: Vec<_> = parse_result
+        .warnings()
+        .filter(|w| w.message() != PRISM_UNREACHABLE_MSG)
+        .collect();
     if !warnings.is_empty() {
         debug!("Found {} warnings in document", warnings.len());
 

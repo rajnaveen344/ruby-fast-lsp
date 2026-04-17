@@ -964,15 +964,22 @@ async fn run_diagnostics_check(
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect();
 
-    // Check that no errors exist within the "none" ranges
+    // Check that no errors exist within the "none" ranges.
+    // If the `none` tag has a `code` attr, only errors of that code are forbidden.
     for none_tag in none_err_tags {
+        let code_filter = none_tag.attributes.get("code");
         let errors_in_range: Vec<_> = errors
             .iter()
             .filter(|e| range_overlaps(&e.range, &none_tag.range))
+            .filter(|e| match code_filter {
+                Some(expected) => matches!(&e.code, Some(NumberOrString::String(s)) if s == expected),
+                None => true,
+            })
             .collect();
         assert!(
             errors_in_range.is_empty(),
-            "Expected no errors in range {:?}, got: {:?}",
+            "Expected no errors{} in range {:?}, got: {:?}",
+            code_filter.map(|c| format!(" [code={}]", c)).unwrap_or_default(),
             none_tag.range,
             errors_in_range
                 .iter()
@@ -1003,15 +1010,22 @@ async fn run_diagnostics_check(
         .filter(|d| d.severity == Some(DiagnosticSeverity::WARNING))
         .collect();
 
-    // Check that no warnings exist within the "none" ranges
+    // Check that no warnings exist within the "none" ranges.
+    // If the `none` tag has a `code` attr, only warnings of that code are forbidden.
     for none_tag in none_warn_tags {
+        let code_filter = none_tag.attributes.get("code");
         let warnings_in_range: Vec<_> = warnings
             .iter()
             .filter(|w| range_overlaps(&w.range, &none_tag.range))
+            .filter(|w| match code_filter {
+                Some(expected) => matches!(&w.code, Some(NumberOrString::String(s)) if s == expected),
+                None => true,
+            })
             .collect();
         assert!(
             warnings_in_range.is_empty(),
-            "Expected no warnings in range {:?}, got: {:?}",
+            "Expected no warnings{} in range {:?}, got: {:?}",
+            code_filter.map(|c| format!(" [code={}]", c)).unwrap_or_default(),
             none_tag.range,
             warnings_in_range
                 .iter()
