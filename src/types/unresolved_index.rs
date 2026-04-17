@@ -71,6 +71,15 @@ pub enum UnresolvedEntry {
         /// Location where the method was called (message location)
         location: Location,
     },
+    /// One or more required keyword arguments are missing at a callsite.
+    MissingKwarg {
+        /// The method name
+        method: String,
+        /// All missing required keyword arg names (sorted, without trailing colon)
+        missing: Vec<String>,
+        /// Location of the method name at the callsite
+        location: Location,
+    },
 }
 
 // Manual Hash implementation since Location from tower_lsp doesn't implement Hash
@@ -135,6 +144,20 @@ impl std::hash::Hash for UnresolvedEntry {
                 expected_min.hash(state);
                 expected_max.hash(state);
                 actual.hash(state);
+                location.uri.hash(state);
+                location.range.start.line.hash(state);
+                location.range.start.character.hash(state);
+                location.range.end.line.hash(state);
+                location.range.end.character.hash(state);
+            }
+            UnresolvedEntry::MissingKwarg {
+                method,
+                missing,
+                location,
+            } => {
+                4u8.hash(state); // discriminant
+                method.hash(state);
+                missing.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -225,6 +248,15 @@ impl UnresolvedEntry {
         }
     }
 
+    /// Create a missing-kwarg entry
+    pub fn missing_kwarg(method: String, missing: Vec<String>, location: Location) -> Self {
+        Self::MissingKwarg {
+            method,
+            missing,
+            location,
+        }
+    }
+
     /// Get the location of this unresolved entry
     pub fn location(&self) -> &Location {
         match self {
@@ -232,6 +264,7 @@ impl UnresolvedEntry {
             Self::Method { location, .. } => location,
             Self::WrongArity { location, .. } => location,
             Self::UnknownKwarg { location, .. } => location,
+            Self::MissingKwarg { location, .. } => location,
         }
     }
 
@@ -242,6 +275,7 @@ impl UnresolvedEntry {
             Self::Method { name, .. } => name,
             Self::WrongArity { name, .. } => name,
             Self::UnknownKwarg { method, .. } => method,
+            Self::MissingKwarg { method, .. } => method,
         }
     }
 

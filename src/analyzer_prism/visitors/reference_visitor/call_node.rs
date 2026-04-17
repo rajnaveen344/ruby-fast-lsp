@@ -110,6 +110,52 @@ fn collect_unknown_kwargs<'a>(
     Some(unknown)
 }
 
+/// Extracts missing required kwargs for a callsite.
+///
+/// Returns `None` when the callsite uses a `**splat` (unknown keys — skip entire check).
+/// Returns `Some(Vec<String>)` with sorted names of required kwargs not present at the callsite.
+fn collect_missing_required_kwargs<'a>(
+    node: &ruby_prism::CallNode<'a>,
+    arity: &MethodArity,
+) -> Option<Vec<String>> {
+    if arity.required_keywords.is_empty() {
+        return Some(Vec::new());
+    }
+
+    // Collect kwarg names supplied at the callsite.
+    let mut supplied: Vec<String> = Vec::new();
+    if let Some(args) = node.arguments() {
+        for arg in args.arguments().iter() {
+            if let Some(kh) = arg.as_keyword_hash_node() {
+                for elem in kh.elements().iter() {
+                    // **splat → unknown keys, skip entire check.
+                    if elem.as_assoc_splat_node().is_some() {
+                        return None;
+                    }
+                    if let Some(assoc) = elem.as_assoc_node() {
+                        if let Some(sym) = assoc.key().as_symbol_node() {
+                            if let Some(loc) = sym.value_loc() {
+                                let name =
+                                    String::from_utf8_lossy(loc.as_slice()).to_string();
+                                supplied.push(name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut missing: Vec<String> = arity
+        .required_keywords
+        .iter()
+        .filter(|kw| !supplied.contains(kw))
+        .cloned()
+        .collect();
+    missing.sort();
+    Some(missing)
+}
+
 /// Returns `Some((min, max, actual))` if callsite positional arity is outside
 /// `[min, max]`. `max` is `None` when the method accepts `*args`. Returns `None`
 /// when arity matches OR when the callsite contains a splat (unknown count).
@@ -465,6 +511,18 @@ impl ReferenceVisitor {
                                     kwarg_name,
                                     suggestion,
                                     kw_lsp_loc,
+                                ),
+                            );
+                        }
+                    }
+                    if let Some(missing) = collect_missing_required_kwargs(node, &arity) {
+                        if !missing.is_empty() {
+                            index.add_unresolved_entry(
+                                self.document.uri.clone(),
+                                UnresolvedEntry::missing_kwarg(
+                                    method_name.clone(),
+                                    missing,
+                                    message_location.clone(),
                                 ),
                             );
                         }

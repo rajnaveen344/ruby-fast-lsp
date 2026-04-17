@@ -129,6 +129,31 @@ impl IndexQuery {
                         data: None,
                     }
                 }
+                UnresolvedEntry::MissingKwarg {
+                    method,
+                    missing,
+                    location,
+                } => {
+                    let kw_list = missing
+                        .iter()
+                        .map(|k| format!("`{}:`", k))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Diagnostic {
+                        range: location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("missing-kwarg".to_string())),
+                        code_description: None,
+                        source: Some("ruby-fast-lsp".to_string()),
+                        message: format!(
+                            "Missing required keyword argument(s) for `{}`: {}",
+                            method, kw_list
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    }
+                }
             })
             .collect()
     }
