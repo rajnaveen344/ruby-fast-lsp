@@ -1190,7 +1190,7 @@ impl ReferenceVisitor {
         // Case 1: Local variable (e.g., `user.name` where `user = User.new`)
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
             let var_name = String::from_utf8_lossy(local_var.name().as_slice()).to_string();
-            return self.infer_variable_type(&var_name);
+            return self.infer_variable_type_cached(&var_name);
         }
 
         // Case 2: Method call chain (e.g., `team.leader.name`)
@@ -1219,8 +1219,9 @@ impl ReferenceVisitor {
                 }
             }?;
 
-            // Now resolve the method's return type
-            let index = self.index.lock();
+            // Now resolve the method's return type. Pure read — use the
+            // shared guard so multiple workers can recurse in parallel.
+            let index = self.index.read();
             return MethodResolver::resolve_method_return_type(&index, &inner_type, &inner_method);
         }
 
@@ -1228,7 +1229,7 @@ impl ReferenceVisitor {
     }
 
     /// Infer a local variable's type from constructor patterns in the source.
-    fn infer_variable_type(&self, var_name: &str) -> Option<RubyType> {
+    pub(super) fn infer_variable_type_uncached(&self, var_name: &str) -> Option<RubyType> {
         let content = &self.document.content;
         for line in content.lines() {
             let trimmed = line.trim();

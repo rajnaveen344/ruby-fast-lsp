@@ -1,9 +1,12 @@
 use ruby_prism::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
+use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::unresolved_index::UnresolvedEntry;
@@ -69,6 +72,13 @@ pub struct ReferenceVisitor {
     /// flushed under a single write lock by the file processor. See
     /// [`PendingWrites`] for the rationale.
     pub staged: PendingWrites,
+    /// Per-file cache for `infer_variable_type`. The inference does a naive
+    /// linear scan of the whole file content to find `varname = Class.new`
+    /// assignments; without memoization every expression-receiver call that
+    /// bottoms out in a local var re-scans the file. For goshposh-shape
+    /// (many chained `user.thing.other`) this was the dominant phase-2
+    /// self-time.
+    pub variable_type_cache: RefCell<HashMap<String, Option<RubyType>>>,
 }
 
 impl ReferenceVisitor {
@@ -89,6 +99,7 @@ impl ReferenceVisitor {
             include_local_vars,
             track_unresolved: false,
             staged: PendingWrites::default(),
+            variable_type_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -106,7 +117,26 @@ impl ReferenceVisitor {
             include_local_vars,
             track_unresolved: true,
             staged: PendingWrites::default(),
+            variable_type_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Memoizing wrapper around [`infer_variable_type_uncached`]. The
+    /// underlying scan is O(file_lines) per call and fires many times per
+    /// file on chained receivers — caching by variable name per visit
+    /// collapses that to O(distinct_vars × file_lines).
+    pub fn infer_variable_type_cached(&self, var_name: &str) -> Option<RubyType> {
+        {
+            let cache = self.variable_type_cache.borrow();
+            if let Some(v) = cache.get(var_name) {
+                return v.clone();
+            }
+        }
+        let ty = self.infer_variable_type_uncached(var_name);
+        self.variable_type_cache
+            .borrow_mut()
+            .insert(var_name.to_string(), ty.clone());
+        ty
     }
 }
 
