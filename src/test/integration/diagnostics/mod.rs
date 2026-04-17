@@ -5,6 +5,7 @@ mod inconsistent_return;
 mod missing_kwarg;
 mod misspelled_method;
 mod nil_call;
+mod raise_non_exception;
 mod unknown_kwarg;
 mod unreachable_code;
 mod wrong_arity;

@@ -154,6 +154,20 @@ impl IndexQuery {
                         data: None,
                     }
                 }
+                UnresolvedEntry::RaiseNonException { arg_repr, location } => Diagnostic {
+                    range: location.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("raise-non-exception".to_string())),
+                    code_description: None,
+                    source: Some("ruby-fast-lsp".to_string()),
+                    message: format!(
+                        "`raise` argument `{}` is not an Exception subclass",
+                        arg_repr
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                },
             })
             .collect()
     }

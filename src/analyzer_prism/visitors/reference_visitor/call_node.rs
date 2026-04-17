@@ -268,6 +268,144 @@ enum ReceiverInfo {
 }
 
 impl ReferenceVisitor {
+    /// Stdlib exception class names that are always valid `raise` arguments.
+    const EXCEPTION_WHITELIST: &'static [&'static str] = &[
+        "Exception",
+        "StandardError",
+        "RuntimeError",
+        "ArgumentError",
+        "TypeError",
+        "NameError",
+        "NoMethodError",
+        "IOError",
+        "RangeError",
+        "NotImplementedError",
+        "ZeroDivisionError",
+        "IndexError",
+        "KeyError",
+        "StopIteration",
+        "SystemExit",
+        "Interrupt",
+        "ScriptError",
+        "SyntaxError",
+        "LoadError",
+        "LocalJumpError",
+        "FrozenError",
+        "EncodingError",
+        "RegexpError",
+        "SystemCallError",
+        "ThreadError",
+        "FiberError",
+        "SecurityError",
+        "SignalException",
+    ];
+
+    /// Check whether `name` resolves to an Exception subclass.
+    ///
+    /// Returns `true` (safe to raise) when:
+    /// - Name is in the stdlib whitelist, OR
+    /// - Name ends with "Error" / "Exception" (heuristic for unindexed user classes), OR
+    /// - Name is found in the user index and its ancestor chain includes a whitelist entry.
+    ///
+    /// Returns `false` (warn) only when the class is in the user index but its ancestors
+    /// do NOT include Exception. Unknown classes not in the index are treated as safe
+    /// (conservative — avoid false positives on third-party gems).
+    fn is_exception_class(
+        index: &crate::indexer::index::RubyIndex,
+        name: &str,
+    ) -> bool {
+        if Self::EXCEPTION_WHITELIST.contains(&name) {
+            return true;
+        }
+        // Suffix heuristic: unindexed UserDefinedError / FooException → treat as safe.
+        if name.ends_with("Error") || name.ends_with("Exception") {
+            return true;
+        }
+        // User index walk.
+        if let Ok(ruby_const) = RubyConstant::new(name) {
+            let ns_fqn = FullyQualifiedName::namespace_with_kind(
+                vec![ruby_const],
+                crate::indexer::entry::NamespaceKind::Instance,
+            );
+            if index.contains_fqn(&ns_fqn) {
+                for ancestor in index.get_ancestor_chain(&ns_fqn) {
+                    let last = ancestor
+                        .namespace_parts()
+                        .last()
+                        .map(|c| c.to_string());
+                    if let Some(n) = last {
+                        if Self::EXCEPTION_WHITELIST.contains(&n.as_str()) {
+                            return true;
+                        }
+                    }
+                }
+                // Class is indexed but no Exception ancestor found.
+                return false;
+            }
+        }
+        // Not in index and no suffix match → conservative, assume unknown/safe.
+        true
+    }
+
+    /// Inspect the first argument of a bare `raise` call and return an
+    /// `UnresolvedEntry::RaiseNonException` when the argument is provably
+    /// not an Exception subclass. Returns `None` when uncertain.
+    fn check_raise_call(
+        &self,
+        index: &crate::indexer::index::RubyIndex,
+        node: &CallNode,
+    ) -> Option<UnresolvedEntry> {
+        let args = node.arguments()?;
+        let first_arg = args.arguments().iter().next()?;
+
+        let arg_loc = self
+            .document
+            .prism_location_to_lsp_location(&first_arg.location());
+        let arg_repr =
+            String::from_utf8_lossy(first_arg.location().as_slice()).to_string();
+
+        // String → Ruby wraps in RuntimeError, always OK.
+        if first_arg.as_string_node().is_some() {
+            return None;
+        }
+
+        // Definite non-exception literals.
+        if first_arg.as_integer_node().is_some()
+            || first_arg.as_float_node().is_some()
+            || first_arg.as_array_node().is_some()
+            || first_arg.as_hash_node().is_some()
+            || first_arg.as_symbol_node().is_some()
+            || first_arg.as_true_node().is_some()
+            || first_arg.as_false_node().is_some()
+            || first_arg.as_nil_node().is_some()
+            || first_arg.as_range_node().is_some()
+        {
+            return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+        }
+
+        // Constant reference (e.g., `raise MyError`).
+        if let Some(const_read) = first_arg.as_constant_read_node() {
+            let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
+            if !Self::is_exception_class(index, &name) {
+                return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+            }
+            return None;
+        }
+
+        // ConstantPath (e.g., `raise Foo::MyError`) — check last segment name.
+        if let Some(_const_path) = first_arg.as_constant_path_node() {
+            let full_name = self.build_constant_path_name(&first_arg);
+            let last_segment = full_name.split("::").last().unwrap_or(&full_name);
+            if !Self::is_exception_class(index, last_segment) {
+                return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+            }
+            return None;
+        }
+
+        // Anything else (local var, method call, interpolation, etc.) → uncertain, skip.
+        None
+    }
+
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let method_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
 
@@ -528,6 +666,13 @@ impl ReferenceVisitor {
                         }
                     }
                 }
+            }
+        }
+
+        // Raise-non-exception check: bare `raise` with provably non-Exception arg.
+        if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
+            if let Some(entry) = self.check_raise_call(&index, node) {
+                index.add_unresolved_entry(self.document.uri.clone(), entry);
             }
         }
     }
@@ -999,3 +1144,4 @@ impl ReferenceVisitor {
         // Nothing to do on exit
     }
 }
+

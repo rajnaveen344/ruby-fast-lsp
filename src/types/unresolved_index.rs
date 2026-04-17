@@ -80,6 +80,13 @@ pub enum UnresolvedEntry {
         /// Location of the method name at the callsite
         location: Location,
     },
+    /// A `raise` call whose first argument is provably not an Exception subclass.
+    RaiseNonException {
+        /// The argument expression as written (e.g., "42", "[]", "MyClass")
+        arg_repr: String,
+        /// Location of the offending argument
+        location: Location,
+    },
 }
 
 // Manual Hash implementation since Location from tower_lsp doesn't implement Hash
@@ -158,6 +165,15 @@ impl std::hash::Hash for UnresolvedEntry {
                 4u8.hash(state); // discriminant
                 method.hash(state);
                 missing.hash(state);
+                location.uri.hash(state);
+                location.range.start.line.hash(state);
+                location.range.start.character.hash(state);
+                location.range.end.line.hash(state);
+                location.range.end.character.hash(state);
+            }
+            UnresolvedEntry::RaiseNonException { arg_repr, location } => {
+                5u8.hash(state); // discriminant
+                arg_repr.hash(state);
                 location.uri.hash(state);
                 location.range.start.line.hash(state);
                 location.range.start.character.hash(state);
@@ -257,6 +273,11 @@ impl UnresolvedEntry {
         }
     }
 
+    /// Create a raise-non-exception entry
+    pub fn raise_non_exception(arg_repr: String, location: Location) -> Self {
+        Self::RaiseNonException { arg_repr, location }
+    }
+
     /// Get the location of this unresolved entry
     pub fn location(&self) -> &Location {
         match self {
@@ -265,6 +286,7 @@ impl UnresolvedEntry {
             Self::WrongArity { location, .. } => location,
             Self::UnknownKwarg { location, .. } => location,
             Self::MissingKwarg { location, .. } => location,
+            Self::RaiseNonException { location, .. } => location,
         }
     }
 
@@ -276,6 +298,7 @@ impl UnresolvedEntry {
             Self::WrongArity { name, .. } => name,
             Self::UnknownKwarg { method, .. } => method,
             Self::MissingKwarg { method, .. } => method,
+            Self::RaiseNonException { arg_repr, .. } => arg_repr,
         }
     }
 
