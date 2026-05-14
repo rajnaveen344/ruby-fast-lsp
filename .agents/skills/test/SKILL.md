@@ -1,3 +1,8 @@
+---
+name: test
+description: "Write, debug, and understand Ruby Fast LSP integration tests, test harness tags, fixtures, and test commands."
+---
+
 # Test Writing Skill
 
 Use this skill when writing, debugging, or understanding integration tests for the Ruby Fast LSP project. Triggers: writing tests, adding tests, integration tests, test harness, test fixtures, test markers.

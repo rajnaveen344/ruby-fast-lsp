@@ -1,3 +1,8 @@
+---
+name: architecture
+description: "Design Ruby Fast LSP features, understand module responsibilities, apply layer boundaries, and make structural changes."
+---
+
 # Architecture Skill
 
 Use this skill when designing new features, understanding module responsibilities, or making structural changes to the Ruby Fast LSP project. Provides guidance on the 3-layer architecture, module boundaries, and dependency rules. Triggers: architecture, design, module structure, dependencies, layers, new feature, refactoring structure.

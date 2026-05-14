@@ -1,3 +1,8 @@
+---
+name: review
+description: "Review Ruby Fast LSP code changes and PRs using TigerStyle principles, project standards, and correctness checks."
+---
+
 # Code Review Skill
 
 Use this skill when reviewing code changes, pull requests, or before merging code in the Ruby Fast LSP project. Provides a comprehensive checklist based on TigerStyle principles and project standards. Triggers: review, code review, PR review, pull request, check code, review changes.

@@ -1,3 +1,8 @@
+---
+name: error-handling
+description: "Implement or review error handling patterns in Ruby Fast LSP, including Result, Option, logging, failures, and exception flows."
+---
+
 # Error Handling Skill
 
 Use this skill when implementing error handling, debugging error flows, or standardizing error patterns in the Ruby Fast LSP project. Provides consistent patterns for Result vs Option, error logging, and graceful degradation. Triggers: error handling, Result, Option, error, exception, failure, logging errors, error pattern.

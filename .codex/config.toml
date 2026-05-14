@@ -1,0 +1,19 @@
+# Codex CLI config template for this repo.
+# Codex loads this shape from ~/.codex/config.toml.
+
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+
+# Equivalent intent to running with --full-auto:
+# no approval prompts and no Codex sandbox.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[projects."/Users/naveenraj/sources/devtools/ruby-fast-lsp"]
+trust_level = "trusted"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"

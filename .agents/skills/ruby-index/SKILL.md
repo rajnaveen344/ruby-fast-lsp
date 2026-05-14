@@ -1,3 +1,8 @@
+---
+name: ruby-index
+description: "Debug the Ruby Index tree view, inheritance graph, exported JSON, jq workflows, mixin resolution, included_by, and MRO."
+---
+
 # Ruby Index Debugging Skill
 
 Use this skill when debugging the Ruby Index tree view, understanding the inheritance graph, or analyzing the exported JSON with jq. Triggers: ruby index, namespace tree, inheritance graph, export graph, jq debugging, mixin resolution, included_by, MRO.

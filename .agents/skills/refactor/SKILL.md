@@ -1,3 +1,8 @@
+---
+name: refactor
+description: "Refactor Ruby Fast LSP modules, extract abstractions, reduce complexity, and preserve test coverage during structural changes."
+---
+
 # Refactoring Skill
 
 Use this skill when breaking down large modules, extracting abstractions, or simplifying complex code in the Ruby Fast LSP project. Provides strategies for safe refactoring while maintaining test coverage. Triggers: refactor, split module, extract, simplify, break down, too long, complexity, modularize.

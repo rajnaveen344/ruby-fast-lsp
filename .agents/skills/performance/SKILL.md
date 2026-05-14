@@ -1,3 +1,8 @@
+---
+name: performance
+description: "Optimize Ruby Fast LSP performance, profile latency and memory, benchmark changes, and make performance-critical decisions."
+---
+
 # Performance Skill
 
 Use this skill when optimizing code, profiling performance, or making performance-critical decisions in the Ruby Fast LSP project. Provides guidance on benchmarking, profiling, and optimization patterns. Triggers: performance, optimization, slow, profiling, benchmark, memory, latency, speed.

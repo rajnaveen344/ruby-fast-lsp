@@ -1,3 +1,8 @@
+---
+name: tigerstyle
+description: "Apply TigerBeetle-inspired Ruby Fast LSP code quality rules for safety, performance, invariants, and maintainability."
+---
+
 # TigerStyle Code Quality Skill
 
 Use this skill when writing new code, reviewing code, or refactoring existing code in the Ruby Fast LSP project. Enforces TigerBeetle-inspired coding standards for safety, performance, and maintainability. Triggers: writing code, code quality, style guide, best practices, coding standards.

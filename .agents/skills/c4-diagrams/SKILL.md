@@ -1,3 +1,8 @@
+---
+name: c4-diagrams
+description: "Create, update, validate, and maintain Ruby Fast LSP C4 architecture diagrams using LikeC4."
+---
+
 # C4 Architecture Diagrams Skill
 
 Use this skill when creating, updating, or maintaining C4 architecture diagrams for the Ruby Fast LSP project. Provides guidance on proper layering (L1-L4), file organization, LikeC4 syntax, and validation. Triggers: c4 diagrams, architecture visualization, documentation, system design, component diagrams, dynamic views.
