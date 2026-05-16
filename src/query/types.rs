@@ -646,6 +646,31 @@ impl<'a> TypeQuery<'a> {
         infer_type_from_assignment(content_str, name, &index)
     }
 
+    pub fn get_local_variable_type_at(
+        &self,
+        name: &str,
+        scope_id: u32,
+        position: Position,
+    ) -> Option<RubyType> {
+        if let Some(type_store) = self.type_store {
+            let byte_offset = position_to_byte_offset(self.content, position)?;
+            match type_store.type_at(
+                &TypeSubject::Local {
+                    scope_id,
+                    name: name.to_string(),
+                },
+                SourceFileId(0),
+                byte_offset,
+            ) {
+                TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
+                TypeResolution::Ambiguous(_) => return None,
+                TypeResolution::Unresolved => {}
+            }
+        }
+
+        self.get_local_variable_type(name, position)
+    }
+
     /// Get type for a method parameter if the variable is a parameter of the enclosing method.
     fn get_method_parameter_type(&self, param_name: &str, position: Position) -> Option<RubyType> {
         let index = self.index.lock();

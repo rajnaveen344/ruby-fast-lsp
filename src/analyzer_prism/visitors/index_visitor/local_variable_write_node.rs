@@ -1,4 +1,5 @@
 use log::{error, trace};
+use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
     LocalVariableTargetNode, LocalVariableWriteNode, Location, Node,
@@ -95,6 +96,20 @@ impl IndexVisitor {
                     location.range,
                     inferred_type.clone(),
                 );
+                let scope_id = u32::try_from(current_scope_id).expect(
+                    "INVARIANT VIOLATED: local variable scope id exceeded u32. \
+                     This is a bug because ruby-analysis-core TypeSubject::Local stores u32 scope ids. \
+                     Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
+                );
+                self.document.type_store.add(TypeFact::new(
+                    TypeSubject::Local {
+                        scope_id,
+                        name: variable_name.clone(),
+                    },
+                    inferred_type.clone(),
+                    self.document.prism_location_to_text_range(&name_loc),
+                    TypeProvenance::Assignment,
+                ));
             }
 
             trace!(
@@ -187,6 +202,7 @@ mod tests {
     use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::{Index, Unlocked};
     use parking_lot::RwLock;
+    use ruby_analysis_core::{SourceFileId, TypeResolution, TypeSubject};
     use ruby_prism::Visit;
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
@@ -225,6 +241,26 @@ mod tests {
             find_var_in_scopes(&visitor, "name"),
             "No variable 'name' stored in VariableScopes"
         );
+    }
+
+    #[test]
+    fn local_variable_write_emits_type_fact() {
+        let content = "name = 'John'";
+        let (mut visitor, parse_result) = create_test_visitor(content);
+        visitor.visit(&parse_result.node());
+
+        let subject = TypeSubject::Local {
+            scope_id: 0,
+            name: "name".to_string(),
+        };
+        match visitor
+            .document
+            .type_store
+            .type_at(&subject, SourceFileId(0), 8)
+        {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected local variable type fact, got {other:?}"),
+        }
     }
 
     #[test]

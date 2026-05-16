@@ -681,7 +681,32 @@ async fn run_type_check(
         {
             match &identifier {
                 crate::analyzer_prism::Identifier::RubyLocalVariable { name, .. } => {
-                    (type_query.get_local_variable_type(name, position), "var")
+                    let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
+                    let variable_type = if let Some(doc) = doc_snapshot {
+                        let scope_id = doc
+                            .variable_scopes()
+                            .find_scope_for_variable_at(name, position)
+                            .or_else(|| doc.variable_scopes().scope_at_position(position));
+                        if let Some(scope_id) = scope_id {
+                            let scope_id = u32::try_from(scope_id).expect(
+                                "INVARIANT VIOLATED: local variable scope id exceeded u32. \
+                                 This is a bug because ruby-analysis-core TypeSubject::Local stores u32 scope ids. \
+                                 Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
+                            );
+                            TypeQuery::with_type_store(
+                                server.index_for_uri(uri),
+                                uri,
+                                content.as_bytes(),
+                                &doc.type_store,
+                            )
+                            .get_local_variable_type_at(name, scope_id, position)
+                        } else {
+                            type_query.get_local_variable_type(name, position)
+                        }
+                    } else {
+                        type_query.get_local_variable_type(name, position)
+                    };
+                    (variable_type, "var")
                 }
                 crate::analyzer_prism::Identifier::RubyConstant { iden, .. } => {
                     let constant_fqn =
