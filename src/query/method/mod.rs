@@ -28,7 +28,6 @@ pub use ruby_analysis_core::MethodCalleeResolution;
 use ruby_analysis_core::TypeSubject;
 use tower_lsp::lsp_types::{Location, Position};
 
-use super::inference::ReceiverResolver;
 use super::IndexQuery;
 
 // ============================================================================
@@ -259,14 +258,7 @@ impl IndexQuery {
         if self.analysis_engine().is_some() {
             return None;
         }
-
-        let content = self.doc.as_ref()?.read().content.clone();
-        let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
-
-        let var_type = resolver.resolve_variable(var_name, position, &content)?;
-        trace!("Inferred type for '{}': {:?}", var_name, var_type);
-
-        self.convert_type_to_namespace(&var_type)
+        None
     }
 
     /// Resolve method call receiver: `a.b.c` where we need a.b's return type
@@ -296,20 +288,7 @@ impl IndexQuery {
         if self.analysis_engine().is_some() {
             return None;
         }
-
-        let content = self.doc.as_ref()?.read().content.clone();
-        let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
-
-        let chain_type =
-            resolver.resolve_method_chain(inner_receiver, method_name, position, &content)?;
-        trace!(
-            "Inferred type for '{}.{}': {:?}",
-            receiver_to_string(inner_receiver),
-            method_name,
-            chain_type
-        );
-
-        self.convert_type_to_namespace(&chain_type)
+        None
     }
 
     fn variable_receiver_type_from_analysis(
