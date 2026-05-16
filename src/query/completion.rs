@@ -126,6 +126,43 @@ impl IndexQuery {
         }
         items
     }
+
+    pub fn find_top_level_method_completions(&self, partial_method: &str) -> Vec<CompletionItem> {
+        let mut items = self.top_level_method_completions_from_analysis(partial_method);
+        items.extend(method::find_top_level_method_completions(
+            &self.index,
+            partial_method,
+        ));
+        dedupe_completion_items(items)
+    }
+
+    fn top_level_method_completions_from_analysis(
+        &self,
+        partial_method: &str,
+    ) -> Vec<CompletionItem> {
+        let Some(engine) = self.analysis_engine() else {
+            return Vec::new();
+        };
+        let engine = engine.lock();
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        query
+            .top_level_method_completion_facts(partial_method)
+            .into_iter()
+            .filter_map(|fact| {
+                let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                    return None;
+                };
+                let name = method.get_name();
+                Some(CompletionItem {
+                    label: name.clone(),
+                    kind: Some(CompletionItemKind::METHOD),
+                    detail: Some(format!("method {}", fact.fqn)),
+                    insert_text: Some(name),
+                    ..Default::default()
+                })
+            })
+            .collect()
+    }
 }
 
 fn receiver_type_to_namespaces(

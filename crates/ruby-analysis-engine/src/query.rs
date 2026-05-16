@@ -196,6 +196,32 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
+    pub fn top_level_method_completion_facts(&self, partial: &str) -> Vec<MethodFact> {
+        let mut facts = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for fact in self.engine.all_method_facts() {
+            if !fact.owner.namespace_parts().is_empty() {
+                continue;
+            }
+
+            let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                continue;
+            };
+            let method_name = method.get_name();
+            if !method_name.starts_with(partial) {
+                continue;
+            }
+
+            if seen.insert(method_name) {
+                facts.push(fact);
+            }
+        }
+
+        facts.sort_by_key(|fact| fact.fqn.to_string());
+        facts
+    }
+
     pub fn resolve_constant_receiver(
         &self,
         path: &[RubyConstant],

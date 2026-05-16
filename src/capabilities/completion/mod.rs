@@ -287,9 +287,7 @@ pub async fn find_completion_at_position(
         completions.extend(constant_completions);
 
         // Add top-level method completions (methods defined outside any class/module).
-        // Route by URI so the file's workspace index supplies the methods.
-        let top_level_methods =
-            method::find_top_level_method_completions(&server.index_for_uri(&uri), &partial_string);
+        let top_level_methods = query.find_top_level_method_completions(&partial_string);
         completions.extend(top_level_methods);
 
         // Add snippet completions with context awareness
