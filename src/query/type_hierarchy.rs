@@ -20,7 +20,7 @@
 //! The supertypes list follows this exact order (excluding self).
 
 use log::{debug, info};
-use ruby_analysis_core::GraphEdgeKind;
+use ruby_analysis_core::{GraphEdgeKind, GraphNodeKind};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
@@ -137,10 +137,22 @@ impl IndexQuery {
             }
         };
 
-        let index = self.index.lock();
-
         // Resolve the FQN for this constant
-        let fqn = resolve_constant_fqn(&constant_parts, &ancestors, &index)?;
+        let fqn = if let Some(fqn) =
+            resolve_constant_fqn_from_analysis(self, &constant_parts, &ancestors)
+        {
+            fqn
+        } else {
+            let index = self.index.lock();
+            resolve_constant_fqn(&constant_parts, &ancestors, &index)?
+        };
+
+        if let Some(item) = self.type_hierarchy_item_from_analysis(&fqn) {
+            info!("Found type hierarchy item: {}", fqn);
+            return Some(vec![item]);
+        }
+
+        let index = self.index.lock();
 
         // Get the entry for this FQN to get location info
         let entries = index.get(&fqn)?;
@@ -472,6 +484,36 @@ impl IndexQuery {
 
         Some(subtypes)
     }
+
+    fn type_hierarchy_item_from_analysis(
+        &self,
+        fqn: &FullyQualifiedName,
+    ) -> Option<TypeHierarchyItem> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let node = engine.graph_nodes_for(fqn).first()?;
+        let location = location_for_range(&engine, node.range)?;
+        let kind = match node.kind {
+            GraphNodeKind::Class => SymbolKind::CLASS,
+            GraphNodeKind::Module => SymbolKind::MODULE,
+        };
+
+        Some(TypeHierarchyItem {
+            name: fqn.name(),
+            kind,
+            tags: None,
+            detail: Some(fqn.to_string()),
+            uri: location.uri,
+            range: location.range,
+            selection_range: location.range,
+            data: Some(
+                serde_json::to_value(TypeHierarchyData {
+                    fqn: fqn.to_string(),
+                })
+                .ok()?,
+            ),
+        })
+    }
 }
 
 // ============================================================================
@@ -532,6 +574,45 @@ fn resolve_constant_fqn(
 
     let root_fqn = FullyQualifiedName::Constant(constant_parts.to_vec());
     if index.get(&root_fqn).is_some() {
+        return Some(root_fqn);
+    }
+
+    None
+}
+
+fn resolve_constant_fqn_from_analysis(
+    query: &IndexQuery,
+    constant_parts: &[RubyConstant],
+    ancestors: &[RubyConstant],
+) -> Option<FullyQualifiedName> {
+    let engine = query.analysis_engine()?;
+    let engine = engine.lock();
+    let mut search_namespaces = ancestors.to_vec();
+
+    while !search_namespaces.is_empty() {
+        let mut combined_ns = search_namespaces.clone();
+        combined_ns.extend(constant_parts.iter().cloned());
+
+        let search_namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+        if !engine.graph_nodes_for(&search_namespace_fqn).is_empty() {
+            return Some(search_namespace_fqn);
+        }
+
+        let search_constant_fqn = FullyQualifiedName::Constant(combined_ns);
+        if !engine.symbol_facts_for(&search_constant_fqn).is_empty() {
+            return Some(search_constant_fqn);
+        }
+
+        search_namespaces.pop();
+    }
+
+    let root_namespace_fqn = FullyQualifiedName::namespace(constant_parts.to_vec());
+    if !engine.graph_nodes_for(&root_namespace_fqn).is_empty() {
+        return Some(root_namespace_fqn);
+    }
+
+    let root_fqn = FullyQualifiedName::Constant(constant_parts.to_vec());
+    if !engine.symbol_facts_for(&root_fqn).is_empty() {
         return Some(root_fqn);
     }
 
