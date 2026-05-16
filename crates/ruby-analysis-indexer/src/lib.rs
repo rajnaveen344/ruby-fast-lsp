@@ -788,7 +788,10 @@ fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         });
     }
     if node.as_hash_node().is_some() {
-        return Some(RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]));
+        return Some(RubyType::Hash(
+            vec![RubyType::Unknown],
+            vec![RubyType::Unknown],
+        ));
     }
     None
 }
@@ -891,9 +894,8 @@ mod tests {
 
     #[test]
     fn indexes_literal_assignment_type_facts() {
-        let index = AnalysisIndexer::new(file()).index_source(
-            "A = 1\nname = \"Ada\"\n@active = true\n@@count = 1\n$debug = false\n",
-        );
+        let index = AnalysisIndexer::new(file())
+            .index_source("A = 1\nname = \"Ada\"\n@active = true\n@@count = 1\n$debug = false\n");
 
         assert!(index.types.iter().any(|fact| {
             fact.subject
@@ -906,7 +908,7 @@ mod tests {
             fact.subject
                 == TypeSubject::Local {
                     scope_id: 0,
-                    name: "name".to_string()
+                    name: "name".to_string(),
                 }
                 && fact.ruby_type == RubyType::string()
         }));
