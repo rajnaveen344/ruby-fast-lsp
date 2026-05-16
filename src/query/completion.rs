@@ -7,7 +7,6 @@ use tower_lsp::lsp_types::{CompletionItem, Position};
 use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
-use crate::capabilities::completion::constant;
 use crate::capabilities::completion::method;
 use crate::indexer::entry::NamespaceKind;
 use crate::inferrer::r#type::ruby::RubyType;
@@ -26,17 +25,9 @@ impl IndexQuery {
         position: Position,
         partial: String,
     ) -> Vec<CompletionItem> {
-        let mut items = self
+        let items = self
             .find_constant_completions_from_analysis(analyzer, position, &partial)
             .unwrap_or_default();
-        if self.analysis_engine().is_some() {
-            return dedupe_completion_items(items);
-        }
-
-        let index = self.index.lock();
-        items.extend(constant::find_constant_completions(
-            &index, analyzer, position, partial,
-        ));
         dedupe_completion_items(items)
     }
 
@@ -123,15 +114,7 @@ impl IndexQuery {
     }
 
     pub fn find_top_level_method_completions(&self, partial_method: &str) -> Vec<CompletionItem> {
-        let mut items = self.top_level_method_completions_from_analysis(partial_method);
-        if self.analysis_engine().is_some() {
-            return dedupe_completion_items(items);
-        }
-
-        items.extend(method::find_top_level_method_completions(
-            &self.index,
-            partial_method,
-        ));
+        let items = self.top_level_method_completions_from_analysis(partial_method);
         dedupe_completion_items(items)
     }
 
