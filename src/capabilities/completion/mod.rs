@@ -1051,6 +1051,9 @@ mod tests {
             ruby_namespace::RubyConstant,
         },
     };
+    use ruby_analysis_core::{
+        GraphNodeFact, GraphNodeKind, SourceKind, SymbolFact, SymbolKind, TextRange,
+    };
     use tower_lsp::{
         lsp_types::{
             CompletionItemKind, CompletionTriggerKind, DidOpenTextDocumentParams, InitializeParams,
@@ -1062,7 +1065,36 @@ mod tests {
     async fn create_test_server() -> RubyLanguageServer {
         let server = RubyLanguageServer::default();
         let _ = server.initialize(InitializeParams::default()).await;
+        add_builtin_analysis_constants(&server);
         server
+    }
+
+    fn add_builtin_analysis_constants(server: &RubyLanguageServer) {
+        let mut engine = server.analysis_engine.lock();
+        let file_id = engine.open_or_update_file_with_kind(
+            "/tmp/ruby-fast-lsp-test-builtins.rb",
+            "class Object; end\nclass String < Object; end\nclass Array < Object; end\nclass Hash < Object; end\n",
+            SourceKind::Stub,
+        );
+
+        for (idx, name) in ["Object", "String", "Array", "Hash"]
+            .into_iter()
+            .enumerate()
+        {
+            let start = u32::try_from(idx * 20).expect(
+                "INVARIANT VIOLATED: test builtin offset exceeded u32. \
+                 This is a bug because test offsets are tiny. \
+                 Fix: keep test builtin ranges in u32 bounds.",
+            );
+            let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new(name).unwrap()]);
+            let range = TextRange::new(file_id, start, start + 10);
+            engine.add_graph_node_fact(GraphNodeFact::new(
+                fqn.clone(),
+                GraphNodeKind::Class,
+                range,
+            ));
+            engine.add_symbol_fact(SymbolFact::new(fqn, SymbolKind::Class, range));
+        }
     }
 
     fn create_test_entry(

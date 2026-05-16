@@ -26,10 +26,14 @@ impl IndexQuery {
         position: Position,
         partial: String,
     ) -> Vec<CompletionItem> {
-        let index = self.index.lock();
         let mut items = self
             .find_constant_completions_from_analysis(analyzer, position, &partial)
             .unwrap_or_default();
+        if self.analysis_engine().is_some() {
+            return dedupe_completion_items(items);
+        }
+
+        let index = self.index.lock();
         items.extend(constant::find_constant_completions(
             &index, analyzer, position, partial,
         ));
@@ -120,6 +124,10 @@ impl IndexQuery {
 
     pub fn find_top_level_method_completions(&self, partial_method: &str) -> Vec<CompletionItem> {
         let mut items = self.top_level_method_completions_from_analysis(partial_method);
+        if self.analysis_engine().is_some() {
+            return dedupe_completion_items(items);
+        }
+
         items.extend(method::find_top_level_method_completions(
             &self.index,
             partial_method,
