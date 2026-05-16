@@ -12,8 +12,9 @@ use ruby_analysis_core::{
 };
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_module_node, CallNode, ClassNode, ConstantPathNode,
-    ConstantPathWriteNode, ConstantWriteNode, DefNode, ModuleNode, Node, Visit,
+    visit_def_node, visit_module_node, visit_singleton_class_node, CallNode, ClassNode,
+    ConstantPathNode, ConstantPathWriteNode, ConstantWriteNode, DefNode, ModuleNode, Node,
+    SingletonClassNode, Visit,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -28,6 +29,7 @@ pub struct AnalysisIndex {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScopeKind {
     Instance,
+    Singleton,
 }
 
 #[derive(Debug)]
@@ -177,6 +179,82 @@ impl AnalysisIndexer {
             .graph_edges
             .push(GraphEdgeFact::new(source, target, kind, range));
     }
+
+    fn push_method_fact(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: ruby_analysis_core::NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+    ) {
+        let fqn = FullyQualifiedName::method(namespace.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
+        self.facts
+            .symbols
+            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.facts.methods.push(MethodFact::new(fqn, owner, range));
+    }
+
+    fn push_attr_method_facts(&mut self, node: &CallNode<'_>, reader: bool, writer: bool) {
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+
+        let owner_kind = match self.current_scope_kind() {
+            ScopeKind::Instance => ruby_analysis_core::NamespaceKind::Instance,
+            ScopeKind::Singleton => ruby_analysis_core::NamespaceKind::Singleton,
+        };
+
+        for arg in arguments.arguments().iter() {
+            let Some((name, range)) = attr_name_and_range(&arg, self.file_id) else {
+                continue;
+            };
+
+            if reader {
+                if let Ok(method) = RubyMethod::new(&name) {
+                    self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+                }
+            }
+
+            if writer {
+                if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
+                    self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+                }
+            }
+        }
+    }
+
+    fn push_module_function_facts(&mut self, node: &CallNode<'_>) {
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+
+        for arg in arguments.arguments().iter() {
+            let Some((name, fallback_range)) = symbol_name_and_range(&arg, self.file_id) else {
+                continue;
+            };
+            let Ok(method) = RubyMethod::new(&name) else {
+                continue;
+            };
+            let fqn = FullyQualifiedName::method(self.namespace_stack.clone(), method);
+            let instance_owner = FullyQualifiedName::namespace_with_kind(
+                self.namespace_stack.clone(),
+                ruby_analysis_core::NamespaceKind::Instance,
+            );
+            let range = self
+                .facts
+                .methods
+                .iter()
+                .find(|fact| fact.fqn == fqn && fact.owner == instance_owner)
+                .map(|fact| fact.range)
+                .unwrap_or(fallback_range);
+            let owner = FullyQualifiedName::namespace_with_kind(
+                self.namespace_stack.clone(),
+                ruby_analysis_core::NamespaceKind::Singleton,
+            );
+            self.facts.methods.push(MethodFact::new(fqn, owner, range));
+        }
+    }
 }
 
 impl Visit<'_> for AnalysisIndexer {
@@ -245,6 +323,7 @@ impl Visit<'_> for AnalysisIndexer {
 
         let mut owner_kind = match self.current_scope_kind() {
             ScopeKind::Instance => ruby_analysis_core::NamespaceKind::Instance,
+            ScopeKind::Singleton => ruby_analysis_core::NamespaceKind::Singleton,
         };
         if let Some(receiver) = node.receiver() {
             if receiver.as_self_node().is_some() {
@@ -305,6 +384,14 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_call_node(&mut self, node: &CallNode<'_>) {
         if node.receiver().is_none() {
+            match node.name().as_slice() {
+                b"attr_reader" => self.push_attr_method_facts(node, true, false),
+                b"attr_writer" => self.push_attr_method_facts(node, false, true),
+                b"attr_accessor" => self.push_attr_method_facts(node, true, true),
+                b"module_function" => self.push_module_function_facts(node),
+                _ => {}
+            }
+
             let kind = match node.name().as_slice() {
                 b"include" => Some(GraphEdgeKind::Include),
                 b"prepend" => Some(GraphEdgeKind::Prepend),
@@ -335,6 +422,12 @@ impl Visit<'_> for AnalysisIndexer {
 
         visit_call_node(self, node);
     }
+
+    fn visit_singleton_class_node(&mut self, node: &SingletonClassNode<'_>) {
+        self.scope_stack.push(ScopeKind::Singleton);
+        visit_singleton_class_node(self, node);
+        self.scope_stack.pop();
+    }
 }
 
 fn constant_parts(node: &Node<'_>) -> Option<Vec<RubyConstant>> {
@@ -346,6 +439,31 @@ fn constant_parts(node: &Node<'_>) -> Option<Vec<RubyConstant>> {
         return constant_path_parts(&path);
     }
     None
+}
+
+fn attr_name_and_range(node: &Node<'_>, file_id: SourceFileId) -> Option<(String, TextRange)> {
+    if let Some(symbol) = node.as_symbol_node() {
+        return Some((
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            text_range(file_id, &symbol.location()),
+        ));
+    }
+    if let Some(string) = node.as_string_node() {
+        return Some((
+            String::from_utf8_lossy(string.unescaped()).to_string(),
+            text_range(file_id, &string.content_loc()),
+        ));
+    }
+    None
+}
+
+fn symbol_name_and_range(node: &Node<'_>, file_id: SourceFileId) -> Option<(String, TextRange)> {
+    node.as_symbol_node().map(|symbol| {
+        (
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            text_range(file_id, &symbol.location()),
+        )
+    })
 }
 
 fn constant_parts_and_absolute(node: &Node<'_>) -> Option<(Vec<RubyConstant>, bool)> {
@@ -387,6 +505,14 @@ fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<Ruby
     }
 }
 
+fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> TextRange {
+    TextRange::new(
+        file_id,
+        u32_offset(location.start_offset()),
+        u32_offset(location.end_offset()),
+    )
+}
+
 fn u32_offset(offset: usize) -> u32 {
     u32::try_from(offset).expect(
         "INVARIANT VIOLATED: source byte offset exceeded u32. \
@@ -424,6 +550,34 @@ mod tests {
         }));
         assert!(index.methods.iter().any(|fact| {
             fact.fqn.to_string() == "User#find"
+                && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
+        }));
+    }
+
+    #[test]
+    fn indexes_singleton_class_attr_and_module_function_methods() {
+        let index = AnalysisIndexer::new(file()).index_source(
+            "module Utils\n  def helper\n  end\n  module_function :helper\nend\nclass User\n  attr_accessor :name\n  class << self\n    attr_reader :count\n    def build\n    end\n  end\nend\n",
+        );
+
+        assert!(index.methods.iter().any(|fact| {
+            fact.fqn.to_string() == "Utils#helper"
+                && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
+        }));
+        assert!(index.methods.iter().any(|fact| {
+            fact.fqn.to_string() == "User#name"
+                && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Instance)
+        }));
+        assert!(index.methods.iter().any(|fact| {
+            fact.fqn.to_string() == "User#name="
+                && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Instance)
+        }));
+        assert!(index.methods.iter().any(|fact| {
+            fact.fqn.to_string() == "User#count"
+                && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
+        }));
+        assert!(index.methods.iter().any(|fact| {
+            fact.fqn.to_string() == "User#build"
                 && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
         }));
     }

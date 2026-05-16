@@ -21,8 +21,7 @@ use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::analysis_facts::{
-    collect_method_facts_for_file, collect_reference_facts_from_locations,
-    collect_symbol_facts_for_file,
+    collect_reference_facts_from_locations, collect_symbol_facts_for_file,
 };
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
@@ -252,16 +251,7 @@ impl FileProcessor {
                 )
             };
             let symbol_facts = merge_symbol_facts(direct_facts.symbols, legacy_symbol_facts);
-            let legacy_method_facts = {
-                let index = self.index.lock();
-                collect_method_facts_for_file(
-                    &index,
-                    &updated_document,
-                    uri,
-                    updated_document.analysis_file_id(),
-                )
-            };
-            let method_facts = merge_method_facts(direct_facts.methods, legacy_method_facts);
+            let method_facts = direct_facts.methods;
             server
                 .analysis_engine
                 .lock()
@@ -770,23 +760,6 @@ fn merge_symbol_facts(mut direct: Vec<SymbolFact>, legacy: Vec<SymbolFact>) -> V
     });
     direct.dedup_by(|left, right| {
         left.fqn == right.fqn && left.kind == right.kind && left.range == right.range
-    });
-    direct
-}
-
-fn merge_method_facts(mut direct: Vec<MethodFact>, legacy: Vec<MethodFact>) -> Vec<MethodFact> {
-    direct.extend(legacy);
-    direct.sort_by_key(|fact| {
-        (
-            fact.fqn.to_string(),
-            fact.owner.to_string(),
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-        )
-    });
-    direct.dedup_by(|left, right| {
-        left.fqn == right.fqn && left.owner == right.owner && left.range == right.range
     });
     direct
 }
