@@ -65,6 +65,10 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.graph_edges_from(fqn)
     }
 
+    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
+        self.engine.all_graph_edges()
+    }
+
     pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
         self.engine.graph_store().nodes_in_file(file_id)
     }

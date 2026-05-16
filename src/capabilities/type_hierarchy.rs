@@ -21,7 +21,7 @@ pub async fn handle_prepare_type_hierarchy(
     let position = params.text_document_position_params.position;
     let doc = server.get_doc(&uri)?;
     let content = doc.content.clone();
-    let query = IndexQuery::new(server.index_for_uri(&uri));
+    let query = IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
     query.prepare_type_hierarchy(&uri, position, content)
 }
 
@@ -37,7 +37,10 @@ pub async fn handle_supertypes(
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Supertypes request for: {}", data.fqn);
-    let query = IndexQuery::new(server.index_for_uri(&item_uri));
+    let query = IndexQuery::with_engine(
+        server.index_for_uri(&item_uri),
+        server.analysis_engine.clone(),
+    );
     query.get_supertypes(&data)
 }
 
@@ -53,6 +56,9 @@ pub async fn handle_subtypes(
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Subtypes request for: {}", data.fqn);
-    let query = IndexQuery::new(server.index_for_uri(&item_uri));
+    let query = IndexQuery::with_engine(
+        server.index_for_uri(&item_uri),
+        server.analysis_engine.clone(),
+    );
     query.get_subtypes(&data)
 }

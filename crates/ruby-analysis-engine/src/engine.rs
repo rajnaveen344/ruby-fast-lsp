@@ -180,6 +180,10 @@ impl AnalysisEngine {
         self.graph_store.edges_from(source)
     }
 
+    pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
+        self.graph_store.all_edges()
+    }
+
     pub fn graph_store(&self) -> &GraphStore {
         &self.graph_store
     }

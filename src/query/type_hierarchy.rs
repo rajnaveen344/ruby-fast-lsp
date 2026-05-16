@@ -20,6 +20,7 @@
 //! The supertypes list follows this exact order (excluding self).
 
 use log::{debug, info};
+use ruby_analysis_core::GraphEdgeKind;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
@@ -31,6 +32,7 @@ use crate::indexer::index::{FileId, FqnId, RubyIndex};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 
+use super::analysis_location::location_for_range;
 use super::IndexQuery;
 
 // ============================================================================
@@ -342,8 +344,6 @@ impl IndexQuery {
     pub fn get_subtypes(&self, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
         info!("Subtypes request for: {}", data.fqn);
 
-        let index = self.index.lock();
-
         // Parse the FQN string - return empty if can't parse (type might have been deleted)
         let fqn = match parse_fqn_string(&data.fqn) {
             Some(f) => f,
@@ -352,6 +352,13 @@ impl IndexQuery {
                 return Some(vec![]);
             }
         };
+
+        if let Some(subtypes) = self.subtypes_from_analysis(&fqn) {
+            info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
+            return Some(subtypes);
+        }
+
+        let index = self.index.lock();
 
         // Get FQN ID - return empty if not in index (type might have been deleted)
         let fqn_id = match index.get_fqn_id(&fqn) {
@@ -410,6 +417,59 @@ impl IndexQuery {
         // so they're already covered by the included_by section above.
 
         info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
+        Some(subtypes)
+    }
+
+    fn subtypes_from_analysis(&self, fqn: &FullyQualifiedName) -> Option<Vec<TypeHierarchyItem>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        if engine.graph_nodes_for(fqn).is_empty() {
+            return None;
+        }
+
+        let mut subclass_edges = Vec::new();
+        let mut included_by_edges = Vec::new();
+        let mut prepended_by_edges = Vec::new();
+        let mut extended_by_edges = Vec::new();
+
+        for edge in engine.all_graph_edges() {
+            if &edge.target != fqn {
+                continue;
+            }
+            match edge.kind {
+                GraphEdgeKind::Superclass => subclass_edges.push(edge),
+                GraphEdgeKind::Include => included_by_edges.push(edge),
+                GraphEdgeKind::Prepend => prepended_by_edges.push(edge),
+                GraphEdgeKind::Extend => extended_by_edges.push(edge),
+            }
+        }
+
+        let mut subtypes = Vec::new();
+        push_analysis_subtype_items(
+            &engine,
+            &mut subclass_edges,
+            RelationType::Subclass,
+            &mut subtypes,
+        );
+        push_analysis_subtype_items(
+            &engine,
+            &mut included_by_edges,
+            RelationType::IncludedBy,
+            &mut subtypes,
+        );
+        push_analysis_subtype_items(
+            &engine,
+            &mut prepended_by_edges,
+            RelationType::PrependedBy,
+            &mut subtypes,
+        );
+        push_analysis_subtype_items(
+            &engine,
+            &mut extended_by_edges,
+            RelationType::ExtendedBy,
+            &mut subtypes,
+        );
+
         Some(subtypes)
     }
 }
@@ -641,6 +701,48 @@ fn fqn_id_to_type_hierarchy_item_with_relation(
     Some(TypeHierarchyItem {
         name: fqn.name(),
         kind,
+        tags: None,
+        detail: Some(detail),
+        uri: location.uri,
+        range: location.range,
+        selection_range: location.range,
+        data: Some(
+            serde_json::to_value(TypeHierarchyData {
+                fqn: fqn.to_string(),
+            })
+            .ok()?,
+        ),
+    })
+}
+
+fn push_analysis_subtype_items(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    edges: &mut [ruby_analysis_core::GraphEdgeFact],
+    relation: RelationType,
+    items: &mut Vec<TypeHierarchyItem>,
+) {
+    edges.sort_by(|left, right| left.source.to_string().cmp(&right.source.to_string()));
+    for edge in edges {
+        if let Some(item) =
+            graph_source_to_type_hierarchy_item_with_relation(engine, &edge.source, relation)
+        {
+            items.push(item);
+        }
+    }
+}
+
+fn graph_source_to_type_hierarchy_item_with_relation(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    relation: RelationType,
+) -> Option<TypeHierarchyItem> {
+    let node = engine.graph_nodes_for(fqn).first()?;
+    let location = location_for_range(engine, node.range)?;
+    let detail = format!("{} ({})", fqn, relation.label());
+
+    Some(TypeHierarchyItem {
+        name: fqn.name(),
+        kind: relation.symbol_kind(),
         tags: None,
         detail: Some(detail),
         uri: location.uri,
