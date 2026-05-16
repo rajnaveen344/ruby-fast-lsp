@@ -164,6 +164,10 @@ impl AnalysisEngine {
         self.symbol_store.facts_for(fqn)
     }
 
+    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
+        self.symbol_store.all_facts()
+    }
+
     pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
         self.reference_store.facts_for(target)
     }

@@ -7,8 +7,10 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::Entry;
 use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use ruby_analysis_core::{SymbolFact, SymbolKind as AnalysisSymbolKind};
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
 
+use super::analysis_location::location_for_range;
 use super::IndexQuery;
 
 // ============================================================================
@@ -16,8 +18,19 @@ use super::IndexQuery;
 // ============================================================================
 
 impl IndexQuery {
+    pub fn has_analysis_symbols(&self) -> bool {
+        let Some(engine) = self.analysis_engine() else {
+            return false;
+        };
+        !engine.lock().all_symbol_facts().is_empty()
+    }
+
     /// Return a limited set of top-level symbols (for empty queries).
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
+        if let Some(symbols) = self.top_level_symbols_from_analysis() {
+            return symbols;
+        }
+
         let index = self.index.lock();
         let mut symbols = Vec::new();
         let mut count = 0;
@@ -28,15 +41,23 @@ impl IndexQuery {
                 break;
             }
 
-            if let FullyQualifiedName::Constant(parts) = fqn {
-                if parts.len() == 1 {
-                    if let Some(entry) = entries.first() {
-                        if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
-                            symbols.push(symbol);
-                            count += 1;
+            match fqn {
+                FullyQualifiedName::Namespace(parts, _) | FullyQualifiedName::Constant(parts) => {
+                    if parts.len() == 1 {
+                        if let Some(entry) = entries.first() {
+                            if let Some(symbol) = convert_entry_to_symbol_information(entry, &index)
+                            {
+                                symbols.push(symbol);
+                                count += 1;
+                            }
                         }
                     }
                 }
+                FullyQualifiedName::Method(_, _)
+                | FullyQualifiedName::LocalVariable(_)
+                | FullyQualifiedName::InstanceVariable(_)
+                | FullyQualifiedName::ClassVariable(_)
+                | FullyQualifiedName::GlobalVariable(_) => {}
             }
         }
 
@@ -48,6 +69,10 @@ impl IndexQuery {
     /// Supports exact, prefix, camel case, and fuzzy subsequence matching.
     /// Results are ranked by relevance and limited to 100.
     pub fn search_workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
+        if let Some(symbols) = self.search_workspace_symbols_from_analysis(query) {
+            return symbols;
+        }
+
         let index = self.index.lock();
         let matcher = SymbolMatcher::new();
         let mut results = Vec::new();
@@ -85,6 +110,74 @@ impl IndexQuery {
 
         results.into_iter().map(|r| r.symbol).collect()
     }
+
+    fn top_level_symbols_from_analysis(&self) -> Option<Vec<SymbolInformation>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let mut symbols = Vec::new();
+        const MAX_SYMBOLS: usize = 50;
+
+        for fact in engine.all_symbol_facts() {
+            if symbols.len() >= MAX_SYMBOLS {
+                break;
+            }
+            match &fact.fqn {
+                FullyQualifiedName::Namespace(parts, _) | FullyQualifiedName::Constant(parts) => {
+                    if parts.len() == 1 {
+                        if let Some(symbol) =
+                            convert_symbol_fact_to_symbol_information(&fact, &engine)
+                        {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+                FullyQualifiedName::Method(_, _)
+                | FullyQualifiedName::LocalVariable(_)
+                | FullyQualifiedName::InstanceVariable(_)
+                | FullyQualifiedName::ClassVariable(_)
+                | FullyQualifiedName::GlobalVariable(_) => {}
+            }
+        }
+
+        Some(symbols)
+    }
+
+    fn search_workspace_symbols_from_analysis(
+        &self,
+        query: &str,
+    ) -> Option<Vec<SymbolInformation>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let matcher = SymbolMatcher::new();
+        let mut results = Vec::new();
+
+        for fact in engine.all_symbol_facts() {
+            let name = extract_display_name(&fact.fqn);
+            let match_name = match &fact.fqn {
+                FullyQualifiedName::Method(_, method) => method.get_name(),
+                FullyQualifiedName::Namespace(_, _)
+                | FullyQualifiedName::Constant(_)
+                | FullyQualifiedName::LocalVariable(_)
+                | FullyQualifiedName::InstanceVariable(_)
+                | FullyQualifiedName::ClassVariable(_)
+                | FullyQualifiedName::GlobalVariable(_) => name.clone(),
+            };
+            if let Some(symbol) = convert_symbol_fact_to_symbol_information(&fact, &engine) {
+                if let Some(relevance) = matcher.calculate_relevance(&match_name, query) {
+                    results.push(WorkspaceSymbolResult { symbol, relevance });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| {
+            b.relevance
+                .partial_cmp(&a.relevance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(100);
+
+        Some(results.into_iter().map(|r| r.symbol).collect())
+    }
 }
 
 // ============================================================================
@@ -121,6 +214,38 @@ fn convert_entry_to_symbol_information(
         location,
         container_name,
     })
+}
+
+fn convert_symbol_fact_to_symbol_information(
+    fact: &SymbolFact,
+    engine: &ruby_analysis_engine::AnalysisEngine,
+) -> Option<SymbolInformation> {
+    if matches!(fact.kind, AnalysisSymbolKind::LocalVariable) {
+        return None;
+    }
+
+    Some(SymbolInformation {
+        name: extract_display_name(&fact.fqn),
+        kind: analysis_symbol_kind_to_lsp_kind(fact.kind),
+        tags: None,
+        #[allow(deprecated)]
+        deprecated: Some(false),
+        location: location_for_range(engine, fact.range)?,
+        container_name: extract_container_name(&fact.fqn),
+    })
+}
+
+fn analysis_symbol_kind_to_lsp_kind(kind: AnalysisSymbolKind) -> SymbolKind {
+    match kind {
+        AnalysisSymbolKind::Class => SymbolKind::CLASS,
+        AnalysisSymbolKind::Module => SymbolKind::MODULE,
+        AnalysisSymbolKind::Method => SymbolKind::METHOD,
+        AnalysisSymbolKind::Constant => SymbolKind::CONSTANT,
+        AnalysisSymbolKind::LocalVariable
+        | AnalysisSymbolKind::InstanceVariable
+        | AnalysisSymbolKind::ClassVariable
+        | AnalysisSymbolKind::GlobalVariable => SymbolKind::VARIABLE,
+    }
 }
 
 fn entry_kind_to_symbol_kind(kind: &EntryKind) -> SymbolKind {
@@ -341,7 +466,73 @@ impl SymbolMatcher {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::{Mutex, RwLock};
+    use ruby_analysis_core::{
+        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolFact,
+        SymbolKind as AnalysisSymbolKind, TextRange,
+    };
+    use ruby_analysis_engine::AnalysisEngine;
+
     use super::*;
+    use crate::indexer::index_ref::Index;
+
+    fn query_with_analysis_symbols() -> IndexQuery {
+        let source = "class User\n  def name\n  end\nend";
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.open_or_update_file("/tmp/user.rb", source);
+        assert_eq!(
+            file_id,
+            SourceFileId(0),
+            "INVARIANT VIOLATED: first test analysis file id changed. \
+             This is a bug because this test assumes a fresh AnalysisEngine. \
+             Fix: update the expected file id or avoid asserting it."
+        );
+
+        let user = RubyConstant::new("User").expect("test constant must be valid");
+        engine.add_symbol_fact(SymbolFact::new(
+            FullyQualifiedName::namespace(vec![user.clone()]),
+            AnalysisSymbolKind::Class,
+            TextRange::new(file_id, 6, 10),
+        ));
+        engine.add_symbol_fact(SymbolFact::new(
+            FullyQualifiedName::method(
+                vec![user],
+                RubyMethod::new("name").expect("test method must be valid"),
+            ),
+            AnalysisSymbolKind::Method,
+            TextRange::new(file_id, 17, 21),
+        ));
+
+        IndexQuery::with_engine(
+            Index::new(Arc::new(RwLock::new(RubyIndex::new()))),
+            Arc::new(Mutex::new(engine)),
+        )
+    }
+
+    #[test]
+    fn workspace_symbols_can_read_analysis_engine_without_index_entries() {
+        let query = query_with_analysis_symbols();
+
+        let symbols = query.search_workspace_symbols("name");
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "name");
+        assert_eq!(symbols[0].kind, SymbolKind::METHOD);
+        assert_eq!(symbols[0].container_name.as_deref(), Some("User"));
+    }
+
+    #[test]
+    fn top_level_symbols_can_read_analysis_engine_without_index_entries() {
+        let query = query_with_analysis_symbols();
+
+        let symbols = query.get_top_level_symbols();
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "User");
+        assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    }
 
     #[test]
     fn test_symbol_matcher_relevance() {

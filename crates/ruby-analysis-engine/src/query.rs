@@ -41,6 +41,10 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.symbol_store().facts_in_file(file_id)
     }
 
+    pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
+        self.engine.all_symbol_facts()
+    }
+
     pub fn symbols_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [SymbolFact] {
         self.engine.symbol_facts_for(fqn)
     }

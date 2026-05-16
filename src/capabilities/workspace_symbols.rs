@@ -22,16 +22,29 @@ pub async fn handle_workspace_symbols(
     info!("Workspace symbols request for query: '{}'", query_text);
 
     let start_time = Instant::now();
-    let mut symbols: Vec<SymbolInformation> = Vec::new();
-    for index in lang_server.all_indices() {
-        let query = IndexQuery::new(index);
-        let part = if query_text.is_empty() {
-            query.get_top_level_symbols()
+    let engine_query = IndexQuery::with_engine(
+        lang_server.orphan_index.clone(),
+        lang_server.analysis_engine.clone(),
+    );
+    let symbols = if engine_query.has_analysis_symbols() {
+        if query_text.is_empty() {
+            engine_query.get_top_level_symbols()
         } else {
-            query.search_workspace_symbols(&query_text)
-        };
-        symbols.extend(part);
-    }
+            engine_query.search_workspace_symbols(&query_text)
+        }
+    } else {
+        let mut symbols: Vec<SymbolInformation> = Vec::new();
+        for index in lang_server.all_indices() {
+            let query = IndexQuery::new(index);
+            let part = if query_text.is_empty() {
+                query.get_top_level_symbols()
+            } else {
+                query.search_workspace_symbols(&query_text)
+            };
+            symbols.extend(part);
+        }
+        symbols
+    };
 
     info!(
         "Workspace symbols search completed in {:?} - found {} symbols",

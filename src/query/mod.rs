@@ -16,6 +16,7 @@
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 
+mod analysis_location;
 pub mod call_hierarchy;
 mod code_lens;
 mod completion;
@@ -97,6 +98,19 @@ impl IndexQuery {
             index,
             doc: Some(doc),
             uri: Some(uri),
+            analysis_engine: Some(analysis_engine),
+        }
+    }
+
+    /// Create an IndexQuery with analysis engine access and no document context.
+    pub fn with_engine(
+        index: Index<Unlocked>,
+        analysis_engine: Arc<Mutex<AnalysisEngine>>,
+    ) -> Self {
+        Self {
+            index,
+            doc: None,
+            uri: None,
             analysis_engine: Some(analysis_engine),
         }
     }
