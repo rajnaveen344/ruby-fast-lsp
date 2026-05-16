@@ -31,6 +31,10 @@ use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
+use ruby_analysis_core::{
+    GraphEdgeFact, GraphNodeFact, MethodFact, SymbolFact, SymbolKind as AnalysisSymbolKind,
+};
+use ruby_analysis_indexer::AnalysisIndexer;
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::Path;
@@ -226,7 +230,9 @@ impl FileProcessor {
             // Flush indexing-time type facts into the shared analysis engine.
             let type_facts = visitor.type_store.all_facts();
             let updated_document = visitor.document.clone();
-            let symbol_facts = {
+            let direct_facts =
+                collect_direct_facts(server, content, updated_document.analysis_file_id());
+            let legacy_symbol_facts = {
                 let index = self.index.lock();
                 collect_symbol_facts_for_file(
                     &index,
@@ -235,7 +241,8 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
-            let method_facts = {
+            let symbol_facts = merge_symbol_facts(direct_facts.symbols, legacy_symbol_facts);
+            let legacy_method_facts = {
                 let index = self.index.lock();
                 collect_method_facts_for_file(
                     &index,
@@ -244,6 +251,7 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
+            let method_facts = merge_method_facts(direct_facts.methods, legacy_method_facts);
             server
                 .analysis_engine
                 .lock()
@@ -287,7 +295,7 @@ impl FileProcessor {
                 HashSet::new()
             };
 
-            let (graph_nodes, graph_edges) = {
+            let (legacy_graph_nodes, legacy_graph_edges) = {
                 let index = self.index.lock();
                 collect_graph_facts_for_file(
                     &index,
@@ -296,6 +304,8 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
+            let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
+            let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
             server.analysis_engine.lock().replace_graph_facts_for_file(
                 updated_document.analysis_file_id(),
                 graph_nodes,
@@ -313,7 +323,12 @@ impl FileProcessor {
                 else {
                     continue;
                 };
-                let (graph_nodes, graph_edges) = {
+                let direct_facts = collect_direct_facts(
+                    server,
+                    &retry_document.content,
+                    retry_document.analysis_file_id(),
+                );
+                let (legacy_graph_nodes, legacy_graph_edges) = {
                     let index = self.index.lock();
                     collect_graph_facts_for_file(
                         &index,
@@ -322,6 +337,8 @@ impl FileProcessor {
                         retry_document.analysis_file_id(),
                     )
                 };
+                let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
+                let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
                 server.analysis_engine.lock().replace_graph_facts_for_file(
                     retry_document.analysis_file_id(),
                     graph_nodes,
@@ -510,4 +527,104 @@ impl FileProcessor {
         let content = std::fs::read_to_string(file_path)?;
         self.index_references(&uri, &content)
     }
+}
+
+fn collect_direct_facts(
+    server: &RubyLanguageServer,
+    content: &str,
+    file_id: ruby_analysis_core::SourceFileId,
+) -> ruby_analysis_indexer::AnalysisIndex {
+    let known_namespaces = {
+        let engine = server.analysis_engine.lock();
+        engine
+            .all_symbol_facts()
+            .into_iter()
+            .filter(|fact| {
+                matches!(
+                    fact.kind,
+                    AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
+                )
+            })
+            .filter_map(|fact| fact.fqn.to_instance_namespace())
+            .collect()
+    };
+    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_source(content)
+}
+
+fn merge_symbol_facts(mut direct: Vec<SymbolFact>, legacy: Vec<SymbolFact>) -> Vec<SymbolFact> {
+    direct.extend(legacy);
+    direct.sort_by_key(|fact| {
+        (
+            fact.fqn.to_string(),
+            fact.kind,
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    });
+    direct.dedup_by(|left, right| {
+        left.fqn == right.fqn && left.kind == right.kind && left.range == right.range
+    });
+    direct
+}
+
+fn merge_method_facts(mut direct: Vec<MethodFact>, legacy: Vec<MethodFact>) -> Vec<MethodFact> {
+    direct.extend(legacy);
+    direct.sort_by_key(|fact| {
+        (
+            fact.fqn.to_string(),
+            fact.owner.to_string(),
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    });
+    direct.dedup_by(|left, right| {
+        left.fqn == right.fqn && left.owner == right.owner && left.range == right.range
+    });
+    direct
+}
+
+fn merge_graph_nodes(
+    mut direct: Vec<GraphNodeFact>,
+    legacy: Vec<GraphNodeFact>,
+) -> Vec<GraphNodeFact> {
+    direct.extend(legacy);
+    direct.sort_by_key(|fact| {
+        (
+            fact.fqn.to_string(),
+            fact.kind,
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    });
+    direct.dedup_by(|left, right| {
+        left.fqn == right.fqn && left.kind == right.kind && left.range == right.range
+    });
+    direct
+}
+
+fn merge_graph_edges(
+    mut direct: Vec<GraphEdgeFact>,
+    legacy: Vec<GraphEdgeFact>,
+) -> Vec<GraphEdgeFact> {
+    direct.extend(legacy);
+    direct.sort_by_key(|fact| {
+        (
+            fact.source.to_string(),
+            fact.target.to_string(),
+            fact.kind,
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    });
+    direct.dedup_by(|left, right| {
+        left.source == right.source
+            && left.target == right.target
+            && left.kind == right.kind
+            && left.range == right.range
+    });
+    direct
 }

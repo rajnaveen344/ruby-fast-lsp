@@ -7,6 +7,7 @@ members = [
     "crates/lsp-test-harness",
     "crates/ruby-analysis-core",
     "crates/ruby-analysis-engine",
+    "crates/ruby-analysis-indexer",
     "crates/extension-api",
     "crates/extension-rspec",
     "crates/extension-wasm-host",
@@ -67,6 +68,7 @@ ruby-prism = "1.4.0"
 rbs-parser = { path = "crates/rbs-parser" }
 ruby-analysis-core = { path = "crates/ruby-analysis-core" }
 ruby-analysis-engine = { path = "crates/ruby-analysis-engine" }
+ruby-analysis-indexer = { path = "crates/ruby-analysis-indexer" }
 
 # File system operations
 walkdir = "2.4.0"

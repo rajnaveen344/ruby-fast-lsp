@@ -1,0 +1,11 @@
+[package]
+name = "ruby-analysis-indexer"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ruby Fast LSP Team"]
+description = "Parser-to-facts Ruby indexer for ruby-analysis-engine"
+license = "MIT"
+
+[dependencies]
+ruby-analysis-core = { path = "../ruby-analysis-core" }
+ruby-prism = "1.4.0"
