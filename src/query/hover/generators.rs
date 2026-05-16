@@ -508,10 +508,17 @@ fn receiver_type_to_analysis_namespaces(receiver_type: &RubyType) -> Vec<FullyQu
 
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            vec![FullyQualifiedName::namespace_with_kind(
+            let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
                 fqn.namespace_parts(),
                 NamespaceKind::Instance,
-            )]
+            )];
+            if fqn.name() == "Object" {
+                namespaces.push(FullyQualifiedName::namespace_with_kind(
+                    Vec::new(),
+                    NamespaceKind::Instance,
+                ));
+            }
+            namespaces
         }
         RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
             vec![FullyQualifiedName::namespace_with_kind(

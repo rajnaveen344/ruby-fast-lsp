@@ -245,7 +245,7 @@ impl<'a> AnalysisQuery<'a> {
             return_types.dedup();
             return match return_types.len() {
                 1 => return_types.pop(),
-                _ => None,
+                _ => Some(ruby_analysis_core::RubyType::union(return_types)),
             };
         }
 
@@ -434,11 +434,17 @@ fn method_lookup_chain(
          Fix: resolve receivers to Namespace FQNs before method lookup."
     );
 
-    if fqn.namespace_parts().is_empty() {
-        return vec![fqn.clone()];
-    }
-
     if engine.graph_nodes_for(fqn).is_empty() {
+        if fqn.namespace_parts().is_empty() {
+            let mut chain = Vec::new();
+            let mut visited = std::collections::HashSet::new();
+            build_mro(engine, fqn, &mut chain, &mut visited);
+            if chain.is_empty() {
+                chain.push(fqn.clone());
+            }
+            return chain;
+        }
+
         return vec![
             fqn.clone(),
             FullyQualifiedName::namespace_with_kind(
