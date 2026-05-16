@@ -75,23 +75,16 @@ impl IndexQuery {
         let mut results = Vec::new();
 
         for (fqn, start_offset, end_offset) in &collector.modules {
-            let (usages, class_locations) = if let Some(engine_ref) = self.analysis_engine() {
-                let engine = engine_ref.lock();
-                (
-                    mixin_usages_from_analysis(&engine, fqn),
-                    class_definition_locations_from_analysis(&engine, fqn),
-                )
-            } else {
-                let index = self.index.lock();
-                (
-                    index
-                        .get_mixin_usages(fqn)
-                        .into_iter()
-                        .map(|usage| (usage.mixin_type, usage.location))
-                        .collect(),
-                    index.get_class_definition_locations(fqn),
-                )
-            };
+            let engine_ref = self.analysis_engine().expect(
+                "INVARIANT VIOLATED: code lens query requires analysis engine. \
+                 This is a bug because module usage lenses are derived from graph facts. \
+                 Fix: construct IndexQuery with with_doc_and_engine().",
+            );
+            let engine = engine_ref.lock();
+            let (usages, class_locations) = (
+                mixin_usages_from_analysis(&engine, fqn),
+                class_definition_locations_from_analysis(&engine, fqn),
+            );
 
             if usages.is_empty() && class_locations.is_empty() {
                 debug!("No usages or classes found for module: {:?}", fqn);
