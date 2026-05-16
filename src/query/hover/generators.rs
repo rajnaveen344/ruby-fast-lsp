@@ -423,6 +423,46 @@ fn constant_path_to_string(path: &[RubyConstant]) -> String {
         .join("::")
 }
 
+fn graph_node_kind_from_analysis(
+    context: &HoverContext,
+    namespace_fqn: &FullyQualifiedName,
+) -> Option<GraphNodeKind> {
+    let engine = context.analysis_engine?.lock();
+    engine
+        .graph_nodes_for(namespace_fqn)
+        .iter()
+        .max_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+            )
+        })
+        .map(|fact| fact.kind)
+}
+
+fn namespace_type_from_analysis(
+    context: &HoverContext,
+    namespace_fqn: &FullyQualifiedName,
+) -> Option<RubyType> {
+    match graph_node_kind_from_analysis(context, namespace_fqn)? {
+        GraphNodeKind::Class => Some(RubyType::Class(namespace_fqn.clone())),
+        GraphNodeKind::Module => Some(RubyType::Module(namespace_fqn.clone())),
+    }
+}
+
+fn constant_reference_type_from_analysis(
+    context: &HoverContext,
+    path: &[RubyConstant],
+) -> Option<RubyType> {
+    let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
+    let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
+    match graph_node_kind_from_analysis(context, &namespace_fqn)? {
+        GraphNodeKind::Class => Some(RubyType::ClassReference(constant_fqn)),
+        GraphNodeKind::Module => Some(RubyType::ModuleReference(constant_fqn)),
+    }
+}
+
 fn method_call_return_type(
     context: &HoverContext,
     receiver_type: &RubyType,
@@ -755,6 +795,9 @@ fn resolve_receiver_type(
                 RubyType::class("Object")
             } else {
                 let fqn = FullyQualifiedName::from(namespace.to_vec());
+                if let Some(ruby_type) = namespace_type_from_analysis(context, &fqn) {
+                    return ruby_type;
+                }
                 let index = context.index.lock();
                 let is_module = index.get(&fqn).map_or(false, |entries| {
                     entries
@@ -769,6 +812,9 @@ fn resolve_receiver_type(
             }
         }
         MethodReceiver::Constant(path) => {
+            if let Some(ruby_type) = constant_reference_type_from_analysis(context, path) {
+                return ruby_type;
+            }
             let fqn = FullyQualifiedName::Constant(path.clone());
             RubyType::ClassReference(fqn)
         }
