@@ -502,43 +502,10 @@ fn get_receiver_type_from_snapshots(
         }
     }
 
-    // Fallback: receiver might be a bare method call (e.g., `top_level.to_s`)
-    // Look up method in the index, infer return type from source if needed
-    if let Ok(ruby_method) = crate::types::ruby_method::RubyMethod::new(receiver_text) {
-        let mut index = server.index_for_uri(&uri).lock_arc();
-
-        // First check stored return type, then collect FQN for inference
-        let method_fqn = if let Some(entries) = index.get_methods_by_name(&ruby_method) {
-            let mut fqn = None;
-            for entry in entries {
-                if let crate::indexer::entry::entry_kind::EntryKind::Method(data) = &entry.kind {
-                    if let Some(ref rt) = data.return_type {
-                        if *rt != RubyType::Unknown {
-                            return Some(rt.clone());
-                        }
-                    }
-                    // Remember FQN for source-level inference
-                    if fqn.is_none() {
-                        fqn = Some(FullyQualifiedName::method(
-                            data.owner.namespace_parts(),
-                            ruby_method.clone(),
-                        ));
-                    }
-                }
-            }
-            fqn
-        } else {
-            None
-        };
-
-        // Try source-level inference with the method FQN
-        if let Some(fqn) = method_fqn {
-            if let Some(rt) =
-                crate::inferrer::return_type::infer_method_return_type(&mut index, &fqn, None, None)
-            {
-                return Some(rt);
-            }
-        }
+    if let Some(return_type) =
+        infer_bare_method_return_type_from_analysis(server, receiver_text, identifier)
+    {
+        return Some(return_type);
     }
 
     None
@@ -787,6 +754,37 @@ fn receiver_type_to_analysis_namespaces(
             .collect(),
         RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
     }
+}
+
+fn infer_bare_method_return_type_from_analysis(
+    server: &RubyLanguageServer,
+    method_name: &str,
+    identifier: &Option<Identifier>,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::types::fully_qualified_name::NamespaceKind;
+    use crate::types::ruby_method::RubyMethod;
+
+    let method = RubyMethod::new(method_name).ok()?;
+    let mut namespaces = Vec::new();
+    if let Some(Identifier::RubyMethod { namespace, .. }) = identifier {
+        namespaces.push(FullyQualifiedName::namespace_with_kind(
+            namespace.clone(),
+            NamespaceKind::Instance,
+        ));
+    }
+    namespaces.push(FullyQualifiedName::namespace_with_kind(
+        Vec::new(),
+        NamespaceKind::Instance,
+    ));
+
+    let engine = server.analysis_engine.lock();
+    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    for namespace in namespaces {
+        if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
+            return Some(return_type);
+        }
+    }
+    None
 }
 
 /// Look for a constructor assignment pattern like `var = ClassName.new` in the source
