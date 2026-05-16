@@ -7,12 +7,10 @@
 use std::collections::HashSet;
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::EntryKind;
-use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use log::info;
-use ruby_analysis_core::GraphEdgeKind;
+use ruby_analysis_core::{GraphEdgeKind, NamespaceKind as AnalysisNamespaceKind};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
@@ -91,35 +89,7 @@ impl IndexQuery {
         owner_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
-        if let Some(locations) = self.method_implementations_from_analysis(owner_fqn, method) {
-            return Some(locations);
-        }
-
-        let index = self.index.lock();
-
-        let namespaces_to_check = collect_all_implementors(&index, owner_fqn);
-
-        let mut locations = Vec::new();
-        for ns_fqn in &namespaces_to_check {
-            let method_fqn =
-                FullyQualifiedName::method(ns_fqn.namespace_parts().to_vec(), method.clone());
-
-            if let Some(entries) = index.get(&method_fqn) {
-                for entry in entries {
-                    if matches!(entry.kind, EntryKind::Method(_)) {
-                        if let Some(loc) = index.to_lsp_location(&entry.location) {
-                            locations.push(loc);
-                        }
-                    }
-                }
-            }
-        }
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        self.method_implementations_from_analysis(owner_fqn, method)
     }
 
     /// Find all implementations of a module/class.
@@ -128,32 +98,7 @@ impl IndexQuery {
     /// (transitively through module chains), plus all subclasses.
     /// For a class: returns all subclasses.
     fn find_namespace_implementations(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        if let Some(locations) = self.namespace_implementations_from_analysis(fqn) {
-            return Some(locations);
-        }
-
-        let index = self.index.lock();
-
-        let implementors = collect_all_implementors(&index, fqn);
-
-        let mut locations = Vec::new();
-        for impl_fqn in &implementors {
-            if let Some(entries) = index.get(impl_fqn) {
-                for entry in entries {
-                    if matches!(entry.kind, EntryKind::Class(_) | EntryKind::Module(_)) {
-                        if let Some(loc) = index.to_lsp_location(&entry.location) {
-                            locations.push(loc);
-                        }
-                    }
-                }
-            }
-        }
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        self.namespace_implementations_from_analysis(fqn)
     }
 
     fn method_implementations_from_analysis(
@@ -161,7 +106,11 @@ impl IndexQuery {
         owner_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
+        let engine = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: method implementation query requires an analysis engine. \
+             This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_doc_and_engine().",
+        );
         let engine = engine.lock();
         let namespaces_to_check = collect_all_implementors_from_analysis(&engine, owner_fqn);
         if namespaces_to_check.is_empty() {
@@ -193,7 +142,11 @@ impl IndexQuery {
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
+        let engine = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: namespace implementation query requires an analysis engine. \
+             This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_doc_and_engine().",
+        );
         let engine = engine.lock();
         let implementors = collect_all_implementors_from_analysis(&engine, fqn);
         if implementors.is_empty() {
@@ -222,37 +175,6 @@ impl IndexQuery {
 /// 3. For each mixer: also collect its mixers AND its descendants
 ///
 /// Uses a visited set to avoid cycles (e.g., circular includes) and duplicates.
-fn collect_all_implementors(
-    index: &RubyIndex,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut result = Vec::new();
-    let mut visited = HashSet::new();
-    let mut queue = vec![origin_fqn.clone()];
-
-    // Mark the origin as visited so we don't include it in results
-    visited.insert(origin_fqn.clone());
-
-    while let Some(current) = queue.pop() {
-        // 1. Descendants (subclasses, transitively — descendants() is already transitive)
-        for desc in index.descendants(&current) {
-            if visited.insert(desc.clone()) {
-                result.push(desc);
-            }
-        }
-
-        // 2. Mixers (include/prepend, direct only — we walk transitively via the queue)
-        for mixer in index.mixers(&current) {
-            if visited.insert(mixer.clone()) {
-                result.push(mixer.clone());
-                queue.push(mixer);
-            }
-        }
-    }
-
-    result
-}
-
 fn collect_all_implementors_from_analysis(
     engine: &ruby_analysis_engine::AnalysisEngine,
     origin_fqn: &FullyQualifiedName,
@@ -324,8 +246,7 @@ fn mixers_from_analysis(
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
                 )
                 && (matches!(edge.kind, GraphEdgeKind::Extend)
-                    || edge.source.namespace_kind()
-                        == Some(crate::indexer::entry::NamespaceKind::Instance))
+                    || edge.source.namespace_kind() == Some(AnalysisNamespaceKind::Instance))
         })
         .map(|edge| edge.source)
         .collect::<Vec<_>>();

@@ -18,8 +18,6 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -77,17 +75,16 @@ impl IndexQuery {
                 let method_fqn =
                     FullyQualifiedName::method(owner_fqn.namespace_parts().to_vec(), *iden);
 
-                if let Some(engine_ref) = self.analysis_engine() {
-                    let engine = engine_ref.lock();
-                    if let Some(item) =
-                        build_call_hierarchy_item_from_analysis(&engine, &method_fqn)
-                    {
-                        return Some(vec![item]);
-                    }
+                let engine_ref = self.analysis_engine().expect(
+                    "INVARIANT VIOLATED: call hierarchy prepare requires an analysis engine. \
+                     This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
+                     Fix: construct IndexQuery with with_engine().",
+                );
+                let engine = engine_ref.lock();
+                if let Some(item) = build_call_hierarchy_item_from_analysis(&engine, &method_fqn) {
+                    return Some(vec![item]);
                 }
-
-                let index = self.index.lock();
-                build_call_hierarchy_item_from_index(&index, &method_fqn).map(|item| vec![item])
+                None
             }
             _ => {
                 info!(
@@ -106,29 +103,13 @@ impl IndexQuery {
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
         let method_fqn = parse_method_fqn_string(&data.fqn)?;
 
-        if let Some(engine_ref) = self.analysis_engine() {
-            let engine = engine_ref.lock();
-            return Some(incoming_calls_from_analysis(&engine, &method_fqn));
-        }
-
-        let index = self.index.lock();
-
-        let calls = index.incoming_calls(&method_fqn);
-        if calls.is_empty() {
-            return Some(vec![]);
-        }
-
-        let mut results = Vec::with_capacity(calls.len());
-        for (caller_fqn, from_ranges) in calls {
-            if let Some(item) = build_call_hierarchy_item_from_index(&index, &caller_fqn) {
-                results.push(CallHierarchyIncomingCall {
-                    from: item,
-                    from_ranges,
-                });
-            }
-        }
-
-        Some(results)
+        let engine_ref = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: incoming call hierarchy requires an analysis engine. \
+             This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_engine().",
+        );
+        let engine = engine_ref.lock();
+        Some(incoming_calls_from_analysis(&engine, &method_fqn))
     }
 
     /// Get all methods called by the given method.
@@ -138,64 +119,19 @@ impl IndexQuery {
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
         let method_fqn = parse_method_fqn_string(&data.fqn)?;
 
-        if let Some(engine_ref) = self.analysis_engine() {
-            let engine = engine_ref.lock();
-            return Some(outgoing_calls_from_analysis(&engine, &method_fqn));
-        }
-
-        let index = self.index.lock();
-
-        let calls = index.outgoing_calls(&method_fqn);
-        if calls.is_empty() {
-            return Some(vec![]);
-        }
-
-        let mut results = Vec::with_capacity(calls.len());
-        for (callee_fqn, from_ranges) in calls {
-            if let Some(item) = build_call_hierarchy_item_from_index(&index, &callee_fqn) {
-                results.push(CallHierarchyOutgoingCall {
-                    to: item,
-                    from_ranges,
-                });
-            }
-        }
-
-        Some(results)
+        let engine_ref = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: outgoing call hierarchy requires an analysis engine. \
+             This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_engine().",
+        );
+        let engine = engine_ref.lock();
+        Some(outgoing_calls_from_analysis(&engine, &method_fqn))
     }
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/// Build a CallHierarchyItem from a method FQN by looking up its definition in the index.
-fn build_call_hierarchy_item_from_index(
-    index: &RubyIndex,
-    method_fqn: &FullyQualifiedName,
-) -> Option<CallHierarchyItem> {
-    let entries = index.get(method_fqn)?;
-    let entry = entries
-        .iter()
-        .find(|e| matches!(e.kind, EntryKind::Method(_)))?;
-
-    let location = index.to_lsp_location(&entry.location)?;
-
-    Some(CallHierarchyItem {
-        name: method_fqn.name(),
-        kind: SymbolKind::METHOD,
-        tags: Some(Vec::<SymbolTag>::new()),
-        detail: Some(method_fqn.to_string()),
-        uri: location.uri,
-        range: location.range,
-        selection_range: location.range,
-        data: Some(
-            serde_json::to_value(CallHierarchyData {
-                fqn: method_fqn.to_string(),
-            })
-            .ok()?,
-        ),
-    })
-}
 
 fn build_call_hierarchy_item_from_analysis(
     engine: &AnalysisEngine,
