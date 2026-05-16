@@ -115,13 +115,24 @@ fn get_type_from_type_query(
         .map(|engine| engine.lock().type_store().clone());
     let doc = context.document.map(|doc| doc.read().clone());
     let type_query = if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
-        TypeQuery::with_type_store_for_file(
+        let type_query = TypeQuery::with_type_store_for_file(
             context.index.clone(),
             context.uri,
             context.content.as_bytes(),
             type_store,
             doc.analysis_file_id(),
-        )
+        );
+        let scope_id = doc
+            .variable_scopes()
+            .find_scope_for_variable_at(name, position)
+            .or_else(|| doc.variable_scopes().scope_at_position(position))
+            .unwrap_or(0);
+        let scope_id = u32::try_from(scope_id).expect(
+            "INVARIANT VIOLATED: local variable scope id exceeded u32. \
+             This is a bug because analysis TypeSubject stores scope ids as u32. \
+             Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+        );
+        return type_query.get_local_variable_type_at(name, scope_id, position);
     } else {
         TypeQuery::new(
             context.index.clone(),
@@ -166,6 +177,9 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
 
     if let Some(hover) = constant_hover_from_analysis(context, path, &constant_fqn, &fqn) {
         return Some(hover);
+    }
+    if context.analysis_engine.is_some() {
+        return Some(HoverInfo::text(constant_path_to_string(path)));
     }
 
     let index = context.index.lock();
@@ -287,6 +301,9 @@ pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Opti
 
     if let Some(ruby_type) = variable_type_from_analysis(context, name, variable_kind) {
         return Some(HoverInfo::text(format!("{}: {}", name, ruby_type)));
+    }
+    if context.analysis_engine.is_some() {
+        return Some(HoverInfo::text(name.to_string()));
     }
 
     let index = context.index.lock();
@@ -633,6 +650,9 @@ fn generate_method_definition_hover(
     if let Some(hover) = method_definition_hover_from_analysis(method_name, position, context) {
         return Some(hover);
     }
+    if context.analysis_engine.is_some() {
+        return Some(HoverInfo::ruby_code(format!("def {}", method_name)));
+    }
 
     let index = context.index.lock();
 
@@ -798,6 +818,9 @@ fn resolve_receiver_type(
                 if let Some(ruby_type) = namespace_type_from_analysis(context, &fqn) {
                     return ruby_type;
                 }
+                if context.analysis_engine.is_some() {
+                    return RubyType::Class(fqn);
+                }
                 let index = context.index.lock();
                 let is_module = index.get(&fqn).map_or(false, |entries| {
                     entries
@@ -829,22 +852,37 @@ fn resolve_receiver_type(
                 .analysis_engine
                 .map(|engine| engine.lock().type_store().clone());
             let doc = context.document.map(|doc| doc.read().clone());
-            let type_query =
-                if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
-                    TypeQuery::with_type_store_for_file(
-                        context.index.clone(),
-                        context.uri,
-                        context.content.as_bytes(),
-                        type_store,
-                        doc.analysis_file_id(),
-                    )
-                } else {
-                    TypeQuery::new(
-                        context.index.clone(),
-                        context.uri,
-                        context.content.as_bytes(),
-                    )
-                };
+            let type_query = if let (Some(type_store), Some(doc)) =
+                (type_store.as_ref(), doc.as_ref())
+            {
+                let type_query = TypeQuery::with_type_store_for_file(
+                    context.index.clone(),
+                    context.uri,
+                    context.content.as_bytes(),
+                    type_store,
+                    doc.analysis_file_id(),
+                );
+                let scope_id = doc
+                    .variable_scopes()
+                    .find_scope_for_variable_at(name, position)
+                    .or_else(|| doc.variable_scopes().scope_at_position(position))
+                    .unwrap_or(0);
+                let scope_id = u32::try_from(scope_id).expect(
+                        "INVARIANT VIOLATED: local variable scope id exceeded u32. \
+                         This is a bug because analysis TypeSubject stores scope ids as u32. \
+                         Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+                    );
+                if let Some(t) = type_query.get_local_variable_type_at(name, scope_id, position) {
+                    return t;
+                }
+                return RubyType::Unknown;
+            } else {
+                TypeQuery::new(
+                    context.index.clone(),
+                    context.uri,
+                    context.content.as_bytes(),
+                )
+            };
 
             if let Some(t) = type_query.get_local_variable_type(name, position) {
                 return t;
@@ -857,6 +895,9 @@ fn resolve_receiver_type(
                 variable_type_from_analysis(context, name, VariableHoverKind::Instance)
             {
                 return ruby_type;
+            }
+            if context.analysis_engine.is_some() {
+                return RubyType::Unknown;
             }
             let index = context.index.lock();
             index
@@ -878,6 +919,9 @@ fn resolve_receiver_type(
             {
                 return ruby_type;
             }
+            if context.analysis_engine.is_some() {
+                return RubyType::Unknown;
+            }
             let index = context.index.lock();
             index
                 .file_entries(context.uri)
@@ -897,6 +941,9 @@ fn resolve_receiver_type(
                 variable_type_from_analysis(context, name, VariableHoverKind::Global)
             {
                 return ruby_type;
+            }
+            if context.analysis_engine.is_some() {
+                return RubyType::Unknown;
             }
             let index = context.index.lock();
             index
