@@ -412,7 +412,8 @@ fn get_receiver_type_from_snapshots(
             MethodReceiver::InstanceVariable(name)
             | MethodReceiver::ClassVariable(name)
             | MethodReceiver::GlobalVariable(name) => {
-                lookup_variable_type_from_index(server, uri, name, receiver)
+                lookup_variable_type_from_engine(server, uri, name, receiver)
+                    .or_else(|| lookup_variable_type_from_index(server, uri, name, receiver))
             }
             _ => None,
         };
@@ -598,7 +599,8 @@ fn resolve_method_receiver_type(
         MethodReceiver::InstanceVariable(name)
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
-            lookup_variable_type_from_index(server, uri, name, receiver)
+            lookup_variable_type_from_engine(server, uri, name, receiver)
+                .or_else(|| lookup_variable_type_from_index(server, uri, name, receiver))
         }
         MethodReceiver::MethodCall {
             inner_receiver,
@@ -631,6 +633,58 @@ fn resolve_method_receiver_type(
 ///
 /// These variables have their types tracked in EntryKind::InstanceVariable,
 /// ClassVariable, and GlobalVariable entries in the RubyIndex.
+fn lookup_variable_type_from_engine(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    name: &str,
+    receiver: &MethodReceiver,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use ruby_analysis_core::TypeSubject;
+
+    let file_id = {
+        let docs = server.docs.lock();
+        let file_id = docs.get(uri)?.read().analysis_file_id();
+        file_id
+    };
+
+    let engine = server.analysis_engine.lock();
+    engine
+        .type_store()
+        .facts_in_file(file_id)
+        .into_iter()
+        .rev()
+        .find_map(|fact| match (&fact.subject, receiver) {
+            (
+                TypeSubject::InstanceVariable {
+                    name: fact_name, ..
+                },
+                MethodReceiver::InstanceVariable(_),
+            ) if fact_name == name => Some(fact.ruby_type),
+            (
+                TypeSubject::ClassVariable {
+                    name: fact_name, ..
+                },
+                MethodReceiver::ClassVariable(_),
+            ) if fact_name == name => Some(fact.ruby_type),
+            (TypeSubject::GlobalVariable(fact_name), MethodReceiver::GlobalVariable(_))
+                if fact_name == name =>
+            {
+                Some(fact.ruby_type)
+            }
+            (
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_),
+                _,
+            ) => None,
+        })
+}
+
 fn lookup_variable_type_from_index(
     server: &RubyLanguageServer,
     uri: &Url,
