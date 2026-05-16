@@ -304,12 +304,14 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
+            let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
             let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
             let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
-            server.analysis_engine.lock().replace_graph_facts_for_file(
+            server.analysis_engine.lock().replace_graph_update_for_file(
                 updated_document.analysis_file_id(),
                 graph_nodes,
                 graph_edges,
+                unresolved_graph_edges,
             );
             for retry_file_id in retry_resolved_file_ids {
                 let Some(retry_uri) = self.index.lock().get_file_url(retry_file_id).cloned() else {
@@ -337,12 +339,14 @@ impl FileProcessor {
                         retry_document.analysis_file_id(),
                     )
                 };
+                let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
                 let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
                 let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
-                server.analysis_engine.lock().replace_graph_facts_for_file(
+                server.analysis_engine.lock().replace_graph_update_for_file(
                     retry_document.analysis_file_id(),
                     graph_nodes,
                     graph_edges,
+                    unresolved_graph_edges,
                 );
             }
 

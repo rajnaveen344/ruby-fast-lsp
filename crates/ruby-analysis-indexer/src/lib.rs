@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     RubyConstant, RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange,
+    UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
@@ -21,6 +22,7 @@ pub struct AnalysisIndex {
     pub methods: Vec<MethodFact>,
     pub graph_nodes: Vec<GraphNodeFact>,
     pub graph_edges: Vec<GraphEdgeFact>,
+    pub unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +161,16 @@ impl AnalysisIndexer {
         range: TextRange,
     ) {
         let Some(target) = self.resolve_namespace(parts, absolute) else {
+            self.facts
+                .unresolved_graph_edges
+                .push(UnresolvedGraphEdgeFact::new(
+                    source,
+                    parts.to_vec(),
+                    absolute,
+                    FullyQualifiedName::namespace(self.namespace_stack.clone()),
+                    kind,
+                    range,
+                ));
             return;
         };
         self.facts

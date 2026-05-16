@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, MethodFact, MethodStore,
     ReferenceFact, ReferenceStore, SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact,
-    TypeResolution, TypeStore, TypeSubject,
+    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::FileIdMap;
@@ -22,6 +22,7 @@ pub struct AnalysisEngine {
     file_ids: FileIdMap,
     files: HashMap<SourceFileId, SourceFile>,
     graph_store: GraphStore,
+    unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
     method_store: MethodStore,
     reference_store: ReferenceStore,
     symbol_store: SymbolStore,
@@ -156,6 +157,51 @@ impl AnalysisEngine {
         self.graph_store.replace_file(file_id, nodes, edges);
     }
 
+    pub fn replace_graph_update_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        nodes: impl IntoIterator<Item = GraphNodeFact>,
+        edges: impl IntoIterator<Item = GraphEdgeFact>,
+        unresolved_edges: impl IntoIterator<Item = UnresolvedGraphEdgeFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "graph update replacement references unknown source file id",
+        );
+        self.graph_store.remove_file(file_id);
+        self.unresolved_graph_edges
+            .retain(|edge| edge.range.file_id != file_id);
+
+        for node in nodes {
+            assert!(
+                node.range.file_id == file_id,
+                "INVARIANT VIOLATED: replacement graph node belongs to a different file id. \
+                 This is a bug because graph updates must only receive facts for the target file. \
+                 Fix: partition graph facts by SourceFileId before replacing."
+            );
+            self.graph_store.add_node(node);
+        }
+        for edge in edges {
+            assert!(
+                edge.range.file_id == file_id,
+                "INVARIANT VIOLATED: replacement graph edge belongs to a different file id. \
+                 This is a bug because graph updates must only receive facts for the target file. \
+                 Fix: partition graph facts by SourceFileId before replacing."
+            );
+            self.graph_store.add_edge(edge);
+        }
+        for edge in unresolved_edges {
+            assert!(
+                edge.range.file_id == file_id,
+                "INVARIANT VIOLATED: unresolved graph edge belongs to a different file id. \
+                 This is a bug because graph updates must only receive facts for the target file. \
+                 Fix: partition graph facts by SourceFileId before replacing."
+            );
+            self.unresolved_graph_edges.push(edge);
+        }
+        self.retry_unresolved_graph_edges();
+    }
+
     pub fn replace_type_facts_for_file(
         &mut self,
         file_id: SourceFileId,
@@ -217,6 +263,10 @@ impl AnalysisEngine {
         &self.graph_store
     }
 
+    pub fn unresolved_graph_edges(&self) -> &[UnresolvedGraphEdgeFact] {
+        &self.unresolved_graph_edges
+    }
+
     pub fn reference_store(&self) -> &ReferenceStore {
         &self.reference_store
     }
@@ -250,13 +300,60 @@ impl AnalysisEngine {
              Fix: call AnalysisEngine::open_or_update_file before adding file facts."
         );
     }
+
+    fn retry_unresolved_graph_edges(&mut self) {
+        if self.unresolved_graph_edges.is_empty() {
+            return;
+        }
+
+        let pending = std::mem::take(&mut self.unresolved_graph_edges);
+        for unresolved in pending {
+            if let Some(target) = self.resolve_unresolved_graph_target(&unresolved) {
+                self.graph_store.add_edge(GraphEdgeFact::new(
+                    unresolved.source,
+                    target,
+                    unresolved.kind,
+                    unresolved.range,
+                ));
+            } else {
+                self.unresolved_graph_edges.push(unresolved);
+            }
+        }
+    }
+
+    fn resolve_unresolved_graph_target(
+        &self,
+        unresolved: &UnresolvedGraphEdgeFact,
+    ) -> Option<FullyQualifiedName> {
+        let mut search_namespaces = if unresolved.absolute {
+            Vec::new()
+        } else {
+            unresolved.context.namespace_parts()
+        };
+
+        loop {
+            let mut probe = search_namespaces.clone();
+            probe.extend(unresolved.target_parts.iter().cloned());
+            let namespace_fqn = FullyQualifiedName::namespace(probe);
+            if !self.graph_store.nodes_for(&namespace_fqn).is_empty() {
+                return Some(namespace_fqn);
+            }
+
+            if unresolved.absolute || search_namespaces.is_empty() {
+                break;
+            }
+            search_namespaces.pop();
+        }
+
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use ruby_analysis_core::{
-        FullyQualifiedName, RubyConstant, RubyType, SymbolFact, SymbolKind, TypeProvenance,
-        TypeSubject,
+        FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, RubyConstant, RubyType,
+        SymbolFact, SymbolKind, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
     };
 
     use super::*;
@@ -353,6 +450,51 @@ mod tests {
         let facts = engine.symbol_facts_for(&fqn);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].range.start_byte, 20);
+    }
+
+    #[test]
+    fn graph_update_retries_unresolved_edges_when_target_arrives() {
+        let mut engine = AnalysisEngine::new();
+        let user_file = engine.open_or_update_file("user.rb", "class User; include Auth; end");
+        let auth_file = engine.open_or_update_file("auth.rb", "module Auth; end");
+
+        let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+        let auth = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
+        engine.replace_graph_update_for_file(
+            user_file,
+            [GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(user_file, 0, 10),
+            )],
+            [],
+            [UnresolvedGraphEdgeFact::new(
+                user.clone(),
+                vec![RubyConstant::new("Auth").unwrap()],
+                false,
+                user.clone(),
+                GraphEdgeKind::Include,
+                TextRange::new(user_file, 12, 24),
+            )],
+        );
+        assert_eq!(engine.unresolved_graph_edges().len(), 1);
+
+        engine.replace_graph_update_for_file(
+            auth_file,
+            [GraphNodeFact::new(
+                auth.clone(),
+                GraphNodeKind::Module,
+                TextRange::new(auth_file, 0, 11),
+            )],
+            [],
+            [],
+        );
+
+        assert!(engine.unresolved_graph_edges().is_empty());
+        assert!(engine
+            .graph_edges_from(&user)
+            .iter()
+            .any(|edge| edge.target == auth && edge.kind == GraphEdgeKind::Include));
     }
 
     #[test]

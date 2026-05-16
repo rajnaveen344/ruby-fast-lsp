@@ -16,7 +16,9 @@ pub mod symbol_store;
 pub mod type_store;
 
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
-pub use graph_store::{GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore};
+pub use graph_store::{
+    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, UnresolvedGraphEdgeFact,
+};
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{MethodFact, MethodStore};
 pub use reference_store::{ReferenceFact, ReferenceStore};

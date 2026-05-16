@@ -37,6 +37,36 @@ pub struct GraphEdgeFact {
     pub range: TextRange,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedGraphEdgeFact {
+    pub source: FullyQualifiedName,
+    pub target_parts: Vec<crate::RubyConstant>,
+    pub absolute: bool,
+    pub context: FullyQualifiedName,
+    pub kind: GraphEdgeKind,
+    pub range: TextRange,
+}
+
+impl UnresolvedGraphEdgeFact {
+    pub fn new(
+        source: FullyQualifiedName,
+        target_parts: Vec<crate::RubyConstant>,
+        absolute: bool,
+        context: FullyQualifiedName,
+        kind: GraphEdgeKind,
+        range: TextRange,
+    ) -> Self {
+        Self {
+            source,
+            target_parts,
+            absolute,
+            context,
+            kind,
+            range,
+        }
+    }
+}
+
 impl GraphEdgeFact {
     pub fn new(
         source: FullyQualifiedName,
