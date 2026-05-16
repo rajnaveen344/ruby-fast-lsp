@@ -20,16 +20,12 @@
 //! The supertypes list follows this exact order (excluding self).
 
 use log::{debug, info};
-use ruby_analysis_core::{GraphEdgeKind, GraphNodeKind};
+use ruby_analysis_core::{GraphEdgeFact, GraphEdgeKind, GraphNodeKind};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
-use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::{MixinRef, NamespaceKind};
-use crate::indexer::index::{FileId, FqnId, RubyIndex};
-use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 use crate::types::ruby_namespace::RubyConstant;
 
 use super::analysis_location::location_for_range;
@@ -138,56 +134,13 @@ impl IndexQuery {
         };
 
         // Resolve the FQN for this constant
-        let fqn = if let Some(fqn) =
-            resolve_constant_fqn_from_analysis(self, &constant_parts, &ancestors)
-        {
-            fqn
-        } else {
-            let index = self.index.lock();
-            resolve_constant_fqn(&constant_parts, &ancestors, &index)?
-        };
+        let fqn = resolve_constant_fqn_from_analysis(self, &constant_parts, &ancestors)?;
 
         if let Some(item) = self.type_hierarchy_item_from_analysis(&fqn) {
             info!("Found type hierarchy item: {}", fqn);
             return Some(vec![item]);
         }
-
-        let index = self.index.lock();
-
-        // Get the entry for this FQN to get location info
-        let entries = index.get(&fqn)?;
-        let entry = entries.first()?;
-
-        // Only support classes and modules
-        let kind = match &entry.kind {
-            EntryKind::Class(_) => SymbolKind::CLASS,
-            EntryKind::Module(_) => SymbolKind::MODULE,
-            _ => {
-                debug!("Type hierarchy only supports classes and modules");
-                return None;
-            }
-        };
-
-        let location = index.to_lsp_location(&entry.location)?;
-
-        let item = TypeHierarchyItem {
-            name: fqn.name(),
-            kind,
-            tags: None,
-            detail: Some(fqn.to_string()),
-            uri: location.uri,
-            range: location.range,
-            selection_range: location.range,
-            data: Some(
-                serde_json::to_value(TypeHierarchyData {
-                    fqn: fqn.to_string(),
-                })
-                .ok()?,
-            ),
-        };
-
-        info!("Found type hierarchy item: {}", fqn);
-        Some(vec![item])
+        None
     }
 
     /// Get the ancestor chain for a class/module in Ruby's Method Resolution Order.
@@ -207,8 +160,6 @@ impl IndexQuery {
     pub fn get_supertypes(&self, data: &TypeHierarchyData) -> Option<Vec<TypeHierarchyItem>> {
         info!("Supertypes request for: {}", data.fqn);
 
-        let index = self.index.lock();
-
         // Parse the FQN string - return empty if can't parse (type might have been deleted)
         let fqn = match parse_fqn_string(&data.fqn) {
             Some(f) => f,
@@ -218,123 +169,7 @@ impl IndexQuery {
             }
         };
 
-        // Get ALL entries for this FQN (class may be reopened in multiple files)
-        let entries = match index.get(&fqn) {
-            Some(e) => e,
-            None => {
-                info!("Entry not found for: {}", data.fqn);
-                return Some(vec![]);
-            }
-        };
-
-        if entries.is_empty() {
-            info!("No entries for: {}", data.fqn);
-            return Some(vec![]);
-        }
-
-        // The primary file is where the first definition lives
-        let primary_file_id = entries.first().unwrap().location.file_id;
-
-        // Collect mixins from ALL entries (all reopenings of the class)
-        let mut all_prepends: Vec<(&MixinRef, FileId)> = Vec::new();
-        let mut all_includes: Vec<(&MixinRef, FileId)> = Vec::new();
-        let mut all_extends: Vec<(&MixinRef, FileId)> = Vec::new();
-        let mut superclass_ref: Option<(&MixinRef, FileId)> = None;
-
-        for entry in &entries {
-            let entry_file_id = entry.location.file_id;
-            match &entry.kind {
-                EntryKind::Class(class_data) => {
-                    // First superclass found wins (should only be one)
-                    if superclass_ref.is_none() {
-                        if let Some(ref sc) = class_data.superclass {
-                            superclass_ref = Some((sc, entry_file_id));
-                        }
-                    }
-                    for mixin in &class_data.prepends {
-                        all_prepends.push((mixin, entry_file_id));
-                    }
-                    for mixin in &class_data.includes {
-                        all_includes.push((mixin, entry_file_id));
-                    }
-                    for mixin in &class_data.extends {
-                        all_extends.push((mixin, entry_file_id));
-                    }
-                }
-                EntryKind::Module(module_data) => {
-                    for mixin in &module_data.prepends {
-                        all_prepends.push((mixin, entry_file_id));
-                    }
-                    for mixin in &module_data.includes {
-                        all_includes.push((mixin, entry_file_id));
-                    }
-                    for mixin in &module_data.extends {
-                        all_extends.push((mixin, entry_file_id));
-                    }
-                }
-                _ => continue,
-            }
-        }
-
-        let mut supertypes = Vec::new();
-
-        // Build supertypes in MRO order (matching Ruby's Module#ancestors):
-        // 1. Prepended modules (in reverse order - last prepend first)
-        for (mixin_ref, entry_file_id) in all_prepends.iter().rev() {
-            if let Some(item) = mixin_ref_to_type_hierarchy_item(
-                &index,
-                mixin_ref,
-                RelationType::Prepend,
-                &fqn,
-                primary_file_id,
-                *entry_file_id,
-            ) {
-                supertypes.push(item);
-            }
-        }
-
-        // 2. Included modules (in reverse order - last include first)
-        for (mixin_ref, entry_file_id) in all_includes.iter().rev() {
-            if let Some(item) = mixin_ref_to_type_hierarchy_item(
-                &index,
-                mixin_ref,
-                RelationType::Include,
-                &fqn,
-                primary_file_id,
-                *entry_file_id,
-            ) {
-                supertypes.push(item);
-            }
-        }
-
-        // 3. Superclass (if any)
-        if let Some((superclass, entry_file_id)) = superclass_ref {
-            if let Some(item) = mixin_ref_to_type_hierarchy_item(
-                &index,
-                superclass,
-                RelationType::Superclass,
-                &fqn,
-                primary_file_id,
-                entry_file_id,
-            ) {
-                supertypes.push(item);
-            }
-        }
-
-        // 4. Extended modules (shown separately - these affect singleton class/class methods)
-        // Shown in reverse order for consistency
-        for (mixin_ref, entry_file_id) in all_extends.iter().rev() {
-            if let Some(item) = mixin_ref_to_type_hierarchy_item(
-                &index,
-                mixin_ref,
-                RelationType::Extend,
-                &fqn,
-                primary_file_id,
-                *entry_file_id,
-            ) {
-                supertypes.push(item);
-            }
-        }
+        let supertypes = self.supertypes_from_analysis(&fqn);
 
         info!("Found {} supertypes for {}", supertypes.len(), data.fqn);
         Some(supertypes)
@@ -365,78 +200,21 @@ impl IndexQuery {
             }
         };
 
-        if let Some(subtypes) = self.subtypes_from_analysis(&fqn) {
-            info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
-            return Some(subtypes);
-        }
-
-        let index = self.index.lock();
-
-        // Get FQN ID - return empty if not in index (type might have been deleted)
-        let fqn_id = match index.get_fqn_id(&fqn) {
-            Some(id) => id,
-            None => {
-                info!("FQN not found in index: {}", data.fqn);
-                return Some(vec![]);
-            }
-        };
-
-        // Get the graph node - return empty if no node (no relationships recorded)
-        let node = match index.graph.get_node(fqn_id) {
-            Some(n) => n,
-            None => {
-                info!("No graph node for: {}", data.fqn);
-                return Some(vec![]);
-            }
-        };
-
-        let mut subtypes = Vec::new();
-
-        // 1. Direct subclasses first (children in class hierarchy)
-        for &child_id in &node.children {
-            if let Some(item) = fqn_id_to_type_hierarchy_item_with_relation(
-                &index,
-                child_id,
-                RelationType::Subclass,
-            ) {
-                subtypes.push(item);
-            }
-        }
-
-        // 2. Classes/modules that include this module
-        for &includer_id in &node.included_by {
-            if let Some(item) = fqn_id_to_type_hierarchy_item_with_relation(
-                &index,
-                includer_id,
-                RelationType::IncludedBy,
-            ) {
-                subtypes.push(item);
-            }
-        }
-
-        // 3. Classes/modules that prepend this module
-        for &prepender_id in &node.prepended_by {
-            if let Some(item) = fqn_id_to_type_hierarchy_item_with_relation(
-                &index,
-                prepender_id,
-                RelationType::PrependedBy,
-            ) {
-                subtypes.push(item);
-            }
-        }
-
-        // Note: "extend" relationships are now modeled as includes on Singleton nodes,
-        // so they're already covered by the included_by section above.
+        let subtypes = self.subtypes_from_analysis(&fqn);
 
         info!("Found {} subtypes for {}", subtypes.len(), data.fqn);
         Some(subtypes)
     }
 
-    fn subtypes_from_analysis(&self, fqn: &FullyQualifiedName) -> Option<Vec<TypeHierarchyItem>> {
-        let engine = self.analysis_engine()?;
+    fn subtypes_from_analysis(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyItem> {
+        let engine = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: subtype query requires an analysis engine. \
+             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_engine().",
+        );
         let engine = engine.lock();
         if engine.graph_nodes_for(fqn).is_empty() {
-            return None;
+            return Vec::new();
         }
 
         let mut subclass_edges = Vec::new();
@@ -491,14 +269,72 @@ impl IndexQuery {
             &mut subtypes,
         );
 
-        Some(subtypes)
+        subtypes
+    }
+
+    fn supertypes_from_analysis(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyItem> {
+        let engine = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: supertype query requires an analysis engine. \
+             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_engine().",
+        );
+        let engine = engine.lock();
+        let primary_file_id = match engine.graph_nodes_for(fqn).first() {
+            Some(node) => node.range.file_id,
+            None => {
+                return Vec::new();
+            }
+        };
+
+        let edges = engine.graph_edges_from(fqn);
+        let mut supertypes = Vec::new();
+
+        push_analysis_supertype_items(
+            &engine,
+            edges,
+            GraphEdgeKind::Prepend,
+            RelationType::Prepend,
+            primary_file_id,
+            &mut supertypes,
+        );
+        push_analysis_supertype_items(
+            &engine,
+            edges,
+            GraphEdgeKind::Include,
+            RelationType::Include,
+            primary_file_id,
+            &mut supertypes,
+        );
+        push_analysis_supertype_items(
+            &engine,
+            edges,
+            GraphEdgeKind::Superclass,
+            RelationType::Superclass,
+            primary_file_id,
+            &mut supertypes,
+        );
+        push_analysis_supertype_items(
+            &engine,
+            edges,
+            GraphEdgeKind::Extend,
+            RelationType::Extend,
+            primary_file_id,
+            &mut supertypes,
+        );
+        push_unresolved_supertype_items(&engine, fqn, primary_file_id, &mut supertypes);
+
+        supertypes
     }
 
     fn type_hierarchy_item_from_analysis(
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<TypeHierarchyItem> {
-        let engine = self.analysis_engine()?;
+        let engine = self.analysis_engine().expect(
+            "INVARIANT VIOLATED: type hierarchy item query requires an analysis engine. \
+             This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
+             Fix: construct IndexQuery with with_engine().",
+        );
         let engine = engine.lock();
         let node = engine.graph_nodes_for(fqn).first()?;
         let location = location_for_range(&engine, node.range)?;
@@ -545,50 +381,6 @@ fn parse_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
     Some(FullyQualifiedName::namespace(namespace))
 }
 
-/// Resolve a constant to its FQN, searching through ancestor namespaces
-fn resolve_constant_fqn(
-    constant_parts: &[RubyConstant],
-    ancestors: &[RubyConstant],
-    index: &RubyIndex,
-) -> Option<FullyQualifiedName> {
-    // Start with the current namespace and ancestors
-    let mut search_namespaces = ancestors.to_vec();
-
-    // Search through ancestor namespaces
-    while !search_namespaces.is_empty() {
-        let mut combined_ns = search_namespaces.clone();
-        combined_ns.extend(constant_parts.iter().cloned());
-
-        // Try as Namespace first (for class/module definitions)
-        let search_namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
-        if index.get(&search_namespace_fqn).is_some() {
-            return Some(search_namespace_fqn);
-        }
-
-        // Then try as Constant (for value constants)
-        let search_constant_fqn = FullyQualifiedName::Constant(combined_ns);
-        if index.get(&search_constant_fqn).is_some() {
-            return Some(search_constant_fqn);
-        }
-
-        // Pop the last namespace and try again
-        search_namespaces.pop();
-    }
-
-    // Try at root level - Namespace first, then Constant
-    let root_namespace_fqn = FullyQualifiedName::namespace(constant_parts.to_vec());
-    if index.get(&root_namespace_fqn).is_some() {
-        return Some(root_namespace_fqn);
-    }
-
-    let root_fqn = FullyQualifiedName::Constant(constant_parts.to_vec());
-    if index.get(&root_fqn).is_some() {
-        return Some(root_fqn);
-    }
-
-    None
-}
-
 fn resolve_constant_fqn_from_analysis(
     query: &IndexQuery,
     constant_parts: &[RubyConstant],
@@ -628,183 +420,6 @@ fn resolve_constant_fqn_from_analysis(
     None
 }
 
-/// Convert a MixinRef to TypeHierarchyItem with relation type information
-///
-/// This version takes the mixin reference (which has location info) and compares
-/// where the include/prepend/extend statement was written vs the primary class definition.
-///
-/// Parameters:
-/// - `context_fqn`: The FQN of the class/module containing the mixin (for constant resolution)
-/// - `primary_file_id`: The file where the class/module was first defined
-/// - `entry_file_id`: The file where this particular entry (with this mixin) came from
-///
-/// If the entry is from a different file than the primary definition, a warning is added
-/// since the MRO depends on runtime require order which we can't determine statically.
-///
-/// If the mixin module isn't found in the index, we still show it with a warning
-/// indicating the definition wasn't found (could be from an external gem, stdlib, etc).
-fn mixin_ref_to_type_hierarchy_item(
-    index: &RubyIndex,
-    mixin_ref: &MixinRef,
-    relation: RelationType,
-    context_fqn: &FullyQualifiedName,
-    primary_file_id: FileId,
-    entry_file_id: FileId,
-) -> Option<TypeHierarchyItem> {
-    // Resolve the mixin ref to a fully qualified name using Ruby's constant lookup rules
-    // This handles cases like `include Users` inside `module GoshPosh::Platform::API`
-    // which should resolve to `GoshPosh::Platform::API::Users`
-    let resolved_fqn =
-        resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, context_fqn);
-
-    // Create a display name for the mixin (using parts if not resolved)
-    let display_fqn = resolved_fqn
-        .clone()
-        .unwrap_or_else(|| FullyQualifiedName::Constant(mixin_ref.parts.clone()));
-
-    // Try to find the entry in the index using the resolved FQN
-    let found_entry = resolved_fqn.as_ref().and_then(|fqn| {
-        index.get(fqn).and_then(|entries| {
-            entries.first().and_then(|entry| {
-                // Verify this is a class or module
-                match &entry.kind {
-                    EntryKind::Class(_) | EntryKind::Module(_) => {
-                        index.to_lsp_location(&entry.location)
-                    }
-                    _ => None,
-                }
-            })
-        })
-    });
-
-    // If not found, create an item at the mixin_ref location with a warning
-    let location = match found_entry {
-        Some(loc) => loc,
-        None => {
-            // Use the location of the include/prepend/extend statement itself
-            let loc = index.to_lsp_location(&mixin_ref.location)?;
-
-            // Build a warning detail for unresolved mixin
-            let detail = format!(
-                "{} ({}) ❓ definition not found",
-                display_fqn,
-                relation.label()
-            );
-
-            return Some(TypeHierarchyItem {
-                name: display_fqn.name(),
-                kind: relation.symbol_kind(),
-                tags: None,
-                detail: Some(detail),
-                uri: loc.uri,
-                range: loc.range,
-                selection_range: loc.range,
-                data: Some(
-                    serde_json::to_value(TypeHierarchyData {
-                        fqn: display_fqn.to_string(),
-                    })
-                    .ok()?,
-                ),
-            });
-        }
-    };
-
-    // Use relation-based SymbolKind for visual differentiation
-    let kind = relation.symbol_kind();
-
-    // Check if this mixin comes from a reopened class in a different file
-    // The entry_file_id tells us which file contained this include/prepend/extend
-    let is_cross_file = entry_file_id != primary_file_id;
-
-    // Build detail with relation label
-    // Format: "FQN (label)" or "FQN (label) ⚠️ from filename"
-    let detail = if is_cross_file {
-        // Get the filename for context
-        if let Some(file_url) = index.get_file_url(entry_file_id) {
-            // Extract filename from URL path
-            let filename = file_url
-                .path_segments()
-                .and_then(|segs| segs.last())
-                .unwrap_or("unknown");
-            format!(
-                "{} ({}) ⚠️ from {}",
-                display_fqn,
-                relation.label(),
-                filename
-            )
-        } else {
-            format!("{} ({}) ⚠️ different file", display_fqn, relation.label())
-        }
-    } else {
-        format!("{} ({})", display_fqn, relation.label())
-    };
-
-    Some(TypeHierarchyItem {
-        name: display_fqn.name(),
-        kind,
-        tags: None,
-        detail: Some(detail),
-        uri: location.uri,
-        range: location.range,
-        selection_range: location.range,
-        data: Some(
-            serde_json::to_value(TypeHierarchyData {
-                fqn: display_fqn.to_string(),
-            })
-            .ok()?,
-        ),
-    })
-}
-
-/// Convert FqnId to TypeHierarchyItem with relation type information
-///
-/// The relation type is used to:
-/// - Set an appropriate SymbolKind that visually distinguishes relationships
-/// - Include emoji + relationship label in the detail field
-///
-/// This version is used for subtypes where we don't have location info about
-/// where the include/prepend/extend statement was written.
-fn fqn_id_to_type_hierarchy_item_with_relation(
-    index: &RubyIndex,
-    fqn_id: FqnId,
-    relation: RelationType,
-) -> Option<TypeHierarchyItem> {
-    let fqn = index.get_fqn(fqn_id)?;
-    let entries = index.get(fqn)?;
-    let entry = entries.first()?;
-
-    // Verify this is a class or module
-    match &entry.kind {
-        EntryKind::Class(_) | EntryKind::Module(_) => {}
-        _ => return None,
-    };
-
-    let location = index.to_lsp_location(&entry.location)?;
-
-    // Use relation-based SymbolKind for visual differentiation
-    let kind = relation.symbol_kind();
-
-    // Include relation label in detail for clarity
-    // Format: "FQN (label)"
-    let detail = format!("{} ({})", fqn, relation.label());
-
-    Some(TypeHierarchyItem {
-        name: fqn.name(),
-        kind,
-        tags: None,
-        detail: Some(detail),
-        uri: location.uri,
-        range: location.range,
-        selection_range: location.range,
-        data: Some(
-            serde_json::to_value(TypeHierarchyData {
-                fqn: fqn.to_string(),
-            })
-            .ok()?,
-        ),
-    })
-}
-
 fn push_analysis_subtype_items(
     engine: &ruby_analysis_engine::AnalysisEngine,
     edges: &mut [ruby_analysis_core::GraphEdgeFact],
@@ -818,6 +433,81 @@ fn push_analysis_subtype_items(
         {
             items.push(item);
         }
+    }
+}
+
+fn push_analysis_supertype_items(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    edges: &[GraphEdgeFact],
+    kind: GraphEdgeKind,
+    relation: RelationType,
+    primary_file_id: ruby_analysis_core::SourceFileId,
+    items: &mut Vec<TypeHierarchyItem>,
+) {
+    edges
+        .iter()
+        .filter(|edge| edge.kind == kind)
+        .rev()
+        .filter_map(|edge| {
+            graph_target_to_type_hierarchy_item_with_relation(
+                engine,
+                &edge.target,
+                relation,
+                Some((primary_file_id, edge.range.file_id)),
+            )
+        })
+        .for_each(|item| items.push(item));
+}
+
+fn push_unresolved_supertype_items(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    primary_file_id: ruby_analysis_core::SourceFileId,
+    items: &mut Vec<TypeHierarchyItem>,
+) {
+    for edge in engine.unresolved_graph_edges() {
+        if edge.source != *fqn {
+            continue;
+        }
+        let relation = match edge.kind {
+            GraphEdgeKind::Superclass => RelationType::Superclass,
+            GraphEdgeKind::Include => RelationType::Include,
+            GraphEdgeKind::Prepend => RelationType::Prepend,
+            GraphEdgeKind::Extend => RelationType::Extend,
+        };
+        let display_fqn = FullyQualifiedName::Constant(edge.target_parts.clone());
+        let Some(location) = location_for_range(engine, edge.range) else {
+            continue;
+        };
+        let mut detail = format!(
+            "{} ({}) ❓ definition not found",
+            display_fqn,
+            relation.label()
+        );
+        if edge.range.file_id != primary_file_id {
+            detail = format!(
+                "{} ⚠️ from {}",
+                detail,
+                file_name_for(engine, edge.range.file_id)
+            );
+        }
+
+        items.push(TypeHierarchyItem {
+            name: display_fqn.name(),
+            kind: relation.symbol_kind(),
+            tags: None,
+            detail: Some(detail),
+            uri: location.uri,
+            range: location.range,
+            selection_range: location.range,
+            data: Some(
+                serde_json::to_value(TypeHierarchyData {
+                    fqn: display_fqn.to_string(),
+                })
+                .ok()
+                .expect("INVARIANT VIOLATED: serializing type hierarchy data failed. This is a bug because TypeHierarchyData contains only a string. Fix: keep TypeHierarchyData serializable."),
+            ),
+        });
     }
 }
 
@@ -845,6 +535,55 @@ fn graph_source_to_type_hierarchy_item_with_relation(
             .ok()?,
         ),
     })
+}
+
+fn graph_target_to_type_hierarchy_item_with_relation(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    relation: RelationType,
+    file_context: Option<(
+        ruby_analysis_core::SourceFileId,
+        ruby_analysis_core::SourceFileId,
+    )>,
+) -> Option<TypeHierarchyItem> {
+    let node = engine.graph_nodes_for(fqn).first()?;
+    let location = location_for_range(engine, node.range)?;
+    let mut detail = format!("{} ({})", fqn, relation.label());
+    if let Some((primary_file_id, edge_file_id)) = file_context {
+        if edge_file_id != primary_file_id {
+            detail = format!("{} ⚠️ from {}", detail, file_name_for(engine, edge_file_id));
+        }
+    }
+
+    Some(TypeHierarchyItem {
+        name: fqn.name(),
+        kind: relation.symbol_kind(),
+        tags: None,
+        detail: Some(detail),
+        uri: location.uri,
+        range: location.range,
+        selection_range: location.range,
+        data: Some(
+            serde_json::to_value(TypeHierarchyData {
+                fqn: fqn.to_string(),
+            })
+            .ok()?,
+        ),
+    })
+}
+
+fn file_name_for(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    file_id: ruby_analysis_core::SourceFileId,
+) -> String {
+    engine
+        .file(file_id)
+        .and_then(|file| {
+            file.path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 // ============================================================================
