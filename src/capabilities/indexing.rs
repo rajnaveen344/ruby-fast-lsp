@@ -267,7 +267,8 @@ pub async fn handle_watched_files_changed(
 
 #[cfg(test)]
 mod tests {
-    use ruby_analysis_core::{FullyQualifiedName, RubyConstant, SymbolKind};
+    use ruby_analysis_core::{FullyQualifiedName, GraphEdgeKind, RubyConstant, SymbolKind};
+    use ruby_analysis_engine::AnalysisQuery;
 
     use super::*;
 
@@ -370,5 +371,57 @@ mod tests {
         let account_facts = engine.symbol_facts_for(&account_fqn);
         assert_eq!(account_facts.len(), 1);
         assert_eq!(account_facts[0].kind, SymbolKind::Class);
+    }
+
+    #[tokio::test]
+    async fn did_open_mirrors_reference_facts_into_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\nend\nUser.new".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+        let engine = server.analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        assert_eq!(query.references_for_fqn(&user_fqn).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn did_open_mirrors_graph_facts_into_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "module Auth\nend\nclass User\n  include Auth\nend".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+        let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
+        let engine = server.analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let edges = query.graph_edges_from(&user_fqn);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target, auth_fqn);
+        assert_eq!(edges[0].kind, GraphEdgeKind::Include);
     }
 }

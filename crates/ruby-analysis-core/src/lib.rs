@@ -5,6 +5,8 @@
 //! consumers.
 
 pub mod fully_qualified_name;
+pub mod graph_store;
+pub mod reference_store;
 pub mod ruby_method;
 pub mod ruby_namespace;
 pub mod ruby_type;
@@ -12,6 +14,8 @@ pub mod symbol_store;
 pub mod type_store;
 
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
+pub use graph_store::{GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore};
+pub use reference_store::{ReferenceFact, ReferenceStore};
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;
 pub use ruby_type::RubyType;

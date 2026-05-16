@@ -16,26 +16,31 @@
 //! Each indexer (project, stdlib, gem) discovers files to process, then delegates
 //! the actual processing to `FileProcessor` with appropriate options.
 
+use crate::analyzer_prism::utils;
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::indexer::entry::EntryKind;
+use crate::indexer::entry::{EntryKind, MixinRef};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
-use ruby_analysis_core::{SourceFileId, SymbolFact, SymbolKind, TextRange};
+use ruby_analysis_core::{
+    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, ReferenceFact, SourceFileId,
+    SymbolFact, SymbolKind, TextRange,
+};
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::{Diagnostic, Location, Range, Url};
 
 // ============================================================================
 // Options Structs
@@ -181,6 +186,19 @@ impl FileProcessor {
                 .analysis_engine
                 .lock()
                 .replace_type_facts_for_file(analysis_file_id, std::iter::empty());
+            server
+                .analysis_engine
+                .lock()
+                .replace_symbol_facts_for_file(analysis_file_id, std::iter::empty());
+            server.analysis_engine.lock().replace_graph_facts_for_file(
+                analysis_file_id,
+                std::iter::empty(),
+                std::iter::empty(),
+            );
+            server
+                .analysis_engine
+                .lock()
+                .replace_reference_facts_for_file(analysis_file_id, std::iter::empty());
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -246,13 +264,28 @@ impl FileProcessor {
                 let mut docs = server.docs.lock();
                 docs.insert(
                     uri.clone(),
-                    Arc::new(parking_lot::RwLock::new(updated_document)),
+                    Arc::new(parking_lot::RwLock::new(updated_document.clone())),
                 );
             }
 
             if options.resolve_mixins {
                 self.index.lock().resolve_mixins_for_uri(uri);
             }
+
+            let (graph_nodes, graph_edges) = {
+                let index = self.index.lock();
+                collect_graph_facts_for_file(
+                    &index,
+                    &updated_document,
+                    uri,
+                    updated_document.analysis_file_id(),
+                )
+            };
+            server.analysis_engine.lock().replace_graph_facts_for_file(
+                updated_document.analysis_file_id(),
+                graph_nodes,
+                graph_edges,
+            );
 
             // NOTE: Return type inference is now done lazily when inlay hints are requested
             // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
@@ -307,6 +340,19 @@ impl FileProcessor {
                     options.include_local_vars,
                 );
                 visitor.visit(&node);
+
+                let reference_facts = collect_reference_facts_from_locations(
+                    &visitor.document,
+                    visitor.document.analysis_file_id(),
+                    visitor.staged.references.iter(),
+                );
+                server
+                    .analysis_engine
+                    .lock()
+                    .replace_reference_facts_for_file(
+                        visitor.document.analysis_file_id(),
+                        reference_facts,
+                    );
 
                 // Flush staged writes under a single brief write lock.
                 let staged = std::mem::take(&mut visitor.staged);
@@ -459,6 +505,177 @@ fn collect_symbol_facts_for_file(
         .collect()
 }
 
+fn collect_reference_facts_from_locations<'a>(
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    references: impl Iterator<Item = &'a (FullyQualifiedName, Location, Option<FullyQualifiedName>)>,
+) -> Vec<ReferenceFact> {
+    references
+        .map(|(target, location, caller)| {
+            ReferenceFact::new(
+                target.clone(),
+                text_range_from_lsp_range(document, file_id, location.range, "reference"),
+                caller.clone(),
+            )
+        })
+        .collect()
+}
+
+fn collect_graph_facts_for_file(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    uri: &Url,
+    file_id: SourceFileId,
+) -> (Vec<GraphNodeFact>, Vec<GraphEdgeFact>) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    for entry in index.file_entries(uri) {
+        let source = index.get_fqn(entry.fqn_id).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: index entry references missing FQN id. \
+                 This is a bug because RubyIndex::add_entry must intern every FQN before storing entries. \
+                 Fix: build entries through EntryBuilder or intern the FQN before insertion."
+            )
+        });
+        match &entry.kind {
+            EntryKind::Class(data) => {
+                nodes.push(GraphNodeFact::new(
+                    source.clone(),
+                    GraphNodeKind::Class,
+                    text_range_from_lsp_range(
+                        document,
+                        file_id,
+                        entry.location.range,
+                        "graph node",
+                    ),
+                ));
+                if let Some(superclass) = &data.superclass {
+                    push_graph_edge(
+                        index,
+                        document,
+                        file_id,
+                        source,
+                        superclass,
+                        GraphEdgeKind::Superclass,
+                        &mut edges,
+                    );
+                }
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.includes,
+                    GraphEdgeKind::Include,
+                    &mut edges,
+                );
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.prepends,
+                    GraphEdgeKind::Prepend,
+                    &mut edges,
+                );
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.extends,
+                    GraphEdgeKind::Extend,
+                    &mut edges,
+                );
+            }
+            EntryKind::Module(data) => {
+                nodes.push(GraphNodeFact::new(
+                    source.clone(),
+                    GraphNodeKind::Module,
+                    text_range_from_lsp_range(
+                        document,
+                        file_id,
+                        entry.location.range,
+                        "graph node",
+                    ),
+                ));
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.includes,
+                    GraphEdgeKind::Include,
+                    &mut edges,
+                );
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.prepends,
+                    GraphEdgeKind::Prepend,
+                    &mut edges,
+                );
+                push_graph_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.extends,
+                    GraphEdgeKind::Extend,
+                    &mut edges,
+                );
+            }
+            EntryKind::Method(_)
+            | EntryKind::Constant(_)
+            | EntryKind::LocalVariable(_)
+            | EntryKind::InstanceVariable(_)
+            | EntryKind::ClassVariable(_)
+            | EntryKind::GlobalVariable(_)
+            | EntryKind::Reference(_) => {}
+        }
+    }
+
+    (nodes, edges)
+}
+
+fn push_graph_edges(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    source: &FullyQualifiedName,
+    mixin_refs: &[MixinRef],
+    kind: GraphEdgeKind,
+    edges: &mut Vec<GraphEdgeFact>,
+) {
+    for mixin_ref in mixin_refs {
+        push_graph_edge(index, document, file_id, source, mixin_ref, kind, edges);
+    }
+}
+
+fn push_graph_edge(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    source: &FullyQualifiedName,
+    mixin_ref: &MixinRef,
+    kind: GraphEdgeKind,
+    edges: &mut Vec<GraphEdgeFact>,
+) {
+    if let Some(target) =
+        utils::resolve_constant_fqn_from_parts(index, &mixin_ref.parts, mixin_ref.absolute, source)
+    {
+        edges.push(GraphEdgeFact::new(
+            source.clone(),
+            target,
+            kind,
+            text_range_from_lsp_range(document, file_id, mixin_ref.location.range, "graph edge"),
+        ));
+    }
+}
+
 fn symbol_kind_for_entry(entry_kind: &EntryKind) -> Option<SymbolKind> {
     match entry_kind {
         EntryKind::Class(_) => Some(SymbolKind::Class),
@@ -481,4 +698,21 @@ fn byte_offset_u32(byte_offset: usize, message: &str) -> u32 {
              Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
         )
     })
+}
+
+fn text_range_from_lsp_range(
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    range: Range,
+    kind: &str,
+) -> TextRange {
+    let start_byte = byte_offset_u32(
+        document.position_to_offset(range.start),
+        &format!("{kind} start offset exceeded u32"),
+    );
+    let end_byte = byte_offset_u32(
+        document.position_to_offset(range.end),
+        &format!("{kind} end offset exceeded u32"),
+    );
+    TextRange::new(file_id, start_byte, end_byte)
 }

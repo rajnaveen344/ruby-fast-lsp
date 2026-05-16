@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ruby_analysis_core::{
-    FullyQualifiedName, SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution,
-    TypeStore, TypeSubject,
+    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, ReferenceFact, ReferenceStore,
+    SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore,
+    TypeSubject,
 };
 
 use crate::FileIdMap;
@@ -20,6 +21,8 @@ pub struct SourceFile {
 pub struct AnalysisEngine {
     file_ids: FileIdMap,
     files: HashMap<SourceFileId, SourceFile>,
+    graph_store: GraphStore,
+    reference_store: ReferenceStore,
     symbol_store: SymbolStore,
     type_store: TypeStore,
 }
@@ -71,6 +74,30 @@ impl AnalysisEngine {
         self.symbol_store.add(fact);
     }
 
+    pub fn add_reference_fact(&mut self, fact: ReferenceFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "reference fact references unknown source file id",
+        );
+        self.reference_store.add(fact);
+    }
+
+    pub fn add_graph_node_fact(&mut self, fact: GraphNodeFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "graph node fact references unknown source file id",
+        );
+        self.graph_store.add_node(fact);
+    }
+
+    pub fn add_graph_edge_fact(&mut self, fact: GraphEdgeFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "graph edge fact references unknown source file id",
+        );
+        self.graph_store.add_edge(fact);
+    }
+
     pub fn replace_symbol_facts_for_file(
         &mut self,
         file_id: SourceFileId,
@@ -81,6 +108,31 @@ impl AnalysisEngine {
             "symbol fact replacement references unknown source file id",
         );
         self.symbol_store.replace_file(file_id, facts);
+    }
+
+    pub fn replace_reference_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = ReferenceFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "reference fact replacement references unknown source file id",
+        );
+        self.reference_store.replace_file(file_id, facts);
+    }
+
+    pub fn replace_graph_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        nodes: impl IntoIterator<Item = GraphNodeFact>,
+        edges: impl IntoIterator<Item = GraphEdgeFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "graph fact replacement references unknown source file id",
+        );
+        self.graph_store.replace_file(file_id, nodes, edges);
     }
 
     pub fn replace_type_facts_for_file(
@@ -110,6 +162,26 @@ impl AnalysisEngine {
 
     pub fn symbol_facts_for(&self, fqn: &FullyQualifiedName) -> &[SymbolFact] {
         self.symbol_store.facts_for(fqn)
+    }
+
+    pub fn reference_facts_for(&self, target: &FullyQualifiedName) -> &[ReferenceFact] {
+        self.reference_store.facts_for(target)
+    }
+
+    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> &[GraphNodeFact] {
+        self.graph_store.nodes_for(fqn)
+    }
+
+    pub fn graph_edges_from(&self, source: &FullyQualifiedName) -> &[GraphEdgeFact] {
+        self.graph_store.edges_from(source)
+    }
+
+    pub fn graph_store(&self) -> &GraphStore {
+        &self.graph_store
+    }
+
+    pub fn reference_store(&self) -> &ReferenceStore {
+        &self.reference_store
     }
 
     pub fn symbol_store(&self) -> &SymbolStore {

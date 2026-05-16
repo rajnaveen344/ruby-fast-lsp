@@ -61,6 +61,15 @@ impl SymbolStore {
             .collect()
     }
 
+    pub fn facts_in_file(&self, file_id: crate::SourceFileId) -> Vec<SymbolFact> {
+        self.facts
+            .values()
+            .flat_map(|facts| facts.iter())
+            .filter(|fact| fact.range.file_id == file_id)
+            .cloned()
+            .collect()
+    }
+
     pub fn remove_file(&mut self, file_id: crate::SourceFileId) {
         self.facts.retain(|_, facts| {
             facts.retain(|fact| fact.range.file_id != file_id);
