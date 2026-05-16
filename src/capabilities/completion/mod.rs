@@ -229,7 +229,8 @@ pub async fn find_completion_at_position(
     // Prioritize constant completions when in scope resolution context (::)
     if is_scope_resolution_context {
         // Focus on constant completions for scope resolution
-        let query = IndexQuery::new(server.index_for_uri(&uri));
+        let query =
+            IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string);
         completions.extend(constant_completions);
@@ -265,7 +266,8 @@ pub async fn find_completion_at_position(
                 NamespaceKind::Instance
             };
 
-            let query = IndexQuery::new(server.index_for_uri(&uri));
+            let query =
+                IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
             let method_completions =
                 query.find_method_completions(&receiver_type, &partial_string, kind);
             completions.extend(method_completions);
@@ -278,7 +280,8 @@ pub async fn find_completion_at_position(
         completions.extend(variable_completions);
 
         // Add constant completions
-        let query = IndexQuery::new(server.index_for_uri(&uri));
+        let query =
+            IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
         let constant_completions =
             query.find_constant_completions(&analyzer, position, partial_string.clone());
         completions.extend(constant_completions);
