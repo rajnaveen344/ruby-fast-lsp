@@ -366,41 +366,6 @@ impl ReferenceVisitor {
         None
     }
 
-    /// Infer a local variable's type from constructor patterns in the source.
-    pub(super) fn infer_variable_type_uncached(&self, var_name: &str) -> Option<RubyType> {
-        let content = &self.document.content;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix(var_name) {
-                let next_char = rest.chars().next();
-                if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
-                    continue;
-                }
-                let rest = rest.trim();
-                if let Some(rest) = rest.strip_prefix('=') {
-                    let rhs = rest.trim();
-                    if let Some(new_pos) = rhs.find(".new") {
-                        let class_part = rhs[..new_pos].trim();
-                        if !class_part.chars().next().is_some_and(|c| c.is_uppercase()) {
-                            continue;
-                        }
-
-                        let parts: Vec<_> = class_part
-                            .split("::")
-                            .filter_map(|s| RubyConstant::new(s.trim()).ok())
-                            .collect();
-                        if parts.is_empty() {
-                            continue;
-                        }
-
-                        return Some(RubyType::Class(FullyQualifiedName::Constant(parts)));
-                    }
-                }
-            }
-        }
-        None
-    }
-
     /// Convert a RubyType to namespace parts for FQN construction.
     fn type_to_namespace_parts(&self, ruby_type: &RubyType) -> Option<Vec<RubyConstant>> {
         match ruby_type {
