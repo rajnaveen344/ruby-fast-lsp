@@ -654,7 +654,7 @@ mod tests {
     use crate::indexer::entry::entry_builder::EntryBuilder;
     use crate::indexer::entry::{MethodOrigin, MethodVisibility};
     use crate::indexer::index::RubyIndex;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::sync::Arc;
     use tower_lsp::lsp_types::{Location, Position, Range, Url};
 

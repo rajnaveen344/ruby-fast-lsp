@@ -735,7 +735,7 @@ pub fn get_var_type_at(
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::sync::Arc;
 
     fn create_test_tracker<'a>(
