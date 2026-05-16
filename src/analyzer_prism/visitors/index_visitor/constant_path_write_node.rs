@@ -1,4 +1,5 @@
 use log::{error, trace};
+use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
 use ruby_prism::ConstantPathWriteNode;
 
 use crate::analyzer_prism::utils;
@@ -50,6 +51,12 @@ impl IndexVisitor {
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(fqn_parts);
         let inferred_type = self.infer_type_from_value(&node.value());
+        self.document.type_store.add(TypeFact::new(
+            TypeSubject::Constant(fqn.clone()),
+            inferred_type.clone(),
+            self.document.prism_location_to_text_range(&node.location()),
+            TypeProvenance::Assignment,
+        ));
 
         // Create an Entry with EntryKind::Constant
         let entry = {
@@ -83,5 +90,48 @@ impl IndexVisitor {
 
     pub fn process_constant_path_write_node_exit(&mut self, _node: &ConstantPathWriteNode) {
         // No-op for now
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::index::RubyIndex;
+    use crate::indexer::index_ref::{Index, Unlocked};
+    use crate::inferrer::r#type::ruby::RubyType;
+    use parking_lot::RwLock;
+    use ruby_analysis_core::{SourceFileId, TypeResolution};
+    use ruby_prism::Visit;
+    use std::sync::Arc;
+    use tower_lsp::lsp_types::Url;
+
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
+    }
+
+    #[test]
+    fn constant_path_write_emits_type_fact() {
+        let content = "Foo::VALUE = 1";
+        let uri = Url::parse("file:///test.rb").unwrap();
+        let index = create_test_index();
+        let document =
+            crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
+        let mut visitor = IndexVisitor::new(index, document);
+        let parse_result = ruby_prism::parse(content.as_bytes());
+
+        visitor.visit(&parse_result.node());
+
+        let subject = TypeSubject::Constant(FullyQualifiedName::constant(vec![
+            RubyConstant::new("Foo").unwrap(),
+            RubyConstant::new("VALUE").unwrap(),
+        ]));
+        match visitor
+            .document
+            .type_store
+            .type_at(&subject, SourceFileId(0), 13)
+        {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
+            other => panic!("expected constant path type fact, got {other:?}"),
+        }
     }
 }

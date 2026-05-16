@@ -692,10 +692,24 @@ async fn run_type_check(
                         crate::types::fully_qualified_name::FullyQualifiedName::namespace(
                             iden.clone(),
                         );
+                    let doc_type_store = server
+                        .docs
+                        .lock()
+                        .get(uri)
+                        .map(|doc| doc.read().type_store.clone());
+                    let constant_type = if let Some(type_store) = doc_type_store {
+                        TypeQuery::with_type_store(
+                            server.index_for_uri(uri),
+                            uri,
+                            content.as_bytes(),
+                            &type_store,
+                        )
+                        .get_constant_type_at(&constant_fqn, position)
+                    } else {
+                        type_query.get_constant_type_at(&constant_fqn, position)
+                    };
                     (
-                        type_query
-                            .get_constant_type(&constant_fqn)
-                            .or_else(|| Some(RubyType::Class(namespace_fqn))),
+                        constant_type.or_else(|| Some(RubyType::Class(namespace_fqn))),
                         "const",
                     )
                 }

@@ -15,6 +15,7 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
 use ruby_prism::{Node, Visit};
 use tower_lsp::lsp_types::{Position, Range, Url};
 
@@ -56,6 +57,7 @@ pub struct TypeQuery<'a> {
     index: Index<Unlocked>,
     uri: &'a Url,
     content: &'a [u8],
+    type_store: Option<&'a TypeStore>,
 }
 
 impl<'a> TypeQuery<'a> {
@@ -65,6 +67,21 @@ impl<'a> TypeQuery<'a> {
             index,
             uri,
             content,
+            type_store: None,
+        }
+    }
+
+    pub fn with_type_store(
+        index: Index<Unlocked>,
+        uri: &'a Url,
+        content: &'a [u8],
+        type_store: &'a TypeStore,
+    ) -> Self {
+        Self {
+            index,
+            uri,
+            content,
+            type_store: Some(type_store),
         }
     }
 
@@ -350,6 +367,31 @@ impl<'a> TypeQuery<'a> {
     /// Class/module constants still fall back to ClassReference/ModuleReference when
     /// there is no value-constant entry, but `A = 1` returns `Integer`.
     pub fn get_constant_type(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
+        self.get_constant_type_from_index(fqn)
+    }
+
+    pub fn get_constant_type_at(
+        &self,
+        fqn: &FullyQualifiedName,
+        position: Position,
+    ) -> Option<RubyType> {
+        if let Some(type_store) = self.type_store {
+            let byte_offset = position_to_byte_offset(self.content, position)?;
+            match type_store.type_at(
+                &TypeSubject::Constant(fqn.clone()),
+                SourceFileId(0),
+                byte_offset,
+            ) {
+                TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
+                TypeResolution::Ambiguous(_) => return None,
+                TypeResolution::Unresolved => {}
+            }
+        }
+
+        self.get_constant_type_from_index(fqn)
+    }
+
+    fn get_constant_type_from_index(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
         let index = self.index.lock();
 
         if let Some(entries) = index.get(fqn) {
@@ -906,6 +948,31 @@ fn flatten_constant_path<'a>(node: &ruby_prism::ConstantPathNode<'a>) -> Option<
         .name()
         .map(|n| String::from_utf8_lossy(n.as_slice()).to_string())?;
     Some(format!("{}::{}", parent_str, name))
+}
+
+fn position_to_byte_offset(content: &[u8], position: Position) -> Option<u32> {
+    let content = std::str::from_utf8(content).ok()?;
+    let mut line = 0u32;
+    let mut character = 0u32;
+
+    for (byte_offset, ch) in content.char_indices() {
+        if line == position.line && character == position.character {
+            return u32::try_from(byte_offset).ok();
+        }
+
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+    }
+
+    if line == position.line && character == position.character {
+        return u32::try_from(content.len()).ok();
+    }
+
+    None
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use ruby_analysis_core::{SourceFileId, TextRange, TypeStore};
 use ruby_prism::Location as PrismLocation;
 use std::cmp;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
@@ -26,6 +27,9 @@ pub struct RubyDocument {
 
     /// Variable scopes for local variable tracking (definitions, references, types)
     pub variable_scopes: VariableScopes,
+
+    /// Document-local type facts emitted during indexing.
+    pub type_store: TypeStore,
 }
 
 impl RubyDocument {
@@ -41,6 +45,7 @@ impl RubyDocument {
             inlay_hints: Vec::new(),
             comments,
             variable_scopes: VariableScopes::new(),
+            type_store: TypeStore::new(),
         };
         doc.compute_line_offsets();
         doc
@@ -62,8 +67,17 @@ impl RubyDocument {
         self.content = content;
         self.version = version;
         self.variable_scopes = VariableScopes::new();
+        self.type_store = TypeStore::new();
         self.compute_line_offsets();
         self.compute_inlay_hints();
+    }
+
+    /// Document-local source file id for type facts.
+    ///
+    /// This remains local to `RubyDocument` until a project-level analysis engine
+    /// owns stable file ids.
+    pub fn analysis_file_id(&self) -> SourceFileId {
+        SourceFileId(0)
     }
 
     /// Computes byte offsets at the start of each line
@@ -132,6 +146,20 @@ impl RubyDocument {
             self.offset_to_position(location.start_offset()),
             self.offset_to_position(location.end_offset()),
         )
+    }
+
+    pub fn prism_location_to_text_range(&self, location: &PrismLocation) -> TextRange {
+        let start_byte = u32::try_from(location.start_offset()).expect(
+            "INVARIANT VIOLATED: Prism start offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        let end_byte = u32::try_from(location.end_offset()).expect(
+            "INVARIANT VIOLATED: Prism end offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        TextRange::new(self.analysis_file_id(), start_byte, end_byte)
     }
 
     pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {
