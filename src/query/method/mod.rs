@@ -27,6 +27,7 @@ use helpers::{
     get_module_includers, is_module_instance_namespace, matches_ancestor, receiver_to_string,
 };
 use log::{debug, trace};
+pub use ruby_analysis_core::MethodCalleeResolution;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::inference::ReceiverResolver;
@@ -51,12 +52,6 @@ pub struct ResolvedMethodCallee {
     pub method: RubyMethod,
     pub resolution: MethodCalleeResolution,
     pub definition_locations: Vec<Location>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MethodCalleeResolution {
-    Exact,
-    ReceiverOnly,
 }
 
 impl IndexQuery {

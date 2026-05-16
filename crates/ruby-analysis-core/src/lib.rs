@@ -6,6 +6,7 @@
 
 pub mod fully_qualified_name;
 pub mod graph_store;
+pub mod method_resolution;
 pub mod method_store;
 pub mod reference_store;
 pub mod ruby_method;
@@ -16,6 +17,7 @@ pub mod type_store;
 
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore};
+pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{MethodFact, MethodStore};
 pub use reference_store::{ReferenceFact, ReferenceStore};
 pub use ruby_method::RubyMethod;
