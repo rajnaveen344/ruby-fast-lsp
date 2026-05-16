@@ -14,6 +14,8 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
+use parking_lot::Mutex;
+use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Url};
 
@@ -23,6 +25,7 @@ pub struct HoverContext<'a> {
     pub uri: &'a Url,
     pub content: &'a str,
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
+    pub analysis_engine: Option<&'a Arc<Mutex<AnalysisEngine>>>,
 }
 
 /// Hover information for a symbol.
@@ -106,11 +109,25 @@ fn get_type_from_type_query(
     name: &str,
     position: Position,
 ) -> Option<RubyType> {
-    let type_query = TypeQuery::new(
-        context.index.clone(),
-        context.uri,
-        context.content.as_bytes(),
-    );
+    let type_store = context
+        .analysis_engine
+        .map(|engine| engine.lock().type_store().clone());
+    let doc = context.document.map(|doc| doc.read().clone());
+    let type_query = if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
+        TypeQuery::with_type_store_for_file(
+            context.index.clone(),
+            context.uri,
+            context.content.as_bytes(),
+            type_store,
+            doc.analysis_file_id(),
+        )
+    } else {
+        TypeQuery::new(
+            context.index.clone(),
+            context.uri,
+            context.content.as_bytes(),
+        )
+    };
     type_query.get_local_variable_type(name, position)
 }
 
@@ -431,11 +448,26 @@ fn resolve_receiver_type(
             }
 
             // Fall back to TypeQuery (AST-based inference)
-            let type_query = TypeQuery::new(
-                context.index.clone(),
-                context.uri,
-                context.content.as_bytes(),
-            );
+            let type_store = context
+                .analysis_engine
+                .map(|engine| engine.lock().type_store().clone());
+            let doc = context.document.map(|doc| doc.read().clone());
+            let type_query =
+                if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
+                    TypeQuery::with_type_store_for_file(
+                        context.index.clone(),
+                        context.uri,
+                        context.content.as_bytes(),
+                        type_store,
+                        doc.analysis_file_id(),
+                    )
+                } else {
+                    TypeQuery::new(
+                        context.index.clone(),
+                        context.uri,
+                        context.content.as_bytes(),
+                    )
+                };
 
             if let Some(t) = type_query.get_local_variable_type(name, position) {
                 return t;

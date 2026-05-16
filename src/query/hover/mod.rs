@@ -53,6 +53,7 @@ impl IndexQuery {
             uri,
             content,
             document: self.doc.as_ref(),
+            analysis_engine: self.analysis_engine.as_ref(),
         };
 
         // Step 4: Generate hover content based on node type
