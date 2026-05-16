@@ -16,6 +16,7 @@ use crate::{
     indexer::entry::NamespaceKind,
     query::IndexQuery,
     server::RubyLanguageServer,
+    types::fully_qualified_name::FullyQualifiedName,
     utils::{ast::is_in_statement_position, position_to_offset},
 };
 
@@ -382,14 +383,9 @@ fn get_receiver_type_from_snapshots(
             }
 
             // General case: look up the method's return type
-            let mut index = server.index_for_uri(&uri).lock_arc();
-            let return_type = crate::inferrer::return_type::infer_method_call(
-                &mut index,
-                &inner_type,
-                method_name,
-                None,
-            );
-            if let Some(rt) = return_type {
+            if let Some(rt) =
+                infer_method_call_return_type_from_analysis(server, &inner_type, method_name)
+            {
                 return Some(rt);
             }
         }
@@ -612,16 +608,184 @@ fn resolve_method_receiver_type(
                     return Some(RubyType::Class(fqn.clone()));
                 }
             }
-            let mut index = server.index_for_uri(&uri).lock_arc();
-            crate::inferrer::return_type::infer_method_call(
-                &mut index,
-                &inner_type,
-                method_name,
-                None,
-            )
+            infer_method_call_return_type_from_analysis(server, &inner_type, method_name)
         }
         MethodReceiver::Literal(ty) => Some(ty.clone()),
         _ => None,
+    }
+}
+
+fn infer_method_call_return_type_from_analysis(
+    server: &RubyLanguageServer,
+    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    method_name: &str,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+    use crate::types::ruby_method::RubyMethod;
+
+    if method_name == "new" {
+        if let RubyType::ClassReference(fqn) = receiver_type {
+            return Some(RubyType::Class(fqn.clone()));
+        }
+    }
+
+    if let Some(return_type) = infer_generic_rbs_method_return_type(receiver_type, method_name) {
+        return Some(return_type);
+    }
+
+    let method = RubyMethod::new(method_name).ok()?;
+    let engine = server.analysis_engine.lock();
+    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    for namespace in receiver_type_to_analysis_namespaces(receiver_type) {
+        if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
+            return Some(return_type);
+        }
+    }
+
+    infer_rbs_method_return_type(receiver_type, method_name)
+}
+
+fn infer_generic_rbs_method_return_type(
+    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    method_name: &str,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+
+    match receiver_type {
+        RubyType::Array(element_types) => {
+            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+                "Array",
+                method_name,
+                false,
+                element_types,
+            )
+        }
+        RubyType::Hash(key_types, value_types) => {
+            let type_args = vec![
+                RubyType::union(key_types.clone()),
+                RubyType::union(value_types.clone()),
+            ];
+            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+                "Hash",
+                method_name,
+                false,
+                &type_args,
+            )
+        }
+        RubyType::Class(_)
+        | RubyType::Module(_)
+        | RubyType::ClassReference(_)
+        | RubyType::ModuleReference(_)
+        | RubyType::Union(_)
+        | RubyType::Unknown => None,
+    }
+}
+
+fn infer_rbs_method_return_type(
+    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    method_name: &str,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    use crate::inferrer::r#type::ruby::RubyType;
+
+    match receiver_type {
+        RubyType::Class(fqn) | RubyType::Module(fqn) => {
+            rbs_method_return_for_fqn(fqn, method_name, false)
+        }
+        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+            rbs_method_return_for_fqn(fqn, method_name, true)
+        }
+        RubyType::Array(_) | RubyType::Hash(_, _) => {
+            infer_generic_rbs_method_return_type(receiver_type, method_name)
+        }
+        RubyType::Union(types) => {
+            let mut return_types = types
+                .iter()
+                .filter_map(|ty| {
+                    infer_method_call_return_type_from_analysis_fallback(ty, method_name)
+                })
+                .collect::<Vec<_>>();
+            return_types.sort_by_key(|ty| ty.to_string());
+            return_types.dedup();
+            match return_types.len() {
+                0 => None,
+                1 => return_types.pop(),
+                _ => Some(RubyType::union(return_types)),
+            }
+        }
+        RubyType::Unknown => None,
+    }
+}
+
+fn infer_method_call_return_type_from_analysis_fallback(
+    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    method_name: &str,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    infer_generic_rbs_method_return_type(receiver_type, method_name)
+        .or_else(|| infer_rbs_method_return_type(receiver_type, method_name))
+}
+
+fn rbs_method_return_for_fqn(
+    fqn: &FullyQualifiedName,
+    method_name: &str,
+    is_singleton: bool,
+) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+    for class_name in class_names_for_fqn(fqn) {
+        if let Some(return_type) = crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
+            &class_name,
+            method_name,
+            is_singleton,
+        ) {
+            return Some(return_type);
+        }
+    }
+    None
+}
+
+fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
+    let parts = fqn.namespace_parts();
+    let fqn_name = parts
+        .iter()
+        .map(|part| part.to_string())
+        .collect::<Vec<_>>()
+        .join("::");
+    let simple_name = parts.last().map(|part| part.to_string());
+
+    let mut names = Vec::new();
+    if !fqn_name.is_empty() {
+        names.push(fqn_name);
+    }
+    if let Some(simple_name) = simple_name {
+        if !names.contains(&simple_name) {
+            names.push(simple_name);
+        }
+    }
+    names
+}
+
+fn receiver_type_to_analysis_namespaces(
+    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+) -> Vec<FullyQualifiedName> {
+    use crate::inferrer::r#type::ruby::RubyType;
+    use crate::types::fully_qualified_name::NamespaceKind;
+
+    match receiver_type {
+        RubyType::Class(fqn) | RubyType::Module(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                NamespaceKind::Instance,
+            )]
+        }
+        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                NamespaceKind::Singleton,
+            )]
+        }
+        RubyType::Union(types) => types
+            .iter()
+            .flat_map(receiver_type_to_analysis_namespaces)
+            .collect(),
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
     }
 }
 

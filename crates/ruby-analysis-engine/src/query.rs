@@ -207,6 +207,51 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
+    pub fn method_return_type_for_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<ruby_analysis_core::RubyType> {
+        if !namespace_target_exists(self.engine, namespace_fqn) {
+            return None;
+        }
+
+        for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
+            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
+            let facts = self
+                .engine
+                .method_facts_for(&method_fqn)
+                .iter()
+                .filter(|fact| {
+                    fact.owner.namespace_parts() == ancestor.namespace_parts()
+                        && fact.owner.namespace_kind() == ancestor.namespace_kind()
+                })
+                .collect::<Vec<_>>();
+
+            if facts.is_empty() {
+                continue;
+            }
+
+            let mut return_types = facts
+                .into_iter()
+                .filter_map(|fact| self.method_return_type(fact))
+                .collect::<Vec<_>>();
+
+            if return_types.is_empty() {
+                return None;
+            }
+
+            return_types.sort_by_key(|ruby_type| ruby_type.to_string());
+            return_types.dedup();
+            return match return_types.len() {
+                1 => return_types.pop(),
+                _ => None,
+            };
+        }
+
+        None
+    }
+
     pub fn top_level_method_completion_facts(&self, partial: &str) -> Vec<MethodFact> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
