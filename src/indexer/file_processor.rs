@@ -20,9 +20,7 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::indexer::analysis_facts::{
-    collect_reference_facts_from_locations, collect_symbol_facts_for_file,
-};
+use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
@@ -241,16 +239,7 @@ impl FileProcessor {
                 &extension_index_patches,
                 &mut direct_facts,
             );
-            let legacy_symbol_facts = {
-                let index = self.index.lock();
-                collect_symbol_facts_for_file(
-                    &index,
-                    &updated_document,
-                    uri,
-                    updated_document.analysis_file_id(),
-                )
-            };
-            let symbol_facts = merge_symbol_facts(direct_facts.symbols, legacy_symbol_facts);
+            let symbol_facts = direct_facts.symbols;
             let method_facts = direct_facts.methods;
             server
                 .analysis_engine
@@ -745,21 +734,4 @@ fn byte_offset_u32(byte_offset: usize, message: &str) -> u32 {
              Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
         )
     })
-}
-
-fn merge_symbol_facts(mut direct: Vec<SymbolFact>, legacy: Vec<SymbolFact>) -> Vec<SymbolFact> {
-    direct.extend(legacy);
-    direct.sort_by_key(|fact| {
-        (
-            fact.fqn.to_string(),
-            fact.kind,
-            fact.range.file_id,
-            fact.range.start_byte,
-            fact.range.end_byte,
-        )
-    });
-    direct.dedup_by(|left, right| {
-        left.fqn == right.fqn && left.kind == right.kind && left.range == right.range
-    });
-    direct
 }
