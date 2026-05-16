@@ -421,7 +421,7 @@ impl FileProcessor {
             0,
             analysis_file_id,
         );
-        let parse_result = document.parse();
+        let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
         let mut index_visitor = IndexVisitor::with_extension_registry(
@@ -469,7 +469,7 @@ impl FileProcessor {
         // Create a document for the visitor (needed for position conversion)
         // NOTE: We don't store lvars here - they are computed on-demand when file is opened
         let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        let parse_result = document.parse();
+        let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
         // Clone document because parse_result borrows from the original
@@ -504,6 +504,51 @@ impl FileProcessor {
         let mut visitor =
             ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
         visitor.visit(&node);
+
+        let staged = std::mem::take(&mut visitor.staged);
+        staged.flush(&mut self.index.lock());
+
+        debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
+        Ok(())
+    }
+
+    pub fn index_references_with_analysis(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        let start = Instant::now();
+        debug!(
+            "Indexing references for: {:?} (track_unresolved: true)",
+            uri
+        );
+
+        self.index.lock().remove_unresolved_entries_for_uri(uri);
+
+        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let document = RubyDocument::with_analysis_file_id(
+            uri.clone(),
+            content.to_string(),
+            0,
+            analysis_file_id,
+        );
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let node = parse_result.node();
+
+        let mut visitor =
+            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
+        visitor.visit(&node);
+
+        let reference_facts = collect_reference_facts_from_locations(
+            &visitor.document,
+            analysis_file_id,
+            visitor.staged.references.iter(),
+        );
+        server
+            .analysis_engine
+            .lock()
+            .replace_reference_facts_for_file(analysis_file_id, reference_facts);
 
         let staged = std::mem::take(&mut visitor.staged);
         staged.flush(&mut self.index.lock());

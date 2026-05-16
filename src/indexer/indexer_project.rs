@@ -298,7 +298,9 @@ impl IndexerProject {
 
                 // Index references
                 if let Ok(uri) = Url::from_file_path(file_path) {
-                    if let Err(e) = file_processor_ref.index_references(&uri, &content) {
+                    if let Err(e) =
+                        file_processor_ref.index_references_with_analysis(&uri, &content, server)
+                    {
                         warn!("Failed to index references {:?}: {}", file_path, e);
                     }
                 } else {
