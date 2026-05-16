@@ -140,6 +140,28 @@ impl<'a> AnalysisQuery<'a> {
         Some(callees)
     }
 
+    pub fn method_reference_targets(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<FullyQualifiedName> {
+        if !namespace_target_exists(self.engine, namespace_fqn) {
+            return Vec::new();
+        }
+
+        let mut targets = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for namespace in related_namespaces_for_method_references(self.engine, namespace_fqn) {
+            for ancestor in method_lookup_chain(self.engine, &namespace) {
+                let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
+                if seen.insert(method_fqn.clone()) {
+                    targets.push(method_fqn);
+                }
+            }
+        }
+        targets
+    }
+
     pub fn resolve_constant_receiver(
         &self,
         path: &[RubyConstant],
@@ -225,6 +247,63 @@ fn module_includers(
     }
 
     result.sort_by_key(|fqn| fqn.to_string());
+    result
+}
+
+fn related_namespaces_for_method_references(
+    engine: &crate::AnalysisEngine,
+    origin_fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    if seen.insert(origin_fqn.clone()) {
+        queue.push_back(origin_fqn.clone());
+    }
+
+    while let Some(current) = queue.pop_front() {
+        result.push(current.clone());
+
+        for descendant in descendants(engine, &current) {
+            if seen.insert(descendant.clone()) {
+                queue.push_back(descendant);
+            }
+        }
+
+        for includer in module_includers(engine, &current) {
+            if seen.insert(includer.clone()) {
+                queue.push_back(includer);
+            }
+        }
+    }
+
+    result.sort_by_key(|fqn| fqn.to_string());
+    result
+}
+
+fn descendants(
+    engine: &crate::AnalysisEngine,
+    origin_fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(origin_fqn.clone());
+    seen.insert(origin_fqn.clone());
+
+    while let Some(current) = queue.pop_front() {
+        for edge in engine.all_graph_edges() {
+            if edge.kind == GraphEdgeKind::Superclass
+                && edge.target == current
+                && seen.insert(edge.source.clone())
+            {
+                result.push(edge.source.clone());
+                queue.push_back(edge.source);
+            }
+        }
+    }
+
     result
 }
 

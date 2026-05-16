@@ -236,6 +236,10 @@ impl IndexQuery {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
+        if let Some(locations) = self.find_method_refs_from_analysis(namespace_fqn, method) {
+            return Some(locations);
+        }
+
         let mut all_references = Vec::new();
         let kind = NamespaceKind::Instance;
 
@@ -260,6 +264,14 @@ impl IndexQuery {
         receiver_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            receiver_fqn.namespace_parts(),
+            NamespaceKind::Singleton,
+        );
+        if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
+            return Some(locations);
+        }
+
         self.find_method_refs_in_ancestor_chain(receiver_fqn, method, NamespaceKind::Singleton)
     }
 
@@ -269,6 +281,14 @@ impl IndexQuery {
         context_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            context_fqn.namespace_parts(),
+            NamespaceKind::Instance,
+        );
+        if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
+            return Some(locations);
+        }
+
         let mut all_references = Vec::new();
         let method_kind = NamespaceKind::Instance;
 
@@ -295,6 +315,29 @@ impl IndexQuery {
             None
         } else {
             Some(all_references)
+        }
+    }
+
+    fn find_method_refs_from_analysis(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let mut locations = Vec::new();
+        for target in query.method_reference_targets(namespace_fqn, method) {
+            for fact in engine.reference_facts_for(&target) {
+                if let Some(location) = reference_fact_to_location(&engine, fact) {
+                    locations.push(location);
+                }
+            }
+        }
+        if locations.is_empty() {
+            None
+        } else {
+            Some(crate::utils::deduplicate_locations(locations))
         }
     }
 
