@@ -1,19 +1,20 @@
-//! Call Hierarchy Query — Resolves incoming/outgoing calls from the index.
+//! Call Hierarchy Query — Resolves incoming/outgoing calls from analysis facts.
 //!
 //! Implements the LSP Call Hierarchy feature for Ruby methods:
 //! 1. `prepare` — Find the method at cursor position
 //! 2. `incoming_calls` — Who calls this method?
 //! 3. `outgoing_calls` — What does this method call?
 //!
-//! Call site data is stored at index time: each Reference entry records
-//! the FQN of the enclosing method (the caller). This makes both incoming
-//! and outgoing calls simple grouping operations on existing index data.
+//! Call site data is stored at index time: each ReferenceFact records the FQN
+//! of the enclosing method (the caller). This makes both incoming and outgoing
+//! calls simple grouping operations on existing analysis data.
 
 use log::info;
+use ruby_analysis_engine::AnalysisEngine;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{
-    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, SymbolKind,
-    SymbolTag, Url,
+    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range,
+    SymbolKind, SymbolTag, Url,
 };
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
@@ -23,6 +24,7 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 
+use super::analysis_location::location_for_range;
 use super::IndexQuery;
 
 // ============================================================================
@@ -75,8 +77,17 @@ impl IndexQuery {
                 let method_fqn =
                     FullyQualifiedName::method(owner_fqn.namespace_parts().to_vec(), *iden);
 
+                if let Some(engine_ref) = self.analysis_engine() {
+                    let engine = engine_ref.lock();
+                    if let Some(item) =
+                        build_call_hierarchy_item_from_analysis(&engine, &method_fqn)
+                    {
+                        return Some(vec![item]);
+                    }
+                }
+
                 let index = self.index.lock();
-                build_call_hierarchy_item(&index, &method_fqn).map(|item| vec![item])
+                build_call_hierarchy_item_from_index(&index, &method_fqn).map(|item| vec![item])
             }
             _ => {
                 info!(
@@ -94,6 +105,12 @@ impl IndexQuery {
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
         let method_fqn = parse_method_fqn_string(&data.fqn)?;
+
+        if let Some(engine_ref) = self.analysis_engine() {
+            let engine = engine_ref.lock();
+            return Some(incoming_calls_from_analysis(&engine, &method_fqn));
+        }
+
         let index = self.index.lock();
 
         let calls = index.incoming_calls(&method_fqn);
@@ -103,7 +120,7 @@ impl IndexQuery {
 
         let mut results = Vec::with_capacity(calls.len());
         for (caller_fqn, from_ranges) in calls {
-            if let Some(item) = build_call_hierarchy_item(&index, &caller_fqn) {
+            if let Some(item) = build_call_hierarchy_item_from_index(&index, &caller_fqn) {
                 results.push(CallHierarchyIncomingCall {
                     from: item,
                     from_ranges,
@@ -120,6 +137,12 @@ impl IndexQuery {
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
         let method_fqn = parse_method_fqn_string(&data.fqn)?;
+
+        if let Some(engine_ref) = self.analysis_engine() {
+            let engine = engine_ref.lock();
+            return Some(outgoing_calls_from_analysis(&engine, &method_fqn));
+        }
+
         let index = self.index.lock();
 
         let calls = index.outgoing_calls(&method_fqn);
@@ -129,7 +152,7 @@ impl IndexQuery {
 
         let mut results = Vec::with_capacity(calls.len());
         for (callee_fqn, from_ranges) in calls {
-            if let Some(item) = build_call_hierarchy_item(&index, &callee_fqn) {
+            if let Some(item) = build_call_hierarchy_item_from_index(&index, &callee_fqn) {
                 results.push(CallHierarchyOutgoingCall {
                     to: item,
                     from_ranges,
@@ -146,7 +169,7 @@ impl IndexQuery {
 // ============================================================================
 
 /// Build a CallHierarchyItem from a method FQN by looking up its definition in the index.
-fn build_call_hierarchy_item(
+fn build_call_hierarchy_item_from_index(
     index: &RubyIndex,
     method_fqn: &FullyQualifiedName,
 ) -> Option<CallHierarchyItem> {
@@ -172,6 +195,107 @@ fn build_call_hierarchy_item(
             .ok()?,
         ),
     })
+}
+
+fn build_call_hierarchy_item_from_analysis(
+    engine: &AnalysisEngine,
+    method_fqn: &FullyQualifiedName,
+) -> Option<CallHierarchyItem> {
+    let fact = engine.method_facts_for(method_fqn).first()?;
+    let location = location_for_range(engine, fact.range)?;
+    Some(call_hierarchy_item(
+        method_fqn,
+        location.uri,
+        location.range,
+    )?)
+}
+
+fn call_hierarchy_item(
+    method_fqn: &FullyQualifiedName,
+    uri: Url,
+    range: Range,
+) -> Option<CallHierarchyItem> {
+    Some(CallHierarchyItem {
+        name: method_fqn.name(),
+        kind: SymbolKind::METHOD,
+        tags: Some(Vec::<SymbolTag>::new()),
+        detail: Some(method_fqn.to_string()),
+        uri,
+        range,
+        selection_range: range,
+        data: Some(
+            serde_json::to_value(CallHierarchyData {
+                fqn: method_fqn.to_string(),
+            })
+            .ok()?,
+        ),
+    })
+}
+
+fn incoming_calls_from_analysis(
+    engine: &AnalysisEngine,
+    method_fqn: &FullyQualifiedName,
+) -> Vec<CallHierarchyIncomingCall> {
+    let mut grouped: Vec<(FullyQualifiedName, Vec<Range>)> = Vec::new();
+    for fact in engine.reference_facts_for(method_fqn) {
+        let Some(caller) = &fact.caller else {
+            continue;
+        };
+        let Some(location) = location_for_range(engine, fact.range) else {
+            continue;
+        };
+        push_grouped_range(&mut grouped, caller.clone(), location.range);
+    }
+
+    grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
+    grouped
+        .into_iter()
+        .filter_map(|(caller_fqn, from_ranges)| {
+            Some(CallHierarchyIncomingCall {
+                from: build_call_hierarchy_item_from_analysis(engine, &caller_fqn)?,
+                from_ranges,
+            })
+        })
+        .collect()
+}
+
+fn outgoing_calls_from_analysis(
+    engine: &AnalysisEngine,
+    method_fqn: &FullyQualifiedName,
+) -> Vec<CallHierarchyOutgoingCall> {
+    let mut grouped: Vec<(FullyQualifiedName, Vec<Range>)> = Vec::new();
+    for fact in engine.reference_store().all_facts() {
+        if fact.caller.as_ref() != Some(method_fqn) {
+            continue;
+        }
+        let Some(location) = location_for_range(engine, fact.range) else {
+            continue;
+        };
+        push_grouped_range(&mut grouped, fact.target, location.range);
+    }
+
+    grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
+    grouped
+        .into_iter()
+        .filter_map(|(callee_fqn, from_ranges)| {
+            Some(CallHierarchyOutgoingCall {
+                to: build_call_hierarchy_item_from_analysis(engine, &callee_fqn)?,
+                from_ranges,
+            })
+        })
+        .collect()
+}
+
+fn push_grouped_range(
+    grouped: &mut Vec<(FullyQualifiedName, Vec<Range>)>,
+    fqn: FullyQualifiedName,
+    range: Range,
+) {
+    if let Some((_, ranges)) = grouped.iter_mut().find(|(existing, _)| *existing == fqn) {
+        ranges.push(range);
+        return;
+    }
+    grouped.push((fqn, vec![range]));
 }
 
 /// Parse a method FQN string like "Foo::Bar#method_name" back into a FullyQualifiedName.

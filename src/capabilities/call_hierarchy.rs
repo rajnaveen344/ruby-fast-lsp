@@ -20,7 +20,7 @@ pub async fn handle_prepare_call_hierarchy(
     let position = params.text_document_position_params.position;
     let doc = server.get_doc(&uri)?;
     let content = doc.content.clone();
-    let query = IndexQuery::new(server.index_for_uri(&uri));
+    let query = IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
     query.prepare_call_hierarchy(&uri, position, content)
 }
 
@@ -36,7 +36,10 @@ pub async fn handle_incoming_calls(
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Incoming calls request for: {}", data.fqn);
-    let query = IndexQuery::new(server.index_for_uri(&item_uri));
+    let query = IndexQuery::with_engine(
+        server.index_for_uri(&item_uri),
+        server.analysis_engine.clone(),
+    );
     query.get_incoming_calls(&data)
 }
 
@@ -52,6 +55,9 @@ pub async fn handle_outgoing_calls(
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Outgoing calls request for: {}", data.fqn);
-    let query = IndexQuery::new(server.index_for_uri(&item_uri));
+    let query = IndexQuery::with_engine(
+        server.index_for_uri(&item_uri),
+        server.analysis_engine.clone(),
+    );
     query.get_outgoing_calls(&data)
 }

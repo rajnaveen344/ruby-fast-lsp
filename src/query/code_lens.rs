@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 
 use log::debug;
+use ruby_analysis_core::{GraphEdgeKind, GraphNodeKind};
+use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::{ModuleNode, Node, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -17,6 +19,7 @@ use crate::indexer::entry::MixinType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 
+use super::analysis_location::location_for_range;
 use super::IndexQuery;
 
 // ============================================================================
@@ -69,14 +72,26 @@ impl IndexQuery {
             .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc(). Fix: call IndexQuery::with_doc() before get_code_lenses()");
         let document = doc_arc.read();
 
-        // 3. Lock index once and query all modules.
-        let index = self.index.lock();
-
         let mut results = Vec::new();
 
         for (fqn, start_offset, end_offset) in &collector.modules {
-            let usages = index.get_mixin_usages(fqn);
-            let class_locations = index.get_class_definition_locations(fqn);
+            let (usages, class_locations) = if let Some(engine_ref) = self.analysis_engine() {
+                let engine = engine_ref.lock();
+                (
+                    mixin_usages_from_analysis(&engine, fqn),
+                    class_definition_locations_from_analysis(&engine, fqn),
+                )
+            } else {
+                let index = self.index.lock();
+                (
+                    index
+                        .get_mixin_usages(fqn)
+                        .into_iter()
+                        .map(|usage| (usage.mixin_type, usage.location))
+                        .collect(),
+                    index.get_class_definition_locations(fqn),
+                )
+            };
 
             if usages.is_empty() && class_locations.is_empty() {
                 debug!("No usages or classes found for module: {:?}", fqn);
@@ -93,11 +108,8 @@ impl IndexQuery {
 
             // Group mixin usages by type.
             let mut usages_by_type: HashMap<MixinType, Vec<Location>> = HashMap::new();
-            for usage in &usages {
-                usages_by_type
-                    .entry(usage.mixin_type)
-                    .or_default()
-                    .push(usage.location.clone());
+            for (mixin_type, location) in usages {
+                usages_by_type.entry(mixin_type).or_default().push(location);
             }
 
             // One CodeLensData per mixin type.
@@ -135,6 +147,112 @@ impl IndexQuery {
         }
 
         results
+    }
+}
+
+fn mixin_usages_from_analysis(
+    engine: &AnalysisEngine,
+    module_fqn: &FullyQualifiedName,
+) -> Vec<(MixinType, Location)> {
+    let mut usages = Vec::new();
+    for edge in engine.all_graph_edges() {
+        if edge.target.namespace_parts() != module_fqn.namespace_parts() {
+            continue;
+        }
+        let Some(mixin_type) = mixin_type_for_graph_edge(edge.kind) else {
+            continue;
+        };
+        let Some(location) = location_for_range(engine, edge.range) else {
+            continue;
+        };
+        usages.push((mixin_type, location));
+    }
+    usages.sort_by_key(|(mixin_type, location)| {
+        (
+            mixin_type_sort_key(*mixin_type),
+            location.uri.to_string(),
+            location.range.start.line,
+            location.range.start.character,
+        )
+    });
+    usages
+}
+
+fn class_definition_locations_from_analysis(
+    engine: &AnalysisEngine,
+    module_fqn: &FullyQualifiedName,
+) -> Vec<Location> {
+    let mut result = Vec::new();
+    let mut queue = vec![module_fqn.clone()];
+    let mut visited = Vec::new();
+
+    while let Some(target) = queue.pop() {
+        if visited.contains(&target) {
+            continue;
+        }
+        visited.push(target.clone());
+
+        for edge in engine.all_graph_edges() {
+            if !matches!(
+                edge.kind,
+                GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
+            ) {
+                continue;
+            }
+            if edge.target.namespace_parts() != target.namespace_parts() {
+                continue;
+            }
+
+            let nodes = engine.graph_nodes_for(&edge.source);
+            if nodes
+                .iter()
+                .any(|node| matches!(node.kind, GraphNodeKind::Class))
+            {
+                for node in nodes {
+                    if matches!(node.kind, GraphNodeKind::Class) {
+                        if let Some(location) = location_for_range(engine, node.range) {
+                            result.push(location);
+                        }
+                    }
+                }
+            } else if nodes
+                .iter()
+                .any(|node| matches!(node.kind, GraphNodeKind::Module))
+            {
+                queue.push(edge.source.clone());
+            }
+        }
+    }
+
+    result.sort_by_key(|location| {
+        (
+            location.uri.to_string(),
+            location.range.start.line,
+            location.range.start.character,
+        )
+    });
+    result.dedup_by(|left, right| {
+        left.uri == right.uri
+            && left.range.start == right.range.start
+            && left.range.end == right.range.end
+    });
+    result
+}
+
+fn mixin_type_for_graph_edge(kind: GraphEdgeKind) -> Option<MixinType> {
+    match kind {
+        GraphEdgeKind::Include => Some(MixinType::Include),
+        GraphEdgeKind::Prepend => Some(MixinType::Prepend),
+        GraphEdgeKind::Extend => Some(MixinType::Extend),
+        GraphEdgeKind::Superclass => None,
+    }
+}
+
+fn mixin_type_sort_key(mixin_type: MixinType) -> u8 {
+    match mixin_type {
+        MixinType::Include => 0,
+        MixinType::Prepend => 1,
+        MixinType::Extend => 2,
     }
 }
 
