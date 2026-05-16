@@ -295,6 +295,7 @@ impl FileProcessor {
                 HashSet::new()
             };
 
+            let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
             let (legacy_graph_nodes, legacy_graph_edges) = {
                 let index = self.index.lock();
                 collect_graph_facts_for_file(
@@ -304,7 +305,6 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
-            let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
             let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
             let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
             server.analysis_engine.lock().replace_graph_update_for_file(
@@ -330,6 +330,7 @@ impl FileProcessor {
                     &retry_document.content,
                     retry_document.analysis_file_id(),
                 );
+                let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
                 let (legacy_graph_nodes, legacy_graph_edges) = {
                     let index = self.index.lock();
                     collect_graph_facts_for_file(
@@ -339,7 +340,6 @@ impl FileProcessor {
                         retry_document.analysis_file_id(),
                     )
                 };
-                let unresolved_graph_edges = direct_facts.unresolved_graph_edges;
                 let graph_nodes = merge_graph_nodes(direct_facts.graph_nodes, legacy_graph_nodes);
                 let graph_edges = merge_graph_edges(direct_facts.graph_edges, legacy_graph_edges);
                 server.analysis_engine.lock().replace_graph_update_for_file(
