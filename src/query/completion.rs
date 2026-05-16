@@ -12,6 +12,7 @@ use crate::capabilities::completion::method;
 use crate::indexer::entry::NamespaceKind;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::ruby_namespace::RubyConstant;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
 
 use super::IndexQuery;
@@ -87,8 +88,78 @@ impl IndexQuery {
         partial_method: &str,
         kind: NamespaceKind,
     ) -> Vec<CompletionItem> {
-        method::find_method_completions(&self.index, receiver_type, partial_method, kind)
+        let mut items = self.method_completions_from_analysis(receiver_type, partial_method, kind);
+        items.extend(method::find_method_completions(
+            &self.index,
+            receiver_type,
+            partial_method,
+            kind,
+        ));
+        dedupe_completion_items(items)
     }
+
+    fn method_completions_from_analysis(
+        &self,
+        receiver_type: &RubyType,
+        partial_method: &str,
+        kind: NamespaceKind,
+    ) -> Vec<CompletionItem> {
+        let Some(engine) = self.analysis_engine() else {
+            return Vec::new();
+        };
+        let engine = engine.lock();
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let mut items = Vec::new();
+        for namespace_fqn in receiver_type_to_namespaces(receiver_type, kind) {
+            for fact in query.method_completion_facts(&namespace_fqn, partial_method) {
+                if let FullyQualifiedName::Method(_, method) = &fact.fqn {
+                    let name = method.get_name();
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        kind: Some(CompletionItemKind::METHOD),
+                        detail: Some(format!("method {}", fact.fqn)),
+                        insert_text: Some(name),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        items
+    }
+}
+
+fn receiver_type_to_namespaces(
+    ruby_type: &RubyType,
+    kind: NamespaceKind,
+) -> Vec<FullyQualifiedName> {
+    match ruby_type {
+        RubyType::Class(fqn)
+        | RubyType::ClassReference(fqn)
+        | RubyType::Module(fqn)
+        | RubyType::ModuleReference(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                kind,
+            )]
+        }
+        RubyType::Array(_) => namespace_for_builtin("Array", kind),
+        RubyType::Hash(_, _) => namespace_for_builtin("Hash", kind),
+        RubyType::Union(types) => types
+            .iter()
+            .flat_map(|ty| receiver_type_to_namespaces(ty, kind))
+            .collect(),
+        RubyType::Unknown => Vec::new(),
+    }
+}
+
+fn namespace_for_builtin(name: &str, kind: NamespaceKind) -> Vec<FullyQualifiedName> {
+    let Ok(constant) = RubyConstant::new(name) else {
+        return Vec::new();
+    };
+    vec![FullyQualifiedName::namespace_with_kind(
+        vec![constant],
+        kind,
+    )]
 }
 
 fn constant_matches(
