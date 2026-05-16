@@ -724,6 +724,35 @@ impl<'a> TypeQuery<'a> {
         self.get_method_type_at(position)
     }
 
+    pub fn get_method_return_type_at(
+        &self,
+        fqn: &FullyQualifiedName,
+        position: Position,
+    ) -> Option<RubyType> {
+        if let Some(type_store) = self.type_store {
+            let byte_offset = position_to_byte_offset(self.content, position)?;
+            match type_store.type_at(
+                &TypeSubject::MethodReturn(fqn.clone()),
+                SourceFileId(0),
+                byte_offset,
+            ) {
+                TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
+                TypeResolution::Ambiguous(_) => return None,
+                TypeResolution::Unresolved => {}
+            }
+        }
+
+        let index = self.index.lock();
+        let entries = index.get(fqn)?;
+        entries.into_iter().find_map(|entry| {
+            if let EntryKind::Method(data) = &entry.kind {
+                data.return_type.clone()
+            } else {
+                None
+            }
+        })
+    }
+
     /// Check if a position is within a range.
     #[inline]
     pub fn is_in_range(pos: &Position, range: &Range) -> bool {

@@ -1,4 +1,5 @@
 use log::warn;
+use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
 use ruby_prism::*;
 
 use crate::analyzer_prism::utils;
@@ -160,7 +161,11 @@ impl IndexVisitor {
         // Always store the inferred type - Unknown displays as "?" in hints
         // For owner_fqn in inference, use instance namespace for proper class resolution
         let instance_owner_fqn = FullyQualifiedName::namespace(namespace_parts.clone());
-        let return_type = rbs_return_type.or(yard_return_type).or_else(|| {
+        let (return_type, return_type_provenance) = if let Some(return_type) = rbs_return_type {
+            (Some(return_type), TypeProvenance::Rbs)
+        } else if let Some(return_type) = yard_return_type {
+            (Some(return_type), TypeProvenance::Yard)
+        } else {
             // Infer return type from method body using TypeTracker
             let mut tracker = TypeTracker::new(
                 self.document.content.as_bytes(),
@@ -171,8 +176,17 @@ impl IndexVisitor {
             if !namespace_parts.is_empty() {
                 tracker.set_current_class(Some(instance_owner_fqn.clone()));
             }
-            Some(tracker.track_method(node))
-        });
+            (Some(tracker.track_method(node)), TypeProvenance::Inferred)
+        };
+
+        if let Some(return_type) = &return_type {
+            self.document.type_store.add(TypeFact::new(
+                TypeSubject::MethodReturn(fqn.clone()),
+                return_type.clone(),
+                self.document.prism_location_to_text_range(&full_location),
+                return_type_provenance,
+            ));
+        }
 
         let entry = {
             let mut index = self.index.lock();
@@ -375,5 +389,48 @@ impl IndexVisitor {
         }
 
         params
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::index::RubyIndex;
+    use crate::indexer::index_ref::{Index, Unlocked};
+    use parking_lot::RwLock;
+    use ruby_analysis_core::{SourceFileId, TypeResolution};
+    use ruby_prism::Visit;
+    use std::sync::Arc;
+    use tower_lsp::lsp_types::Url;
+
+    fn create_test_index() -> Index<Unlocked> {
+        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
+    }
+
+    #[test]
+    fn def_node_emits_method_return_type_fact() {
+        let content = "def name\n  'Ada'\nend";
+        let uri = Url::parse("file:///test.rb").expect("test URI must parse");
+        let index = create_test_index();
+        let document =
+            crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
+        let mut visitor = IndexVisitor::new(index, document);
+        let parse_result = ruby_prism::parse(content.as_bytes());
+
+        visitor.visit(&parse_result.node());
+
+        let method = RubyMethod::new("name").expect("method name must be valid");
+        let subject = TypeSubject::MethodReturn(FullyQualifiedName::method(Vec::new(), method));
+        match visitor
+            .document
+            .type_store
+            .type_at(&subject, SourceFileId(0), 8)
+        {
+            TypeResolution::Resolved(fact) => {
+                assert_eq!(fact.ruby_type, RubyType::string());
+                assert_eq!(fact.provenance, TypeProvenance::Inferred);
+            }
+            other => panic!("expected method return type fact, got {other:?}"),
+        }
     }
 }
