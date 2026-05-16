@@ -15,6 +15,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
+use ruby_analysis_core::TypeSubject;
 use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Url};
@@ -266,22 +267,28 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
 
 /// Generate hover info for a variable (instance, class, or global).
 pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
-    let (name, matcher): (&str, fn(&EntryKind) -> Option<(&str, &RubyType)>) = match node {
-        HoverNode::InstanceVariable { name } => (name.as_str(), |kind| {
-            if let EntryKind::InstanceVariable(data) = kind {
-                Some((&data.name, &data.r#type))
-            } else {
-                None
-            }
-        }),
-        HoverNode::ClassVariable { name } => (name.as_str(), |kind| {
+    let (name, variable_kind, matcher): (
+        &str,
+        VariableHoverKind,
+        fn(&EntryKind) -> Option<(&str, &RubyType)>,
+    ) = match node {
+        HoverNode::InstanceVariable { name } => {
+            (name.as_str(), VariableHoverKind::Instance, |kind| {
+                if let EntryKind::InstanceVariable(data) = kind {
+                    Some((&data.name, &data.r#type))
+                } else {
+                    None
+                }
+            })
+        }
+        HoverNode::ClassVariable { name } => (name.as_str(), VariableHoverKind::Class, |kind| {
             if let EntryKind::ClassVariable(data) = kind {
                 Some((&data.name, &data.r#type))
             } else {
                 None
             }
         }),
-        HoverNode::GlobalVariable { name } => (name.as_str(), |kind| {
+        HoverNode::GlobalVariable { name } => (name.as_str(), VariableHoverKind::Global, |kind| {
             if let EntryKind::GlobalVariable(data) = kind {
                 Some((&data.name, &data.r#type))
             } else {
@@ -290,6 +297,10 @@ pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Opti
         }),
         _ => return None,
     };
+
+    if let Some(ruby_type) = variable_type_from_analysis(context, name, variable_kind) {
+        return Some(HoverInfo::text(format!("{}: {}", name, ruby_type)));
+    }
 
     let index = context.index.lock();
     let type_str = index.file_entries(context.uri).iter().find_map(|entry| {
@@ -315,6 +326,61 @@ pub fn generate_yard_type_hover(node: &HoverNode) -> Option<HoverInfo> {
 // =============================================================================
 // Private Helpers
 // =============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VariableHoverKind {
+    Instance,
+    Class,
+    Global,
+}
+
+fn variable_type_from_analysis(
+    context: &HoverContext,
+    name: &str,
+    variable_kind: VariableHoverKind,
+) -> Option<RubyType> {
+    let doc = context.document?.read();
+    let file_id = doc.analysis_file_id();
+    drop(doc);
+
+    let engine = context.analysis_engine?.lock();
+    engine
+        .type_store()
+        .facts_in_file(file_id)
+        .into_iter()
+        .filter_map(|fact| match (&fact.subject, variable_kind) {
+            (
+                TypeSubject::InstanceVariable {
+                    name: fact_name, ..
+                },
+                VariableHoverKind::Instance,
+            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+            (
+                TypeSubject::ClassVariable {
+                    name: fact_name, ..
+                },
+                VariableHoverKind::Class,
+            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+            (TypeSubject::GlobalVariable(fact_name), VariableHoverKind::Global)
+                if fact_name == name && fact.ruby_type != RubyType::Unknown =>
+            {
+                Some(fact)
+            }
+            (
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_),
+                _,
+            ) => None,
+        })
+        .max_by_key(|fact| fact.range.start_byte)
+        .map(|fact| fact.ruby_type)
+}
 
 fn generate_method_definition_hover(
     method_name: &str,
@@ -476,6 +542,11 @@ fn resolve_receiver_type(
             RubyType::Unknown
         }
         MethodReceiver::InstanceVariable(name) => {
+            if let Some(ruby_type) =
+                variable_type_from_analysis(context, name, VariableHoverKind::Instance)
+            {
+                return ruby_type;
+            }
             let index = context.index.lock();
             index
                 .file_entries(context.uri)
@@ -491,6 +562,11 @@ fn resolve_receiver_type(
                 .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::ClassVariable(name) => {
+            if let Some(ruby_type) =
+                variable_type_from_analysis(context, name, VariableHoverKind::Class)
+            {
+                return ruby_type;
+            }
             let index = context.index.lock();
             index
                 .file_entries(context.uri)
@@ -506,6 +582,11 @@ fn resolve_receiver_type(
                 .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::GlobalVariable(name) => {
+            if let Some(ruby_type) =
+                variable_type_from_analysis(context, name, VariableHoverKind::Global)
+            {
+                return ruby_type;
+            }
             let index = context.index.lock();
             index
                 .file_entries(context.uri)
