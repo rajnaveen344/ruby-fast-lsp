@@ -1241,12 +1241,13 @@ impl RubyIndex {
     /// is correct: each edge either resolves against the current index or stays pending.
     /// Resolving an edge does not add new FQNs to the index, so there are no in-batch
     /// cascades.
-    pub fn retry_unresolved_mixin_edges(&mut self) {
+    pub fn retry_unresolved_mixin_edges(&mut self) -> HashSet<FileId> {
         if self.unresolved_mixin_edges.is_empty() {
-            return;
+            return HashSet::new();
         }
         // Any edge that resolves here changes inheritance; drop the cache.
         self.ancestor_chain_cache.lock().clear();
+        let mut affected_file_ids = HashSet::new();
         let pending: Vec<UnresolvedMixinEdge> = self
             .unresolved_mixin_edges
             .drain()
@@ -1295,19 +1296,22 @@ impl RubyIndex {
             };
             if !applied {
                 self.push_unresolved(edge);
+            } else {
+                affected_file_ids.insert(edge.file_id);
             }
         }
+        affected_file_ids
     }
 
     /// Resolve mixin references only for entries in a specific file
     /// This is more efficient than resolve_all_mixins for incremental updates
-    pub fn resolve_mixins_for_uri(&mut self, uri: &Url) {
+    pub fn resolve_mixins_for_uri(&mut self, uri: &Url) -> HashSet<FileId> {
         // Graph edges may be added — invalidate cached ancestor chains.
         self.ancestor_chain_cache.lock().clear();
         use crate::indexer::graph::NodeKind;
 
         let Some(file_id) = self.files.get_id(uri).copied() else {
-            return;
+            return HashSet::new();
         };
 
         // Drop this file's stale pending edges before re-resolving.
@@ -1360,8 +1364,9 @@ impl RubyIndex {
 
         // Retry pending — this file may have just added the namespace that
         // unlocks edges from earlier-indexed files.
-        self.retry_unresolved_mixin_edges();
+        let affected_file_ids = self.retry_unresolved_mixin_edges();
         self.ancestor_chain_cache.lock().clear();
+        affected_file_ids
     }
 
     /// Get all classes that include this module (transitively through intermediate modules),

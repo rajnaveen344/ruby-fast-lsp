@@ -428,6 +428,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn did_open_refreshes_late_resolved_graph_facts_into_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let user_uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+        let auth_uri = Url::parse("file:///tmp/auth.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: user_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\n  include Auth\nend".to_string(),
+                },
+            },
+        )
+        .await;
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: auth_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "module Auth\nend".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+        let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
+        let engine = server.analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let edges = query.graph_edges_from(&user_fqn);
+        assert!(
+            edges
+                .iter()
+                .any(|edge| edge.target == auth_fqn && edge.kind == GraphEdgeKind::Include),
+            "analysis graph must refresh pending mixin edges once the target module is indexed"
+        );
+    }
+
+    #[tokio::test]
+    async fn did_open_mirrors_normalized_extend_edges_into_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "module Auth\nend\nclass User\n  extend Auth\nend".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let user_singleton =
+            FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
+        let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
+        let engine = server.analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let edges = query.graph_edges_from(&user_singleton);
+        assert!(
+            edges
+                .iter()
+                .any(|edge| edge.target == auth_fqn && edge.kind == GraphEdgeKind::Include),
+            "extend must be mirrored as a singleton include for analysis method lookup"
+        );
+    }
+
+    #[tokio::test]
     async fn did_open_mirrors_method_facts_into_analysis_engine() {
         let server = RubyLanguageServer::default();
         let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");

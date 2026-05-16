@@ -281,9 +281,11 @@ impl FileProcessor {
                 );
             }
 
-            if options.resolve_mixins {
-                self.index.lock().resolve_mixins_for_uri(uri);
-            }
+            let retry_resolved_file_ids = if options.resolve_mixins {
+                self.index.lock().resolve_mixins_for_uri(uri)
+            } else {
+                HashSet::new()
+            };
 
             let (graph_nodes, graph_edges) = {
                 let index = self.index.lock();
@@ -299,6 +301,33 @@ impl FileProcessor {
                 graph_nodes,
                 graph_edges,
             );
+            for retry_file_id in retry_resolved_file_ids {
+                let Some(retry_uri) = self.index.lock().get_file_url(retry_file_id).cloned() else {
+                    continue;
+                };
+                let Some(retry_document) = server
+                    .docs
+                    .lock()
+                    .get(&retry_uri)
+                    .map(|doc_arc| doc_arc.read().clone())
+                else {
+                    continue;
+                };
+                let (graph_nodes, graph_edges) = {
+                    let index = self.index.lock();
+                    collect_graph_facts_for_file(
+                        &index,
+                        &retry_document,
+                        &retry_uri,
+                        retry_document.analysis_file_id(),
+                    )
+                };
+                server.analysis_engine.lock().replace_graph_facts_for_file(
+                    retry_document.analysis_file_id(),
+                    graph_nodes,
+                    graph_edges,
+                );
+            }
 
             // NOTE: Return type inference is now done lazily when inlay hints are requested
             // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
