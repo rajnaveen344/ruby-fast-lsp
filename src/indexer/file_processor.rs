@@ -24,13 +24,14 @@ use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
+use crate::types::file_source::FileSource;
 use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SymbolFact,
+    NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
 use ruby_analysis_indexer::AnalysisIndexer;
@@ -152,7 +153,12 @@ impl FileProcessor {
             );
             // Still parse for syntax diagnostics
             let parse_result = ruby_prism::parse(content.as_bytes());
-            let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+            let source_kind = self.analysis_source_kind_for_uri(uri);
+            let analysis_file_id = server.open_or_update_analysis_file_with_kind(
+                uri,
+                content.to_string(),
+                source_kind,
+            );
             let doc = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.to_string(),
@@ -169,7 +175,9 @@ impl FileProcessor {
         // 1. Parse ONLY ONCE
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
-        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let source_kind = self.analysis_source_kind_for_uri(uri);
+        let analysis_file_id =
+            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),
             content.to_string(),
@@ -415,7 +423,9 @@ impl FileProcessor {
 
         self.index.lock().remove_entries_for_uri(uri);
 
-        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let source_kind = self.analysis_source_kind_for_uri(uri);
+        let analysis_file_id =
+            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),
             content.to_string(),
@@ -461,6 +471,15 @@ impl FileProcessor {
         );
         debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
         Ok(())
+    }
+
+    fn analysis_source_kind_for_uri(&self, uri: &Url) -> SourceKind {
+        let index = self.index.lock();
+        index
+            .get_file_id(uri)
+            .and_then(|file_id| index.get_file_source(file_id))
+            .map(analysis_source_kind)
+            .unwrap_or(SourceKind::Project)
     }
 
     fn index_definitions_inner(&self, uri: &Url, content: &str) -> Result<()> {
@@ -531,7 +550,9 @@ impl FileProcessor {
 
         self.index.lock().remove_unresolved_entries_for_uri(uri);
 
-        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let source_kind = self.analysis_source_kind_for_uri(uri);
+        let analysis_file_id =
+            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),
             content.to_string(),
@@ -812,6 +833,15 @@ fn analysis_mixin_kind(kind: MixinKind) -> GraphEdgeKind {
         MixinKind::Include => GraphEdgeKind::Include,
         MixinKind::Prepend => GraphEdgeKind::Prepend,
         MixinKind::Extend => GraphEdgeKind::Extend,
+    }
+}
+
+fn analysis_source_kind(source: FileSource) -> SourceKind {
+    match source {
+        FileSource::Project => SourceKind::Project,
+        FileSource::Stub => SourceKind::Stub,
+        FileSource::Stdlib => SourceKind::Stdlib,
+        FileSource::Gem => SourceKind::Gem,
     }
 }
 

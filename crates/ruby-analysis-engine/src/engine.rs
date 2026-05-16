@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, MethodFact, MethodStore,
-    ReferenceFact, ReferenceStore, SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact,
-    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    ReferenceFact, ReferenceStore, SourceFileId, SourceKind, SymbolFact, SymbolStore, TextRange,
+    TypeFact, TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::FileIdMap;
@@ -14,6 +14,7 @@ pub struct SourceFile {
     pub id: SourceFileId,
     pub path: PathBuf,
     pub source: String,
+    pub kind: SourceKind,
 }
 
 /// Shared analysis state for editor and agent consumers.
@@ -39,6 +40,15 @@ impl AnalysisEngine {
         path: impl AsRef<Path>,
         source: impl Into<String>,
     ) -> SourceFileId {
+        self.open_or_update_file_with_kind(path, source, SourceKind::Project)
+    }
+
+    pub fn open_or_update_file_with_kind(
+        &mut self,
+        path: impl AsRef<Path>,
+        source: impl Into<String>,
+        kind: SourceKind,
+    ) -> SourceFileId {
         let path = path.as_ref();
         let id = self.file_ids.get_or_insert(path);
         self.files.insert(
@@ -47,6 +57,7 @@ impl AnalysisEngine {
                 id,
                 path: path.components().collect(),
                 source: source.into(),
+                kind,
             },
         );
         id
@@ -374,6 +385,16 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(engine.file_count(), 1);
         assert_eq!(engine.file(first).unwrap().source, "A = 2");
+    }
+
+    #[test]
+    fn source_kind_updates_with_file() {
+        let mut engine = AnalysisEngine::new();
+
+        let file_id =
+            engine.open_or_update_file_with_kind("gems/foo.rb", "module Foo; end", SourceKind::Gem);
+
+        assert_eq!(engine.file(file_id).unwrap().kind, SourceKind::Gem);
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub mod reference_store;
 pub mod ruby_method;
 pub mod ruby_namespace;
 pub mod ruby_type;
+pub mod source_file;
 pub mod symbol_store;
 pub mod type_store;
 
@@ -25,6 +26,7 @@ pub use reference_store::{ReferenceFact, ReferenceStore};
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;
 pub use ruby_type::RubyType;
+pub use source_file::SourceKind;
 pub use symbol_store::{SymbolFact, SymbolKind, SymbolStore};
 pub use type_store::{
     SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeStore, TypeSubject,

@@ -12,7 +12,7 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
-use ruby_analysis_core::SourceFileId;
+use ruby_analysis_core::{SourceFileId, SourceKind};
 use ruby_analysis_engine::AnalysisEngine;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -230,12 +230,21 @@ impl RubyLanguageServer {
         uri: &Url,
         source: impl Into<String>,
     ) -> SourceFileId {
+        self.open_or_update_analysis_file_with_kind(uri, source, SourceKind::Project)
+    }
+
+    pub fn open_or_update_analysis_file_with_kind(
+        &self,
+        uri: &Url,
+        source: impl Into<String>,
+        kind: SourceKind,
+    ) -> SourceFileId {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         self.analysis_engine
             .lock()
-            .open_or_update_file(path, source)
+            .open_or_update_file_with_kind(path, source, kind)
     }
 
     /// Returns handles to every index, including the orphan fallback.
