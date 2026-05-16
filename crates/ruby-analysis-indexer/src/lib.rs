@@ -11,10 +11,26 @@ use ruby_analysis_core::{
     UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
-    visit_call_node, visit_class_node, visit_constant_path_write_node, visit_constant_write_node,
-    visit_def_node, visit_module_node, visit_singleton_class_node, CallNode, ClassNode,
-    ConstantPathNode, ConstantPathWriteNode, ConstantWriteNode, DefNode, ModuleNode, Node,
-    SingletonClassNode, Visit,
+    visit_call_node, visit_class_node, visit_class_variable_and_write_node,
+    visit_class_variable_operator_write_node, visit_class_variable_or_write_node,
+    visit_class_variable_target_node, visit_class_variable_write_node,
+    visit_constant_path_write_node, visit_constant_write_node, visit_def_node,
+    visit_global_variable_and_write_node, visit_global_variable_operator_write_node,
+    visit_global_variable_or_write_node, visit_global_variable_target_node,
+    visit_global_variable_write_node, visit_instance_variable_and_write_node,
+    visit_instance_variable_operator_write_node, visit_instance_variable_or_write_node,
+    visit_instance_variable_target_node, visit_instance_variable_write_node,
+    visit_local_variable_and_write_node, visit_local_variable_operator_write_node,
+    visit_local_variable_or_write_node, visit_local_variable_target_node,
+    visit_local_variable_write_node, visit_module_node, visit_singleton_class_node, CallNode,
+    ClassNode, ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
+    ClassVariableTargetNode, ClassVariableWriteNode, ConstantPathNode, ConstantPathWriteNode,
+    ConstantWriteNode, DefNode, GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode,
+    GlobalVariableOrWriteNode, GlobalVariableTargetNode, GlobalVariableWriteNode,
+    InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
+    InstanceVariableTargetNode, InstanceVariableWriteNode, LocalVariableAndWriteNode,
+    LocalVariableOperatorWriteNode, LocalVariableOrWriteNode, LocalVariableTargetNode,
+    LocalVariableWriteNode, ModuleNode, Node, SingletonClassNode, Visit,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -260,6 +276,50 @@ impl AnalysisIndexer {
             self.facts.methods.push(MethodFact::new(fqn, owner, range));
         }
     }
+
+    fn push_local_variable_fact(&mut self, name: &[u8], location: ruby_prism::Location<'_>) {
+        let name = String::from_utf8_lossy(name).to_string();
+        if let Ok(fqn) = FullyQualifiedName::local_variable(name) {
+            self.facts.symbols.push(SymbolFact::new(
+                fqn,
+                SymbolKind::LocalVariable,
+                self.range(&location),
+            ));
+        }
+    }
+
+    fn push_instance_variable_fact(&mut self, name: &[u8], location: ruby_prism::Location<'_>) {
+        let name = String::from_utf8_lossy(name).to_string();
+        if let Ok(fqn) = FullyQualifiedName::instance_variable(name) {
+            self.facts.symbols.push(SymbolFact::new(
+                fqn,
+                SymbolKind::InstanceVariable,
+                self.range(&location),
+            ));
+        }
+    }
+
+    fn push_class_variable_fact(&mut self, name: &[u8], location: ruby_prism::Location<'_>) {
+        let name = String::from_utf8_lossy(name).to_string();
+        if let Ok(fqn) = FullyQualifiedName::class_variable(name) {
+            self.facts.symbols.push(SymbolFact::new(
+                fqn,
+                SymbolKind::ClassVariable,
+                self.range(&location),
+            ));
+        }
+    }
+
+    fn push_global_variable_fact(&mut self, name: &[u8], location: ruby_prism::Location<'_>) {
+        let name = String::from_utf8_lossy(name).to_string();
+        if let Ok(fqn) = FullyQualifiedName::global_variable(name) {
+            self.facts.symbols.push(SymbolFact::new(
+                fqn,
+                SymbolKind::GlobalVariable,
+                self.range(&location),
+            ));
+        }
+    }
 }
 
 impl Visit<'_> for AnalysisIndexer {
@@ -433,6 +493,118 @@ impl Visit<'_> for AnalysisIndexer {
         visit_singleton_class_node(self, node);
         self.scope_stack.pop();
     }
+
+    fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode<'_>) {
+        self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_local_variable_write_node(self, node);
+    }
+
+    fn visit_local_variable_target_node(&mut self, node: &LocalVariableTargetNode<'_>) {
+        self.push_local_variable_fact(node.name().as_slice(), node.location());
+        visit_local_variable_target_node(self, node);
+    }
+
+    fn visit_local_variable_or_write_node(&mut self, node: &LocalVariableOrWriteNode<'_>) {
+        self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_local_variable_or_write_node(self, node);
+    }
+
+    fn visit_local_variable_and_write_node(&mut self, node: &LocalVariableAndWriteNode<'_>) {
+        self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_local_variable_and_write_node(self, node);
+    }
+
+    fn visit_local_variable_operator_write_node(
+        &mut self,
+        node: &LocalVariableOperatorWriteNode<'_>,
+    ) {
+        self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_local_variable_operator_write_node(self, node);
+    }
+
+    fn visit_instance_variable_write_node(&mut self, node: &InstanceVariableWriteNode<'_>) {
+        self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_instance_variable_write_node(self, node);
+    }
+
+    fn visit_instance_variable_target_node(&mut self, node: &InstanceVariableTargetNode<'_>) {
+        self.push_instance_variable_fact(node.name().as_slice(), node.location());
+        visit_instance_variable_target_node(self, node);
+    }
+
+    fn visit_instance_variable_or_write_node(&mut self, node: &InstanceVariableOrWriteNode<'_>) {
+        self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_instance_variable_or_write_node(self, node);
+    }
+
+    fn visit_instance_variable_and_write_node(&mut self, node: &InstanceVariableAndWriteNode<'_>) {
+        self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_instance_variable_and_write_node(self, node);
+    }
+
+    fn visit_instance_variable_operator_write_node(
+        &mut self,
+        node: &InstanceVariableOperatorWriteNode<'_>,
+    ) {
+        self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_instance_variable_operator_write_node(self, node);
+    }
+
+    fn visit_class_variable_write_node(&mut self, node: &ClassVariableWriteNode<'_>) {
+        self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_class_variable_write_node(self, node);
+    }
+
+    fn visit_class_variable_target_node(&mut self, node: &ClassVariableTargetNode<'_>) {
+        self.push_class_variable_fact(node.name().as_slice(), node.location());
+        visit_class_variable_target_node(self, node);
+    }
+
+    fn visit_class_variable_or_write_node(&mut self, node: &ClassVariableOrWriteNode<'_>) {
+        self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_class_variable_or_write_node(self, node);
+    }
+
+    fn visit_class_variable_and_write_node(&mut self, node: &ClassVariableAndWriteNode<'_>) {
+        self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_class_variable_and_write_node(self, node);
+    }
+
+    fn visit_class_variable_operator_write_node(
+        &mut self,
+        node: &ClassVariableOperatorWriteNode<'_>,
+    ) {
+        self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_class_variable_operator_write_node(self, node);
+    }
+
+    fn visit_global_variable_write_node(&mut self, node: &GlobalVariableWriteNode<'_>) {
+        self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_global_variable_write_node(self, node);
+    }
+
+    fn visit_global_variable_target_node(&mut self, node: &GlobalVariableTargetNode<'_>) {
+        self.push_global_variable_fact(node.name().as_slice(), node.location());
+        visit_global_variable_target_node(self, node);
+    }
+
+    fn visit_global_variable_or_write_node(&mut self, node: &GlobalVariableOrWriteNode<'_>) {
+        self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_global_variable_or_write_node(self, node);
+    }
+
+    fn visit_global_variable_and_write_node(&mut self, node: &GlobalVariableAndWriteNode<'_>) {
+        self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_global_variable_and_write_node(self, node);
+    }
+
+    fn visit_global_variable_operator_write_node(
+        &mut self,
+        node: &GlobalVariableOperatorWriteNode<'_>,
+    ) {
+        self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
+        visit_global_variable_operator_write_node(self, node);
+    }
 }
 
 fn constant_parts(node: &Node<'_>) -> Option<Vec<RubyConstant>> {
@@ -584,6 +756,25 @@ mod tests {
         assert!(index.methods.iter().any(|fact| {
             fact.fqn.to_string() == "User#build"
                 && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
+        }));
+    }
+
+    #[test]
+    fn indexes_variable_write_symbol_facts() {
+        let index = AnalysisIndexer::new(file())
+            .index_source("name = 1\n@name = name\n@@count = 1\n$debug = true\n");
+
+        assert!(index.symbols.iter().any(|fact| {
+            fact.fqn.to_string() == "name" && fact.kind == SymbolKind::LocalVariable
+        }));
+        assert!(index.symbols.iter().any(|fact| {
+            fact.fqn.to_string() == "@name" && fact.kind == SymbolKind::InstanceVariable
+        }));
+        assert!(index.symbols.iter().any(|fact| {
+            fact.fqn.to_string() == "@@count" && fact.kind == SymbolKind::ClassVariable
+        }));
+        assert!(index.symbols.iter().any(|fact| {
+            fact.fqn.to_string() == "$debug" && fact.kind == SymbolKind::GlobalVariable
         }));
     }
 }
