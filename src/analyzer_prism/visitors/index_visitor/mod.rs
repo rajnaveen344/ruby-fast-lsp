@@ -37,6 +37,7 @@ pub struct IndexVisitor {
     pub diagnostics: Vec<Diagnostic>,
     pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
+    pub extension_index_patches: Vec<ruby_fast_lsp_extension_api::IndexPatch>,
     pub extension_registry: ExtensionRegistryHandle,
 }
 
@@ -59,6 +60,7 @@ impl IndexVisitor {
             diagnostics: Vec::new(),
             type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
+            extension_index_patches: Vec::new(),
             extension_registry,
         }
     }

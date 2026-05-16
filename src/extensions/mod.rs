@@ -1234,6 +1234,7 @@ fn argument_from_node(visitor: &IndexVisitor, node: &Node) -> Argument {
 }
 
 fn apply_patch(visitor: &mut IndexVisitor, patch: IndexPatch) {
+    visitor.extension_index_patches.push(patch.clone());
     match patch {
         IndexPatch::DefineMethod(method) => apply_define_method(visitor, method),
         IndexPatch::ApplyMixin(mixin) => apply_mixin(visitor, mixin),
