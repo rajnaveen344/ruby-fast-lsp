@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use ruby_analysis_core::{
-    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, ReferenceFact, SourceFileId, SymbolFact,
-    TypeFact, TypeResolution, TypeSubject,
+    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceFact, SourceFileId,
+    SymbolFact, TypeFact, TypeResolution, TypeSubject,
 };
 
 use crate::{AnalysisEngine, SourceFile};
@@ -51,6 +51,18 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn references_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [ReferenceFact] {
         self.engine.reference_facts_for(fqn)
+    }
+
+    pub fn methods_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [MethodFact] {
+        self.engine.method_facts_for(fqn)
+    }
+
+    pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
+        self.engine.method_store().facts_in_file(file_id)
+    }
+
+    pub fn all_method_facts(&self) -> Vec<MethodFact> {
+        self.engine.all_method_facts()
     }
 
     pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {

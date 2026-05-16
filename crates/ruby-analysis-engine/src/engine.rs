@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ruby_analysis_core::{
-    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, ReferenceFact, ReferenceStore,
-    SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore,
-    TypeSubject,
+    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, MethodFact, MethodStore,
+    ReferenceFact, ReferenceStore, SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact,
+    TypeResolution, TypeStore, TypeSubject,
 };
 
 use crate::FileIdMap;
@@ -22,6 +22,7 @@ pub struct AnalysisEngine {
     file_ids: FileIdMap,
     files: HashMap<SourceFileId, SourceFile>,
     graph_store: GraphStore,
+    method_store: MethodStore,
     reference_store: ReferenceStore,
     symbol_store: SymbolStore,
     type_store: TypeStore,
@@ -82,6 +83,14 @@ impl AnalysisEngine {
         self.reference_store.add(fact);
     }
 
+    pub fn add_method_fact(&mut self, fact: MethodFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "method fact references unknown source file id",
+        );
+        self.method_store.add(fact);
+    }
+
     pub fn add_graph_node_fact(&mut self, fact: GraphNodeFact) {
         self.assert_known_file_id(
             fact.range.file_id,
@@ -120,6 +129,18 @@ impl AnalysisEngine {
             "reference fact replacement references unknown source file id",
         );
         self.reference_store.replace_file(file_id, facts);
+    }
+
+    pub fn replace_method_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = MethodFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "method fact replacement references unknown source file id",
+        );
+        self.method_store.replace_file(file_id, facts);
     }
 
     pub fn replace_graph_facts_for_file(
@@ -172,6 +193,14 @@ impl AnalysisEngine {
         self.reference_store.facts_for(target)
     }
 
+    pub fn method_facts_for(&self, fqn: &FullyQualifiedName) -> &[MethodFact] {
+        self.method_store.facts_for(fqn)
+    }
+
+    pub fn all_method_facts(&self) -> Vec<MethodFact> {
+        self.method_store.all_facts()
+    }
+
     pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> &[GraphNodeFact] {
         self.graph_store.nodes_for(fqn)
     }
@@ -190,6 +219,10 @@ impl AnalysisEngine {
 
     pub fn reference_store(&self) -> &ReferenceStore {
         &self.reference_store
+    }
+
+    pub fn method_store(&self) -> &MethodStore {
+        &self.method_store
     }
 
     pub fn symbol_store(&self) -> &SymbolStore {

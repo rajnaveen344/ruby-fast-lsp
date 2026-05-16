@@ -28,6 +28,7 @@ use helpers::{
 use log::{debug, trace};
 use tower_lsp::lsp_types::{Location, Position};
 
+use super::analysis_location::location_for_range;
 use super::inference::ReceiverResolver;
 use super::IndexQuery;
 
@@ -305,6 +306,23 @@ impl IndexQuery {
         for ancestor in ancestor_chain {
             let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), method.clone());
 
+            if let Some(locations) =
+                self.method_locations_from_analysis(&method_fqn, ancestor_chain)
+            {
+                debug!(
+                    "[Method Found] {}#{} in {} via analysis engine",
+                    ancestor_chain.first().unwrap_or(ancestor),
+                    method,
+                    ancestor
+                );
+                return Some(ResolvedMethodCallee {
+                    owner: ancestor.clone(),
+                    method: method.clone(),
+                    resolution,
+                    definition_locations: locations,
+                });
+            }
+
             if let Some(entries) = index.get(&method_fqn) {
                 let locations: Vec<_> = entries
                     .iter()
@@ -329,6 +347,32 @@ impl IndexQuery {
             }
         }
         None
+    }
+
+    fn method_locations_from_analysis(
+        &self,
+        method_fqn: &FullyQualifiedName,
+        ancestor_chain: &[FullyQualifiedName],
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let locations = engine
+            .method_facts_for(method_fqn)
+            .iter()
+            .filter(|fact| {
+                ancestor_chain.iter().any(|ancestor| {
+                    ancestor.namespace_parts() == fact.owner.namespace_parts()
+                        && ancestor.namespace_kind() == fact.owner.namespace_kind()
+                })
+            })
+            .filter_map(|fact| location_for_range(&engine, fact.range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
     }
 }
 

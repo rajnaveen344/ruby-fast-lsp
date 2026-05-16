@@ -267,7 +267,9 @@ pub async fn handle_watched_files_changed(
 
 #[cfg(test)]
 mod tests {
-    use ruby_analysis_core::{FullyQualifiedName, GraphEdgeKind, RubyConstant, SymbolKind};
+    use ruby_analysis_core::{
+        FullyQualifiedName, GraphEdgeKind, NamespaceKind, RubyConstant, RubyMethod, SymbolKind,
+    };
     use ruby_analysis_engine::AnalysisQuery;
 
     use super::*;
@@ -423,5 +425,50 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].target, auth_fqn);
         assert_eq!(edges[0].kind, GraphEdgeKind::Include);
+    }
+
+    #[tokio::test]
+    async fn did_open_mirrors_method_facts_into_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\n  def name\n  end\n  def self.find\n  end\nend".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let user = RubyConstant::new("User").unwrap();
+        let name_fqn = FullyQualifiedName::method(
+            vec![user.clone()],
+            RubyMethod::new("name").expect("test method must be valid"),
+        );
+        let find_fqn = FullyQualifiedName::method(
+            vec![user.clone()],
+            RubyMethod::new("find").expect("test method must be valid"),
+        );
+
+        let engine = server.analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let name_facts = query.methods_for_fqn(&name_fqn);
+        assert_eq!(name_facts.len(), 1);
+        assert_eq!(
+            name_facts[0].owner.namespace_kind(),
+            Some(NamespaceKind::Instance)
+        );
+
+        let find_facts = query.methods_for_fqn(&find_fqn);
+        assert_eq!(find_facts.len(), 1);
+        assert_eq!(
+            find_facts[0].owner.namespace_kind(),
+            Some(NamespaceKind::Singleton)
+        );
     }
 }

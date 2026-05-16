@@ -1,6 +1,6 @@
 use ruby_analysis_core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, ReferenceFact,
-    SourceFileId, SymbolFact, SymbolKind, TextRange,
+    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
+    ReferenceFact, SourceFileId, SymbolFact, SymbolKind, TextRange,
 };
 use tower_lsp::lsp_types::{Location, Range, Url};
 
@@ -48,6 +48,35 @@ pub fn collect_reference_facts_from_locations<'a>(
                 text_range_from_lsp_range(document, file_id, location.range, "reference"),
                 caller.clone(),
             )
+        })
+        .collect()
+}
+
+pub fn collect_method_facts_for_file(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    uri: &Url,
+    file_id: SourceFileId,
+) -> Vec<MethodFact> {
+    index
+        .file_entries(uri)
+        .into_iter()
+        .filter_map(|entry| {
+            let EntryKind::Method(data) = &entry.kind else {
+                return None;
+            };
+            let fqn = index.get_fqn(entry.fqn_id).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: method index entry references missing FQN id. \
+                     This is a bug because RubyIndex::add_entry must intern every FQN before storing entries. \
+                     Fix: build entries through EntryBuilder or intern the FQN before insertion."
+                )
+            });
+            Some(MethodFact::new(
+                fqn.clone(),
+                data.owner.clone(),
+                text_range_from_lsp_range(document, file_id, entry.location.range, "method"),
+            ))
         })
         .collect()
 }

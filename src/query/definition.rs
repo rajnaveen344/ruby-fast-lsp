@@ -8,8 +8,10 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
 use log::info;
+use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
+use super::analysis_location::location_for_range;
 use super::IndexQuery;
 
 impl IndexQuery {
@@ -100,6 +102,17 @@ impl IndexQuery {
     ) -> Option<Vec<Location>> {
         let fqn = self.resolve_constant_fqn(constant_path, ancestors);
         info!("Resolved constant FQN: {}", fqn);
+
+        if let Some(locations) = self.symbol_locations_from_analysis(
+            &fqn,
+            &[
+                AnalysisSymbolKind::Class,
+                AnalysisSymbolKind::Module,
+                AnalysisSymbolKind::Constant,
+            ],
+        ) {
+            return Some(locations);
+        }
 
         let index = self.index.lock();
         let entries = index.get(&fqn)?;
@@ -260,6 +273,11 @@ impl IndexQuery {
     fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Instance variables are stored with just their name (e.g., "@foo")
         if let Ok(fqn) = FullyQualifiedName::instance_variable(name.to_string()) {
+            if let Some(locations) =
+                self.symbol_locations_from_analysis(&fqn, &[AnalysisSymbolKind::InstanceVariable])
+            {
+                return Some(locations);
+            }
             let index = self.index.lock();
             return index.get(&fqn).map(|entries| {
                 entries
@@ -275,6 +293,11 @@ impl IndexQuery {
     fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Class variables are stored with just their name (e.g., "@@foo")
         if let Ok(fqn) = FullyQualifiedName::class_variable(name.to_string()) {
+            if let Some(locations) =
+                self.symbol_locations_from_analysis(&fqn, &[AnalysisSymbolKind::ClassVariable])
+            {
+                return Some(locations);
+            }
             let index = self.index.lock();
             return index.get(&fqn).map(|entries| {
                 entries
@@ -292,6 +315,10 @@ impl IndexQuery {
         constant_path: &[RubyConstant],
         ancestors: &[RubyConstant],
     ) -> FullyQualifiedName {
+        if let Some(fqn) = self.resolve_constant_fqn_from_analysis(constant_path, ancestors) {
+            return fqn;
+        }
+
         let index = self.index.lock();
         let mut current_context = ancestors.to_vec();
 
@@ -329,6 +356,18 @@ impl IndexQuery {
 
     /// Find variable definitions by FQN.
     fn find_variable_definitions(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        if let Some(locations) = self.symbol_locations_from_analysis(
+            fqn,
+            &[
+                AnalysisSymbolKind::LocalVariable,
+                AnalysisSymbolKind::InstanceVariable,
+                AnalysisSymbolKind::ClassVariable,
+                AnalysisSymbolKind::GlobalVariable,
+            ],
+        ) {
+            return Some(locations);
+        }
+
         let index = self.index.lock();
         index.get(fqn).map(|entries| {
             entries
@@ -336,6 +375,64 @@ impl IndexQuery {
                 .filter_map(|e| index.to_lsp_location(&e.location))
                 .collect()
         })
+    }
+
+    fn resolve_constant_fqn_from_analysis(
+        &self,
+        constant_path: &[RubyConstant],
+        ancestors: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let mut current_context = ancestors.to_vec();
+
+        loop {
+            let mut probe_ns = current_context.clone();
+            probe_ns.extend(constant_path.iter().cloned());
+
+            let namespace_fqn = FullyQualifiedName::namespace(probe_ns.clone());
+            if !engine.symbol_facts_for(&namespace_fqn).is_empty() {
+                return Some(namespace_fqn);
+            }
+
+            let constant_fqn = FullyQualifiedName::Constant(probe_ns);
+            if !engine.symbol_facts_for(&constant_fqn).is_empty() {
+                return Some(constant_fqn);
+            }
+
+            if current_context.is_empty() {
+                break;
+            }
+            current_context.pop();
+        }
+
+        let namespace_fqn = FullyQualifiedName::namespace(constant_path.to_vec());
+        if !engine.symbol_facts_for(&namespace_fqn).is_empty() {
+            return Some(namespace_fqn);
+        }
+
+        None
+    }
+
+    fn symbol_locations_from_analysis(
+        &self,
+        fqn: &FullyQualifiedName,
+        allowed_kinds: &[AnalysisSymbolKind],
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let locations = engine
+            .symbol_facts_for(fqn)
+            .iter()
+            .filter(|fact| allowed_kinds.contains(&fact.kind))
+            .filter_map(|fact| location_for_range(&engine, fact.range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
     }
 }
 

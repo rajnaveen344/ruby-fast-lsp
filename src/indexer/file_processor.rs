@@ -21,8 +21,8 @@ use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::analysis_facts::{
-    collect_graph_facts_for_file, collect_reference_facts_from_locations,
-    collect_symbol_facts_for_file,
+    collect_graph_facts_for_file, collect_method_facts_for_file,
+    collect_reference_facts_from_locations, collect_symbol_facts_for_file,
 };
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
@@ -186,6 +186,10 @@ impl FileProcessor {
                 .analysis_engine
                 .lock()
                 .replace_symbol_facts_for_file(analysis_file_id, std::iter::empty());
+            server
+                .analysis_engine
+                .lock()
+                .replace_method_facts_for_file(analysis_file_id, std::iter::empty());
             server.analysis_engine.lock().replace_graph_facts_for_file(
                 analysis_file_id,
                 std::iter::empty(),
@@ -231,6 +235,15 @@ impl FileProcessor {
                     updated_document.analysis_file_id(),
                 )
             };
+            let method_facts = {
+                let index = self.index.lock();
+                collect_method_facts_for_file(
+                    &index,
+                    &updated_document,
+                    uri,
+                    updated_document.analysis_file_id(),
+                )
+            };
             server
                 .analysis_engine
                 .lock()
@@ -239,6 +252,10 @@ impl FileProcessor {
                 .analysis_engine
                 .lock()
                 .replace_symbol_facts_for_file(updated_document.analysis_file_id(), symbol_facts);
+            server
+                .analysis_engine
+                .lock()
+                .replace_method_facts_for_file(updated_document.analysis_file_id(), method_facts);
             if let Some(program) = node.as_program_node() {
                 // Run TypeTracker to infer types for all code
                 // Track top-level statements (outside methods)
