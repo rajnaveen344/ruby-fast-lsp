@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    RubyConstant, RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange,
-    UnresolvedGraphEdgeFact,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact,
+    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_class_variable_and_write_node,
@@ -40,6 +40,7 @@ pub struct AnalysisIndex {
     pub graph_nodes: Vec<GraphNodeFact>,
     pub graph_edges: Vec<GraphEdgeFact>,
     pub unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
+    pub types: Vec<TypeFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,6 +321,36 @@ impl AnalysisIndexer {
             ));
         }
     }
+
+    fn current_owner_fqn(&self) -> FullyQualifiedName {
+        FullyQualifiedName::namespace_with_kind(
+            self.namespace_stack.clone(),
+            match self.current_scope_kind() {
+                ScopeKind::Instance => ruby_analysis_core::NamespaceKind::Instance,
+                ScopeKind::Singleton => ruby_analysis_core::NamespaceKind::Singleton,
+            },
+        )
+    }
+
+    fn push_type_fact(
+        &mut self,
+        subject: TypeSubject,
+        ruby_type: Option<RubyType>,
+        location: ruby_prism::Location<'_>,
+    ) {
+        let Some(ruby_type) = ruby_type else {
+            return;
+        };
+        if ruby_type == RubyType::Unknown {
+            return;
+        }
+        self.facts.types.push(TypeFact::new(
+            subject,
+            ruby_type,
+            self.range(&location),
+            TypeProvenance::Assignment,
+        ));
+    }
 }
 
 impl Visit<'_> for AnalysisIndexer {
@@ -426,10 +457,15 @@ impl Visit<'_> for AnalysisIndexer {
             parts.push(constant);
             let fqn = FullyQualifiedName::constant(parts);
             self.facts.symbols.push(SymbolFact::new(
-                fqn,
+                fqn.clone(),
                 SymbolKind::Constant,
                 self.range(&node.location()),
             ));
+            self.push_type_fact(
+                TypeSubject::Constant(fqn),
+                literal_type(&node.value()),
+                node.name_loc(),
+            );
         }
         visit_constant_write_node(self, node);
     }
@@ -439,10 +475,15 @@ impl Visit<'_> for AnalysisIndexer {
         if let Some(parts) = constant_path_parts(&target) {
             let fqn = FullyQualifiedName::constant(parts);
             self.facts.symbols.push(SymbolFact::new(
-                fqn,
+                fqn.clone(),
                 SymbolKind::Constant,
                 self.range(&node.location()),
             ));
+            self.push_type_fact(
+                TypeSubject::Constant(fqn),
+                literal_type(&node.value()),
+                target.location(),
+            );
         }
         visit_constant_path_write_node(self, node);
     }
@@ -496,6 +537,12 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_local_variable_write_node(&mut self, node: &LocalVariableWriteNode<'_>) {
         self.push_local_variable_fact(node.name().as_slice(), node.name_loc());
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        self.push_type_fact(
+            TypeSubject::Local { scope_id: 0, name },
+            literal_type(&node.value()),
+            node.name_loc(),
+        );
         visit_local_variable_write_node(self, node);
     }
 
@@ -524,6 +571,15 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_instance_variable_write_node(&mut self, node: &InstanceVariableWriteNode<'_>) {
         self.push_instance_variable_fact(node.name().as_slice(), node.name_loc());
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        self.push_type_fact(
+            TypeSubject::InstanceVariable {
+                owner: self.current_owner_fqn(),
+                name,
+            },
+            literal_type(&node.value()),
+            node.name_loc(),
+        );
         visit_instance_variable_write_node(self, node);
     }
 
@@ -552,6 +608,15 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_class_variable_write_node(&mut self, node: &ClassVariableWriteNode<'_>) {
         self.push_class_variable_fact(node.name().as_slice(), node.name_loc());
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        self.push_type_fact(
+            TypeSubject::ClassVariable {
+                owner: self.current_owner_fqn(),
+                name,
+            },
+            literal_type(&node.value()),
+            node.name_loc(),
+        );
         visit_class_variable_write_node(self, node);
     }
 
@@ -580,6 +645,12 @@ impl Visit<'_> for AnalysisIndexer {
 
     fn visit_global_variable_write_node(&mut self, node: &GlobalVariableWriteNode<'_>) {
         self.push_global_variable_fact(node.name().as_slice(), node.name_loc());
+        let name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        self.push_type_fact(
+            TypeSubject::GlobalVariable(name),
+            literal_type(&node.value()),
+            node.name_loc(),
+        );
         visit_global_variable_write_node(self, node);
     }
 
@@ -682,6 +753,46 @@ fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<Ruby
     }
 }
 
+fn literal_type(node: &Node<'_>) -> Option<RubyType> {
+    if node.as_string_node().is_some() || node.as_interpolated_string_node().is_some() {
+        return Some(RubyType::string());
+    }
+    if node.as_integer_node().is_some() {
+        return Some(RubyType::integer());
+    }
+    if node.as_float_node().is_some() {
+        return Some(RubyType::float());
+    }
+    if node.as_symbol_node().is_some() || node.as_interpolated_symbol_node().is_some() {
+        return Some(RubyType::symbol());
+    }
+    if node.as_true_node().is_some() {
+        return Some(RubyType::true_class());
+    }
+    if node.as_false_node().is_some() {
+        return Some(RubyType::false_class());
+    }
+    if node.as_nil_node().is_some() {
+        return Some(RubyType::nil_class());
+    }
+    if let Some(array) = node.as_array_node() {
+        let element_types = array
+            .elements()
+            .iter()
+            .filter_map(|element| literal_type(&element))
+            .collect::<Vec<_>>();
+        return Some(if element_types.is_empty() {
+            RubyType::Array(vec![RubyType::Unknown])
+        } else {
+            RubyType::Array(element_types)
+        });
+    }
+    if node.as_hash_node().is_some() {
+        return Some(RubyType::Hash(vec![RubyType::Unknown], vec![RubyType::Unknown]));
+    }
+    None
+}
+
 fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> TextRange {
     TextRange::new(
         file_id,
@@ -775,6 +886,45 @@ mod tests {
         }));
         assert!(index.symbols.iter().any(|fact| {
             fact.fqn.to_string() == "$debug" && fact.kind == SymbolKind::GlobalVariable
+        }));
+    }
+
+    #[test]
+    fn indexes_literal_assignment_type_facts() {
+        let index = AnalysisIndexer::new(file()).index_source(
+            "A = 1\nname = \"Ada\"\n@active = true\n@@count = 1\n$debug = false\n",
+        );
+
+        assert!(index.types.iter().any(|fact| {
+            fact.subject
+                == TypeSubject::Constant(FullyQualifiedName::constant(vec![
+                    RubyConstant::new("A").unwrap()
+                ]))
+                && fact.ruby_type == RubyType::integer()
+        }));
+        assert!(index.types.iter().any(|fact| {
+            fact.subject
+                == TypeSubject::Local {
+                    scope_id: 0,
+                    name: "name".to_string()
+                }
+                && fact.ruby_type == RubyType::string()
+        }));
+        assert!(index.types.iter().any(|fact| {
+            matches!(
+                &fact.subject,
+                TypeSubject::InstanceVariable { name, .. } if name == "@active"
+            ) && fact.ruby_type == RubyType::true_class()
+        }));
+        assert!(index.types.iter().any(|fact| {
+            matches!(
+                &fact.subject,
+                TypeSubject::ClassVariable { name, .. } if name == "@@count"
+            ) && fact.ruby_type == RubyType::integer()
+        }));
+        assert!(index.types.iter().any(|fact| {
+            fact.subject == TypeSubject::GlobalVariable("$debug".to_string())
+                && fact.ruby_type == RubyType::false_class()
         }));
     }
 }

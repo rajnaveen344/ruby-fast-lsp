@@ -228,7 +228,6 @@ impl FileProcessor {
             diagnostics.extend(visitor.diagnostics);
 
             // Flush indexing-time type facts into the shared analysis engine.
-            let type_facts = visitor.type_store.all_facts();
             let extension_index_patches = visitor.extension_index_patches.clone();
             let updated_document = visitor.document.clone();
             let mut direct_facts =
@@ -241,6 +240,8 @@ impl FileProcessor {
             );
             let symbol_facts = direct_facts.symbols;
             let method_facts = direct_facts.methods;
+            let mut type_facts = direct_facts.types;
+            type_facts.extend(visitor.type_store.all_facts());
             server
                 .analysis_engine
                 .lock()
@@ -448,6 +449,10 @@ impl FileProcessor {
             .analysis_engine
             .lock()
             .replace_method_facts_for_file(analysis_file_id, direct_facts.methods);
+        server
+            .analysis_engine
+            .lock()
+            .replace_type_facts_for_file(analysis_file_id, direct_facts.types);
         server.analysis_engine.lock().replace_graph_update_for_file(
             analysis_file_id,
             direct_facts.graph_nodes,
