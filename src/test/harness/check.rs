@@ -684,10 +684,20 @@ async fn run_type_check(
                     (type_query.get_local_variable_type(name, position), "var")
                 }
                 crate::analyzer_prism::Identifier::RubyConstant { iden, .. } => {
-                    let fqn = crate::types::fully_qualified_name::FullyQualifiedName::namespace(
-                        iden.clone(),
-                    );
-                    (Some(RubyType::Class(fqn)), "const")
+                    let constant_fqn =
+                        crate::types::fully_qualified_name::FullyQualifiedName::Constant(
+                            iden.clone(),
+                        );
+                    let namespace_fqn =
+                        crate::types::fully_qualified_name::FullyQualifiedName::namespace(
+                            iden.clone(),
+                        );
+                    (
+                        type_query
+                            .get_constant_type(&constant_fqn)
+                            .or_else(|| Some(RubyType::Class(namespace_fqn))),
+                        "const",
+                    )
                 }
                 crate::analyzer_prism::Identifier::RubyMethod {
                     iden,

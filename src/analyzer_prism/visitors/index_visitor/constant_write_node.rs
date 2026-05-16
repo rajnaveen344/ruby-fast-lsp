@@ -26,9 +26,8 @@ impl IndexVisitor {
         namespace.push(constant);
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(namespace);
+        let inferred_type = self.infer_type_from_value(&node.value());
 
-        // Create an Entry with EntryKind::Constant
-        // Create an Entry with EntryKind::Constant
         let entry_result = {
             let mut index = self.index.lock();
             EntryBuilder::new()
@@ -37,13 +36,21 @@ impl IndexVisitor {
                     self.document
                         .prism_location_to_lsp_location(&node.location()),
                 )
-                .kind(EntryKind::new_constant(None, None))
+                .kind(EntryKind::new_typed_constant(
+                    None,
+                    None,
+                    inferred_type.clone(),
+                ))
                 .build(&mut index)
         };
 
         // Add the entry to the index
         if let Ok(entry) = entry_result {
-            trace!("Added constant write node entry: {}", constant_name);
+            trace!(
+                "Added constant write node entry: {} -> {:?}",
+                constant_name,
+                inferred_type
+            );
             self.add_entry(entry);
         } else {
             error!("Error creating entry for constant: {}", constant_name);

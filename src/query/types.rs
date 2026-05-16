@@ -345,6 +345,51 @@ impl<'a> TypeQuery<'a> {
         None
     }
 
+    /// Get the value type for a constant assignment.
+    ///
+    /// Class/module constants still fall back to ClassReference/ModuleReference when
+    /// there is no value-constant entry, but `A = 1` returns `Integer`.
+    pub fn get_constant_type(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
+        let index = self.index.lock();
+
+        if let Some(entries) = index.get(fqn) {
+            if let Some(ty) = entries.iter().find_map(|entry| {
+                if let EntryKind::Constant(data) = &entry.kind {
+                    if data.r#type != RubyType::Unknown {
+                        return Some(data.r#type.clone());
+                    }
+                }
+                None
+            }) {
+                return Some(ty);
+            }
+        }
+
+        let namespace_fqn = match fqn {
+            FullyQualifiedName::Constant(parts) => FullyQualifiedName::namespace(parts.clone()),
+            FullyQualifiedName::Namespace(_, _) => fqn.clone(),
+            FullyQualifiedName::Method(_, _) => return None,
+            FullyQualifiedName::LocalVariable(_) => return None,
+            FullyQualifiedName::InstanceVariable(_) => return None,
+            FullyQualifiedName::ClassVariable(_) => return None,
+            FullyQualifiedName::GlobalVariable(_) => return None,
+        };
+
+        index.get(&namespace_fqn).and_then(|entries| {
+            entries.iter().find_map(|entry| match &entry.kind {
+                EntryKind::Class(_) => Some(RubyType::ClassReference(namespace_fqn.clone())),
+                EntryKind::Module(_) => Some(RubyType::ModuleReference(namespace_fqn.clone())),
+                EntryKind::Method(_)
+                | EntryKind::Constant(_)
+                | EntryKind::LocalVariable(_)
+                | EntryKind::InstanceVariable(_)
+                | EntryKind::ClassVariable(_)
+                | EntryKind::GlobalVariable(_)
+                | EntryKind::Reference(_) => None,
+            })
+        })
+    }
+
     /// Get method return type hints in a range.
     fn get_method_hints_in_range(&mut self, range: &Range) -> Vec<TypeHint> {
         let mut hints = Vec::new();

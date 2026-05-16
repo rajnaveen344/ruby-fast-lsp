@@ -32,17 +32,24 @@ impl IndexVisitor {
             }
         };
 
-        // Extract the namespace path
+        // Extract the full constant path from the target.
         let mut namespace_parts = Vec::new();
         utils::collect_namespaces(&constant_path, &mut namespace_parts);
 
         // Get the current namespace and add the collected parts
         let mut fqn_parts = self.scope_tracker.get_ns_stack();
         fqn_parts.extend(namespace_parts);
-        fqn_parts.push(constant);
+        assert!(
+            fqn_parts.last() == Some(&constant),
+            "INVARIANT VIOLATED: constant path write target `{}` did not end with its name. \
+             This is a bug because Prism target path collection must preserve the written constant. \
+             Fix: inspect collect_namespaces for ConstantPathWriteNode targets.",
+            constant_name
+        );
 
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(fqn_parts);
+        let inferred_type = self.infer_type_from_value(&node.value());
 
         // Create an Entry with EntryKind::Constant
         let entry = {
@@ -53,17 +60,22 @@ impl IndexVisitor {
                     self.document
                         .prism_location_to_lsp_location(&node.location()),
                 )
-                .kind(EntryKind::new_constant(None, None))
+                .kind(EntryKind::new_typed_constant(
+                    None,
+                    None,
+                    inferred_type.clone(),
+                ))
                 .build(&mut index)
         };
 
         // Add the entry to the index
         if let Ok(entry) = entry {
             self.add_entry(entry);
-            // NOTE: `inferred_type` is not defined in this context.
-            // The instruction provided a snippet that included it, but to maintain
-            // syntactical correctness and avoid unrelated edits, it's omitted here.
-            // trace!("Added constant path entry: {} -> {:?}", fqn, inferred_type);
+            trace!(
+                "Added constant path write node entry: {} -> {:?}",
+                constant_name,
+                inferred_type
+            );
         } else {
             error!("Error creating entry for constant path: {}", constant_name);
         }

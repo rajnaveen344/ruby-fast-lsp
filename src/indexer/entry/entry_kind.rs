@@ -117,6 +117,7 @@ pub struct MethodData {
 pub struct ConstantData {
     pub value: Option<String>,
     pub visibility: Option<ConstVisibility>,
+    pub r#type: RubyType,
 }
 
 /// Assignment or narrowing for a local variable, valid for a specific range
@@ -195,7 +196,23 @@ impl EntryKind {
     }
 
     pub fn new_constant(value: Option<String>, visibility: Option<ConstVisibility>) -> Self {
-        Self::Constant(Box::new(ConstantData { value, visibility }))
+        Self::Constant(Box::new(ConstantData {
+            value,
+            visibility,
+            r#type: RubyType::Unknown,
+        }))
+    }
+
+    pub fn new_typed_constant(
+        value: Option<String>,
+        visibility: Option<ConstVisibility>,
+        r#type: RubyType,
+    ) -> Self {
+        Self::Constant(Box::new(ConstantData {
+            value,
+            visibility,
+            r#type,
+        }))
     }
 
     pub fn new_reference(caller_fqn: Option<FullyQualifiedName>) -> Self {

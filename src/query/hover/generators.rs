@@ -143,8 +143,27 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
         _ => return None,
     };
 
+    let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
     let fqn = FullyQualifiedName::namespace(path.to_vec());
     let index = context.index.lock();
+
+    if let Some(entries) = index.get(&constant_fqn) {
+        if let Some(ty) = entries.iter().find_map(|entry| {
+            if let EntryKind::Constant(data) = &entry.kind {
+                if data.r#type != RubyType::Unknown {
+                    return Some(data.r#type.clone());
+                }
+            }
+            None
+        }) {
+            let fqn_str = path
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
+        }
+    }
 
     if let Some(entries) = index.get(&fqn) {
         let entry_kind = entries.iter().find_map(|entry| match &entry.kind {
