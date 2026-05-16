@@ -180,7 +180,7 @@ impl IndexVisitor {
         };
 
         if let Some(return_type) = &return_type {
-            self.document.type_store.add(TypeFact::new(
+            self.type_store.add(TypeFact::new(
                 TypeSubject::MethodReturn(fqn.clone()),
                 return_type.clone(),
                 self.document.prism_location_to_text_range(&full_location),
@@ -421,11 +421,7 @@ mod tests {
 
         let method = RubyMethod::new("name").expect("method name must be valid");
         let subject = TypeSubject::MethodReturn(FullyQualifiedName::method(Vec::new(), method));
-        match visitor
-            .document
-            .type_store
-            .type_at(&subject, SourceFileId(0), 8)
-        {
+        match visitor.type_store.type_at(&subject, SourceFileId(0), 8) {
             TypeResolution::Resolved(fact) => {
                 assert_eq!(fact.ruby_type, RubyType::string());
                 assert_eq!(fact.provenance, TypeProvenance::Inferred);

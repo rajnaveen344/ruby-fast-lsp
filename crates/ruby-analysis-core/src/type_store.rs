@@ -138,6 +138,37 @@ impl TypeStore {
         self.facts.get(subject).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    pub fn all_facts(&self) -> Vec<TypeFact> {
+        self.facts
+            .values()
+            .flat_map(|facts| facts.iter().cloned())
+            .collect()
+    }
+
+    pub fn remove_file(&mut self, file_id: SourceFileId) {
+        self.facts.retain(|_, facts| {
+            facts.retain(|fact| fact.range.file_id != file_id);
+            !facts.is_empty()
+        });
+    }
+
+    pub fn replace_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = TypeFact>,
+    ) {
+        self.remove_file(file_id);
+        for fact in facts {
+            assert!(
+                fact.range.file_id == file_id,
+                "INVARIANT VIOLATED: replacement fact belongs to a different file id. \
+                 This is a bug because TypeStore::replace_file must only receive facts for the target file. \
+                 Fix: partition facts by SourceFileId before replacing."
+            );
+            self.add(fact);
+        }
+    }
+
     pub fn type_at(
         &self,
         subject: &TypeSubject,
@@ -241,6 +272,48 @@ mod tests {
             store.type_at(&constant_subject("MISSING"), file(), 0),
             TypeResolution::Unresolved
         );
+    }
+
+    #[test]
+    fn replace_file_removes_stale_facts_for_same_file_only() {
+        let subject = constant_subject("VALUE");
+        let other_subject = constant_subject("OTHER");
+        let mut store = TypeStore::new();
+        store.add(TypeFact::new(
+            subject.clone(),
+            RubyType::integer(),
+            TextRange::new(file(), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+        store.add(TypeFact::new(
+            other_subject.clone(),
+            RubyType::string(),
+            TextRange::new(SourceFileId(2), 0, 8),
+            TypeProvenance::Assignment,
+        ));
+
+        store.replace_file(
+            file(),
+            [TypeFact::new(
+                subject.clone(),
+                RubyType::string(),
+                TextRange::new(file(), 10, 18),
+                TypeProvenance::Assignment,
+            )],
+        );
+
+        assert_eq!(
+            store.type_at(&subject, file(), 4),
+            TypeResolution::Unresolved
+        );
+        match store.type_at(&subject, file(), 14) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected replacement fact, got {other:?}"),
+        }
+        match store.type_at(&other_subject, SourceFileId(2), 4) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected other file fact to survive, got {other:?}"),
+        }
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl IndexVisitor {
                      This is a bug because ruby-analysis-core TypeSubject::Local stores u32 scope ids. \
                      Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                 );
-                self.document.type_store.add(TypeFact::new(
+                self.type_store.add(TypeFact::new(
                     TypeSubject::Local {
                         scope_id,
                         name: variable_name.clone(),
@@ -253,11 +253,7 @@ mod tests {
             scope_id: 0,
             name: "name".to_string(),
         };
-        match visitor
-            .document
-            .type_store
-            .type_at(&subject, SourceFileId(0), 8)
-        {
+        match visitor.type_store.type_at(&subject, SourceFileId(0), 8) {
             TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
             other => panic!("expected local variable type fact, got {other:?}"),
         }

@@ -1,4 +1,4 @@
-use ruby_analysis_core::{SourceFileId, TextRange, TypeStore};
+use ruby_analysis_core::{SourceFileId, TextRange};
 use ruby_prism::Location as PrismLocation;
 use std::cmp;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
@@ -28,9 +28,6 @@ pub struct RubyDocument {
     /// Variable scopes for local variable tracking (definitions, references, types)
     pub variable_scopes: VariableScopes,
 
-    /// Document-local type facts emitted during indexing.
-    pub type_store: TypeStore,
-
     analysis_file_id: SourceFileId,
 }
 
@@ -56,7 +53,6 @@ impl RubyDocument {
             inlay_hints: Vec::new(),
             comments,
             variable_scopes: VariableScopes::new(),
-            type_store: TypeStore::new(),
             analysis_file_id,
         };
         doc.compute_line_offsets();
@@ -79,7 +75,6 @@ impl RubyDocument {
         self.content = content;
         self.version = version;
         self.variable_scopes = VariableScopes::new();
-        self.type_store = TypeStore::new();
         self.compute_line_offsets();
         self.compute_inlay_hints();
     }

@@ -1,3 +1,4 @@
+use ruby_analysis_core::TypeStore;
 use ruby_prism::*;
 use tower_lsp::lsp_types::Diagnostic;
 
@@ -34,6 +35,7 @@ pub struct IndexVisitor {
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
     pub diagnostics: Vec<Diagnostic>,
+    pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
     pub extension_registry: ExtensionRegistryHandle,
 }
@@ -55,6 +57,7 @@ impl IndexVisitor {
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
             diagnostics: Vec::new(),
+            type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
             extension_registry,
         }

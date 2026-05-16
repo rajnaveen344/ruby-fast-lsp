@@ -1,6 +1,6 @@
 //! Constant value type inference tests.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, FakeEditor};
 
 #[tokio::test]
 async fn constant_literal_type_is_value_type() {
@@ -46,4 +46,18 @@ Foo::A<type label="Integer" kind="const"> = 1
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn constant_type_fact_replaced_after_edit() {
+    let mut editor = FakeEditor::new().await;
+    editor.open("test.rb", "A = 1").await;
+    editor
+        .check("test.rb", r#"A<type label="Integer" kind="const"> = 1"#)
+        .await;
+
+    editor.set("test.rb", r#"A = "Ada""#).await;
+    editor
+        .check("test.rb", r#"A<type label="String" kind="const"> = "Ada""#)
+        .await;
 }

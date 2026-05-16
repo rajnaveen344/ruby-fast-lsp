@@ -693,11 +693,12 @@ async fn run_type_check(
                                  This is a bug because ruby-analysis-core TypeSubject::Local stores u32 scope ids. \
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
+                            let type_store = server.analysis_engine.lock().type_store().clone();
                             TypeQuery::with_type_store_for_file(
                                 server.index_for_uri(uri),
                                 uri,
                                 content.as_bytes(),
-                                &doc.type_store,
+                                &type_store,
                                 doc.analysis_file_id(),
                             )
                             .get_local_variable_type_at(name, scope_id, position)
@@ -720,11 +721,12 @@ async fn run_type_check(
                         );
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
+                        let type_store = server.analysis_engine.lock().type_store().clone();
                         TypeQuery::with_type_store_for_file(
                             server.index_for_uri(uri),
                             uri,
                             content.as_bytes(),
-                            &doc.type_store,
+                            &type_store,
                             doc.analysis_file_id(),
                         )
                         .get_constant_type_at(&constant_fqn, position)

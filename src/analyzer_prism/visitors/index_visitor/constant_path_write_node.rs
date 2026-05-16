@@ -51,7 +51,7 @@ impl IndexVisitor {
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(fqn_parts);
         let inferred_type = self.infer_type_from_value(&node.value());
-        self.document.type_store.add(TypeFact::new(
+        self.type_store.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),
             self.document.prism_location_to_text_range(&node.location()),
@@ -125,11 +125,7 @@ mod tests {
             RubyConstant::new("Foo").unwrap(),
             RubyConstant::new("VALUE").unwrap(),
         ]));
-        match visitor
-            .document
-            .type_store
-            .type_at(&subject, SourceFileId(0), 13)
-        {
+        match visitor.type_store.type_at(&subject, SourceFileId(0), 13) {
             TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
             other => panic!("expected constant path type fact, got {other:?}"),
         }

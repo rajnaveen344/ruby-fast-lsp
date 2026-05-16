@@ -174,6 +174,10 @@ impl FileProcessor {
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
+            server
+                .analysis_engine
+                .lock()
+                .replace_type_facts_for_file(analysis_file_id, std::iter::empty());
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -198,9 +202,15 @@ impl FileProcessor {
             visitor.visit(&node);
             diagnostics.extend(visitor.diagnostics);
 
-            // Run TypeTracker to infer types for all code
+            // Flush indexing-time type facts into the shared analysis engine.
+            let type_facts = visitor.type_store.all_facts();
             let updated_document = visitor.document.clone();
+            server
+                .analysis_engine
+                .lock()
+                .replace_type_facts_for_file(updated_document.analysis_file_id(), type_facts);
             if let Some(program) = node.as_program_node() {
+                // Run TypeTracker to infer types for all code
                 // Track top-level statements (outside methods)
                 let mut top_level_tracker =
                     TypeTracker::new(content.as_bytes(), self.index.clone(), uri);

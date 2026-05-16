@@ -54,13 +54,23 @@ impl AnalysisEngine {
     }
 
     pub fn add_type_fact(&mut self, fact: TypeFact) {
-        assert!(
-            self.files.contains_key(&fact.range.file_id),
-            "INVARIANT VIOLATED: type fact references unknown source file id. \
-             This is a bug because facts must only be emitted for registered files. \
-             Fix: call AnalysisEngine::open_or_update_file before adding file facts."
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "type fact references unknown source file id",
         );
         self.type_store.add(fact);
+    }
+
+    pub fn replace_type_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = TypeFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "type fact replacement references unknown source file id",
+        );
+        self.type_store.replace_file(file_id, facts);
     }
 
     pub fn type_at(
@@ -85,13 +95,17 @@ impl AnalysisEngine {
     }
 
     pub fn text_range(&self, file_id: SourceFileId, start_byte: u32, end_byte: u32) -> TextRange {
+        self.assert_known_file_id(file_id, "TextRange requested for unknown source file id");
+        TextRange::new(file_id, start_byte, end_byte)
+    }
+
+    fn assert_known_file_id(&self, file_id: SourceFileId, message: &str) {
         assert!(
             self.files.contains_key(&file_id),
-            "INVARIANT VIOLATED: TextRange requested for unknown source file id. \
-             This is a bug because ranges must belong to registered files. \
-             Fix: register the file before constructing analysis ranges."
+            "INVARIANT VIOLATED: {message}. \
+             This is a bug because analysis facts and ranges must only reference registered files. \
+             Fix: call AnalysisEngine::open_or_update_file before adding file facts."
         );
-        TextRange::new(file_id, start_byte, end_byte)
     }
 }
 
@@ -137,6 +151,38 @@ mod tests {
         match engine.type_at(&subject, file_id, 4) {
             TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::integer()),
             other => panic!("expected resolved type fact, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replace_type_facts_for_file_removes_stale_engine_facts() {
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.open_or_update_file("app/user.rb", "A = 1");
+        let subject = constant_subject("A");
+
+        engine.add_type_fact(TypeFact::new(
+            subject.clone(),
+            RubyType::integer(),
+            engine.text_range(file_id, 0, 5),
+            TypeProvenance::Assignment,
+        ));
+        engine.replace_type_facts_for_file(
+            file_id,
+            [TypeFact::new(
+                subject.clone(),
+                RubyType::string(),
+                engine.text_range(file_id, 10, 15),
+                TypeProvenance::Assignment,
+            )],
+        );
+
+        assert_eq!(
+            engine.type_at(&subject, file_id, 4),
+            TypeResolution::Unresolved
+        );
+        match engine.type_at(&subject, file_id, 12) {
+            TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
+            other => panic!("expected replacement fact, got {other:?}"),
         }
     }
 
