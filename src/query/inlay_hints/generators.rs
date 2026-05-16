@@ -8,6 +8,7 @@ use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
+use ruby_analysis_core::{TypeFact, TypeSubject};
 use tower_lsp::lsp_types::{Position, Url};
 
 /// Unified inlay hint data structure.
@@ -39,6 +40,7 @@ pub struct HintContext<'a> {
     pub index: Index<Unlocked>,
     pub uri: &'a Url,
     pub content: &'a str,
+    pub type_facts: Vec<TypeFact>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
@@ -253,6 +255,10 @@ fn infer_variable_type(
             crate::query::infer_type_from_assignment(context.content, name, &index)
         }
         VariableKind::Instance | VariableKind::Class | VariableKind::Global => {
+            if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, position) {
+                return Some(ty);
+            }
+
             // Look up in index
             let index = context.index.lock();
             let entries = index.file_entries(context.uri);
@@ -279,4 +285,73 @@ fn infer_variable_type(
             None
         }
     }
+}
+
+fn variable_type_from_analysis_facts(
+    kind: VariableKind,
+    name: &str,
+    context: &HintContext,
+    position: &Position,
+) -> Option<RubyType> {
+    let byte_offset = position_to_byte_offset(context.content, *position)?;
+    context
+        .type_facts
+        .iter()
+        .filter(|fact| fact.range.start_byte <= byte_offset)
+        .filter_map(|fact| match (&fact.subject, kind) {
+            (
+                TypeSubject::InstanceVariable {
+                    name: fact_name, ..
+                },
+                VariableKind::Instance,
+            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+            (
+                TypeSubject::ClassVariable {
+                    name: fact_name, ..
+                },
+                VariableKind::Class,
+            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+            (TypeSubject::GlobalVariable(fact_name), VariableKind::Global)
+                if fact_name == name && fact.ruby_type != RubyType::Unknown =>
+            {
+                Some(fact)
+            }
+            (
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_),
+                _,
+            ) => None,
+        })
+        .max_by_key(|fact| fact.range.start_byte)
+        .map(|fact| fact.ruby_type.clone())
+}
+
+fn position_to_byte_offset(content: &str, position: Position) -> Option<u32> {
+    let mut line = 0u32;
+    let mut character = 0u32;
+
+    for (byte_offset, ch) in content.char_indices() {
+        if line == position.line && character == position.character {
+            return u32::try_from(byte_offset).ok();
+        }
+
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+    }
+
+    if line == position.line && character == position.character {
+        return u32::try_from(content.len()).ok();
+    }
+
+    None
 }

@@ -77,6 +77,15 @@ impl IndexQuery {
             index: self.index.clone(),
             uri,
             content,
+            type_facts: self
+                .analysis_engine()
+                .map(|engine| {
+                    engine
+                        .lock()
+                        .type_store()
+                        .facts_in_file(document.analysis_file_id())
+                })
+                .unwrap_or_default(),
         };
 
         // Step 5: Generate hints from collected nodes
