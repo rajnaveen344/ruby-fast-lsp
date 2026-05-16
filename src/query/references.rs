@@ -38,12 +38,13 @@ impl IndexQuery {
             info!("Found {} constant references to: {}", entries.len(), fqn);
             return Some(entries);
         }
-
-        let index = self.index.lock();
-        let entries = index.references(fqn);
-        if !entries.is_empty() {
-            info!("Found {} constant references to: {}", entries.len(), fqn);
-            return Some(entries);
+        if self.analysis_engine().is_none() || self.has_no_analysis_document_context() {
+            let index = self.index.lock();
+            let entries = index.references(fqn);
+            if !entries.is_empty() {
+                info!("Found {} constant references to: {}", entries.len(), fqn);
+                return Some(entries);
+            }
         }
         None
     }
@@ -54,12 +55,13 @@ impl IndexQuery {
             info!("Found {} variable references to: {}", entries.len(), fqn);
             return Some(entries);
         }
-
-        let index = self.index.lock();
-        let entries = index.references(fqn);
-        if !entries.is_empty() {
-            info!("Found {} variable references to: {}", entries.len(), fqn);
-            return Some(entries);
+        if self.analysis_engine().is_none() || self.has_no_analysis_document_context() {
+            let index = self.index.lock();
+            let entries = index.references(fqn);
+            if !entries.is_empty() {
+                info!("Found {} variable references to: {}", entries.len(), fqn);
+                return Some(entries);
+            }
         }
         None
     }
@@ -429,6 +431,11 @@ impl IndexQuery {
         index: &crate::indexer::index::RubyIndex,
         fqn: &FullyQualifiedName,
     ) -> Vec<Location> {
+        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
+            return self
+                .reference_locations_from_analysis(fqn)
+                .unwrap_or_default();
+        }
         self.reference_locations_from_analysis(fqn)
             .unwrap_or_else(|| index.references(fqn))
     }
@@ -447,6 +454,13 @@ impl IndexQuery {
         } else {
             Some(locations)
         }
+    }
+
+    fn has_no_analysis_document_context(&self) -> bool {
+        self.doc
+            .as_ref()
+            .map(|doc| doc.read().analysis_file_id().0 == 0)
+            .unwrap_or(false)
     }
 }
 
