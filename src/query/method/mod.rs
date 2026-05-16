@@ -14,7 +14,6 @@
 mod analysis;
 mod helpers;
 
-use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::NamespaceKind;
 use crate::indexer::index::RubyIndex;
@@ -23,9 +22,7 @@ use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::deduplicate_locations;
-use helpers::{
-    get_module_includers, is_module_instance_namespace, matches_ancestor, receiver_to_string,
-};
+use helpers::{matches_ancestor, receiver_to_string};
 use log::{debug, trace};
 pub use ruby_analysis_core::MethodCalleeResolution;
 use tower_lsp::lsp_types::{Location, Position};
@@ -104,11 +101,14 @@ impl IndexQuery {
         if let Some(callees) = analysis::resolve_method_callees(self, &namespace_fqn, method) {
             return callees;
         }
+        if self.analysis_engine().is_some() {
+            return Vec::new();
+        }
 
         let index = self.index.lock();
 
-        let fqns_to_search = if is_module_instance_namespace(&index, &namespace_fqn) {
-            let includers = get_module_includers(&index, &namespace_fqn);
+        let fqns_to_search = if helpers::is_module_instance_namespace(&index, &namespace_fqn) {
+            let includers = helpers::get_module_includers(&index, &namespace_fqn);
             if includers.is_empty() {
                 vec![namespace_fqn]
             } else {
@@ -120,7 +120,7 @@ impl IndexQuery {
 
         let mut callees = Vec::new();
         for fqn in &fqns_to_search {
-            let ancestor_chain = index.get_ancestor_chain(&fqn);
+            let ancestor_chain = index.get_ancestor_chain(fqn);
             if let Some(callee) = self.resolve_callee_in_ancestor_chain(
                 &index,
                 &ancestor_chain,
@@ -200,15 +200,23 @@ impl IndexQuery {
         {
             return Some(receiver_fqn);
         }
+        if self.analysis_engine().is_some() {
+            return Some(FullyQualifiedName::namespace_with_kind(
+                path.to_vec(),
+                NamespaceKind::Singleton,
+            ));
+        }
 
         let index = self.index.lock();
         let current_fqn = FullyQualifiedName::namespace(current_namespace.to_vec());
+        let receiver_fqn = crate::analyzer_prism::utils::resolve_constant_fqn_from_parts(
+            &index,
+            path,
+            false,
+            &current_fqn,
+        )
+        .unwrap_or_else(|| FullyQualifiedName::Constant(path.to_vec()));
 
-        let receiver_fqn = resolve_constant_fqn_from_parts(&index, path, false, &current_fqn)
-            .unwrap_or_else(|| FullyQualifiedName::Constant(path.to_vec()));
-        drop(index);
-
-        // Constant receiver means calling a class/module method (singleton)
         Some(FullyQualifiedName::namespace_with_kind(
             receiver_fqn.namespace_parts(),
             NamespaceKind::Singleton,

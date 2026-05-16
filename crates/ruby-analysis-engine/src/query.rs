@@ -161,6 +161,9 @@ impl<'a> AnalysisQuery<'a> {
 
 fn namespace_target_exists(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
     let parts = fqn.namespace_parts();
+    if parts.is_empty() {
+        return true;
+    }
     let instance_fqn = FullyQualifiedName::namespace_with_kind(
         parts.clone(),
         ruby_analysis_core::NamespaceKind::Instance,
