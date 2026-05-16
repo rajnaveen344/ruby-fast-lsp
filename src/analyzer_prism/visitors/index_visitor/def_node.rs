@@ -187,6 +187,20 @@ impl IndexVisitor {
                 return_type_provenance,
             ));
         }
+        for (param_name, param_type) in &param_types {
+            if *param_type == RubyType::Unknown {
+                continue;
+            }
+            self.type_store.add(TypeFact::new(
+                TypeSubject::Parameter {
+                    method: fqn.clone(),
+                    name: param_name.clone(),
+                },
+                param_type.clone(),
+                self.document.prism_location_to_text_range(&full_location),
+                TypeProvenance::Yard,
+            ));
+        }
 
         let entry = {
             let mut index = self.index.lock();

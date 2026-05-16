@@ -6,7 +6,6 @@
 //! Handlers (hover, inlay hints, completion) should use this API instead of
 //! directly interacting with the inferrer or index.
 
-use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::resolver::MethodResolver;
@@ -23,8 +22,6 @@ use tower_lsp::lsp_types::{Position, Range, Url};
 /// Provides methods to query types for various constructs, automatically
 /// handling inference and caching.
 pub struct TypeQuery<'a> {
-    index: Index<Unlocked>,
-    uri: &'a Url,
     content: &'a [u8],
     type_store: Option<&'a TypeStore>,
     source_file_id: SourceFileId,
@@ -32,10 +29,8 @@ pub struct TypeQuery<'a> {
 
 impl<'a> TypeQuery<'a> {
     /// Create a new TypeQuery for a specific file.
-    pub fn new(index: Index<Unlocked>, uri: &'a Url, content: &'a [u8]) -> Self {
+    pub fn new(_index: Index<Unlocked>, _uri: &'a Url, content: &'a [u8]) -> Self {
         Self {
-            index,
-            uri,
             content,
             type_store: None,
             source_file_id: SourceFileId(0),
@@ -52,15 +47,13 @@ impl<'a> TypeQuery<'a> {
     }
 
     pub fn with_type_store_for_file(
-        index: Index<Unlocked>,
-        uri: &'a Url,
+        _index: Index<Unlocked>,
+        _uri: &'a Url,
         content: &'a [u8],
         type_store: &'a TypeStore,
         source_file_id: SourceFileId,
     ) -> Self {
         Self {
-            index,
-            uri,
             content,
             type_store: Some(type_store),
             source_file_id,
@@ -81,7 +74,7 @@ impl<'a> TypeQuery<'a> {
                 .map(|fact| fact.ruby_type.clone());
         }
 
-        self.get_constant_type_from_index(fqn)
+        None
     }
 
     pub fn get_constant_type_at(
@@ -102,62 +95,13 @@ impl<'a> TypeQuery<'a> {
             }
         }
 
-        self.get_constant_type_from_index(fqn)
-    }
-
-    fn get_constant_type_from_index(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
-        let index = self.index.lock();
-
-        if let Some(entries) = index.get(fqn) {
-            if let Some(ty) = entries.iter().find_map(|entry| {
-                if let EntryKind::Constant(data) = &entry.kind {
-                    if data.r#type != RubyType::Unknown {
-                        return Some(data.r#type.clone());
-                    }
-                }
-                None
-            }) {
-                return Some(ty);
-            }
-        }
-
-        let namespace_fqn = match fqn {
-            FullyQualifiedName::Constant(parts) => FullyQualifiedName::namespace(parts.clone()),
-            FullyQualifiedName::Namespace(_, _) => fqn.clone(),
-            FullyQualifiedName::Method(_, _) => return None,
-            FullyQualifiedName::LocalVariable(_) => return None,
-            FullyQualifiedName::InstanceVariable(_) => return None,
-            FullyQualifiedName::ClassVariable(_) => return None,
-            FullyQualifiedName::GlobalVariable(_) => return None,
-        };
-
-        index.get(&namespace_fqn).and_then(|entries| {
-            entries.iter().find_map(|entry| match &entry.kind {
-                EntryKind::Class(_) => Some(RubyType::ClassReference(namespace_fqn.clone())),
-                EntryKind::Module(_) => Some(RubyType::ModuleReference(namespace_fqn.clone())),
-                EntryKind::Method(_)
-                | EntryKind::Constant(_)
-                | EntryKind::LocalVariable(_)
-                | EntryKind::InstanceVariable(_)
-                | EntryKind::ClassVariable(_)
-                | EntryKind::GlobalVariable(_)
-                | EntryKind::Reference(_) => None,
-            })
-        })
+        None
     }
 
     /// Get type for a local variable by name at a position.
     /// Checks method parameters first, then falls back to assignment inference.
-    pub fn get_local_variable_type(&self, name: &str, position: Position) -> Option<RubyType> {
-        // 1. Check if this is a method parameter
-        if let Some(param_type) = self.get_method_parameter_type(name, position) {
-            return Some(param_type);
-        }
-
-        // 2. Try inferring from assignment pattern (e.g., var = Class.new)
-        let content_str = std::str::from_utf8(self.content).ok()?;
-        let index = self.index.lock();
-        infer_type_from_assignment(content_str, name, &index)
+    pub fn get_local_variable_type(&self, _name: &str, _position: Position) -> Option<RubyType> {
+        None
     }
 
     pub fn get_local_variable_type_at(
@@ -180,47 +124,28 @@ impl<'a> TypeQuery<'a> {
                 TypeResolution::Ambiguous(_) => return None,
                 TypeResolution::Unresolved => {}
             }
+            return type_store
+                .facts_in_file(self.source_file_id)
+                .into_iter()
+                .filter(|fact| fact.range.start_byte <= byte_offset)
+                .filter_map(|fact| match &fact.subject {
+                    TypeSubject::Parameter {
+                        name: fact_name, ..
+                    } if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+                    | TypeSubject::Expression(_) => None,
+                })
+                .max_by_key(|fact| fact.range.start_byte)
+                .map(|fact| fact.ruby_type);
         }
 
         self.get_local_variable_type(name, position)
-    }
-
-    /// Get type for a method parameter if the variable is a parameter of the enclosing method.
-    fn get_method_parameter_type(&self, param_name: &str, position: Position) -> Option<RubyType> {
-        let index = self.index.lock();
-
-        // Find the method that contains this position using entry.location (full method body)
-        for entry in index.file_entries(self.uri) {
-            if let EntryKind::Method(data) = &entry.kind {
-                // Check if position is within the method's location range (def to end)
-                let range = &entry.location.range;
-                let is_in_method =
-                    position.line >= range.start.line && position.line <= range.end.line;
-
-                if is_in_method {
-                    // Check if this method has a parameter with the given name
-                    let has_param = data.params.iter().any(|p| p.name == param_name);
-
-                    if has_param {
-                        // Check param_types first (from YARD conversion)
-                        for (name, param_type) in &data.param_types {
-                            if name == param_name && *param_type != RubyType::Unknown {
-                                return Some(param_type.clone());
-                            }
-                        }
-                        // Also check YARD docs for parameter types
-                        if let Some(yard_doc) = &data.yard_doc {
-                            if let Some(type_str) = yard_doc.get_param_type_str(param_name) {
-                                return Some(RubyType::class(&type_str));
-                            }
-                        }
-                        // Parameter exists but has no type info - return Unknown
-                        return Some(RubyType::Unknown);
-                    }
-                }
-            }
-        }
-        None
     }
 
     pub fn get_method_return_type_at(
@@ -241,15 +166,7 @@ impl<'a> TypeQuery<'a> {
             }
         }
 
-        let index = self.index.lock();
-        let entries = index.get(fqn)?;
-        entries.into_iter().find_map(|entry| {
-            if let EntryKind::Method(data) = &entry.kind {
-                data.return_type.clone()
-            } else {
-                None
-            }
-        })
+        None
     }
 
     /// Check if a position is within a range.
