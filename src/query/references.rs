@@ -38,14 +38,6 @@ impl IndexQuery {
             info!("Found {} constant references to: {}", entries.len(), fqn);
             return Some(entries);
         }
-        if self.analysis_engine().is_none() || self.has_no_analysis_document_context() {
-            let index = self.index.lock();
-            let entries = index.references(fqn);
-            if !entries.is_empty() {
-                info!("Found {} constant references to: {}", entries.len(), fqn);
-                return Some(entries);
-            }
-        }
         None
     }
 
@@ -54,14 +46,6 @@ impl IndexQuery {
         if let Some(entries) = self.reference_locations_from_analysis(fqn) {
             info!("Found {} variable references to: {}", entries.len(), fqn);
             return Some(entries);
-        }
-        if self.analysis_engine().is_none() || self.has_no_analysis_document_context() {
-            let index = self.index.lock();
-            let entries = index.references(fqn);
-            if !entries.is_empty() {
-                info!("Found {} variable references to: {}", entries.len(), fqn);
-                return Some(entries);
-            }
         }
         None
     }
@@ -239,26 +223,7 @@ impl IndexQuery {
         if let Some(locations) = self.find_method_refs_from_analysis(namespace_fqn, method) {
             return Some(locations);
         }
-        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
-            return None;
-        }
-
-        let mut all_references = Vec::new();
-        let kind = NamespaceKind::Instance;
-
-        if let Some(refs) = self.find_method_refs_in_ancestor_chain(namespace_fqn, method, kind) {
-            all_references.extend(refs);
-        }
-
-        if let Some(refs) = self.find_method_refs_in_descendants(namespace_fqn, method, kind) {
-            all_references.extend(refs);
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
+        None
     }
 
     /// Find method references with a constant receiver (singleton namespace).
@@ -274,11 +239,7 @@ impl IndexQuery {
         if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
             return Some(locations);
         }
-        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
-            return None;
-        }
-
-        self.find_method_refs_in_ancestor_chain(receiver_fqn, method, NamespaceKind::Singleton)
+        None
     }
 
     /// Find method references without a receiver (instance method in current scope).
@@ -294,37 +255,7 @@ impl IndexQuery {
         if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
             return Some(locations);
         }
-        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
-            return None;
-        }
-
-        let mut all_references = Vec::new();
-        let method_kind = NamespaceKind::Instance;
-
-        if let Some(refs) =
-            self.find_method_refs_in_ancestor_chain(context_fqn, method, method_kind)
-        {
-            all_references.extend(refs);
-        }
-
-        // Also search in classes that include this module
-        if let Some(refs) =
-            self.find_method_refs_in_sibling_modules(context_fqn, method, method_kind)
-        {
-            all_references.extend(refs);
-        }
-
-        // Search descendants (subclasses) — a call to `parent_method` in Child < Parent
-        // is indexed as Child#parent_method, so we need to check subclasses too
-        if let Some(refs) = self.find_method_refs_in_descendants(context_fqn, method, method_kind) {
-            all_references.extend(refs);
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
+        None
     }
 
     fn find_method_refs_from_analysis(
@@ -350,148 +281,6 @@ impl IndexQuery {
         }
     }
 
-    /// Find method references in ancestor chain.
-    fn find_method_refs_in_ancestor_chain(
-        &self,
-        context_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        kind: NamespaceKind,
-    ) -> Option<Vec<Location>> {
-        let index = self.index.lock();
-        let mut all_references = Vec::new();
-        let context_ns =
-            FullyQualifiedName::namespace_with_kind(context_fqn.namespace_parts(), kind);
-        let ancestor_chain = index.get_ancestor_chain(&context_ns);
-
-        for ancestor_fqn in ancestor_chain {
-            let method_fqn =
-                FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
-            let refs = self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
-            if !refs.is_empty() {
-                all_references.extend(refs);
-            }
-
-            // Also check including classes
-            let including_classes = index.including_classes(&ancestor_fqn);
-            for (including_class_fqn, _via_modules) in including_classes {
-                let inc_method_fqn = FullyQualifiedName::method(
-                    including_class_fqn.namespace_parts(),
-                    method.clone(),
-                );
-                let inc_refs =
-                    self.reference_locations_for_fqn_with_index_fallback(&index, &inc_method_fqn);
-                if !inc_refs.is_empty() {
-                    all_references.extend(inc_refs);
-                }
-            }
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
-    }
-
-    /// Find method references in sibling modules.
-    fn find_method_refs_in_sibling_modules(
-        &self,
-        module_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        kind: NamespaceKind,
-    ) -> Option<Vec<Location>> {
-        let index = self.index.lock();
-        let mut all_references = Vec::new();
-        let including_classes = index.including_classes(module_fqn);
-
-        for (including_class_fqn, _via_modules) in including_classes {
-            let class_ns = FullyQualifiedName::namespace_with_kind(
-                including_class_fqn.namespace_parts(),
-                kind,
-            );
-            let ancestor_chain = index.get_ancestor_chain(&class_ns);
-            for ancestor_fqn in ancestor_chain {
-                let method_fqn =
-                    FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
-                let refs =
-                    self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
-                if !refs.is_empty() {
-                    all_references.extend(refs);
-                }
-            }
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
-    }
-
-    /// Find method references in descendant classes (subclasses, sub-subclasses, etc.)
-    /// and descendants of classes that include this module.
-    ///
-    /// When `parent_method` is defined in Parent and called as a bare method in
-    /// `Child < Parent`, the reference is indexed as `Child#parent_method`.
-    /// Similarly, when a module method is called in a subclass of the including class.
-    fn find_method_refs_in_descendants(
-        &self,
-        context_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-        kind: NamespaceKind,
-    ) -> Option<Vec<Location>> {
-        let index = self.index.lock();
-        let mut all_references = Vec::new();
-
-        let context_ns =
-            FullyQualifiedName::namespace_with_kind(context_fqn.namespace_parts(), kind);
-
-        // Collect all FQNs to check descendants of:
-        // 1. The context itself (direct subclasses)
-        // 2. Classes that include this module (their subclasses too)
-        let mut roots_to_search = vec![context_ns.clone()];
-        let including_classes = index.including_classes(&context_ns);
-        for (class_fqn, _via) in &including_classes {
-            roots_to_search.push(FullyQualifiedName::namespace_with_kind(
-                class_fqn.namespace_parts(),
-                kind,
-            ));
-        }
-
-        for root in &roots_to_search {
-            let descendants = index.descendants(root);
-            for descendant_fqn in descendants {
-                let method_fqn =
-                    FullyQualifiedName::method(descendant_fqn.namespace_parts(), method.clone());
-                let refs =
-                    self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
-                if !refs.is_empty() {
-                    all_references.extend(refs);
-                }
-            }
-        }
-
-        if all_references.is_empty() {
-            None
-        } else {
-            Some(all_references)
-        }
-    }
-
-    fn reference_locations_for_fqn_with_index_fallback(
-        &self,
-        index: &crate::indexer::index::RubyIndex,
-        fqn: &FullyQualifiedName,
-    ) -> Vec<Location> {
-        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
-            return self
-                .reference_locations_from_analysis(fqn)
-                .unwrap_or_default();
-        }
-        self.reference_locations_from_analysis(fqn)
-            .unwrap_or_else(|| index.references(fqn))
-    }
-
     fn reference_locations_from_analysis(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
@@ -506,13 +295,6 @@ impl IndexQuery {
         } else {
             Some(locations)
         }
-    }
-
-    fn has_no_analysis_document_context(&self) -> bool {
-        self.doc
-            .as_ref()
-            .map(|doc| doc.read().analysis_file_id().0 == 0)
-            .unwrap_or(false)
     }
 }
 
