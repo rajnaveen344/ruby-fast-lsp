@@ -73,7 +73,8 @@ fn parse_args() -> Result<Config> {
         }
     }
 
-    let corpus = corpus.ok_or_else(|| anyhow!("--corpus is required (try: discourse, mastodon)"))?;
+    let corpus =
+        corpus.ok_or_else(|| anyhow!("--corpus is required (try: discourse, mastodon)"))?;
     assert!(repeats > 0, "repeats must be > 0");
     Ok(Config {
         corpus,
@@ -122,7 +123,10 @@ fn main() -> Result<()> {
             .context("configuring global rayon pool")?;
         info!("rayon pool pinned to {} threads", n);
     } else {
-        info!("rayon pool at default size ({} threads)", rayon::current_num_threads());
+        info!(
+            "rayon pool at default size ({} threads)",
+            rayon::current_num_threads()
+        );
     }
 
     let workspace_path = corpus::ensure_corpus(&cfg.corpus)
@@ -187,7 +191,10 @@ async fn run_once(workspace_path: &PathBuf) -> Result<PhaseTimings> {
 fn log_corpus_shape(dir: &PathBuf) {
     let mut count = 0usize;
     let mut bytes = 0u64;
-    for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if entry.file_type().is_file() && entry.path().extension().map_or(false, |e| e == "rb") {
             count += 1;
             if let Ok(m) = entry.metadata() {

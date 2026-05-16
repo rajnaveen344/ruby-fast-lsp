@@ -613,6 +613,36 @@ function getServerPath() {
     return path.join(__dirname, 'bin', platformDir, binaryName);
 }
 
+function getBundledExtensionPackages(extensionPath) {
+    const packages = [];
+    const rspecPackage = path.join(extensionPath, 'extensions', 'rspec-ruby');
+    if (fs.existsSync(path.join(rspecPackage, 'extension.toml'))) {
+        packages.push(rspecPackage);
+    }
+    return packages;
+}
+
+function rspecTargetToCommand(target) {
+    const index = target.lastIndexOf(':');
+    if (index === -1) {
+        return target;
+    }
+
+    const uri = vscode.Uri.parse(target.slice(0, index));
+    const line = target.slice(index + 1);
+    return `${uri.fsPath}:${line}`;
+}
+
+function runRspecInTerminal(target) {
+    const terminal = vscode.window.createTerminal('RSpec');
+    terminal.show(true);
+    terminal.sendText(`bundle exec rspec ${rspecTargetToCommand(target)}`);
+}
+
+function debugRspecTarget(target) {
+    vscode.window.showInformationMessage(`RSpec debug target: ${rspecTargetToCommand(target)}`);
+}
+
 function activate(context) {
     // Create single output channel for both extension and LSP server logs
     outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP');
@@ -623,6 +653,7 @@ function activate(context) {
     extractZippedStubs(context.extensionPath);
 
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
+    const extensionPackages = getBundledExtensionPackages(context.extensionPath);
 
     const serverOptions = {
         command: getServerPath(),
@@ -639,7 +670,9 @@ function activate(context) {
         initializationOptions: {
             rubyVersion: config.get('rubyVersion', 'auto'),
             stubsPath: config.get('stubsPath', ''),
-            extensionPath: context.extensionPath
+            extensionPath: context.extensionPath,
+            extensionPackages,
+            extensionDirs: []
         },
         outputChannel: outputChannel
     };
@@ -691,7 +724,9 @@ function activate(context) {
                             rubyFastLsp: {
                                 rubyVersion: newConfig.get('rubyVersion', 'auto'),
                                 stubsPath: newConfig.get('stubsPath', ''),
-                                logLevel: newConfig.get('logLevel', 'info')
+                                logLevel: newConfig.get('logLevel', 'info'),
+                                extensionPackages,
+                                extensionDirs: []
                             }
                         }
                     });
@@ -911,6 +946,18 @@ function activate(context) {
         }
     );
 
+    const runRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.run',
+        (_uriStr, _line, target) => {
+            runRspecInTerminal(target);
+        }
+    );
+
+    const debugRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.debug',
+        (_uriStr, _line, target) => {
+            debugRspecTarget(target);
+        }
+    );
+
     // Register toggle external types command
     const toggleExternalTypesCommand = vscode.commands.registerCommand('rubyIndex.toggleExternalTypes', async () => {
         const config = vscode.workspace.getConfiguration('rubyFastLsp');
@@ -925,7 +972,7 @@ function activate(context) {
         indexProvider.refresh();
     });
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, searchCommand, toggleExternalTypesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, searchCommand, toggleExternalTypesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

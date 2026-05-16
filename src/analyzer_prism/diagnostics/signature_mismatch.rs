@@ -102,8 +102,8 @@ fn collect_unknown_kwargs<'a>(
             None => continue,
         };
         let name = utils::utf8_str(value_loc.as_slice()).to_string();
-        let declared = arity.required_keywords.contains(&name)
-            || arity.optional_keywords.contains(&name);
+        let declared =
+            arity.required_keywords.contains(&name) || arity.optional_keywords.contains(&name);
         if !declared {
             unknown.push((name, value_loc));
         }
@@ -250,8 +250,7 @@ fn find_method_arity_strict(
     let owner_with_kind = FullyQualifiedName::namespace_with_kind(owner.to_vec(), kind);
     search.push(owner_with_kind.clone());
     for ancestor in symbols.get_ancestor_chain(&owner_with_kind) {
-        let with_kind =
-            FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
+        let with_kind = FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
         if !search.contains(&with_kind) {
             search.push(with_kind);
         }

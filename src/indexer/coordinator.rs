@@ -1,4 +1,5 @@
 use crate::config::RubyFastLspConfig;
+use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::indexer::indexer_gem::IndexerGem;
@@ -49,6 +50,8 @@ pub struct IndexingCoordinator {
     /// workspaces can index concurrently into separate `RubyIndex` instances.
     index: Index<Unlocked>,
 
+    extension_registry: ExtensionRegistryHandle,
+
     // Ruby version info
     version_detector: RubyVersionDetector,
     detected_ruby_version: Option<RubyVersion>,
@@ -80,17 +83,15 @@ impl IndexingCoordinator {
     /// workspaces can be indexed concurrently into separate `RubyIndex`s.
     ///
     /// Call `run_complete_indexing()` to actually start the indexing process.
-    pub fn new(
-        workspace_root: PathBuf,
-        config: RubyFastLspConfig,
-        index: Index<Unlocked>,
-    ) -> Self {
+    pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig, index: Index<Unlocked>) -> Self {
         let version_detector = RubyVersionDetector::from_path(workspace_root.clone());
+        let extension_registry = ExtensionRegistryHandle::from_config(&config);
 
         Self {
             workspace_root,
             config,
             index,
+            extension_registry,
             version_detector,
             detected_ruby_version: None,
             file_processor: None,
@@ -106,6 +107,10 @@ impl IndexingCoordinator {
     /// `run_complete_indexing`. All-zero before the first call.
     pub fn last_timings(&self) -> PhaseTimings {
         self.last_timings
+    }
+
+    pub fn set_extension_registry(&mut self, extension_registry: ExtensionRegistryHandle) {
+        self.extension_registry = extension_registry;
     }
 
     /// Runs the complete indexing process from start to finish using two-phase approach.
@@ -237,7 +242,10 @@ impl IndexingCoordinator {
 
     /// Step 3: Set up the main indexing engine
     fn setup_file_processor(&mut self, _server: &RubyLanguageServer) {
-        self.file_processor = Some(FileProcessor::new(self.index.clone()));
+        self.file_processor = Some(FileProcessor::with_extension_registry(
+            self.index.clone(),
+            self.extension_registry.clone(),
+        ));
     }
 
     /// Quick scan for dependencies without indexing.
@@ -791,7 +799,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Execute the complete indexing process
@@ -812,7 +821,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
 
         // Test Ruby file collection
         let mut files = Vec::new();
@@ -837,7 +847,8 @@ end
     async fn test_coordinator_ruby_file_detection() {
         let fixture = TestProjectFixture::new();
         let config = RubyFastLspConfig::default();
-        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
 
         // Test various Ruby file extensions
         assert!(coordinator.is_ruby_file(&PathBuf::from("test.rb")));
@@ -860,7 +871,8 @@ end
         fixture.create_core_stubs();
 
         let config = RubyFastLspConfig::default();
-        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
 
         // Test core stubs path resolution
         let stubs_path = coordinator.find_core_stubs_for_version((3, 0));
@@ -899,7 +911,8 @@ end
     async fn test_coordinator_lib_directory_discovery() {
         let fixture = TestProjectFixture::new();
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
 
         // Test lib directory discovery
         coordinator.discover_ruby_library_paths();
@@ -946,7 +959,8 @@ end
         }
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Measure indexing time
@@ -977,7 +991,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Execute indexing which should include gem discovery
@@ -1022,7 +1037,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Test that gem indexing doesn't break the overall indexing process
@@ -1062,7 +1078,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Even if gem discovery fails, the overall indexing should still succeed
@@ -1097,7 +1114,8 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
         let server = create_test_server();
 
         // Measure time for indexing including gem discovery
@@ -1153,7 +1171,8 @@ end
             .expect("Failed to write vendor/bundle Ruby file");
 
         let config = RubyFastLspConfig::default();
-        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator =
+            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
 
         // Collect Ruby files from the project
         let mut collected_files: Vec<PathBuf> = Vec::new();

@@ -208,6 +208,22 @@ async fn completion_filtering() {
 - `check()` — single indexing pass, sufficient for most feature tests
 - `FakeEditor` — lifecycle tests, completion filtering, multi-step scenarios, snippet testing
 
+### FakeEditor vs External LSP Harness
+
+There are currently two editor-test harnesses:
+
+- `src/test/harness/fake_editor.rs` — internal full-featured `FakeEditor` for core
+  tests. It supports tag checks, diagnostics, goto, refs, rename, workspaces,
+  completion, editing, and direct access to core internals where needed.
+- `crates/lsp-test-harness` — external black-box harness for package/extension
+  tests that must exercise the public LSP initialization path.
+
+Do not merge them casually: `crates/lsp-test-harness` depends on `ruby-fast-lsp`,
+so root crate tests cannot depend back on it without creating a package cycle.
+Future cleanup: rename the external one to `BlackBoxEditor` or `LspTestClient`
+to avoid confusion, then keep the internal `FakeEditor` as the richer core test
+harness until core tests move to external integration crates.
+
 ### Type Inference Architecture
 
 **Two code paths for method return types:**

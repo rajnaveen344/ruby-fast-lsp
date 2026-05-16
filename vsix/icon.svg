@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="ruby" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff6b6b"/>
+      <stop offset="55%" stop-color="#d6202a"/>
+      <stop offset="100%" stop-color="#7a0d12"/>
+    </linearGradient>
+    <linearGradient id="facet-light" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff9c9c"/>
+      <stop offset="100%" stop-color="#e63946"/>
+    </linearGradient>
+    <linearGradient id="facet-dark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#b3151c"/>
+      <stop offset="100%" stop-color="#5a0a0f"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fff48a"/>
+      <stop offset="100%" stop-color="#f5a623"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff48a" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#f5a623" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#f5a623" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- soft background glow -->
+  <circle cx="128" cy="128" r="120" fill="url(#glow)"/>
+
+  <!-- lightning rays radiating behind ruby -->
+  <g fill="url(#bolt)" stroke="#c97a14" stroke-width="2" stroke-linejoin="round">
+    <!-- top-left bolt -->
+    <polygon points="60,20 96,72 74,76 110,118 78,90 100,84 70,46"/>
+    <!-- top-right bolt -->
+    <polygon points="206,28 168,78 188,84 152,124 184,96 162,90 196,54"/>
+    <!-- left bolt -->
+    <polygon points="14,108 70,118 60,138 108,140 70,154 80,134 24,128"/>
+    <!-- right bolt -->
+    <polygon points="244,118 188,126 198,146 150,148 196,162 184,142 240,138"/>
+    <!-- bottom-left bolt -->
+    <polygon points="48,228 92,180 110,196 128,156 116,200 96,188 64,238"/>
+    <!-- bottom-right bolt -->
+    <polygon points="216,232 174,182 156,198 138,158 150,202 170,190 200,240"/>
+  </g>
+
+  <!-- ruby gem (classic gem cut) -->
+  <g stroke="#3a0508" stroke-width="3" stroke-linejoin="round">
+    <!-- outer silhouette -->
+    <polygon points="128,44 200,92 168,212 88,212 56,92" fill="url(#ruby)"/>
+
+    <!-- top crown band -->
+    <polygon points="128,44 200,92 56,92" fill="url(#facet-light)" opacity="0.85"/>
+
+    <!-- crown facet divisions -->
+    <line x1="128" y1="44" x2="92" y2="92" stroke="#3a0508" stroke-width="2"/>
+    <line x1="128" y1="44" x2="164" y2="92" stroke="#3a0508" stroke-width="2"/>
+
+    <!-- pavilion facets -->
+    <polygon points="56,92 128,212 88,212" fill="url(#facet-dark)" opacity="0.55"/>
+    <polygon points="200,92 128,212 168,212" fill="url(#facet-dark)" opacity="0.7"/>
+    <polygon points="92,92 128,212 88,212" fill="url(#facet-light)" opacity="0.25"/>
+    <polygon points="164,92 128,212 168,212" fill="url(#facet-dark)" opacity="0.35"/>
+
+    <!-- center pavilion line -->
+    <line x1="128" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="2"/>
+    <line x1="92" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="1.5" opacity="0.6"/>
+    <line x1="164" y1="92" x2="128" y2="212" stroke="#3a0508" stroke-width="1.5" opacity="0.6"/>
+
+    <!-- top crown highlight diamond -->
+    <polygon points="128,56 156,88 128,84 100,88" fill="#ffd1d1" opacity="0.9" stroke="none"/>
+  </g>
+
+  <!-- specular shine on top-left facet -->
+  <polygon points="76,92 110,68 118,86 92,90" fill="#ffffff" opacity="0.35"/>
+</svg>

@@ -1,0 +1,26 @@
+[package]
+name = "ruby-fast-lsp-extension-wasm-host"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Wasm extension host for Ruby Fast LSP"
+
+[dependencies]
+anyhow = "1.0.75"
+ruby-fast-lsp-extension-api = { path = "../extension-api" }
+serde_json = "1.0.107"
+wasmtime = { version = "43.0.2", default-features = false, features = [
+    "anyhow",
+    "cranelift",
+    "gc",
+    "gc-null",
+    "runtime",
+    "std",
+] }
+wasmtime-wasi = { version = "43.0.2", default-features = false, features = [
+    "p1",
+] }
+
+[dev-dependencies]
+tempfile = "3.8.0"
+wat = "1.248.0"

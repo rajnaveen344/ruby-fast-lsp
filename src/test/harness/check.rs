@@ -972,14 +972,18 @@ async fn run_diagnostics_check(
             .iter()
             .filter(|e| range_overlaps(&e.range, &none_tag.range))
             .filter(|e| match code_filter {
-                Some(expected) => matches!(&e.code, Some(NumberOrString::String(s)) if s == expected),
+                Some(expected) => {
+                    matches!(&e.code, Some(NumberOrString::String(s)) if s == expected)
+                }
                 None => true,
             })
             .collect();
         assert!(
             errors_in_range.is_empty(),
             "Expected no errors{} in range {:?}, got: {:?}",
-            code_filter.map(|c| format!(" [code={}]", c)).unwrap_or_default(),
+            code_filter
+                .map(|c| format!(" [code={}]", c))
+                .unwrap_or_default(),
             none_tag.range,
             errors_in_range
                 .iter()
@@ -1018,14 +1022,18 @@ async fn run_diagnostics_check(
             .iter()
             .filter(|w| range_overlaps(&w.range, &none_tag.range))
             .filter(|w| match code_filter {
-                Some(expected) => matches!(&w.code, Some(NumberOrString::String(s)) if s == expected),
+                Some(expected) => {
+                    matches!(&w.code, Some(NumberOrString::String(s)) if s == expected)
+                }
                 None => true,
             })
             .collect();
         assert!(
             warnings_in_range.is_empty(),
             "Expected no warnings{} in range {:?}, got: {:?}",
-            code_filter.map(|c| format!(" [code={}]", c)).unwrap_or_default(),
+            code_filter
+                .map(|c| format!(" [code={}]", c))
+                .unwrap_or_default(),
             none_tag.range,
             warnings_in_range
                 .iter()
@@ -1808,10 +1816,8 @@ end
 
     #[tokio::test]
     async fn diag_tag_combines_attrs() {
-        check(
-            r#"<err code="unresolved-constant" message="Unresolved">UnknownThing</err>.new"#,
-        )
-        .await;
+        check(r#"<err code="unresolved-constant" message="Unresolved">UnknownThing</err>.new"#)
+            .await;
     }
 
     #[tokio::test]

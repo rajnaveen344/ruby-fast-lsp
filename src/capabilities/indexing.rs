@@ -26,6 +26,7 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
     let index = server.index_for_uri(&folder_uri);
     let mut coordinator =
         IndexingCoordinator::new(workspace_path, server.config.lock().clone(), index);
+    coordinator.set_extension_registry(server.extension_registry.clone());
     coordinator.run_complete_indexing(server).await?;
 
     Ok(())
@@ -53,7 +54,10 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     // Process file with unified FileProcessor::process_file. Route the index
     // by URI so the file lands in its workspace's own index.
     let workspace_index = server.index_for_uri(&uri);
-    let indexer = FileProcessor::new(workspace_index.clone());
+    let indexer = FileProcessor::with_extension_registry(
+        workspace_index.clone(),
+        server.extension_registry.clone(),
+    );
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
@@ -113,7 +117,10 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Full processing on every change - includes unresolved diagnostics.
     // Route by URI so the file's workspace index is the one updated.
     let workspace_index = server.index_for_uri(&uri);
-    let indexer = FileProcessor::new(workspace_index.clone());
+    let indexer = FileProcessor::with_extension_registry(
+        workspace_index.clone(),
+        server.extension_registry.clone(),
+    );
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,
@@ -173,7 +180,10 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // On save: do full indexing with unresolved tracking (for cross-file
     // diagnostics). Route by URI for multi-workspace correctness.
     let workspace_index = server.index_for_uri(&uri);
-    let indexer = FileProcessor::new(workspace_index.clone());
+    let indexer = FileProcessor::with_extension_registry(
+        workspace_index.clone(),
+        server.extension_registry.clone(),
+    );
     let options = ProcessingOptions {
         index_definitions: true,
         index_references: true,

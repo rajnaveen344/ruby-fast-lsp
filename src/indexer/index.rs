@@ -766,6 +766,10 @@ impl RubyIndex {
             .unwrap_or_default()
     }
 
+    pub fn clear_ancestor_chain_cache(&self) {
+        self.ancestor_chain_cache.lock().clear();
+    }
+
     /// All Method entries defined directly on the given owner namespace.
     /// `owner` must carry the correct namespace-kind (Instance / Singleton)
     /// since method entries are keyed on the kind-qualified owner FQN.
@@ -1192,7 +1196,10 @@ impl RubyIndex {
                 mixin_ref.absolute,
                 context_fqn,
             );
-            let done = match (singleton_id, resolved.as_ref().and_then(|r| self.get_fqn_id(r))) {
+            let done = match (
+                singleton_id,
+                resolved.as_ref().and_then(|r| self.get_fqn_id(r)),
+            ) {
                 (Some(s), Some(m)) => {
                     self.graph.add_include(s, m, file_id);
                     true
@@ -1354,6 +1361,7 @@ impl RubyIndex {
         // Retry pending — this file may have just added the namespace that
         // unlocks edges from earlier-indexed files.
         self.retry_unresolved_mixin_edges();
+        self.ancestor_chain_cache.lock().clear();
     }
 
     /// Get all classes that include this module (transitively through intermediate modules),

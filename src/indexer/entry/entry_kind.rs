@@ -63,7 +63,10 @@ impl MethodParamInfo {
 
     /// Returns true if this parameter already has a colon (keyword params)
     pub fn has_colon(&self) -> bool {
-        matches!(self.kind, ParamKind::RequiredKeyword | ParamKind::OptionalKeyword)
+        matches!(
+            self.kind,
+            ParamKind::RequiredKeyword | ParamKind::OptionalKeyword
+        )
     }
 }
 

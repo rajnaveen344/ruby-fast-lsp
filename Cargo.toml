@@ -1,5 +1,14 @@
 [workspace]
-members = [".", "crates/ast-visualizer", "crates/rbs-parser", "crates/lsp-repl"]
+members = [
+    ".",
+    "crates/ast-visualizer",
+    "crates/rbs-parser",
+    "crates/lsp-repl",
+    "crates/lsp-test-harness",
+    "crates/extension-api",
+    "crates/extension-rspec",
+    "crates/extension-wasm-host",
+]
 resolver = "2"
 
 [package]
@@ -30,6 +39,10 @@ path = "src/bin/ast.rs"
 name = "bench_references"
 path = "src/bin/bench_references.rs"
 
+[[bin]]
+name = "extension"
+path = "src/bin/extension.rs"
+
 [dependencies]
 # LSP related dependencies
 tower-lsp = "0.20.0"
@@ -40,6 +53,12 @@ log = "0.4.20"
 env_logger = "0.10.0"
 anyhow = "1.0.75"
 futures = "0.3"
+toml = "0.9.8"
+semver = "1.0.28"
+sha2 = "0.10.9"
+ruby-fast-lsp-extension-api = { path = "crates/extension-api" }
+ruby-fast-lsp-extension-rspec = { path = "crates/extension-rspec" }
+ruby-fast-lsp-extension-wasm-host = { path = "crates/extension-wasm-host" }
 
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"

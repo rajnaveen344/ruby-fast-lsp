@@ -9,10 +9,7 @@ async fn file_outside_any_workspace_falls_through_to_orphan() {
 
     // Open a file that does NOT live under workspace_a.
     editor
-        .open(
-            "stray/loose.rb",
-            "class Loose\n  def hello; end\nend\n",
-        )
+        .open("stray/loose.rb", "class Loose\n  def hello; end\nend\n")
         .await;
 
     // No workspace should match the orphan path.

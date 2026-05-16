@@ -71,7 +71,10 @@ pub fn ensure_corpus(name: &str) -> Result<PathBuf> {
 ///
 /// `scale` is the approximate target file count (e.g. 1_000, 10_000).
 /// Generation is deterministic given the scale; the cache key encodes it.
-pub fn ensure_synthetic(scale: usize, generate: impl FnOnce(&Path) -> Result<()>) -> Result<PathBuf> {
+pub fn ensure_synthetic(
+    scale: usize,
+    generate: impl FnOnce(&Path) -> Result<()>,
+) -> Result<PathBuf> {
     assert!(
         scale > 0,
         "INVARIANT VIOLATED: synthetic corpus scale is zero. \
@@ -97,8 +100,7 @@ pub fn ensure_synthetic(scale: usize, generate: impl FnOnce(&Path) -> Result<()>
 fn cache_root() -> Result<PathBuf> {
     let workspace = workspace_root()?;
     let dir = workspace.join("target").join("perf-corpus");
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("creating cache root {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| format!("creating cache root {}", dir.display()))?;
     Ok(dir)
 }
 

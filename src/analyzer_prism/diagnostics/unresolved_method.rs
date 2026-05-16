@@ -8,7 +8,10 @@ use crate::{
         symbol_table::SymbolTable,
     },
     inferrer::r#type::ruby::RubyType,
-    types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod, ruby_namespace::RubyConstant},
+    types::{
+        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
+        ruby_namespace::RubyConstant,
+    },
 };
 
 /// Check whether a method call is unresolved and return an `UnresolvedEntry`
@@ -139,8 +142,7 @@ fn find_suggestion(
     let owner_with_kind = FullyQualifiedName::namespace_with_kind(owner.to_vec(), kind);
     search.push(owner_with_kind.clone());
     for ancestor in symbols.get_ancestor_chain(&owner_with_kind) {
-        let with_kind =
-            FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
+        let with_kind = FullyQualifiedName::namespace_with_kind(ancestor.namespace_parts(), kind);
         if !search.contains(&with_kind) {
             search.push(with_kind);
         }

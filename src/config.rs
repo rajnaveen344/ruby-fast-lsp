@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,6 +10,15 @@ pub struct RubyFastLspConfig {
 
     #[serde(rename = "extensionPath")]
     pub extension_path: Option<String>,
+
+    #[serde(rename = "extensionPackages")]
+    pub extension_packages: Vec<String>,
+
+    #[serde(rename = "extensionDirs")]
+    pub extension_dirs: Vec<String>,
+
+    #[serde(rename = "extensionSettings")]
+    pub extension_settings: BTreeMap<String, serde_json::Value>,
 
     #[serde(rename = "codeLens.modules.enabled")]
     pub code_lens_modules_enabled: Option<bool>,
@@ -22,6 +32,9 @@ impl Default for RubyFastLspConfig {
         Self {
             ruby_version: "auto".to_string(),
             extension_path: None,
+            extension_packages: Vec::new(),
+            extension_dirs: Vec::new(),
+            extension_settings: BTreeMap::new(),
             code_lens_modules_enabled: Some(true),
             log_level: "info".to_string(),
         }

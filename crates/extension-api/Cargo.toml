@@ -1,0 +1,9 @@
+[package]
+name = "ruby-fast-lsp-extension-api"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Stable extension ABI types for Ruby Fast LSP"
+
+[dependencies]
+serde = { version = "1.0.188", features = ["derive"] }

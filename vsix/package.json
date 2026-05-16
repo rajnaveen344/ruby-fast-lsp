@@ -2,7 +2,7 @@
   "name": "ruby-fast-lsp",
   "displayName": "Ruby Fast LSP",
   "description": "High-performance Ruby Language Server with fast code navigation, syntax highlighting, and intelligent code insights for Ruby developers",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "publisher": "naveenraj",
   "icon": "icon.png",
   "repository": {
@@ -144,6 +144,14 @@
         "command": "rubyIndex.toggleExternalTypes",
         "title": "Toggle External Types",
         "icon": "$(library)"
+      },
+      {
+        "command": "ruby-fast-lsp.rspec.run",
+        "title": "Run RSpec"
+      },
+      {
+        "command": "ruby-fast-lsp.rspec.debug",
+        "title": "Debug RSpec"
       }
     ],
     "menus": {

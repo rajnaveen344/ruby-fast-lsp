@@ -62,7 +62,10 @@ fn main() -> anyhow::Result<()> {
                 info!("Indexing completed successfully!");
                 info!(
                     "Total definitions: {}",
-                    server.index_for_uri(&workspace_uri).lock().definitions_len()
+                    server
+                        .index_for_uri(&workspace_uri)
+                        .lock()
+                        .definitions_len()
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

@@ -115,10 +115,7 @@ impl Dumper<'_> {
     fn snippet(&self, start: usize, end: usize) -> String {
         let bytes = &self.src[start..end.min(self.src.len())];
         let s = String::from_utf8_lossy(bytes);
-        let oneline: String = s
-            .chars()
-            .map(|c| if c == '\n' { '⏎' } else { c })
-            .collect();
+        let oneline: String = s.chars().map(|c| if c == '\n' { '⏎' } else { c }).collect();
         if oneline.chars().count() > 50 {
             let head: String = oneline.chars().take(47).collect();
             format!("{head}...")

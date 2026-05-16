@@ -136,7 +136,10 @@ fn main() {
                 .insert(file_uri.clone(), Arc::new(RwLock::new(document)));
 
             // Process file (index definitions/references)
-            let indexer = FileProcessor::new(server.index_for_uri(&file_uri));
+            let indexer = FileProcessor::with_extension_registry(
+                server.index_for_uri(&file_uri),
+                server.extension_registry.clone(),
+            );
             let options = ProcessingOptions {
                 index_definitions: true,
                 index_references: true,
@@ -214,7 +217,10 @@ fn main() {
             }
             drop(docs);
 
-            let indexer = FileProcessor::new(server.index_for_uri(&file_uri));
+            let indexer = FileProcessor::with_extension_registry(
+                server.index_for_uri(&file_uri),
+                server.extension_registry.clone(),
+            );
             let options = ProcessingOptions {
                 index_definitions: true,
                 index_references: true,

@@ -15,6 +15,11 @@ impl IndexVisitor {
     /// To index meta-programming
     /// Implemented: include, extend, prepend
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
+        let extension_registry = self.extension_registry.clone();
+        extension_registry.process_call_node(self, node);
+        self.extension_call_stack
+            .push(crate::extensions::resolved_call_for_stack(self, node));
+
         // Optimization: Fast fail for method calls with receivers (e.g. obj.method)
         if node.receiver().is_some() {
             return;
@@ -113,7 +118,13 @@ impl IndexVisitor {
         }
     }
 
-    pub fn process_call_node_exit(&mut self, _node: &CallNode) {}
+    pub fn process_call_node_exit(&mut self, _node: &CallNode) {
+        self.extension_call_stack.pop().expect(
+            "INVARIANT VIOLATED: extension call stack underflow in IndexVisitor. \
+             This is a bug because every call-node entry must push exactly one stack frame. \
+             Fix: keep process_call_node_entry/process_call_node_exit balanced.",
+        );
+    }
 
     /// Process `module_function :method_name` calls.
     /// This creates a singleton method entry for the module, pointing to the original

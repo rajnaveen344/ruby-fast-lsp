@@ -43,10 +43,17 @@ pub async fn handle_initialize(
     if let Some(init_options) = params.initialization_options {
         if let Ok(config) = serde_json::from_value::<RubyFastLspConfig>(init_options) {
             debug!("Received configuration: {:?}", config);
+            lang_server
+                .extension_registry
+                .configure_from_config(&config);
             *lang_server.config.lock() = config;
         } else {
             warn!("Failed to parse initialization options as configuration");
         }
+    } else {
+        lang_server
+            .extension_registry
+            .configure_from_config(&RubyFastLspConfig::default());
     }
 
     // Register every workspace folder. Each folder gets its own RubyIndex
@@ -323,8 +330,7 @@ pub async fn handle_did_change_workspace_folders(
                         "Background indexing completed for added workspace: {}",
                         workspace_uri.as_str()
                     );
-                    indexing_complete_flag
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    indexing_complete_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 Err(e) => {
                     warn!(
@@ -346,13 +352,19 @@ pub async fn handle_did_change_configuration(
 
     if let Some(settings) = params.settings.as_object() {
         if let Some(ruby_fast_lsp_settings) = settings.get("rubyFastLsp") {
-            if let Ok(config) =
+            if let Ok(mut config) =
                 serde_json::from_value::<RubyFastLspConfig>(ruby_fast_lsp_settings.clone())
             {
+                preserve_initialization_only_config(
+                    &mut config,
+                    &server.config.lock(),
+                    ruby_fast_lsp_settings,
+                );
                 info!("Updated configuration: {:?}", config);
 
                 // Apply log level immediately (works without restart)
                 config.apply_log_level();
+                server.extension_registry.configure_from_config(&config);
 
                 *server.config.lock() = config.clone();
 
@@ -374,6 +386,29 @@ pub async fn handle_did_change_configuration(
                 warn!("Failed to parse configuration from settings");
             }
         }
+    }
+}
+
+fn preserve_initialization_only_config(
+    config: &mut RubyFastLspConfig,
+    current: &RubyFastLspConfig,
+    settings: &serde_json::Value,
+) {
+    let Some(settings) = settings.as_object() else {
+        return;
+    };
+
+    if !settings.contains_key("extensionPath") {
+        config.extension_path = current.extension_path.clone();
+    }
+    if !settings.contains_key("extensionPackages") {
+        config.extension_packages = current.extension_packages.clone();
+    }
+    if !settings.contains_key("extensionDirs") {
+        config.extension_dirs = current.extension_dirs.clone();
+    }
+    if !settings.contains_key("extensionSettings") {
+        config.extension_settings = current.extension_settings.clone();
     }
 }
 

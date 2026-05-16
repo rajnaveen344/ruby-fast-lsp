@@ -923,7 +923,10 @@ end
         server.docs.lock().insert(uri.clone(), doc_arc);
 
         // Process for definitions (which includes local variables)
-        let indexer = FileProcessor::new(server.index_for_uri(&uri));
+        let indexer = FileProcessor::with_extension_registry(
+            server.index_for_uri(&uri),
+            server.extension_registry.clone(),
+        );
         let options = ProcessingOptions {
             index_definitions: true,
             ..ProcessingOptions::default()

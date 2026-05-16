@@ -50,6 +50,12 @@ pub async fn handle_document_symbols(
         .iter()
         .map(|symbol| convert_to_document_symbol(symbol.clone()))
         .collect();
+    let mut lsp_symbols = lsp_symbols;
+    lsp_symbols.extend(
+        server
+            .extension_registry
+            .document_symbols(uri.as_str(), &document.content),
+    );
 
     debug!("Found {} top-level symbols", lsp_symbols.len());
 

@@ -8,6 +8,7 @@ use crate::capabilities::{
     formatting, hover, implementation, inlay_hints, namespace_tree, references, rename,
     semantic_tokens, type_hierarchy, workspace_symbols,
 };
+use crate::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
 use log::{debug, info, trace};
 use tower_lsp::jsonrpc::Result as LspResult;
@@ -249,6 +250,16 @@ pub async fn handle_export_graph(
 ) -> LspResult<debug::ExportGraphResponse> {
     info!("Export graph request received");
     Ok(debug::handle_export_graph(lang_server, params))
+}
+
+pub async fn handle_extension_status(
+    lang_server: &RubyLanguageServer,
+    _params: ExtensionStatusParams,
+) -> LspResult<ExtensionStatusResponse> {
+    info!("Extension status request received");
+    Ok(ExtensionStatusResponse {
+        extensions: lang_server.extension_registry.status_reports(),
+    })
 }
 
 // ============================================================================

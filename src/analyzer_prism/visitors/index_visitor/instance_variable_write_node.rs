@@ -169,7 +169,7 @@ mod tests {
     use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::{Index, Unlocked};
     use crate::inferrer::r#type::ruby::RubyType;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use ruby_prism::Visit;
     use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
@@ -183,16 +183,7 @@ mod tests {
         let index = create_test_index();
         let document =
             crate::types::ruby_document::RubyDocument::new(uri.clone(), content.to_string(), 1);
-        let scope_tracker = crate::analyzer_prism::scope_tracker::ScopeTracker::new();
-        let literal_analyzer = crate::inferrer::r#type::literal::LiteralAnalyzer::new();
-
-        let visitor = IndexVisitor {
-            index,
-            document,
-            scope_tracker,
-            literal_analyzer,
-            diagnostics: Vec::new(),
-        };
+        let visitor = IndexVisitor::new(index, document);
 
         let parse_result = ruby_prism::parse(content.as_bytes());
         (visitor, parse_result)

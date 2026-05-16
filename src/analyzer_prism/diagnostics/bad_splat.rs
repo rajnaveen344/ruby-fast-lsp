@@ -1,9 +1,7 @@
 use ruby_prism::{CallNode, Node};
 
 use crate::{
-    analyzer_prism::utils,
-    indexer::index::UnresolvedEntry,
-    inferrer::r#type::ruby::RubyType,
+    analyzer_prism::utils, indexer::index::UnresolvedEntry, inferrer::r#type::ruby::RubyType,
     types::ruby_document::RubyDocument,
 };
 
@@ -22,8 +20,7 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<UnresolvedEntry> {
         if let Some(splat) = arg.as_splat_node() {
             if let Some(expr) = splat.expression() {
                 if is_definitely_non_array(&expr, document) {
-                    let arg_repr =
-                        String::from_utf8_lossy(expr.location().as_slice()).to_string();
+                    let arg_repr = String::from_utf8_lossy(expr.location().as_slice()).to_string();
                     let loc = document.prism_location_to_lsp_location(&splat.location());
                     entries.push(UnresolvedEntry::bad_splat(
                         "*".to_string(),

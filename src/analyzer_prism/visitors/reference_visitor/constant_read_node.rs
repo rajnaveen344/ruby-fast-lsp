@@ -67,7 +67,11 @@ impl ReferenceVisitor {
                 current_namespace.iter().map(|c| c.to_string()).collect();
             self.staged.push_unresolved(
                 self.document.uri.clone(),
-                UnresolvedEntry::constant_with_context(name.to_string(), namespace_context, location),
+                UnresolvedEntry::constant_with_context(
+                    name.to_string(),
+                    namespace_context,
+                    location,
+                ),
             );
         }
     }

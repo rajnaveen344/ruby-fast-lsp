@@ -2,6 +2,7 @@ use ruby_prism::*;
 use tower_lsp::lsp_types::Diagnostic;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
+use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::method::resolver::MethodResolver;
@@ -33,10 +34,20 @@ pub struct IndexVisitor {
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
     pub diagnostics: Vec<Diagnostic>,
+    pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
+    pub extension_registry: ExtensionRegistryHandle,
 }
 
 impl IndexVisitor {
     pub fn new(index: Index<Unlocked>, document: RubyDocument) -> Self {
+        Self::with_extension_registry(index, document, ExtensionRegistryHandle::from_environment())
+    }
+
+    pub fn with_extension_registry(
+        index: Index<Unlocked>,
+        document: RubyDocument,
+        extension_registry: ExtensionRegistryHandle,
+    ) -> Self {
         let scope_tracker = ScopeTracker::new();
         Self {
             index,
@@ -44,6 +55,8 @@ impl IndexVisitor {
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
             diagnostics: Vec::new(),
+            extension_call_stack: Vec::new(),
+            extension_registry,
         }
     }
 

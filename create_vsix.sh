@@ -262,6 +262,16 @@ else
     echo "Stubs will not be included in the VSIX package"
 fi
 
+# Bundle core server-loaded extension packages.
+echo "Bundling Ruby Fast LSP extensions..."
+rm -rf "$EXTENSION_DIR/extensions"
+mkdir -p "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release"
+cp "extensions/rspec-ruby/extension.toml" "$EXTENSION_DIR/extensions/rspec-ruby/"
+cp "extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-ruby/"
+cp \
+    "extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
+    "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/"
+
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"
 echo "Installing dependencies..."

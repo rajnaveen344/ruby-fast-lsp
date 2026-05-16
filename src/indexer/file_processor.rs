@@ -19,6 +19,7 @@
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
+use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
@@ -90,11 +91,25 @@ pub struct ProcessResult {
 #[derive(Debug, Clone)]
 pub struct FileProcessor {
     index: Index<Unlocked>,
+    extension_registry: ExtensionRegistryHandle,
 }
 
 impl FileProcessor {
     pub fn new(index: Index<Unlocked>) -> Self {
-        Self { index }
+        Self {
+            index,
+            extension_registry: ExtensionRegistryHandle::from_environment(),
+        }
+    }
+
+    pub fn with_extension_registry(
+        index: Index<Unlocked>,
+        extension_registry: ExtensionRegistryHandle,
+    ) -> Self {
+        Self {
+            index,
+            extension_registry,
+        }
     }
 
     /// Get the index handle for creating visitors
@@ -163,7 +178,11 @@ impl FileProcessor {
             // The `document` variable from above is already initialized with content and parse_result
             // We just need to ensure it's mutable for the visitor.
             // Clone document because parse_result borrows from the original
-            let mut visitor = IndexVisitor::new(self.index.clone(), document.clone());
+            let mut visitor = IndexVisitor::with_extension_registry(
+                self.index.clone(),
+                document.clone(),
+                self.extension_registry.clone(),
+            );
             visitor.visit(&node);
             diagnostics.extend(visitor.diagnostics);
 
@@ -253,7 +272,11 @@ impl FileProcessor {
 
                 // Flush staged writes under a single brief write lock.
                 let staged = std::mem::take(&mut visitor.staged);
-                staged.flush(&mut self.index.lock());
+                {
+                    let mut index = self.index.lock();
+                    staged.flush(&mut index);
+                    index.clear_ancestor_chain_cache();
+                }
 
                 // Update the document with VariableScopes from visitor (includes references)
                 let docs = server.docs.lock();
@@ -305,7 +328,11 @@ impl FileProcessor {
         let node = parse_result.node();
 
         // Clone document because parse_result borrows from the original
-        let mut index_visitor = IndexVisitor::new(self.index.clone(), document.clone());
+        let mut index_visitor = IndexVisitor::with_extension_registry(
+            self.index.clone(),
+            document.clone(),
+            self.extension_registry.clone(),
+        );
         index_visitor.visit(&node);
 
         // NOTE: Return type inference is now done lazily when inlay hints are requested
@@ -317,7 +344,10 @@ impl FileProcessor {
     /// Index references and unresolved diagnostic entries from Ruby content.
     pub fn index_references(&self, uri: &Url, content: &str) -> Result<()> {
         let start = Instant::now();
-        debug!("Indexing references for: {:?} (track_unresolved: true)", uri);
+        debug!(
+            "Indexing references for: {:?} (track_unresolved: true)",
+            uri
+        );
 
         // Remove stale unresolved entries
         self.index.lock().remove_unresolved_entries_for_uri(uri);

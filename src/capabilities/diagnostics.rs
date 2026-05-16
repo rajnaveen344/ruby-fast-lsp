@@ -26,7 +26,10 @@ pub fn generate_diagnostics(
     let mut diagnostics = Vec::new();
     diagnostics.extend(extract_syntax_diagnostics(parse_result, document));
     diagnostics.extend(extract_unreachable_diagnostics(parse_result, document));
-    diagnostics.extend(extract_inconsistent_return_diagnostics(parse_result, document));
+    diagnostics.extend(extract_inconsistent_return_diagnostics(
+        parse_result,
+        document,
+    ));
     diagnostics.extend(extract_nil_call_diagnostics(parse_result, document));
     diagnostics
 }
@@ -74,8 +77,7 @@ impl<'a, 'pr> Visit<'pr> for NilCallVisitor<'a> {
                             // Flag the method-name location only, mirroring how
                             // other call diagnostics underline the message.
                             let msg_loc = node.message_loc().unwrap_or(node.location());
-                            let start =
-                                self.document.offset_to_position(msg_loc.start_offset());
+                            let start = self.document.offset_to_position(msg_loc.start_offset());
                             let end = self.document.offset_to_position(msg_loc.end_offset());
                             self.diagnostics.push(Diagnostic {
                                 range: Range::new(start, end),
@@ -196,10 +198,7 @@ fn is_void_call(node: &ruby_prism::Node<'_>) -> bool {
         return false;
     }
     let name = call.name();
-    matches!(
-        name.as_slice(),
-        b"puts" | b"print" | b"p" | b"pp" | b"warn"
-    )
+    matches!(name.as_slice(), b"puts" | b"print" | b"p" | b"pp" | b"warn")
 }
 
 /// Visitor that finds any `return EXPR` where EXPR is present and not `nil` literal.

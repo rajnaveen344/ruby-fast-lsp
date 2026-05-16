@@ -44,7 +44,13 @@ pub async fn handle_code_lens(
     let lens_data = query.get_code_lenses(uri, &content);
 
     // 5. Convert Vec<CodeLensData> → Vec<CodeLens>.
-    Some(lens_data.into_iter().map(to_lsp_code_lens).collect())
+    let mut lenses: Vec<CodeLens> = lens_data.into_iter().map(to_lsp_code_lens).collect();
+    lenses.extend(
+        lang_server
+            .extension_registry
+            .code_lenses(uri.as_str(), &content),
+    );
+    Some(lenses)
 }
 
 /// Convert a `CodeLensData` into an LSP `CodeLens`.

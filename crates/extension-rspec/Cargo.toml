@@ -1,0 +1,9 @@
+[package]
+name = "ruby-fast-lsp-extension-rspec"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "RSpec extension for Ruby Fast LSP"
+
+[dependencies]
+ruby-fast-lsp-extension-api = { path = "../extension-api" }

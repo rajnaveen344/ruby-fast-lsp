@@ -3,6 +3,7 @@ use crate::capabilities::debug::{
     MethodsParams, MethodsResponse, StatsParams, StatsResponse,
 };
 use crate::config::RubyFastLspConfig;
+use crate::extensions::{ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse};
 use crate::handlers::{notification, request};
 use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
@@ -112,6 +113,7 @@ pub struct RubyLanguageServer {
     pub orphan_index: Index<Unlocked>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
+    pub extension_registry: ExtensionRegistryHandle,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
     pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
     /// Timer for debounced reindexing on document changes
@@ -125,12 +127,14 @@ impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
         let orphan_index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         let config = RubyFastLspConfig::default();
+        let extension_registry = ExtensionRegistryHandle::from_config(&config);
         Ok(Self {
             client: Some(client),
             workspaces: Arc::new(RwLock::new(Vec::new())),
             orphan_index,
             docs: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(config)),
+            extension_registry,
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
@@ -142,10 +146,10 @@ impl RubyLanguageServer {
     /// indexing pass. With no workspaces registered, returns true vacuously
     /// (orphan-only mode has no coordinator to wait on).
     pub fn is_indexing_complete(&self) -> bool {
-        self.workspaces
-            .read()
-            .iter()
-            .all(|w| w.indexing_complete.load(std::sync::atomic::Ordering::Relaxed))
+        self.workspaces.read().iter().all(|w| {
+            w.indexing_complete
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
     }
 
     /// Set the parent process ID and start monitoring it.
@@ -352,6 +356,14 @@ impl RubyLanguageServer {
         request::handle_export_graph(self, params).await
     }
 
+    /// Handle `ruby-fast-lsp/extensions/status` - list loaded extension states.
+    pub async fn handle_extension_status(
+        &self,
+        params: ExtensionStatusParams,
+    ) -> LspResult<ExtensionStatusResponse> {
+        request::handle_extension_status(self, params).await
+    }
+
     /// Invalidate namespace tree cache with debouncing (300ms delay)
     pub fn invalidate_namespace_tree_cache_debounced(&self) {
         let server = self.clone();
@@ -399,6 +411,7 @@ impl Default for RubyLanguageServer {
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
+            extension_registry: ExtensionRegistryHandle::from_environment(),
         }
     }
 }

@@ -53,12 +53,12 @@ use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
     CompletionResponse, CompletionTriggerKind, Diagnostic, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString, PartialResultParams,
-    Position, Range, ReferenceContext, ReferenceParams, RenameParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceEdit,
+    DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
+    InlayHintParams, Location, NumberOrString, PartialResultParams, Position, Range,
+    ReferenceContext, ReferenceParams, RenameParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -521,6 +521,27 @@ impl FakeEditor {
             .ok()
             .flatten()
             .unwrap_or_default()
+    }
+
+    /// Returns document symbols for a file.
+    pub async fn document_symbols(&self, filename: &str) -> Vec<DocumentSymbol> {
+        self.assert_open(filename, "document_symbols");
+        let uri = Self::filename_to_uri(filename);
+        let params = DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        match self.server.document_symbol(params).await.ok().flatten() {
+            Some(DocumentSymbolResponse::Nested(symbols)) => symbols,
+            Some(DocumentSymbolResponse::Flat(_)) => panic!(
+                "INVARIANT VIOLATED: FakeEditor document_symbols received flat symbols. \
+                 This is a bug because Ruby Fast LSP document symbol capability returns nested symbols. \
+                 Fix: update the harness if flat symbols become supported."
+            ),
+            None => Vec::new(),
+        }
     }
 
     /// Returns diagnostics for a file by re-generating them from current state.

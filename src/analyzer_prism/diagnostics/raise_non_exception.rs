@@ -10,10 +10,8 @@ use crate::{
     },
     inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
-        ruby_document::RubyDocument,
-        ruby_method::RubyMethod,
-        ruby_namespace::RubyConstant,
-        fully_qualified_name::FullyQualifiedName,
+        fully_qualified_name::FullyQualifiedName, ruby_document::RubyDocument,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
     },
 };
 
@@ -109,10 +107,7 @@ fn is_exception_class(symbols: &dyn SymbolTable, name: &str) -> bool {
         );
         if symbols.contains_fqn(&ns_fqn) {
             for ancestor in symbols.get_ancestor_chain(&ns_fqn) {
-                let last = ancestor
-                    .namespace_parts()
-                    .last()
-                    .map(|c| c.to_string());
+                let last = ancestor.namespace_parts().last().map(|c| c.to_string());
                 if let Some(n) = last {
                     if EXCEPTION_WHITELIST.contains(&n.as_str()) {
                         return true;
@@ -186,9 +181,7 @@ fn resolve_bare_call_return_type(
         for entry in entries.iter() {
             if let EntryKind::Method(data) = &entry.kind {
                 if data.owner.namespace_parts() == *candidate_ns {
-                    return Some(
-                        data.return_type.clone().unwrap_or(RubyType::Unknown),
-                    );
+                    return Some(data.return_type.clone().unwrap_or(RubyType::Unknown));
                 }
             }
         }
@@ -286,10 +279,8 @@ pub fn check(
         let ty = if inner_call.receiver().is_some() {
             // Has receiver — use MethodResolver chain. Must NOT hold the
             // index mutex here: MethodResolver locks internally.
-            let resolver = MethodResolver::with_namespace(
-                index.clone(),
-                current_namespace.to_vec(),
-            );
+            let resolver =
+                MethodResolver::with_namespace(index.clone(), current_namespace.to_vec());
             resolver.resolve_call_type(&inner_call)
         } else {
             // Bare method call (no receiver) — look up by name in current namespace.

@@ -1,0 +1,17 @@
+id = "rspec-ruby"
+name = "RSpec Ruby"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.3, <0.3.0"
+runtime = "mruby-wasm"
+entry = "extension.rb"
+wasm = "target/wasm32-wasip1/release/rspec-ruby.wasm"
+checksum_sha256 = "1de83e8f2025d61eb56ba4d80efaee797c1f09e0f2a127071d005b947ee336fe"
+capabilities = ["index.call", "document_symbol", "code_lens"]
+permissions = []
+
+[build]
+output = "target/wasm32-wasip1/release/rspec-ruby.wasm"
+
+[indexing]
+call_names = ["describe", "context", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"]

@@ -4,10 +4,7 @@ use tower_lsp::lsp_types::Url;
 
 use crate::{
     analyzer_prism::{diagnostics::ReceiverInfo, utils},
-    indexer::{
-        entry::NamespaceKind,
-        index::UnresolvedEntry,
-    },
+    indexer::{entry::NamespaceKind, index::UnresolvedEntry},
     inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
@@ -101,17 +98,15 @@ impl ReferenceVisitor {
             let mut out: Vec<(Url, UnresolvedEntry)> = Vec::new();
 
             if self.track_unresolved {
-                if let Some(entry) =
-                    crate::analyzer_prism::diagnostics::unresolved_method::check(
-                        &receiver_info,
-                        inferred_expr_type.as_ref(),
-                        &method_name,
-                        &target_namespace,
-                        namespace_kind,
-                        &message_location,
-                        &*index,
-                    )
-                {
+                if let Some(entry) = crate::analyzer_prism::diagnostics::unresolved_method::check(
+                    &receiver_info,
+                    inferred_expr_type.as_ref(),
+                    &method_name,
+                    &target_namespace,
+                    namespace_kind,
+                    &message_location,
+                    &*index,
+                ) {
                     trace!("Adding unresolved method call: {}", method_name);
                     out.push((self.document.uri.clone(), entry));
                 }
@@ -158,7 +153,8 @@ impl ReferenceVisitor {
 
         // Bad-splat check: *expr must be Array-like; **expr must be Hash-like.
         if self.track_unresolved {
-            for entry in crate::analyzer_prism::diagnostics::bad_splat::check(node, &self.document) {
+            for entry in crate::analyzer_prism::diagnostics::bad_splat::check(node, &self.document)
+            {
                 self.staged
                     .push_unresolved(self.document.uri.clone(), entry);
             }
@@ -183,7 +179,12 @@ impl ReferenceVisitor {
         &self,
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
-    ) -> (Vec<RubyConstant>, NamespaceKind, ReceiverInfo, Option<RubyType>) {
+    ) -> (
+        Vec<RubyConstant>,
+        NamespaceKind,
+        ReceiverInfo,
+        Option<RubyType>,
+    ) {
         if receiver_node.as_self_node().is_some() {
             let (ns, kind) = self.handle_self_receiver(current_namespace);
             (ns, kind, ReceiverInfo::SelfReceiver, None)
@@ -193,13 +194,19 @@ impl ReferenceVisitor {
             (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
             if self.is_valid_constant_path_receiver(receiver_node) {
-                let receiver_name = crate::analyzer_prism::utils::build_constant_path_name(receiver_node);
+                let receiver_name =
+                    crate::analyzer_prism::utils::build_constant_path_name(receiver_node);
                 let (ns, kind) = self.handle_constant_path_receiver(
                     &constant_path,
                     receiver_node,
                     current_namespace,
                 );
-                (ns, kind, ReceiverInfo::ConstantReceiver(receiver_name), None)
+                (
+                    ns,
+                    kind,
+                    ReceiverInfo::ConstantReceiver(receiver_name),
+                    None,
+                )
             } else {
                 let (ns, kind, inferred) =
                     self.handle_expression_receiver(receiver_node, current_namespace);
@@ -467,5 +474,3 @@ impl ReferenceVisitor {
         // Nothing to do on exit
     }
 }
-
-

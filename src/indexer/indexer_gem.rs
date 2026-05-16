@@ -14,8 +14,8 @@ use log::{debug, info, warn};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tower_lsp::lsp_types::Url;
 
@@ -113,10 +113,11 @@ impl IndexerGem {
 
     /// Index only the gems required by the project
     async fn index_required_gems(&self, server: &RubyLanguageServer) -> Result<Vec<Url>> {
-        let total = self.required_gems.len();
+        let required_gems = self.required_gems_with_dependencies();
+        let total = required_gems.len();
         let mut indexed_files = Vec::new();
 
-        for (current, gem_name) in self.required_gems.iter().enumerate() {
+        for (current, gem_name) in required_gems.iter().enumerate() {
             IndexingCoordinator::send_progress_report(
                 server,
                 "Indexing Gems".to_string(),
@@ -125,7 +126,7 @@ impl IndexerGem {
             )
             .await;
 
-            if let Some(gem_versions) = self.discovered_gems.get(gem_name) {
+            if let Some(gem_versions) = self.discovered_gems.get(gem_name.as_str()) {
                 if let Some(gem_info) = self.select_preferred_version(gem_versions) {
                     info!(
                         "Indexing required gem: {} v{}",
@@ -230,7 +231,8 @@ impl IndexerGem {
 
     /// Get gem paths from Ruby's gem environment
     fn discover_gem_paths(&mut self) -> Result<()> {
-        let output = Command::new("ruby")
+        let output = self
+            .ruby_command()
             .args(["-e", "require 'rubygems'; puts Gem.path.join('\n')"])
             .output()
             .map_err(|e| anyhow!("Failed to execute ruby command: {}", e))?;
@@ -283,14 +285,12 @@ impl IndexerGem {
 
     /// Discover gems using Bundler (Gemfile-based)
     fn discover_bundler_gems(&mut self) -> Result<()> {
-        let gemfile_path = self.find_gemfile()?;
+        self.find_gemfile()?;
 
-        let script = format!(
-            r#"
+        let script = r#"
             require 'bundler'
             require 'json'
             begin
-              Dir.chdir('{}')
               Bundler.root
               gems = Bundler.load.specs.map do |spec|
                 next if spec.name.nil? || spec.version.nil?
@@ -299,7 +299,7 @@ impl IndexerGem {
                   version: spec.version.to_s,
                   gem_dir: spec.gem_dir,
                   lib_dirs: spec.require_paths.map {{ |p| File.join(spec.gem_dir, p) }},
-                  dependencies: spec.dependencies.map(&:name),
+                  dependencies: spec.runtime_dependencies.map(&:name),
                   default_gem: spec.default_gem?
                 }}
               end.compact
@@ -307,17 +307,19 @@ impl IndexerGem {
             rescue Bundler::GemfileNotFound
               exit 1
             end
-            "#,
-            gemfile_path.parent().unwrap().display()
-        );
+        "#;
 
-        let output = Command::new("ruby")
-            .args(["-e", &script])
+        let output = self
+            .ruby_command()
+            .args(["-e", script])
             .output()
             .map_err(|e| anyhow!("Failed to execute bundler gem discovery: {}", e))?;
 
         if !output.status.success() {
-            return Err(anyhow!("No Gemfile found or bundler failed"));
+            return Err(anyhow!(
+                "No Gemfile found or bundler failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         self.process_gem_json(&output.stdout, "Bundler")
@@ -335,14 +337,15 @@ impl IndexerGem {
                 version: spec.version.to_s,
                 gem_dir: spec.gem_dir,
                 lib_dirs: spec.require_paths.map { |p| File.join(spec.gem_dir, p) },
-                dependencies: spec.dependencies.map(&:name),
+                dependencies: spec.runtime_dependencies.map(&:name),
                 default_gem: spec.default_gem?
               }
             end.compact
             puts JSON.generate(gems)
         "#;
 
-        let output = Command::new("ruby")
+        let output = self
+            .ruby_command()
             .args(["-e", script])
             .output()
             .map_err(|e| anyhow!("Failed to execute ruby gem discovery: {}", e))?;
@@ -386,6 +389,22 @@ impl IndexerGem {
         }
 
         Err(anyhow!("No Gemfile found in workspace hierarchy"))
+    }
+
+    fn ruby_command(&self) -> Command {
+        if let Some(root) = &self.workspace_root {
+            if let Some(ruby_path) = workspace_ruby_path(root) {
+                let mut command = Command::new(ruby_path);
+                command.current_dir(root);
+                return command;
+            }
+        }
+
+        let mut command = Command::new("ruby");
+        if let Some(root) = &self.workspace_root {
+            command.current_dir(root);
+        }
+        command
     }
 
     /// Process gem data from JSON output
@@ -499,6 +518,36 @@ impl IndexerGem {
             .max_by(|a, b| compare_versions(&a.version, &b.version))
     }
 
+    fn required_gems_with_dependencies(&self) -> Vec<String> {
+        let mut ordered = Vec::new();
+        let mut seen = HashSet::new();
+        let mut roots = self.required_gems.iter().cloned().collect::<Vec<_>>();
+        roots.sort();
+        let mut queue = roots.into_iter().collect::<VecDeque<String>>();
+
+        while let Some(name) = queue.pop_front() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            ordered.push(name.clone());
+
+            let Some(gem_versions) = self.discovered_gems.get(&name) else {
+                continue;
+            };
+            let Some(gem_info) = self.select_preferred_version(gem_versions) else {
+                continue;
+            };
+
+            for dependency in &gem_info.dependencies {
+                if !seen.contains(dependency) {
+                    queue.push_back(dependency.clone());
+                }
+            }
+        }
+
+        ordered
+    }
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -582,6 +631,48 @@ fn compare_versions(a: &str, b: &str) -> Ordering {
     parts_a.len().cmp(&parts_b.len())
 }
 
+fn workspace_ruby_path(workspace_root: &Path) -> Option<PathBuf> {
+    let version = std::fs::read_to_string(workspace_root.join(".ruby-version")).ok()?;
+    let version = normalize_ruby_version(version.trim())?;
+    let home = std::env::var("HOME").ok()?;
+    let candidates = [
+        PathBuf::from(&home)
+            .join(".rvm")
+            .join("wrappers")
+            .join(format!("ruby-{version}"))
+            .join("ruby"),
+        PathBuf::from(&home)
+            .join(".rvm")
+            .join("rubies")
+            .join(format!("ruby-{version}"))
+            .join("bin")
+            .join("ruby"),
+        PathBuf::from(&home)
+            .join(".rbenv")
+            .join("versions")
+            .join(version)
+            .join("bin")
+            .join("ruby"),
+        PathBuf::from(&home)
+            .join(".asdf")
+            .join("installs")
+            .join("ruby")
+            .join(version)
+            .join("bin")
+            .join("ruby"),
+    ];
+
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn normalize_ruby_version(version: &str) -> Option<&str> {
+    let version = version.trim();
+    if version.is_empty() {
+        return None;
+    }
+    Some(version.strip_prefix("ruby-").unwrap_or(version))
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -609,5 +700,87 @@ mod tests {
         assert_eq!(compare_versions("1.0.1", "1.0.0"), Ordering::Greater);
         assert_eq!(compare_versions("1.0.0", "1.0.1"), Ordering::Less);
         assert_eq!(compare_versions("2.0.0", "1.9.9"), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_required_gems_include_transitive_dependencies() {
+        let mut indexer = create_test_indexer();
+        indexer.set_required_gems(HashSet::from(["rspec".to_string()]));
+        indexer.discovered_gems.insert(
+            "rspec".to_string(),
+            vec![GemInfo {
+                name: "rspec".to_string(),
+                version: "3.13.2".to_string(),
+                path: PathBuf::from("/tmp/rspec"),
+                lib_paths: vec![PathBuf::from("/tmp/rspec/lib")],
+                dependencies: vec![
+                    "rspec-core".to_string(),
+                    "rspec-expectations".to_string(),
+                    "rspec-mocks".to_string(),
+                ],
+                is_default: false,
+            }],
+        );
+        indexer.discovered_gems.insert(
+            "rspec-core".to_string(),
+            vec![GemInfo {
+                name: "rspec-core".to_string(),
+                version: "3.13.6".to_string(),
+                path: PathBuf::from("/tmp/rspec-core"),
+                lib_paths: vec![PathBuf::from("/tmp/rspec-core/lib")],
+                dependencies: vec!["rspec-support".to_string()],
+                is_default: false,
+            }],
+        );
+        indexer.discovered_gems.insert(
+            "rspec-support".to_string(),
+            vec![GemInfo {
+                name: "rspec-support".to_string(),
+                version: "3.13.7".to_string(),
+                path: PathBuf::from("/tmp/rspec-support"),
+                lib_paths: vec![PathBuf::from("/tmp/rspec-support/lib")],
+                dependencies: Vec::new(),
+                is_default: false,
+            }],
+        );
+
+        let gems = indexer.required_gems_with_dependencies();
+
+        assert_eq!(
+            gems,
+            vec![
+                "rspec".to_string(),
+                "rspec-core".to_string(),
+                "rspec-expectations".to_string(),
+                "rspec-mocks".to_string(),
+                "rspec-support".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_workspace_ruby_path_uses_rvm_ruby_version_file() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join(".ruby-version"), "ruby-3.3.11\n").unwrap();
+        let fake_home = temp_dir.path().join("home");
+        let ruby_path = fake_home
+            .join(".rvm")
+            .join("rubies")
+            .join("ruby-3.3.11")
+            .join("bin")
+            .join("ruby");
+        std::fs::create_dir_all(ruby_path.parent().unwrap()).unwrap();
+        std::fs::write(&ruby_path, "").unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &fake_home);
+        let detected = workspace_ruby_path(temp_dir.path());
+        if let Some(home) = old_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(detected, Some(ruby_path));
     }
 }

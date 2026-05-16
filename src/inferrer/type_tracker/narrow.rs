@@ -83,7 +83,9 @@ fn node_to_class_type(node: &Node) -> Option<RubyType> {
     if let Some(const_read) = node.as_constant_read_node() {
         let name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
         let constant = RubyConstant::new(&name).ok()?;
-        return Some(RubyType::Class(FullyQualifiedName::Constant(vec![constant])));
+        return Some(RubyType::Class(FullyQualifiedName::Constant(vec![
+            constant,
+        ])));
     }
     if let Some(const_path) = node.as_constant_path_node() {
         let parts = collect_constant_path(&const_path)?;

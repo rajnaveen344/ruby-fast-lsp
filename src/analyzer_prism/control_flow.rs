@@ -187,7 +187,9 @@ fn analyze_unless(unless_n: &UnlessNode<'_>) -> Reachability {
 
 fn join_branches(a: Reachability, b: Reachability) -> Reachability {
     match (a, b) {
-        (Reachability::Diverges(x), Reachability::Diverges(y)) => Reachability::Diverges(x.union(y)),
+        (Reachability::Diverges(x), Reachability::Diverges(y)) => {
+            Reachability::Diverges(x.union(y))
+        }
         _ => Reachability::Falls,
     }
 }
@@ -302,7 +304,9 @@ fn analyze_begin(begin_n: &ruby_prism::BeginNode<'_>) -> Reachability {
     // `rescues_r` represents: assuming body raises, what's the outcome?
     // The whole begin diverges iff happy_r diverges AND rescues_r diverges.
     match (happy_r, rescues_r) {
-        (Reachability::Diverges(a), Reachability::Diverges(b)) => Reachability::Diverges(a.union(b)),
+        (Reachability::Diverges(a), Reachability::Diverges(b)) => {
+            Reachability::Diverges(a.union(b))
+        }
         _ => {
             // Either path may fall through.
             // Special case: if body never raises (we can't prove this), happy_r alone
@@ -452,7 +456,9 @@ mod tests {
     #[test]
     fn if_then_returns_else_raises_diverges_with_both_kinds() {
         let r = analyze_src("if x\n  return 1\nelse\n  raise\nend");
-        let Reachability::Diverges(es) = r else { panic!("expected diverges") };
+        let Reachability::Diverges(es) = r else {
+            panic!("expected diverges")
+        };
         assert!(es.contains(Exit::Return));
         assert!(es.contains(Exit::Raise));
     }
@@ -484,9 +490,7 @@ mod tests {
 
     #[test]
     fn elsif_chain_all_return_diverges() {
-        let r = analyze_src(
-            "if a\n  return 1\nelsif b\n  return 2\nelse\n  return 3\nend",
-        );
+        let r = analyze_src("if a\n  return 1\nelsif b\n  return 2\nelse\n  return 3\nend");
         assert_eq!(r, Reachability::Diverges(ExitSet::one(Exit::Return)));
     }
 
@@ -498,10 +502,10 @@ mod tests {
 
     #[test]
     fn case_when_all_terminate_with_else_diverges() {
-        let r = analyze_src(
-            "case x\nwhen 1 then return 1\nwhen 2 then raise\nelse return 3\nend",
-        );
-        let Reachability::Diverges(es) = r else { panic!("expected diverges") };
+        let r = analyze_src("case x\nwhen 1 then return 1\nwhen 2 then raise\nelse return 3\nend");
+        let Reachability::Diverges(es) = r else {
+            panic!("expected diverges")
+        };
         assert!(es.contains(Exit::Return));
         assert!(es.contains(Exit::Raise));
     }
@@ -514,25 +518,19 @@ mod tests {
 
     #[test]
     fn case_when_one_branch_falls_means_falls() {
-        let r = analyze_src(
-            "case x\nwhen 1 then return 1\nwhen 2 then 2\nelse return 3\nend",
-        );
+        let r = analyze_src("case x\nwhen 1 then return 1\nwhen 2 then 2\nelse return 3\nend");
         assert_eq!(r, Reachability::Falls);
     }
 
     #[test]
     fn case_in_all_terminate_with_else_diverges() {
-        let r = analyze_src(
-            "case x\nin 1 then return 1\nin 2 then raise\nelse return 3\nend",
-        );
+        let r = analyze_src("case x\nin 1 then return 1\nin 2 then raise\nelse return 3\nend");
         assert!(r.is_diverges());
     }
 
     #[test]
     fn begin_body_and_rescue_both_return_diverges() {
-        let r = analyze_src(
-            "begin\n  return 1\nrescue => e\n  return 2\nend",
-        );
+        let r = analyze_src("begin\n  return 1\nrescue => e\n  return 2\nend");
         assert_eq!(r, Reachability::Diverges(ExitSet::one(Exit::Return)));
     }
 
@@ -544,18 +542,14 @@ mod tests {
 
     #[test]
     fn begin_ensure_diverges_makes_whole_diverge() {
-        let r = analyze_src(
-            "begin\n  1\nensure\n  return 99\nend",
-        );
+        let r = analyze_src("begin\n  1\nensure\n  return 99\nend");
         assert_eq!(r, Reachability::Diverges(ExitSet::one(Exit::Return)));
     }
 
     #[test]
     fn begin_with_else_clause_runs_else_when_body_falls() {
         // body falls → else runs → else returns → whole diverges
-        let r = analyze_src(
-            "begin\n  1\nrescue => e\n  return 2\nelse\n  return 3\nend",
-        );
+        let r = analyze_src("begin\n  1\nrescue => e\n  return 2\nelse\n  return 3\nend");
         assert_eq!(r, Reachability::Diverges(ExitSet::one(Exit::Return)));
     }
 

@@ -1,6 +1,7 @@
 pub mod analyzer_prism;
 pub mod capabilities;
 pub mod config;
+pub mod extensions;
 pub mod handlers;
 pub mod indexer;
 pub mod inferrer;

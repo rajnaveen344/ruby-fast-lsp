@@ -1,0 +1,24 @@
+diff --git a/include/mruby/throw.h b/include/mruby/throw.h
+index 64e2bcd31..bb827e88b 100644
+--- a/include/mruby/throw.h
++++ b/include/mruby/throw.h
+@@ -35,7 +35,18 @@ compilation. C source files that include this header will fail
+ 
+ #define MRB_THROW_H
+ 
+-#if defined(MRB_USE_CXX_EXCEPTION)
++#if defined(MRB_USE_WASM_TRAP_EXCEPTION)
++
++#include <stdlib.h>
++
++#define MRB_TRY(buf) {
++#define MRB_CATCH(buf) } if (0) {
++#define MRB_END_EXC(buf) }
++
++#define MRB_THROW(buf) abort()
++typedef void *mrb_jmpbuf_impl;
++
++#elif defined(MRB_USE_CXX_EXCEPTION)
+ 
+ # if defined(__cplusplus)
+ 

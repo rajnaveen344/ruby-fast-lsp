@@ -1,0 +1,42 @@
+FROM debian:bookworm-slim
+
+ARG MRUBY_VERSION=4.0.0
+ARG WASI_SDK_VERSION=33
+ARG TARGETARCH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        make \
+        ruby \
+        rake \
+        gcc \
+        g++ \
+        bison \
+        patch \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN case "$TARGETARCH" in \
+      amd64) WASI_ARCH=x86_64 ;; \
+      arm64) WASI_ARCH=arm64 ;; \
+      *) echo "unsupported Docker TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+      "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_ARCH}-linux.tar.gz" \
+      -o /tmp/wasi-sdk.tar.gz \
+    && mkdir -p /opt \
+    && tar -xzf /tmp/wasi-sdk.tar.gz -C /opt \
+    && mv "/opt/wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_ARCH}-linux" /opt/wasi-sdk \
+    && rm /tmp/wasi-sdk.tar.gz
+
+RUN git clone --depth 1 --branch "${MRUBY_VERSION}" https://github.com/mruby/mruby.git /opt/mruby
+
+ENV MRUBY_ROOT=/opt/mruby
+ENV WASI_SDK_PATH=/opt/wasi-sdk
+
+WORKDIR /workspace
+
+CMD ["extensions/rspec-ruby/scripts/build-wasm.sh"]
