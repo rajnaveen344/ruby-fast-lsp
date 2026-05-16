@@ -7,11 +7,31 @@ pub struct MethodFact {
     pub fqn: FullyQualifiedName,
     pub owner: FullyQualifiedName,
     pub range: TextRange,
+    pub params: Vec<String>,
 }
 
 impl MethodFact {
     pub fn new(fqn: FullyQualifiedName, owner: FullyQualifiedName, range: TextRange) -> Self {
-        Self { fqn, owner, range }
+        Self {
+            fqn,
+            owner,
+            range,
+            params: Vec::new(),
+        }
+    }
+
+    pub fn with_params(
+        fqn: FullyQualifiedName,
+        owner: FullyQualifiedName,
+        range: TextRange,
+        params: Vec<String>,
+    ) -> Self {
+        Self {
+            fqn,
+            owner,
+            range,
+            params,
+        }
     }
 }
 

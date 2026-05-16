@@ -451,10 +451,13 @@ impl Visit<'_> for AnalysisIndexer {
         let owner =
             FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
         let range = self.range(&node.location());
+        let params = method_param_names(node);
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
-        self.facts.methods.push(MethodFact::new(fqn, owner, range));
+        self.facts
+            .methods
+            .push(MethodFact::with_params(fqn, owner, range, params));
 
         visit_def_node(self, node);
     }
@@ -743,6 +746,65 @@ fn constant_path_parts(path: &ConstantPathNode<'_>) -> Option<Vec<RubyConstant>>
     (!parts.is_empty()).then_some(parts)
 }
 
+fn method_param_names(node: &DefNode<'_>) -> Vec<String> {
+    let mut params = Vec::new();
+    let Some(params_node) = node.parameters() else {
+        return params;
+    };
+
+    for required in params_node.requireds().iter() {
+        if let Some(param) = required.as_required_parameter_node() {
+            params.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+        }
+    }
+
+    for optional in params_node.optionals().iter() {
+        if let Some(param) = optional.as_optional_parameter_node() {
+            params.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+        }
+    }
+
+    if let Some(rest) = params_node.rest() {
+        if let Some(param) = rest.as_rest_parameter_node() {
+            if let Some(name) = param.name() {
+                params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+            }
+        }
+    }
+
+    for keyword in params_node.keywords().iter() {
+        if let Some(param) = keyword.as_required_keyword_parameter_node() {
+            params.push(
+                String::from_utf8_lossy(param.name().as_slice())
+                    .trim_end_matches(':')
+                    .to_string(),
+            );
+        } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
+            params.push(
+                String::from_utf8_lossy(param.name().as_slice())
+                    .trim_end_matches(':')
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(kwrest) = params_node.keyword_rest() {
+        if let Some(param) = kwrest.as_keyword_rest_parameter_node() {
+            if let Some(name) = param.name() {
+                params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+            }
+        }
+    }
+
+    if let Some(block) = params_node.block() {
+        if let Some(name) = block.name() {
+            params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+        }
+    }
+
+    params
+}
+
 fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<RubyConstant>) {
     if let Some(parent) = path.parent() {
         if let Some(parent_path) = parent.as_constant_path_node() {
@@ -865,6 +927,27 @@ mod tests {
             fact.fqn.to_string() == "User#find"
                 && fact.owner.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton)
         }));
+    }
+
+    #[test]
+    fn indexes_method_param_names() {
+        let index = AnalysisIndexer::new(file()).index_source(
+            "class User\n  def find(id, name = nil, *rest, active:, role: nil, **opts, &block)\n  end\nend\n",
+        );
+
+        let method = index
+            .methods
+            .iter()
+            .find(|fact| fact.fqn.to_string() == "User#find")
+            .expect(
+                "INVARIANT VIOLATED: analysis indexer did not emit User#find. \
+                 This is a bug because def nodes must produce method facts. \
+                 Fix: keep visit_def_node method fact emission active.",
+            );
+        assert_eq!(
+            method.params,
+            vec!["id", "name", "rest", "active", "role", "opts", "block"]
+        );
     }
 
     #[test]

@@ -196,6 +196,17 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
+    pub fn method_return_type(&self, fact: &MethodFact) -> Option<ruby_analysis_core::RubyType> {
+        match self.engine.type_at(
+            &TypeSubject::MethodReturn(fact.fqn.clone()),
+            fact.range.file_id,
+            fact.range.end_byte,
+        ) {
+            TypeResolution::Resolved(type_fact) => Some(type_fact.ruby_type),
+            TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+        }
+    }
+
     pub fn top_level_method_completion_facts(&self, partial: &str) -> Vec<MethodFact> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();

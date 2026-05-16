@@ -21,31 +21,17 @@ pub fn find_method_completions(
     partial_method: &str,
     kind: NamespaceKind,
 ) -> Vec<CompletionItem> {
-    let mut completions = Vec::new();
-    let mut seen_methods = std::collections::HashSet::new();
+    let mut completions = find_rbs_method_completions(receiver_type, partial_method, kind);
+    let mut seen_methods = completions
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<std::collections::HashSet<_>>();
     let is_singleton = kind == NamespaceKind::Singleton;
 
     // Get the class name for lookups
     let class_names = get_class_names_for_type(receiver_type);
 
     for class_name in &class_names {
-        // Get methods from RBS (built-in types)
-        let rbs_methods = get_rbs_class_methods(class_name, is_singleton);
-        for method_info in rbs_methods {
-            // Filter by partial match
-            if !method_info.name.starts_with(partial_method) {
-                continue;
-            }
-
-            // Skip if already seen
-            if seen_methods.contains(&method_info.name) {
-                continue;
-            }
-            seen_methods.insert(method_info.name.clone());
-
-            completions.push(create_method_completion_item(&method_info));
-        }
-
         // Get methods from Ruby index (user-defined types) including ancestor chain
         let index_methods =
             get_index_methods_with_ancestors(index, class_name, partial_method, kind);
@@ -61,6 +47,39 @@ pub fn find_method_completions(
                 is_singleton,
                 params,
             };
+            completions.push(create_method_completion_item(&method_info));
+        }
+    }
+
+    // Sort by name
+    completions.sort_by(|a, b| a.label.cmp(&b.label));
+
+    completions
+}
+
+pub fn find_rbs_method_completions(
+    receiver_type: &RubyType,
+    partial_method: &str,
+    kind: NamespaceKind,
+) -> Vec<CompletionItem> {
+    let mut completions = Vec::new();
+    let mut seen_methods = std::collections::HashSet::new();
+    let is_singleton = kind == NamespaceKind::Singleton;
+
+    let class_names = get_class_names_for_type(receiver_type);
+
+    for class_name in &class_names {
+        let rbs_methods = get_rbs_class_methods(class_name, is_singleton);
+        for method_info in rbs_methods {
+            if !method_info.name.starts_with(partial_method) {
+                continue;
+            }
+
+            if seen_methods.contains(&method_info.name) {
+                continue;
+            }
+            seen_methods.insert(method_info.name.clone());
+
             completions.push(create_method_completion_item(&method_info));
         }
     }

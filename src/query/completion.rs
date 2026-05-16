@@ -89,8 +89,7 @@ impl IndexQuery {
         kind: NamespaceKind,
     ) -> Vec<CompletionItem> {
         let mut items = self.method_completions_from_analysis(receiver_type, partial_method, kind);
-        items.extend(method::find_method_completions(
-            &self.index,
+        items.extend(method::find_rbs_method_completions(
             receiver_type,
             partial_method,
             kind,
@@ -112,16 +111,8 @@ impl IndexQuery {
         let mut items = Vec::new();
         for namespace_fqn in receiver_type_to_namespaces(receiver_type, kind) {
             for fact in query.method_completion_facts(&namespace_fqn, partial_method) {
-                if let FullyQualifiedName::Method(_, method) = &fact.fqn {
-                    let name = method.get_name();
-                    items.push(CompletionItem {
-                        label: name.clone(),
-                        kind: Some(CompletionItemKind::METHOD),
-                        detail: Some(format!("method {}", fact.fqn)),
-                        insert_text: Some(name),
-                        ..Default::default()
-                    });
-                }
+                let return_type = query.method_return_type(&fact);
+                items.push(method_completion_item_from_analysis(&fact, return_type));
             }
         }
         items
@@ -148,20 +139,50 @@ impl IndexQuery {
         query
             .top_level_method_completion_facts(partial_method)
             .into_iter()
-            .filter_map(|fact| {
-                let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-                    return None;
-                };
-                let name = method.get_name();
-                Some(CompletionItem {
-                    label: name.clone(),
-                    kind: Some(CompletionItemKind::METHOD),
-                    detail: Some(format!("method {}", fact.fqn)),
-                    insert_text: Some(name),
-                    ..Default::default()
-                })
+            .map(|fact| {
+                let return_type = query.method_return_type(&fact);
+                method_completion_item_from_analysis(&fact, return_type)
             })
             .collect()
+    }
+}
+
+fn method_completion_item_from_analysis(
+    fact: &ruby_analysis_core::MethodFact,
+    return_type: Option<RubyType>,
+) -> CompletionItem {
+    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+        panic!(
+            "INVARIANT VIOLATED: analysis method completion fact has non-method FQN: {}. \
+             This is a bug because MethodStore must only contain method facts. \
+             Fix: reject non-method FQNs in MethodFact construction.",
+            fact.fqn
+        );
+    };
+
+    let name = method.get_name();
+    let params = fact
+        .params
+        .iter()
+        .filter(|param| !param.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let params = if params.is_empty() {
+        String::new()
+    } else {
+        format!("({})", params.join(", "))
+    };
+    let return_type = return_type
+        .map(|ruby_type| format!(" -> {ruby_type}"))
+        .unwrap_or_default();
+    let detail = format!("{name}{params}{return_type}");
+
+    CompletionItem {
+        label: name.clone(),
+        kind: Some(CompletionItemKind::METHOD),
+        detail: Some(detail),
+        insert_text: Some(name),
+        ..Default::default()
     }
 }
 
