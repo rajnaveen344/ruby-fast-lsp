@@ -380,6 +380,15 @@ impl<'a> TypeQuery<'a> {
     /// Class/module constants still fall back to ClassReference/ModuleReference when
     /// there is no value-constant entry, but `A = 1` returns `Integer`.
     pub fn get_constant_type(&self, fqn: &FullyQualifiedName) -> Option<RubyType> {
+        if let Some(type_store) = self.type_store {
+            return type_store
+                .facts_for(&TypeSubject::Constant(fqn.clone()))
+                .iter()
+                .filter(|fact| fact.range.file_id == self.source_file_id)
+                .next_back()
+                .map(|fact| fact.ruby_type.clone());
+        }
+
         self.get_constant_type_from_index(fqn)
     }
 
@@ -397,7 +406,7 @@ impl<'a> TypeQuery<'a> {
             ) {
                 TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
                 TypeResolution::Ambiguous(_) => return None,
-                TypeResolution::Unresolved => {}
+                TypeResolution::Unresolved => return None,
             }
         }
 

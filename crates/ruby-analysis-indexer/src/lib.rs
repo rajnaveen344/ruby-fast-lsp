@@ -136,6 +136,15 @@ impl AnalysisIndexer {
         self.facts
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
+        self.facts.types.push(TypeFact::new(
+            TypeSubject::Constant(FullyQualifiedName::constant(fqn.namespace_parts())),
+            match kind {
+                GraphNodeKind::Class => RubyType::ClassReference(fqn.clone()),
+                GraphNodeKind::Module => RubyType::ModuleReference(fqn.clone()),
+            },
+            range,
+            TypeProvenance::Inferred,
+        ));
 
         let singleton_fqn = fqn.to_singleton_namespace().expect(
             "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
@@ -754,6 +763,19 @@ fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<Ruby
 }
 
 fn literal_type(node: &Node<'_>) -> Option<RubyType> {
+    if let Some(read) = node.as_constant_read_node() {
+        let name = String::from_utf8_lossy(read.name().as_slice()).to_string();
+        let constant = RubyConstant::new(&name).ok()?;
+        return Some(RubyType::ClassReference(FullyQualifiedName::constant(
+            vec![constant],
+        )));
+    }
+    if let Some(path) = node.as_constant_path_node() {
+        let parts = constant_path_parts(&path)?;
+        return Some(RubyType::ClassReference(FullyQualifiedName::constant(
+            parts,
+        )));
+    }
     if node.as_string_node().is_some() || node.as_interpolated_string_node().is_some() {
         return Some(RubyType::string());
     }
@@ -927,6 +949,37 @@ mod tests {
         assert!(index.types.iter().any(|fact| {
             fact.subject == TypeSubject::GlobalVariable("$debug".to_string())
                 && fact.ruby_type == RubyType::false_class()
+        }));
+    }
+
+    #[test]
+    fn indexes_namespace_constant_type_facts() {
+        let index =
+            AnalysisIndexer::new(file()).index_source("module Auth\nend\nclass User\nend\n");
+
+        let auth = FullyQualifiedName::constant(vec![RubyConstant::new("Auth").unwrap()]);
+        let user = FullyQualifiedName::constant(vec![RubyConstant::new("User").unwrap()]);
+        assert!(index.types.iter().any(|fact| {
+            fact.subject == TypeSubject::Constant(auth.clone())
+                && matches!(fact.ruby_type, RubyType::ModuleReference(_))
+        }));
+        assert!(index.types.iter().any(|fact| {
+            fact.subject == TypeSubject::Constant(user.clone())
+                && matches!(fact.ruby_type, RubyType::ClassReference(_))
+        }));
+    }
+
+    #[test]
+    fn indexes_constant_object_assignment_type_fact() {
+        let index = AnalysisIndexer::new(file()).index_source("MODEL = User\n");
+
+        let model = FullyQualifiedName::constant(vec![RubyConstant::new("MODEL").unwrap()]);
+        assert!(index.types.iter().any(|fact| {
+            fact.subject == TypeSubject::Constant(model.clone())
+                && fact.ruby_type
+                    == RubyType::ClassReference(FullyQualifiedName::constant(vec![
+                        RubyConstant::new("User").unwrap(),
+                    ]))
         }));
     }
 }
