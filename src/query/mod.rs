@@ -37,7 +37,7 @@ mod workspace_symbols;
 pub use code_lens::CodeLensData;
 pub use diagnostics::generate_yard_diagnostics_inner;
 pub use hover::HoverInfo;
-pub use inference::{LocalVariableResolver, ReceiverResolver, ReturnTypeResolver};
+pub use inference::ReceiverResolver;
 pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};
