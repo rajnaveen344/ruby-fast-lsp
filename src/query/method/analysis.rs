@@ -46,7 +46,17 @@ pub(super) fn resolve_method_callees(
     }
 
     if callees.is_empty() {
-        return None;
+        return Some(
+            fqns_to_search
+                .into_iter()
+                .map(|fqn| ResolvedMethodCallee {
+                    owner: fqn,
+                    method: *method,
+                    resolution: MethodCalleeResolution::ReceiverOnly,
+                    definition_locations: Vec::new(),
+                })
+                .collect(),
+        );
     }
 
     Some(callees)
@@ -138,7 +148,6 @@ fn module_includers(
     for edge in engine.all_graph_edges() {
         if &edge.target == module_fqn
             && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-            && edge.source.namespace_kind() == Some(NamespaceKind::Instance)
             && visited.insert(edge.source.clone())
         {
             queue.push_back(edge.source);
@@ -155,7 +164,6 @@ fn module_includers(
             for edge in engine.all_graph_edges() {
                 if edge.target == current
                     && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-                    && edge.source.namespace_kind() == Some(NamespaceKind::Instance)
                     && visited.insert(edge.source.clone())
                 {
                     queue.push_back(edge.source);
