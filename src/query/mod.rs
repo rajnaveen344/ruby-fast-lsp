@@ -43,7 +43,8 @@ pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};
 
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::types::ruby_document::RubyDocument;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
@@ -59,6 +60,7 @@ pub struct IndexQuery {
     index: Index<Unlocked>,
     doc: Option<Arc<RwLock<RubyDocument>>>,
     uri: Option<Url>,
+    analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
 impl IndexQuery {
@@ -68,6 +70,7 @@ impl IndexQuery {
             index,
             doc: None,
             uri: None,
+            analysis_engine: None,
         }
     }
 
@@ -79,6 +82,22 @@ impl IndexQuery {
             index,
             doc: Some(doc),
             uri: Some(uri),
+            analysis_engine: None,
+        }
+    }
+
+    /// Create an IndexQuery with document context and analysis engine access.
+    pub fn with_doc_and_engine(
+        index: Index<Unlocked>,
+        doc: Arc<RwLock<RubyDocument>>,
+        analysis_engine: Arc<Mutex<AnalysisEngine>>,
+    ) -> Self {
+        let uri = doc.read().uri.clone();
+        Self {
+            index,
+            doc: Some(doc),
+            uri: Some(uri),
+            analysis_engine: Some(analysis_engine),
         }
     }
 
@@ -88,6 +107,7 @@ impl IndexQuery {
             index,
             doc: None,
             uri: Some(uri),
+            analysis_engine: None,
         }
     }
 
@@ -108,6 +128,12 @@ impl IndexQuery {
     pub fn doc(&self) -> Option<&Arc<RwLock<RubyDocument>>> {
         self.doc.as_ref()
     }
+
+    /// Get the analysis engine if attached.
+    #[inline]
+    pub fn analysis_engine(&self) -> Option<&Arc<Mutex<AnalysisEngine>>> {
+        self.analysis_engine.as_ref()
+    }
 }
 
 impl Clone for IndexQuery {
@@ -116,6 +142,7 @@ impl Clone for IndexQuery {
             index: self.index.clone(),
             doc: self.doc.clone(),
             uri: self.uri.clone(),
+            analysis_engine: self.analysis_engine.clone(),
         }
     }
 }
@@ -124,7 +151,6 @@ impl Clone for IndexQuery {
 mod tests {
     use super::*;
     use crate::indexer::index::RubyIndex;
-    use parking_lot::Mutex;
 
     #[test]
     fn test_index_query_creation() {

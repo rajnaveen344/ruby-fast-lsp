@@ -23,7 +23,11 @@ pub async fn find_references_at_position(
 
     // Create unified query with document context. Route by URI so references
     // are scoped to the file's workspace, not all workspaces.
-    let query = IndexQuery::with_doc(server.index_for_uri(uri), doc_arc);
+    let query = IndexQuery::with_doc_and_engine(
+        server.index_for_uri(uri),
+        doc_arc,
+        server.analysis_engine.clone(),
+    );
 
     query.find_references_at_position(uri, position, &content)
 }

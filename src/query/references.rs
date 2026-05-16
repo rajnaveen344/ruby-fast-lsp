@@ -9,7 +9,9 @@ use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardTypeConverter;
 use log::info;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use ruby_analysis_core::{ReferenceFact, TextRange};
+use ruby_analysis_engine::SourceFile;
+use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use super::IndexQuery;
 
@@ -32,6 +34,11 @@ impl IndexQuery {
 
     /// Find references to a constant by FQN.
     fn find_constant_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        if let Some(entries) = self.reference_locations_from_analysis(fqn) {
+            info!("Found {} constant references to: {}", entries.len(), fqn);
+            return Some(entries);
+        }
+
         let index = self.index.lock();
         let entries = index.references(fqn);
         if !entries.is_empty() {
@@ -43,6 +50,11 @@ impl IndexQuery {
 
     /// Find references to a variable (instance, class, or global).
     fn find_variable_references(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        if let Some(entries) = self.reference_locations_from_analysis(fqn) {
+            info!("Found {} variable references to: {}", entries.len(), fqn);
+            return Some(entries);
+        }
+
         let index = self.index.lock();
         let entries = index.references(fqn);
         if !entries.is_empty() {
@@ -300,7 +312,7 @@ impl IndexQuery {
         for ancestor_fqn in ancestor_chain {
             let method_fqn =
                 FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
-            let refs = index.references(&method_fqn);
+            let refs = self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
             if !refs.is_empty() {
                 all_references.extend(refs);
             }
@@ -312,7 +324,8 @@ impl IndexQuery {
                     including_class_fqn.namespace_parts(),
                     method.clone(),
                 );
-                let inc_refs = index.references(&inc_method_fqn);
+                let inc_refs =
+                    self.reference_locations_for_fqn_with_index_fallback(&index, &inc_method_fqn);
                 if !inc_refs.is_empty() {
                     all_references.extend(inc_refs);
                 }
@@ -346,7 +359,8 @@ impl IndexQuery {
             for ancestor_fqn in ancestor_chain {
                 let method_fqn =
                     FullyQualifiedName::method(ancestor_fqn.namespace_parts(), method.clone());
-                let refs = index.references(&method_fqn);
+                let refs =
+                    self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
                 if !refs.is_empty() {
                     all_references.extend(refs);
                 }
@@ -395,7 +409,8 @@ impl IndexQuery {
             for descendant_fqn in descendants {
                 let method_fqn =
                     FullyQualifiedName::method(descendant_fqn.namespace_parts(), method.clone());
-                let refs = index.references(&method_fqn);
+                let refs =
+                    self.reference_locations_for_fqn_with_index_fallback(&index, &method_fqn);
                 if !refs.is_empty() {
                     all_references.extend(refs);
                 }
@@ -408,4 +423,83 @@ impl IndexQuery {
             Some(all_references)
         }
     }
+
+    fn reference_locations_for_fqn_with_index_fallback(
+        &self,
+        index: &crate::indexer::index::RubyIndex,
+        fqn: &FullyQualifiedName,
+    ) -> Vec<Location> {
+        self.reference_locations_from_analysis(fqn)
+            .unwrap_or_else(|| index.references(fqn))
+    }
+
+    fn reference_locations_from_analysis(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let mut locations = Vec::new();
+        for fact in engine.reference_facts_for(fqn) {
+            if let Some(location) = reference_fact_to_location(&engine, fact) {
+                locations.push(location);
+            }
+        }
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+}
+
+fn reference_fact_to_location(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    fact: &ReferenceFact,
+) -> Option<Location> {
+    let file = engine.file(fact.range.file_id)?;
+    Some(Location {
+        uri: source_file_uri(file)?,
+        range: text_range_to_lsp_range(file, fact.range)?,
+    })
+}
+
+fn source_file_uri(file: &SourceFile) -> Option<Url> {
+    Url::from_file_path(&file.path).ok()
+}
+
+fn text_range_to_lsp_range(file: &SourceFile, range: TextRange) -> Option<Range> {
+    assert!(
+        file.id == range.file_id,
+        "INVARIANT VIOLATED: reference range file id does not match source file id. \
+         This is a bug because analysis facts must only be converted with their owning source file. \
+         Fix: look up the SourceFile by fact.range.file_id before converting."
+    );
+    Some(Range::new(
+        byte_offset_to_position(&file.source, range.start_byte)?,
+        byte_offset_to_position(&file.source, range.end_byte)?,
+    ))
+}
+
+fn byte_offset_to_position(source: &str, byte_offset: u32) -> Option<Position> {
+    let target = usize::try_from(byte_offset).ok()?;
+    if target > source.len() || !source.is_char_boundary(target) {
+        return None;
+    }
+
+    let mut line = 0u32;
+    let mut line_start = 0usize;
+    for (idx, byte) in source.bytes().enumerate() {
+        if idx >= target {
+            break;
+        }
+        if byte == b'\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    let character = source[line_start..target].chars().count();
+    let character = u32::try_from(character).expect(
+        "INVARIANT VIOLATED: LSP character offset exceeded u32. \
+         This is a bug because LSP positions require u32 columns. \
+         Fix: reject or segment lines longer than u32::MAX characters.",
+    );
+    Some(Position::new(line, character))
 }
