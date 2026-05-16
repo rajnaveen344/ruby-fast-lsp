@@ -1004,7 +1004,10 @@ async fn run_diagnostics_check(
     // Add unresolved-entry diagnostics (unresolved-constant, unresolved-method, etc.)
     // populated by indexing.
     {
-        let query = crate::query::IndexQuery::new(server.index_for_uri(uri));
+        let query = crate::query::IndexQuery::with_engine(
+            server.index_for_uri(uri),
+            server.analysis_engine.clone(),
+        );
         diagnostics.extend(query.get_unresolved_diagnostics(uri));
     }
 

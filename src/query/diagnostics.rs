@@ -7,187 +7,35 @@
 //! AST-only diagnostics (syntax errors/warnings) remain in `capabilities/diagnostics.rs`.
 
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index::{RubyIndex, UnresolvedEntry};
+use crate::indexer::index::RubyIndex;
 use crate::yard::YardTypeConverter;
 use log::debug;
+use ruby_analysis_core::{DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity};
+use std::path::PathBuf;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
-use super::IndexQuery;
+use super::{analysis_location::location_for_range, IndexQuery};
 
 impl IndexQuery {
-    /// Get diagnostics for unresolved entries (constants and methods) from the index.
+    /// Get diagnostics for unresolved entries from the analysis engine.
     pub fn get_unresolved_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
-        let index = self.index.lock();
-        let unresolved_list = index.get_unresolved_entries(uri);
+        let analysis_engine = self.analysis_engine.as_ref().expect(
+            "INVARIANT VIOLATED: unresolved diagnostics requested without analysis engine. \
+             This is a bug because diagnostics are owned by ruby-analysis-engine. \
+             Fix: construct IndexQuery with IndexQuery::with_engine or with_doc_and_engine.",
+        );
+        let engine = analysis_engine.lock();
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        let Some(file_id) = engine.file_id(&path) else {
+            return Vec::new();
+        };
 
-        unresolved_list
-            .iter()
-            .map(|entry| match entry {
-                UnresolvedEntry::Constant { name, location, .. } => Diagnostic {
-                    range: location.range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: Some(NumberOrString::String("unresolved-constant".to_string())),
-                    code_description: None,
-                    source: Some("ruby-fast-lsp".to_string()),
-                    message: format!("Unresolved constant `{}`", name),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                },
-                UnresolvedEntry::Method {
-                    name,
-                    receiver_type,
-                    location,
-                    suggestion,
-                } => {
-                    if let Some(crate::inferrer::r#type::ruby::RubyType::Unknown) = receiver_type {
-                        Diagnostic {
-                            range: location.range,
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            code: Some(NumberOrString::String(
-                                "unknown-receiver-type".to_string(),
-                            )),
-                            code_description: None,
-                            source: Some("ruby-fast-lsp".to_string()),
-                            message: format!(
-                                "Cannot determine receiver type for method call `{}`. Definition may be imprecise.",
-                                name
-                            ),
-                            related_information: None,
-                            tags: None,
-                            data: None,
-                        }
-                    } else {
-                        let mut message = match receiver_type {
-                            Some(recv) => format!("Unresolved method `{}` on `{}`", name, recv),
-                            None => format!("Unresolved method `{}`", name),
-                        };
-                        if let Some(s) = suggestion {
-                            message.push_str(&format!(". Did you mean `{}`?", s));
-                        }
-
-                        Diagnostic {
-                            range: location.range,
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            code: Some(NumberOrString::String("unresolved-method".to_string())),
-                            code_description: None,
-                            source: Some("ruby-fast-lsp".to_string()),
-                            message,
-                            related_information: None,
-                            tags: None,
-                            data: None,
-                        }
-                    }
-                }
-                UnresolvedEntry::UnknownKwarg {
-                    method,
-                    kwarg,
-                    suggestion,
-                    location,
-                } => {
-                    let mut message =
-                        format!("Unknown keyword argument `{}:` for `{}`", kwarg, method);
-                    if let Some(s) = suggestion {
-                        message.push_str(&format!(". Did you mean `{}:`?", s));
-                    }
-                    Diagnostic {
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unknown-kwarg".to_string())),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message,
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    }
-                }
-                UnresolvedEntry::WrongArity {
-                    name,
-                    expected_min,
-                    expected_max,
-                    actual,
-                    location,
-                } => {
-                    let expected = match expected_max {
-                        Some(max) if max == expected_min => format!("{}", expected_min),
-                        Some(max) => format!("{}..{}", expected_min, max),
-                        None => format!("{}+", expected_min),
-                    };
-                    Diagnostic {
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("wrong-arity".to_string())),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message: format!(
-                            "Wrong number of arguments for `{}` (expected {}, got {})",
-                            name, expected, actual
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    }
-                }
-                UnresolvedEntry::MissingKwarg {
-                    method,
-                    missing,
-                    location,
-                } => {
-                    let kw_list = missing
-                        .iter()
-                        .map(|k| format!("`{}:`", k))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    Diagnostic {
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("missing-kwarg".to_string())),
-                        code_description: None,
-                        source: Some("ruby-fast-lsp".to_string()),
-                        message: format!(
-                            "Missing required keyword argument(s) for `{}`: {}",
-                            method, kw_list
-                        ),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    }
-                }
-                UnresolvedEntry::RaiseNonException { arg_repr, location } => Diagnostic {
-                    range: location.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("raise-non-exception".to_string())),
-                    code_description: None,
-                    source: Some("ruby-fast-lsp".to_string()),
-                    message: format!(
-                        "`raise` argument `{}` is not an Exception subclass",
-                        arg_repr
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                },
-                UnresolvedEntry::BadSplat {
-                    operator,
-                    arg_repr,
-                    expected,
-                    location,
-                } => Diagnostic {
-                    range: location.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("bad-splat".to_string())),
-                    code_description: None,
-                    source: Some("ruby-fast-lsp".to_string()),
-                    message: format!(
-                        "`{}{}` expected {} but got non-{} value",
-                        operator, arg_repr, expected, expected
-                    ),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                },
-            })
+        engine
+            .diagnostic_facts_in_file(file_id)
+            .into_iter()
+            .filter_map(|fact| diagnostic_from_fact(&engine, &fact))
             .collect()
     }
 
@@ -200,6 +48,33 @@ impl IndexQuery {
     pub fn get_yard_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         let index = self.index.lock();
         generate_yard_diagnostics_inner(&index, uri)
+    }
+}
+
+fn diagnostic_from_fact(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    fact: &DiagnosticFact,
+) -> Option<Diagnostic> {
+    let location = location_for_range(engine, fact.range)?;
+    Some(Diagnostic {
+        range: location.range,
+        severity: Some(lsp_diagnostic_severity(fact.severity)),
+        code: Some(NumberOrString::String(fact.code.clone())),
+        code_description: None,
+        source: Some("ruby-fast-lsp".to_string()),
+        message: fact.message.clone(),
+        related_information: None,
+        tags: None,
+        data: None,
+    })
+}
+
+fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSeverity {
+    match severity {
+        AnalysisDiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+        AnalysisDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+        AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+        AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
     }
 }
 

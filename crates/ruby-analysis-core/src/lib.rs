@@ -4,6 +4,7 @@
 //! dependencies. It is the shared contract for future editor and agent
 //! consumers.
 
+pub mod diagnostic_store;
 pub mod fully_qualified_name;
 pub mod graph_store;
 pub mod method_resolution;
@@ -16,6 +17,7 @@ pub mod source_file;
 pub mod symbol_store;
 pub mod type_store;
 
+pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
     GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, UnresolvedGraphEdgeFact,

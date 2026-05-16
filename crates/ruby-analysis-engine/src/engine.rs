@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ruby_analysis_core::{
-    FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore, MethodFact, MethodStore,
-    ReferenceFact, ReferenceStore, SourceFileId, SourceKind, SymbolFact, SymbolStore, TextRange,
-    TypeFact, TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    DiagnosticFact, DiagnosticStore, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore,
+    MethodFact, MethodStore, ReferenceFact, ReferenceStore, SourceFileId, SourceKind, SymbolFact,
+    SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 
 use crate::FileIdMap;
@@ -28,6 +29,7 @@ pub struct AnalysisEngine {
     reference_store: ReferenceStore,
     symbol_store: SymbolStore,
     type_store: TypeStore,
+    diagnostic_store: DiagnosticStore,
 }
 
 impl AnalysisEngine {
@@ -117,6 +119,14 @@ impl AnalysisEngine {
             "graph edge fact references unknown source file id",
         );
         self.graph_store.add_edge(fact);
+    }
+
+    pub fn add_diagnostic_fact(&mut self, fact: DiagnosticFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "diagnostic fact references unknown source file id",
+        );
+        self.diagnostic_store.add(fact);
     }
 
     pub fn replace_symbol_facts_for_file(
@@ -225,6 +235,18 @@ impl AnalysisEngine {
         self.type_store.replace_file(file_id, facts);
     }
 
+    pub fn replace_diagnostic_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = DiagnosticFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "diagnostic fact replacement references unknown source file id",
+        );
+        self.diagnostic_store.replace_file(file_id, facts);
+    }
+
     pub fn type_at(
         &self,
         subject: &TypeSubject,
@@ -270,6 +292,14 @@ impl AnalysisEngine {
         self.graph_store.all_edges()
     }
 
+    pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
+        self.diagnostic_store.facts_in_file(file_id)
+    }
+
+    pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
+        self.diagnostic_store.all_facts()
+    }
+
     pub fn graph_store(&self) -> &GraphStore {
         &self.graph_store
     }
@@ -292,6 +322,10 @@ impl AnalysisEngine {
 
     pub fn type_store(&self) -> &TypeStore {
         &self.type_store
+    }
+
+    pub fn diagnostic_store(&self) -> &DiagnosticStore {
+        &self.diagnostic_store
     }
 
     pub fn file_count(&self) -> usize {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ruby_analysis_core::{
-    FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+    DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
     MethodCalleeResolution, MethodFact, ReferenceFact, ResolvedMethodCallee, RubyConstant,
     RubyMethod, SourceFileId, SymbolFact, TypeFact, TypeResolution, TypeSubject,
 };
@@ -80,6 +80,14 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
         self.engine.all_graph_edges()
+    }
+
+    pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
+        self.engine.diagnostic_facts_in_file(file_id)
+    }
+
+    pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
+        self.engine.all_diagnostic_facts()
     }
 
     pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {

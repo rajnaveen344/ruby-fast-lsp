@@ -82,7 +82,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
     // Add unresolved entry diagnostics and YARD diagnostics (no re-parsing needed)
-    let query = IndexQuery::new(workspace_index);
+    let query = IndexQuery::with_engine(workspace_index, server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
@@ -148,7 +148,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         };
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
-    let query = IndexQuery::new(workspace_index);
+    let query = IndexQuery::with_engine(workspace_index, server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
 
     debug!(
@@ -214,7 +214,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     server.invalidate_namespace_tree_cache_debounced();
 
     // Add unresolved diagnostics and YARD diagnostics (no re-parsing needed)
-    let query = IndexQuery::new(workspace_index);
+    let query = IndexQuery::with_engine(workspace_index, server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
     diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
@@ -243,7 +243,7 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     // Keep unresolved entry diagnostics visible (project-wide diagnostics).
     // Use the file's workspace index so we don't surface diagnostics from
     // other workspaces.
-    let query = IndexQuery::new(server.index_for_uri(&uri));
+    let query = IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
     let diagnostics = query.get_unresolved_diagnostics(&uri);
     server.publish_diagnostics(uri, diagnostics).await;
 }

@@ -21,6 +21,7 @@
 
 pub mod analysis_facts;
 pub mod coordinator;
+pub mod diagnostic_facts;
 pub mod entry;
 pub mod file_processor;
 pub mod graph;

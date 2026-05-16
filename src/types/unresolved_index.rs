@@ -346,16 +346,6 @@ impl UnresolvedEntry {
             Self::BadSplat { arg_repr, .. } => arg_repr,
         }
     }
-
-    /// Check if this is a constant entry
-    pub fn is_constant(&self) -> bool {
-        matches!(self, Self::Constant { .. })
-    }
-
-    /// Check if this is a method entry
-    pub fn is_method(&self) -> bool {
-        matches!(self, Self::Method { .. })
-    }
 }
 
 // ============================================================================

@@ -564,7 +564,10 @@ impl FakeEditor {
 
         // Add unresolved entry diagnostics
         {
-            let query = crate::query::IndexQuery::new(self.server.index_for_uri(&uri));
+            let query = crate::query::IndexQuery::with_engine(
+                self.server.index_for_uri(&uri),
+                self.server.analysis_engine.clone(),
+            );
             diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         }
 

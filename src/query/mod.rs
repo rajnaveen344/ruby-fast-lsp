@@ -16,7 +16,7 @@
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 
-mod analysis_location;
+pub(crate) mod analysis_location;
 pub mod call_hierarchy;
 mod code_lens;
 mod completion;

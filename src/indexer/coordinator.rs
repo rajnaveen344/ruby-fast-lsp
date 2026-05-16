@@ -288,21 +288,25 @@ impl IndexingCoordinator {
 
     /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::query::IndexQuery;
+        use crate::query::{analysis_location::location_for_range, IndexQuery};
 
-        // Collect all URIs with unresolved entries while holding the lock
         let uris: Vec<_> = {
-            let index = self.index.lock();
-            let count = index.unresolved.len();
+            let engine = server.analysis_engine.lock();
+            let mut uris = engine
+                .all_diagnostic_facts()
+                .into_iter()
+                .filter_map(|fact| location_for_range(&engine, fact.range).map(|loc| loc.uri))
+                .collect::<Vec<_>>();
+            uris.sort();
+            uris.dedup();
             info!(
-                "Publishing diagnostics for {} files with unresolved entries",
-                count
+                "Publishing diagnostics for {} files with analysis diagnostics",
+                uris.len()
             );
-            index.unresolved.uris()
+            uris
         };
 
-        // Publish diagnostics for each file (lock released, safe to await)
-        let query = IndexQuery::new(self.index.clone());
+        let query = IndexQuery::with_engine(self.index.clone(), server.analysis_engine.clone());
         for uri in uris {
             let diagnostics = query.get_unresolved_diagnostics(&uri);
             if !diagnostics.is_empty() {

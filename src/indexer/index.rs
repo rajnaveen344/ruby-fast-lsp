@@ -984,24 +984,6 @@ impl RubyIndex {
         self.unresolved.get(uri)
     }
 
-    /// Get all unresolved constants for a file
-    pub fn get_unresolved_constants(&self, uri: &Url) -> Vec<UnresolvedEntry> {
-        self.unresolved
-            .get(uri)
-            .into_iter()
-            .filter(|e| e.is_constant())
-            .collect()
-    }
-
-    /// Get all unresolved methods for a file
-    pub fn get_unresolved_methods(&self, uri: &Url) -> Vec<UnresolvedEntry> {
-        self.unresolved
-            .get(uri)
-            .into_iter()
-            .filter(|e| e.is_method())
-            .collect()
-    }
-
     // ========================================================================
     // Inheritance Graph
     // ========================================================================

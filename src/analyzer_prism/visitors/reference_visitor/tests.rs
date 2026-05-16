@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use crate::capabilities::references;
 use crate::indexer::entry::EntryKind;
+use crate::indexer::file_processor::{FileProcessor, ProcessingOptions};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use parking_lot::RwLock;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 
@@ -29,66 +27,38 @@ fn open_file_with_options(
     uri: &Url,
     include_local_vars: bool,
 ) -> RubyDocument {
-    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+    let processor = FileProcessor::with_extension_registry(
+        server.index_for_uri(uri),
+        server.extension_registry.clone(),
+    );
+    processor
+        .process_file(
+            uri,
+            content,
+            server,
+            ProcessingOptions {
+                index_definitions: true,
+                index_references: true,
+                resolve_mixins: true,
+                include_local_vars,
+            },
+        )
+        .expect(
+            "INVARIANT VIOLATED: reference visitor test file failed to process. \
+             This is a bug because test helpers must exercise the same file processor path as LSP. \
+             Fix: keep test content parseable and FileProcessor usable in tests.",
+        );
     server
         .docs
         .lock()
-        .insert(uri.clone(), Arc::new(RwLock::new(document.clone())));
-
-    // Process content directly instead of reading from filesystem
-    process_content_for_definitions(server, uri.clone(), content);
-    process_content_for_references(server, uri.clone(), content, include_local_vars);
-    document
-}
-
-// Helper function to process content for definitions without reading from filesystem
-fn process_content_for_definitions(server: &RubyLanguageServer, uri: Url, content: &str) {
-    use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-    use ruby_prism::Visit;
-
-    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-    let parse_result = document.parse();
-    let mut visitor = IndexVisitor::new(server.index_for_uri(&uri), document.clone());
-    visitor.visit(&parse_result.node());
-
-    // Persist the document with LocalVariable entries back to server.docs
-    server
-        .docs
-        .lock()
-        .insert(uri, Arc::new(RwLock::new(visitor.document)));
-}
-
-// Helper function to process content for references without reading from filesystem
-fn process_content_for_references(
-    server: &RubyLanguageServer,
-    uri: Url,
-    content: &str,
-    include_local_vars: bool,
-) {
-    use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
-    use ruby_prism::{parse, Visit};
-
-    let parse_result = parse(content.as_bytes());
-    let errors_count = parse_result.errors().count();
-    if errors_count > 0 {
-        println!("Parse errors in content: {} errors", errors_count);
-        return;
-    }
-
-    // Create a temporary document since we're processing content directly
-    let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-
-    let index = server.index_for_uri(&uri);
-    let mut visitor = if include_local_vars {
-        ReferenceVisitor::new(index.clone(), document)
-    } else {
-        ReferenceVisitor::with_options(index.clone(), document, false)
-    };
-    visitor.visit(&parse_result.node());
-
-    // Flush staged writes (matches production path in FileProcessor).
-    let staged = std::mem::take(&mut visitor.staged);
-    staged.flush(&mut index.lock());
+        .get(uri)
+        .expect(
+            "INVARIANT VIOLATED: processed test file was not stored in server docs. \
+             This is a bug because FileProcessor must publish the updated RubyDocument. \
+             Fix: keep FileProcessor document cache writes active.",
+        )
+        .read()
+        .clone()
 }
 
 #[tokio::test]

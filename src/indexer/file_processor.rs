@@ -21,6 +21,10 @@ use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
+use crate::indexer::diagnostic_facts::{
+    replace_unresolved_diagnostic_facts_for_document,
+    replace_unresolved_diagnostic_facts_for_uri_from_index,
+};
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
@@ -211,6 +215,10 @@ impl FileProcessor {
                 .analysis_engine
                 .lock()
                 .replace_reference_facts_for_file(analysis_file_id, std::iter::empty());
+            server
+                .analysis_engine
+                .lock()
+                .replace_diagnostic_facts_for_file(analysis_file_id, std::iter::empty());
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -330,11 +338,25 @@ impl FileProcessor {
                     .index
                     .lock()
                     .mark_references_as_unresolved(&truly_removed);
+                for affected_uri in &removed_affected {
+                    replace_unresolved_diagnostic_facts_for_uri_from_index(
+                        server,
+                        self.index.clone(),
+                        affected_uri,
+                    );
+                }
                 affected_uris.extend(removed_affected);
             }
 
             if !added_fqns.is_empty() {
                 let resolved_affected = self.index.lock().clear_resolved_entries(&added_fqns);
+                for affected_uri in &resolved_affected {
+                    replace_unresolved_diagnostic_facts_for_uri_from_index(
+                        server,
+                        self.index.clone(),
+                        affected_uri,
+                    );
+                }
                 affected_uris.extend(resolved_affected);
             }
         }
@@ -372,6 +394,11 @@ impl FileProcessor {
                         visitor.document.analysis_file_id(),
                         reference_facts,
                     );
+                replace_unresolved_diagnostic_facts_for_document(
+                    server,
+                    &visitor.document,
+                    visitor.staged.unresolved.iter().map(|(_, entry)| entry),
+                );
 
                 // Flush staged writes under a single brief write lock.
                 let staged = std::mem::take(&mut visitor.staged);
@@ -389,6 +416,11 @@ impl FileProcessor {
                 }
             } else {
                 warn!("Document not found for reference indexing: {}", uri);
+                replace_unresolved_diagnostic_facts_for_uri_from_index(
+                    server,
+                    self.index.clone(),
+                    uri,
+                );
             }
         }
 
@@ -585,6 +617,11 @@ impl FileProcessor {
             .analysis_engine
             .lock()
             .replace_reference_facts_for_file(analysis_file_id, reference_facts);
+        replace_unresolved_diagnostic_facts_for_document(
+            server,
+            &visitor.document,
+            visitor.staged.unresolved.iter().map(|(_, entry)| entry),
+        );
 
         let staged = std::mem::take(&mut visitor.staged);
         staged.flush(&mut self.index.lock());
