@@ -11,6 +11,7 @@
 //! 4. Collect and return all definitions
 //! ```
 
+mod analysis;
 mod helpers;
 
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
@@ -28,7 +29,6 @@ use helpers::{
 use log::{debug, trace};
 use tower_lsp::lsp_types::{Location, Position};
 
-use super::analysis_location::location_for_range;
 use super::inference::ReceiverResolver;
 use super::IndexQuery;
 
@@ -105,6 +105,10 @@ impl IndexQuery {
                 Some(namespace_fqn) => namespace_fqn,
                 None => return Vec::new(),
             };
+
+        if let Some(callees) = analysis::resolve_method_callees(self, &namespace_fqn, method) {
+            return callees;
+        }
 
         let index = self.index.lock();
 
@@ -196,6 +200,12 @@ impl IndexQuery {
         path: &[RubyConstant],
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
+        if let Some(receiver_fqn) =
+            analysis::resolve_constant_receiver(self, path, current_namespace)
+        {
+            return Some(receiver_fqn);
+        }
+
         let index = self.index.lock();
         let current_fqn = FullyQualifiedName::namespace(current_namespace.to_vec());
 
@@ -306,9 +316,7 @@ impl IndexQuery {
         for ancestor in ancestor_chain {
             let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), method.clone());
 
-            if let Some(locations) =
-                self.method_locations_from_analysis(&method_fqn, ancestor_chain)
-            {
+            if let Some(locations) = analysis::method_locations(self, &method_fqn, ancestor_chain) {
                 debug!(
                     "[Method Found] {}#{} in {} via analysis engine",
                     ancestor_chain.first().unwrap_or(ancestor),
@@ -347,32 +355,6 @@ impl IndexQuery {
             }
         }
         None
-    }
-
-    fn method_locations_from_analysis(
-        &self,
-        method_fqn: &FullyQualifiedName,
-        ancestor_chain: &[FullyQualifiedName],
-    ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine()?;
-        let engine = engine.lock();
-        let locations = engine
-            .method_facts_for(method_fqn)
-            .iter()
-            .filter(|fact| {
-                ancestor_chain.iter().any(|ancestor| {
-                    ancestor.namespace_parts() == fact.owner.namespace_parts()
-                        && ancestor.namespace_kind() == fact.owner.namespace_kind()
-                })
-            })
-            .filter_map(|fact| location_for_range(&engine, fact.range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
     }
 }
 
