@@ -613,6 +613,7 @@ mod tests {
                     owner: vec!["RSpec".to_string()],
                     owner_kind: NamespaceKind::Singleton,
                     method: "describe".to_string(),
+                    resolution: ruby_fast_lsp_extension_api::CalleeResolution::ReceiverOnly,
                 }],
                 call_range: range(),
                 message_range: range(),

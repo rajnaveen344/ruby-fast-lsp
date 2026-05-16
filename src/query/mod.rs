@@ -38,7 +38,7 @@ pub use diagnostics::generate_yard_diagnostics_inner;
 pub use hover::HoverInfo;
 pub use inference::{LocalVariableResolver, ReceiverResolver, ReturnTypeResolver};
 pub use inlay_hints::{InlayHintData, InlayHintKind};
-pub use method::MethodInfo;
+pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use types::{infer_type_from_assignment, TypeHint, TypeHintKind, TypeQuery};
 
 use crate::indexer::index_ref::{Index, Unlocked};

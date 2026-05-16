@@ -192,6 +192,9 @@ module SpecHelpers
   end</def>
 end
 
+module RSpec
+end
+
 module ApiSpec
   RSpec.describe User do
     extend SpecHelpers
@@ -204,6 +207,45 @@ end
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn rspec_extension_does_not_treat_other_describe_as_rspec_scope() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "plain_spec.rb",
+            r#"
+class User
+end
+
+module SpecHelpers
+  def describe(*args)
+  end
+end
+
+class PlainSpec
+  include SpecHelpers
+
+  describe User do
+    let(:user) { User.new }
+
+    it "does not enter rspec scope" do
+      user
+    end
+  end
+end
+"#,
+        )
+        .await;
+
+    let locations = editor.goto_def_at("plain_spec.rb", 16, 8).await;
+    assert!(
+        locations.is_empty(),
+        "INVARIANT VIOLATED: RSpec extension treated non-RSpec describe as RSpec scope. \
+         This is a bug because extension hooks must use resolved callees, not call names alone. \
+         Fix: require an RSpec resolved callee before entering RSpec scope."
+    );
 }
 
 #[tokio::test]

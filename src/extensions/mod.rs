@@ -21,6 +21,7 @@ use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, S
 
 use crate::analyzer_prism::utils;
 use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::analyzer_prism::MethodReceiver as CoreMethodReceiver;
 use crate::config::RubyFastLspConfig;
 use crate::indexer::entry::NamespaceKind;
 use crate::indexer::entry::{
@@ -28,6 +29,7 @@ use crate::indexer::entry::{
     EntryBuilder, EntryKind, MethodOrigin, MethodVisibility as CoreVisibility, MixinRef,
 };
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::query::{IndexQuery, MethodCalleeResolution};
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
@@ -1029,7 +1031,7 @@ fn call_context(visitor: &IndexVisitor, node: &CallNode) -> CallContext {
             .message_loc()
             .map(|loc| source_range(visitor, &loc))
             .unwrap_or_else(|| source_range(visitor, &node.location())),
-        resolved_callees: resolved_callees_for_call(visitor, &receiver, node),
+        resolved_callees: resolved_callees_for_call(visitor, node),
         enclosing_calls: visitor.extension_call_stack.clone(),
     }
 }
@@ -1042,7 +1044,7 @@ pub fn resolved_call_for_stack(visitor: &IndexVisitor, node: &CallNode) -> Resol
     ResolvedCall {
         method_name: utils::utf8_str(node.name().as_slice()).to_string(),
         receiver: receiver.clone(),
-        resolved_callees: resolved_callees_for_call(visitor, &receiver, node),
+        resolved_callees: resolved_callees_for_call(visitor, node),
         call_range: source_range(visitor, &node.location()),
         message_range: node
             .message_loc()
@@ -1051,36 +1053,100 @@ pub fn resolved_call_for_stack(visitor: &IndexVisitor, node: &CallNode) -> Resol
     }
 }
 
-fn resolved_callees_for_call(
-    visitor: &IndexVisitor,
-    receiver: &Receiver,
-    node: &CallNode,
-) -> Vec<ResolvedCallee> {
-    let Receiver::Constant(owner) = receiver else {
+fn resolved_callees_for_call(visitor: &IndexVisitor, node: &CallNode) -> Vec<ResolvedCallee> {
+    let method_name = utils::utf8_str(node.name().as_slice());
+    let Ok(method) = RubyMethod::new(method_name) else {
         return Vec::new();
     };
-    if !constant_receiver_exists(visitor, owner) {
-        return Vec::new();
-    }
+    let core_receiver = node
+        .receiver()
+        .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
+        .unwrap_or(CoreMethodReceiver::None);
+    let document = Arc::new(RwLock::new(visitor.document.clone()));
+    let query = IndexQuery::with_doc(visitor.index.clone(), document);
 
-    vec![ResolvedCallee {
-        owner: owner.clone(),
-        owner_kind: AbiNamespaceKind::Singleton,
-        method: utils::utf8_str(node.name().as_slice()).to_string(),
-    }]
+    query
+        .resolve_method_callees(
+            &core_receiver,
+            &method,
+            &visitor.scope_tracker.get_ns_stack(),
+            visitor.scope_tracker.current_method_context(),
+            position_from_source(source_range(visitor, &node.location()).start),
+        )
+        .into_iter()
+        .map(|callee| {
+            let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: resolved method callee owner `{}` is not a namespace. \
+                     This is a bug because methods must resolve to namespace owners. \
+                     Fix: ensure IndexQuery::resolve_method_callees only returns namespace FQNs.",
+                    callee.owner
+                )
+            });
+            ResolvedCallee {
+                owner: callee
+                    .owner
+                    .namespace_parts()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+                owner_kind: namespace_kind_to_abi(owner_kind),
+                method: callee.method.to_string(),
+                resolution: callee_resolution_to_abi(callee.resolution),
+            }
+        })
+        .collect()
 }
 
-fn constant_receiver_exists(visitor: &IndexVisitor, owner: &[String]) -> bool {
-    let parts = ruby_constants(owner);
-    let instance_fqn =
-        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Instance);
-    let singleton_fqn =
-        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Singleton);
-    let constant_fqn = FullyQualifiedName::constant(parts);
-    let index = visitor.index.read();
-    index.contains_fqn(&instance_fqn)
-        || index.contains_fqn(&singleton_fqn)
-        || index.contains_fqn(&constant_fqn)
+fn core_method_receiver_from_node(visitor: &IndexVisitor, node: &Node) -> CoreMethodReceiver {
+    if node.as_self_node().is_some() {
+        CoreMethodReceiver::SelfReceiver
+    } else if let Some(constant) = node.as_constant_read_node() {
+        CoreMethodReceiver::Constant(vec![RubyConstant::new(utils::utf8_str(
+            constant.name().as_slice(),
+        ))
+        .expect(
+            "INVARIANT VIOLATED: Prism returned an invalid constant-read name. \
+             This is a bug because Prism constant names must be valid Ruby constants. \
+             Fix: inspect constant receiver conversion.",
+        )])
+    } else if let Some(path) = node.as_constant_path_node() {
+        let mut parts = Vec::new();
+        utils::collect_namespaces(&path, &mut parts);
+        CoreMethodReceiver::Constant(parts)
+    } else if let Some(local) = node.as_local_variable_read_node() {
+        CoreMethodReceiver::LocalVariable(utils::utf8_str(local.name().as_slice()).to_string())
+    } else if let Some(ivar) = node.as_instance_variable_read_node() {
+        CoreMethodReceiver::InstanceVariable(utils::utf8_str(ivar.name().as_slice()).to_string())
+    } else if let Some(cvar) = node.as_class_variable_read_node() {
+        CoreMethodReceiver::ClassVariable(utils::utf8_str(cvar.name().as_slice()).to_string())
+    } else if let Some(gvar) = node.as_global_variable_read_node() {
+        CoreMethodReceiver::GlobalVariable(utils::utf8_str(gvar.name().as_slice()).to_string())
+    } else if let Some(call) = node.as_call_node() {
+        CoreMethodReceiver::MethodCall {
+            inner_receiver: Box::new(
+                call.receiver()
+                    .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
+                    .unwrap_or(CoreMethodReceiver::None),
+            ),
+            method_name: utils::utf8_str(call.name().as_slice()).to_string(),
+        }
+    } else if let Some(ruby_type) = visitor.literal_analyzer.analyze_literal(node) {
+        CoreMethodReceiver::Literal(ruby_type)
+    } else {
+        CoreMethodReceiver::Expression
+    }
+}
+
+fn callee_resolution_to_abi(
+    resolution: MethodCalleeResolution,
+) -> ruby_fast_lsp_extension_api::CalleeResolution {
+    match resolution {
+        MethodCalleeResolution::Exact => ruby_fast_lsp_extension_api::CalleeResolution::Exact,
+        MethodCalleeResolution::ReceiverOnly => {
+            ruby_fast_lsp_extension_api::CalleeResolution::ReceiverOnly
+        }
+    }
 }
 
 fn receiver_from_node(node: &Node) -> Receiver {

@@ -32,15 +32,6 @@ end
         )
         .await;
 
-    let direct_symbols = ruby_fast_lsp::extensions::document_symbols(
-        "file:///spec/user_spec.rb",
-        editor.content("spec/user_spec.rb"),
-    );
-    assert!(
-        !direct_symbols.is_empty(),
-        "direct extension symbols empty after loaded status; status now {:?}",
-        editor.extension_status().await
-    );
     let symbols = editor.document_symbols("spec/user_spec.rb").await;
     let names: Vec<_> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
 

@@ -185,6 +185,18 @@ guest exports it, then applies the returned `index_patches`. Response and
 command patches are ABI-defined so request/command hooks can be wired without a
 second guest contract change.
 
+`CallContext.resolved_callees` is produced by the core `IndexQuery` method
+resolver. A callee can be:
+
+- `Exact`: method definition was found through Ruby method lookup / ancestor
+  chain.
+- `ReceiverOnly`: receiver namespace resolved, but the method is not in the
+  index yet. This is the deterministic meta-programming escape hatch for DSLs
+  such as `RSpec.describe`.
+
+Ambiguity is represented as multiple callees. Extensions must inspect the owner,
+owner kind, method, and resolution before emitting patches.
+
 The mruby build uses trap-only exception handling for Wasm. Ruby exceptions
 inside an extension trap the guest instead of unwinding through Wasm EH. That
 matches the host contract: extensions return valid patches or fail loudly.
@@ -235,14 +247,15 @@ What is done:
 - mruby-authored RSpec extension compiled to Wasm and packaged in VSIX.
 - Native Rust RSpec extension kept as fallback/reference implementation.
 - Extension-generated methods, mixins, document symbols, and code lenses.
+- Extension hook context uses the same core method-resolution path as
+  definitions, including exact and receiver-only callee options.
 - Recoverable failure path for bad response patches and guest failures.
 - Full test suite green for current scope.
 
 What remains to reach 9.5+/10:
 
-- Route extension hooks through the same full method resolver used by core
-  definition/diagnostic logic, including deterministic handling of ambiguous
-  callees.
+- Push the shared resolver into remaining diagnostics/reference paths that still
+  carry local lookup variants.
 - Expand ABI beyond current patch set: hover, completion, diagnostics, code
   actions, test items, formatting, definition locations, and references.
 - Add hard runtime budgets for every extension: fuel, memory, payload size,

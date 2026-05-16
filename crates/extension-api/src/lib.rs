@@ -62,6 +62,13 @@ pub struct ResolvedCallee {
     pub owner: Vec<String>,
     pub owner_kind: NamespaceKind,
     pub method: String,
+    pub resolution: CalleeResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CalleeResolution {
+    Exact,
+    ReceiverOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

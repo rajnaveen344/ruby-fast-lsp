@@ -44,6 +44,20 @@ pub struct MethodInfo {
     pub documentation: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMethodCallee {
+    pub owner: FullyQualifiedName,
+    pub method: RubyMethod,
+    pub resolution: MethodCalleeResolution,
+    pub definition_locations: Vec<Location>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodCalleeResolution {
+    Exact,
+    ReceiverOnly,
+}
+
 impl IndexQuery {
     /// Find definitions for a Ruby method call.
     ///
@@ -62,46 +76,76 @@ impl IndexQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<Vec<Location>> {
-        // 1. Resolve receiver → namespace FQN
-        // If type inference fails, return None — correct or nothing.
+        let locations = self
+            .resolve_method_callees(receiver, method, namespace, namespace_kind, position)
+            .into_iter()
+            .filter(|callee| callee.resolution == MethodCalleeResolution::Exact)
+            .flat_map(|callee| callee.definition_locations)
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(deduplicate_locations(locations))
+        }
+    }
+
+    pub fn resolve_method_callees(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+    ) -> Vec<ResolvedMethodCallee> {
         let namespace_fqn =
-            self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)?;
+            match self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
+            {
+                Some(namespace_fqn) => namespace_fqn,
+                None => return Vec::new(),
+            };
 
         let index = self.index.lock();
 
-        // 2. Determine which FQNs to search
         let fqns_to_search = if is_module_instance_namespace(&index, &namespace_fqn) {
-            // Module: search all includers' chains
-            // WHY: When module M is included in ClassA and ClassB, calling a method from M
-            // should find both ClassA#method and ClassB#method (different overrides).
             let includers = get_module_includers(&index, &namespace_fqn);
             if includers.is_empty() {
-                // No includers? Search module's own chain
                 vec![namespace_fqn]
             } else {
                 includers
             }
         } else {
-            // Class or module singleton: search just this namespace
             vec![namespace_fqn]
         };
 
-        // 3. Search each FQN's ancestor chain
-        let mut all_definitions = Vec::new();
-        for fqn in fqns_to_search {
+        let mut callees = Vec::new();
+        for fqn in &fqns_to_search {
             let ancestor_chain = index.get_ancestor_chain(&fqn);
-            if let Some(definitions) = self.search_ancestor_chain(&index, &ancestor_chain, method) {
-                all_definitions.extend(definitions);
+            if let Some(callee) = self.resolve_callee_in_ancestor_chain(
+                &index,
+                &ancestor_chain,
+                method,
+                MethodCalleeResolution::Exact,
+            ) {
+                callees.push(callee);
             }
         }
 
-        drop(index);
-
-        if all_definitions.is_empty() {
-            None
-        } else {
-            Some(deduplicate_locations(all_definitions))
+        if callees.is_empty() {
+            callees.extend(
+                fqns_to_search
+                    .into_iter()
+                    .filter(|fqn| namespace_target_exists(&index, fqn))
+                    .map(|fqn| ResolvedMethodCallee {
+                        owner: fqn,
+                        method: method.clone(),
+                        resolution: MethodCalleeResolution::ReceiverOnly,
+                        definition_locations: Vec::new(),
+                    }),
+            );
         }
+
+        callees
     }
 }
 
@@ -251,15 +295,13 @@ impl IndexQuery {
 // ============================================================================
 
 impl IndexQuery {
-    /// Search ancestor chain with early return (Ruby's override semantics).
-    ///
-    /// Searches [Self, Prepends, Includes, Superclass, ...] and returns first match.
-    fn search_ancestor_chain(
+    fn resolve_callee_in_ancestor_chain(
         &self,
         index: &RubyIndex,
         ancestor_chain: &[FullyQualifiedName],
         method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
+        resolution: MethodCalleeResolution,
+    ) -> Option<ResolvedMethodCallee> {
         for ancestor in ancestor_chain {
             let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), method.clone());
 
@@ -277,10 +319,28 @@ impl IndexQuery {
                         method,
                         ancestor
                     );
-                    return Some(locations); // Early return - override semantics
+                    return Some(ResolvedMethodCallee {
+                        owner: ancestor.clone(),
+                        method: method.clone(),
+                        resolution,
+                        definition_locations: locations,
+                    });
                 }
             }
         }
         None
     }
+}
+
+fn namespace_target_exists(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
+    let parts = fqn.namespace_parts();
+    let instance_fqn =
+        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Instance);
+    let singleton_fqn =
+        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Singleton);
+    let constant_fqn = FullyQualifiedName::constant(parts);
+
+    index.contains_fqn(&instance_fqn)
+        || index.contains_fqn(&singleton_fqn)
+        || index.contains_fqn(&constant_fqn)
 }
