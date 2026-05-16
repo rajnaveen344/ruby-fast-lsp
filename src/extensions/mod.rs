@@ -61,6 +61,7 @@ pub struct ExtensionStatusReport {
     pub name: Option<String>,
     pub version: Option<String>,
     pub status: String,
+    pub last_error: Option<String>,
     pub capabilities: Vec<String>,
     pub permissions: Vec<String>,
     pub watched_files: Vec<String>,
@@ -93,10 +94,10 @@ struct ExtensionMetadata {
     process_commands: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ExtensionStatus {
     Loaded,
-    Disabled,
+    Failed { reason: String },
 }
 
 #[derive(Default)]
@@ -310,14 +311,17 @@ impl LoadedWasmExtension {
         *self.status.lock() == ExtensionStatus::Loaded
     }
 
-    fn disable(&self) {
-        *self.status.lock() = ExtensionStatus::Disabled;
+    fn fail(&self, reason: impl Into<String>) {
+        *self.status.lock() = ExtensionStatus::Failed {
+            reason: reason.into(),
+        };
     }
 
     fn status_report(&self) -> ExtensionStatusReport {
-        let status = match *self.status.lock() {
-            ExtensionStatus::Loaded => "loaded",
-            ExtensionStatus::Disabled => "disabled",
+        let status_guard = self.status.lock();
+        let (status, last_error) = match &*status_guard {
+            ExtensionStatus::Loaded => ("loaded", None),
+            ExtensionStatus::Failed { reason } => ("failed", Some(reason.clone())),
         };
         let indexed_call_names = self.extension.lock().indexed_call_names().to_vec();
         ExtensionStatusReport {
@@ -325,6 +329,7 @@ impl LoadedWasmExtension {
             name: self.metadata.name.clone(),
             version: self.metadata.version.clone(),
             status: status.to_string(),
+            last_error,
             capabilities: self.metadata.capabilities.clone(),
             permissions: self.metadata.permissions.clone(),
             watched_files: self.metadata.watched_files.clone(),
@@ -485,8 +490,9 @@ fn handle_response_event(
                     "Disabling Ruby Fast LSP extension `{}` after event `{}` failure: {}",
                     extension_id, event_name, err
                 );
+                let reason = err.to_string();
                 drop(extension);
-                loaded.disable();
+                loaded.fail(reason);
                 continue;
             }
         };
@@ -498,7 +504,7 @@ fn handle_response_event(
                     extension_id, event_name, err
                 );
                 drop(extension);
-                loaded.disable();
+                loaded.fail(err);
                 break;
             }
         }
@@ -536,8 +542,9 @@ fn process_wasm_call_node(
                     "Disabling Ruby Fast LSP extension `{}` after indexing failure on `{}`: {}",
                     extension_id, method_name, err
                 );
+                let reason = err.to_string();
                 drop(extension);
-                loaded.disable();
+                loaded.fail(reason);
                 continue;
             }
         };

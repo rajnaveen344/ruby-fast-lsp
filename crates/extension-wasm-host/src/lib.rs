@@ -589,7 +589,70 @@ mod tests {
             err.to_string().contains("output payload"),
             "INVARIANT VIOLATED: oversized extension output did not return a clear error. \
              This is a bug because bad external extensions must be disabled without crashing. \
-             Fix: keep output size validation on the recoverable error path."
+            Fix: keep output size validation on the recoverable error path."
+        );
+    }
+
+    #[test]
+    fn oversized_input_is_recoverable_error() {
+        let wasm = wat::parse_str(test_extension_wat()).unwrap();
+        let mut ext = WasmExtension::from_bytes_with_config(
+            "test",
+            &wasm,
+            WasmExtensionConfig {
+                max_input_bytes: 8,
+                ..WasmExtensionConfig::default()
+            },
+        )
+        .unwrap();
+        let err = ext.index_call(&let_context()).unwrap_err();
+        assert!(
+            err.to_string().contains("input payload"),
+            "INVARIANT VIOLATED: oversized extension input did not return a clear error. \
+             This is a bug because host payload budgets must fail before guest execution. \
+             Fix: keep input size validation before alloc/call."
+        );
+    }
+
+    #[test]
+    fn fuel_exhaustion_is_recoverable_error() {
+        let wasm = wat::parse_str(fuel_hog_extension_wat()).unwrap();
+        let mut ext = WasmExtension::from_bytes_with_config(
+            "fuel-hog",
+            &wasm,
+            WasmExtensionConfig {
+                fuel_per_call: 10_000,
+                ..WasmExtensionConfig::default()
+            },
+        )
+        .unwrap();
+        let err = ext.index_call(&let_context()).unwrap_err();
+        assert!(
+            err.to_string().contains("fuel"),
+            "INVARIANT VIOLATED: fuel exhaustion did not return a clear recoverable error: {err}. \
+             This is a bug because runaway extensions must not freeze indexing. \
+             Fix: keep consume_fuel enabled and refuel each guest call."
+        );
+    }
+
+    #[test]
+    fn memory_growth_limit_is_recoverable_error() {
+        let wasm = wat::parse_str(memory_hog_extension_wat()).unwrap();
+        let mut ext = WasmExtension::from_bytes_with_config(
+            "memory-hog",
+            &wasm,
+            WasmExtensionConfig {
+                max_memory_bytes: 64 * 1024,
+                ..WasmExtensionConfig::default()
+            },
+        )
+        .unwrap();
+        let err = ext.index_call(&let_context()).unwrap_err();
+        assert!(
+            err.to_string().contains("memory") || err.to_string().contains("grow"),
+            "INVARIANT VIOLATED: memory growth limit did not return a clear recoverable error: {err}. \
+             This is a bug because memory budgets must stop extension heap growth. \
+             Fix: keep StoreLimits memory_size + trap_on_grow_failure wired."
         );
     }
 
@@ -697,6 +760,65 @@ mod tests {
                 (i64.extend_i32_u (i32.const 2048))
                 (i64.const 32))
               (i64.extend_i32_u (i32.const 311))))
+        )
+        "#
+    }
+
+    fn fuel_hog_extension_wat() -> &'static str {
+        r#"
+        (module
+          (memory (export "memory") 1)
+          (data (i32.const 1024) "[\"let\"]")
+
+          (func (export "alloc") (param $len i32) (result i32)
+            i32.const 4096)
+
+          (func (export "dealloc") (param $ptr i32) (param $len i32))
+
+          (func (export "abi_version") (result i32)
+            i32.const 1)
+
+          (func (export "indexed_call_names") (result i64)
+            (i64.or
+              (i64.shl
+                (i64.extend_i32_u (i32.const 1024))
+                (i64.const 32))
+              (i64.extend_i32_u (i32.const 7))))
+
+          (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+            (loop $again
+              br $again)
+            i64.const 0)
+        )
+        "#
+    }
+
+    fn memory_hog_extension_wat() -> &'static str {
+        r#"
+        (module
+          (memory (export "memory") 1)
+          (data (i32.const 1024) "[\"let\"]")
+
+          (func (export "alloc") (param $len i32) (result i32)
+            i32.const 4096)
+
+          (func (export "dealloc") (param $ptr i32) (param $len i32))
+
+          (func (export "abi_version") (result i32)
+            i32.const 1)
+
+          (func (export "indexed_call_names") (result i64)
+            (i64.or
+              (i64.shl
+                (i64.extend_i32_u (i32.const 1024))
+                (i64.const 32))
+              (i64.extend_i32_u (i32.const 7))))
+
+          (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+            i32.const 1
+            memory.grow
+            drop
+            i64.const 0)
         )
         "#
     }

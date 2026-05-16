@@ -249,6 +249,9 @@ What is done:
 - Extension-generated methods, mixins, document symbols, and code lenses.
 - Extension hook context uses the same core method-resolution path as
   definitions, including exact and receiver-only callee options.
+- Wasm host enforces input/output payload limits, memory growth limits, and
+  per-call fuel budgets; failures are recoverable and disable only that
+  extension.
 - Recoverable failure path for bad response patches and guest failures.
 - Full test suite green for current scope.
 
@@ -258,8 +261,8 @@ What remains to reach 9.5+/10:
   carry local lookup variants.
 - Expand ABI beyond current patch set: hover, completion, diagnostics, code
   actions, test items, formatting, definition locations, and references.
-- Add hard runtime budgets for every extension: fuel, memory, payload size,
-  timeout, and slow-extension status.
+- Add wall-clock timeout and slow-extension status on top of deterministic fuel
+  budgets.
 - Publish stable Ruby SDK docs with versioning/migration rules for third-party
   extension authors.
 - Add perf benchmarks for many loaded extensions and large projects.
