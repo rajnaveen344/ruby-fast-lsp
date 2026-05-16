@@ -25,6 +25,7 @@ use crate::utils::deduplicate_locations;
 use helpers::{matches_ancestor, receiver_to_string};
 use log::{debug, trace};
 pub use ruby_analysis_core::MethodCalleeResolution;
+use ruby_analysis_core::TypeSubject;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::inference::ReceiverResolver;
@@ -182,7 +183,13 @@ impl IndexQuery {
             MethodReceiver::MethodCall {
                 inner_receiver,
                 method_name,
-            } => self.resolve_method_call_receiver(inner_receiver, method_name, position),
+            } => self.resolve_method_call_receiver(
+                inner_receiver,
+                method_name,
+                current_namespace,
+                namespace_kind,
+                position,
+            ),
 
             MethodReceiver::Literal(t) => self.convert_type_to_namespace(t),
             MethodReceiver::Expression => None, // No type info available
@@ -241,6 +248,18 @@ impl IndexQuery {
         var_name: &str,
         position: Position,
     ) -> Option<FullyQualifiedName> {
+        if let Some(var_type) = self.variable_receiver_type_from_analysis(var_name, position) {
+            trace!(
+                "Inferred type for '{}': {:?} via analysis",
+                var_name,
+                var_type
+            );
+            return self.convert_type_to_namespace(&var_type);
+        }
+        if self.analysis_engine().is_some() {
+            return None;
+        }
+
         let content = self.doc.as_ref()?.read().content.clone();
         let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
 
@@ -255,8 +274,29 @@ impl IndexQuery {
         &self,
         inner_receiver: &MethodReceiver,
         method_name: &str,
+        current_namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<FullyQualifiedName> {
+        if let Some(chain_type) = self.method_call_receiver_type_from_analysis(
+            inner_receiver,
+            method_name,
+            current_namespace,
+            namespace_kind,
+            position,
+        ) {
+            trace!(
+                "Inferred type for '{}.{}': {:?} via analysis",
+                receiver_to_string(inner_receiver),
+                method_name,
+                chain_type
+            );
+            return self.convert_type_to_namespace(&chain_type);
+        }
+        if self.analysis_engine().is_some() {
+            return None;
+        }
+
         let content = self.doc.as_ref()?.read().content.clone();
         let resolver = ReceiverResolver::new(&self.index, self.doc.as_ref());
 
@@ -270,6 +310,95 @@ impl IndexQuery {
         );
 
         self.convert_type_to_namespace(&chain_type)
+    }
+
+    fn variable_receiver_type_from_analysis(
+        &self,
+        var_name: &str,
+        position: Position,
+    ) -> Option<RubyType> {
+        let doc_arc = self.doc.as_ref()?;
+        let doc = doc_arc.read();
+        if let Some(scope_id) = doc
+            .variable_scopes()
+            .find_scope_for_variable_at(var_name, position)
+            .or_else(|| doc.variable_scopes().scope_at_position(position))
+        {
+            if let Some(ty) = doc
+                .variable_scopes()
+                .get_type_at_position(var_name, scope_id, position)
+            {
+                if *ty != RubyType::Unknown {
+                    return Some(ty.clone());
+                }
+            }
+        }
+
+        let file_id = doc.analysis_file_id();
+        let byte_offset = u32::try_from(doc.position_to_offset(position)).expect(
+            "INVARIANT VIOLATED: LSP position offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        drop(doc);
+
+        let engine = self.analysis_engine()?.lock();
+        engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.range.start_byte <= byte_offset)
+            .filter_map(|fact| match &fact.subject {
+                TypeSubject::Local { name, .. } if name == var_name => Some(fact),
+                TypeSubject::InstanceVariable { name, .. } if name == var_name => Some(fact),
+                TypeSubject::ClassVariable { name, .. } if name == var_name => Some(fact),
+                TypeSubject::GlobalVariable(name) if name == var_name => Some(fact),
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .filter(|fact| fact.ruby_type != RubyType::Unknown)
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
+    fn method_call_receiver_type_from_analysis(
+        &self,
+        inner_receiver: &MethodReceiver,
+        method_name: &str,
+        current_namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+    ) -> Option<RubyType> {
+        if method_name == "new" {
+            if let MethodReceiver::Constant(path) = inner_receiver {
+                return Some(RubyType::Class(FullyQualifiedName::Constant(path.clone())));
+            }
+        }
+
+        let inner_namespace = self.resolve_receiver_to_namespace(
+            inner_receiver,
+            current_namespace,
+            namespace_kind,
+            position,
+        )?;
+        if method_name == "new"
+            && inner_namespace.namespace_kind() == Some(NamespaceKind::Singleton)
+        {
+            return Some(RubyType::Class(FullyQualifiedName::Constant(
+                inner_namespace.namespace_parts(),
+            )));
+        }
+
+        let method = RubyMethod::new(method_name).ok()?;
+        let engine = self.analysis_engine()?.lock();
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        query.method_return_type_for_receiver(&inner_namespace, &method)
     }
 
     /// Convert RubyType to namespace FQN
