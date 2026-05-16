@@ -15,7 +15,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
-use ruby_analysis_core::TypeSubject;
+use ruby_analysis_core::{GraphNodeKind, TypeSubject};
 use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Url};
@@ -163,6 +163,11 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
 
     let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
     let fqn = FullyQualifiedName::namespace(path.to_vec());
+
+    if let Some(hover) = constant_hover_from_analysis(context, path, &constant_fqn, &fqn) {
+        return Some(hover);
+    }
+
     let index = context.index.lock();
 
     if let Some(entries) = index.get(&constant_fqn) {
@@ -174,11 +179,7 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
             }
             None
         }) {
-            let fqn_str = path
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join("::");
+            let fqn_str = constant_path_to_string(path);
             return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
         }
     }
@@ -204,11 +205,7 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
 
         Some(HoverInfo::text(content))
     } else {
-        let fqn_str = path
-            .iter()
-            .map(|c| c.to_string())
-            .collect::<Vec<_>>()
-            .join("::");
+        let fqn_str = constant_path_to_string(path);
         Some(HoverInfo::text(fqn_str))
     }
 }
@@ -370,6 +367,60 @@ fn variable_type_from_analysis(
         })
         .max_by_key(|fact| fact.range.start_byte)
         .map(|fact| fact.ruby_type)
+}
+
+fn constant_hover_from_analysis(
+    context: &HoverContext,
+    path: &[RubyConstant],
+    constant_fqn: &FullyQualifiedName,
+    namespace_fqn: &FullyQualifiedName,
+) -> Option<HoverInfo> {
+    let engine = context.analysis_engine?.lock();
+    let fqn_str = constant_path_to_string(path);
+
+    let node_kind = engine
+        .graph_nodes_for(namespace_fqn)
+        .iter()
+        .max_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+            )
+        })
+        .map(|fact| fact.kind);
+
+    match node_kind {
+        Some(GraphNodeKind::Class) => return Some(HoverInfo::text(format!("class {}", fqn_str))),
+        Some(GraphNodeKind::Module) => return Some(HoverInfo::text(format!("module {}", fqn_str))),
+        None => {}
+    }
+
+    if let Some(ty) = engine
+        .type_store()
+        .facts_for(&TypeSubject::Constant(constant_fqn.clone()))
+        .iter()
+        .filter(|fact| fact.ruby_type != RubyType::Unknown)
+        .max_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+            )
+        })
+        .map(|fact| fact.ruby_type.clone())
+    {
+        return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
+    }
+
+    None
+}
+
+fn constant_path_to_string(path: &[RubyConstant]) -> String {
+    path.iter()
+        .map(|constant| constant.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 fn method_call_return_type(
@@ -539,6 +590,10 @@ fn generate_method_definition_hover(
     position: Position,
     context: &HoverContext,
 ) -> Option<HoverInfo> {
+    if let Some(hover) = method_definition_hover_from_analysis(method_name, position, context) {
+        return Some(hover);
+    }
+
     let index = context.index.lock();
 
     // Find method entry at position
@@ -627,6 +682,64 @@ fn generate_method_definition_hover(
 
     // Fallback - just show the method name
     Some(HoverInfo::ruby_code(format!("def {}", method_name)))
+}
+
+fn method_definition_hover_from_analysis(
+    method_name: &str,
+    position: Position,
+    context: &HoverContext,
+) -> Option<HoverInfo> {
+    let doc = context.document?.read();
+    let file_id = doc.analysis_file_id();
+    drop(doc);
+
+    let byte_offset = position_to_byte_offset(context.content, position)?;
+    let engine = context.analysis_engine?.lock();
+    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let method_fact = query
+        .method_facts_in_file(file_id)
+        .into_iter()
+        .filter(|fact| fact.range.contains_offset(file_id, byte_offset))
+        .find(|fact| {
+            let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                return false;
+            };
+            method.as_str() == method_name
+        })?;
+
+    let return_type = query.method_return_type(&method_fact)?;
+    if return_type == RubyType::Unknown {
+        return None;
+    }
+
+    Some(HoverInfo::ruby_code(format!(
+        "def {} -> {}",
+        method_name, return_type
+    )))
+}
+
+fn position_to_byte_offset(content: &str, position: Position) -> Option<u32> {
+    let mut line = 0u32;
+    let mut character = 0u32;
+
+    for (byte_offset, ch) in content.char_indices() {
+        if line == position.line && character == position.character {
+            return u32::try_from(byte_offset).ok();
+        }
+
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+    }
+
+    if line == position.line && character == position.character {
+        return u32::try_from(content.len()).ok();
+    }
+
+    None
 }
 
 fn resolve_receiver_type(
