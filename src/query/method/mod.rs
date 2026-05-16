@@ -12,18 +12,15 @@
 //! ```
 
 mod analysis;
-mod helpers;
 
 use crate::analyzer_prism::MethodReceiver;
 use crate::indexer::entry::NamespaceKind;
-use crate::indexer::index::RubyIndex;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::deduplicate_locations;
-use helpers::{matches_ancestor, receiver_to_string};
-use log::{debug, trace};
+use log::trace;
 pub use ruby_analysis_core::MethodCalleeResolution;
 use ruby_analysis_core::TypeSubject;
 use tower_lsp::lsp_types::{Location, Position};
@@ -101,51 +98,8 @@ impl IndexQuery {
         if let Some(callees) = analysis::resolve_method_callees(self, &namespace_fqn, method) {
             return callees;
         }
-        if self.analysis_engine().is_some() {
-            return Vec::new();
-        }
 
-        let index = self.index.lock();
-
-        let fqns_to_search = if helpers::is_module_instance_namespace(&index, &namespace_fqn) {
-            let includers = helpers::get_module_includers(&index, &namespace_fqn);
-            if includers.is_empty() {
-                vec![namespace_fqn]
-            } else {
-                includers
-            }
-        } else {
-            vec![namespace_fqn]
-        };
-
-        let mut callees = Vec::new();
-        for fqn in &fqns_to_search {
-            let ancestor_chain = index.get_ancestor_chain(fqn);
-            if let Some(callee) = self.resolve_callee_in_ancestor_chain(
-                &index,
-                &ancestor_chain,
-                method,
-                MethodCalleeResolution::Exact,
-            ) {
-                callees.push(callee);
-            }
-        }
-
-        if callees.is_empty() {
-            callees.extend(
-                fqns_to_search
-                    .into_iter()
-                    .filter(|fqn| namespace_target_exists(&index, fqn))
-                    .map(|fqn| ResolvedMethodCallee {
-                        owner: fqn,
-                        method: method.clone(),
-                        resolution: MethodCalleeResolution::ReceiverOnly,
-                        definition_locations: Vec::new(),
-                    }),
-            );
-        }
-
-        callees
+        Vec::new()
     }
 }
 
@@ -412,72 +366,24 @@ impl IndexQuery {
     }
 }
 
-// ============================================================================
-// Ancestor Chain Search
-// ============================================================================
-
-impl IndexQuery {
-    fn resolve_callee_in_ancestor_chain(
-        &self,
-        index: &RubyIndex,
-        ancestor_chain: &[FullyQualifiedName],
-        method: &RubyMethod,
-        resolution: MethodCalleeResolution,
-    ) -> Option<ResolvedMethodCallee> {
-        for ancestor in ancestor_chain {
-            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), method.clone());
-
-            if let Some(locations) = analysis::method_locations(self, &method_fqn, ancestor_chain) {
-                debug!(
-                    "[Method Found] {}#{} in {} via analysis engine",
-                    ancestor_chain.first().unwrap_or(ancestor),
-                    method,
-                    ancestor
-                );
-                return Some(ResolvedMethodCallee {
-                    owner: ancestor.clone(),
-                    method: method.clone(),
-                    resolution,
-                    definition_locations: locations,
-                });
-            }
-
-            if let Some(entries) = index.get(&method_fqn) {
-                let locations: Vec<_> = entries
-                    .iter()
-                    .filter(|e| matches_ancestor(e, ancestor_chain))
-                    .filter_map(|e| index.to_lsp_location(&e.location))
-                    .collect();
-
-                if !locations.is_empty() {
-                    debug!(
-                        "[Method Found] {}#{} in {}",
-                        ancestor_chain.first().unwrap_or(ancestor),
-                        method,
-                        ancestor
-                    );
-                    return Some(ResolvedMethodCallee {
-                        owner: ancestor.clone(),
-                        method: method.clone(),
-                        resolution,
-                        definition_locations: locations,
-                    });
-                }
-            }
-        }
-        None
+fn receiver_to_string(receiver: &MethodReceiver) -> String {
+    match receiver {
+        MethodReceiver::None => "".to_string(),
+        MethodReceiver::SelfReceiver => "self".to_string(),
+        MethodReceiver::Constant(path) => path
+            .iter()
+            .map(|constant| constant.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        MethodReceiver::LocalVariable(name)
+        | MethodReceiver::InstanceVariable(name)
+        | MethodReceiver::ClassVariable(name)
+        | MethodReceiver::GlobalVariable(name) => name.clone(),
+        MethodReceiver::MethodCall {
+            inner_receiver,
+            method_name,
+        } => format!("{}.{}", receiver_to_string(inner_receiver), method_name),
+        MethodReceiver::Literal(ruby_type) => format!("<literal:{:?}>", ruby_type),
+        MethodReceiver::Expression => "<expr>".to_string(),
     }
-}
-
-fn namespace_target_exists(index: &RubyIndex, fqn: &FullyQualifiedName) -> bool {
-    let parts = fqn.namespace_parts();
-    let instance_fqn =
-        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Instance);
-    let singleton_fqn =
-        FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Singleton);
-    let constant_fqn = FullyQualifiedName::constant(parts);
-
-    index.contains_fqn(&instance_fqn)
-        || index.contains_fqn(&singleton_fqn)
-        || index.contains_fqn(&constant_fqn)
 }

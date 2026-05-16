@@ -1070,7 +1070,11 @@ fn resolved_callees_for_call(visitor: &IndexVisitor, node: &CallNode) -> Vec<Res
         .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
         .unwrap_or(CoreMethodReceiver::None);
     let document = Arc::new(RwLock::new(visitor.document.clone()));
-    let query = IndexQuery::with_doc(visitor.index.clone(), document);
+    let query = if let Some(engine) = &visitor.analysis_engine {
+        IndexQuery::with_doc_and_engine(visitor.index.clone(), document, engine.clone())
+    } else {
+        IndexQuery::with_doc(visitor.index.clone(), document)
+    };
 
     query
         .resolve_method_callees(

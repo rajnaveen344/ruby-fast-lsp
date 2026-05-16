@@ -1,4 +1,5 @@
 use ruby_analysis_core::TypeStore;
+use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::*;
 use tower_lsp::lsp_types::Diagnostic;
 
@@ -12,6 +13,8 @@ use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 mod block_node;
 mod call_node;
@@ -39,6 +42,7 @@ pub struct IndexVisitor {
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
     pub extension_index_patches: Vec<ruby_fast_lsp_extension_api::IndexPatch>,
     pub extension_registry: ExtensionRegistryHandle,
+    pub analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
 impl IndexVisitor {
@@ -51,6 +55,15 @@ impl IndexVisitor {
         document: RubyDocument,
         extension_registry: ExtensionRegistryHandle,
     ) -> Self {
+        Self::with_extension_registry_and_analysis_engine(index, document, extension_registry, None)
+    }
+
+    pub fn with_extension_registry_and_analysis_engine(
+        index: Index<Unlocked>,
+        document: RubyDocument,
+        extension_registry: ExtensionRegistryHandle,
+        analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
+    ) -> Self {
         let scope_tracker = ScopeTracker::new();
         Self {
             index,
@@ -62,6 +75,7 @@ impl IndexVisitor {
             extension_call_stack: Vec::new(),
             extension_index_patches: Vec::new(),
             extension_registry,
+            analysis_engine,
         }
     }
 

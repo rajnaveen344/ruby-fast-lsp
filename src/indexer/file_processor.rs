@@ -227,10 +227,19 @@ impl FileProcessor {
             // The `document` variable from above is already initialized with content and parse_result
             // We just need to ensure it's mutable for the visitor.
             // Clone document because parse_result borrows from the original
-            let mut visitor = IndexVisitor::with_extension_registry(
+            let direct_facts_seed =
+                collect_direct_facts(server, content, document.analysis_file_id());
+            replace_analysis_facts_for_file(
+                server,
+                document.analysis_file_id(),
+                &direct_facts_seed,
+            );
+
+            let mut visitor = IndexVisitor::with_extension_registry_and_analysis_engine(
                 self.index.clone(),
                 document.clone(),
                 self.extension_registry.clone(),
+                Some(server.analysis_engine.clone()),
             );
             visitor.visit(&node);
             diagnostics.extend(visitor.diagnostics);
@@ -238,8 +247,7 @@ impl FileProcessor {
             // Flush indexing-time type facts into the shared analysis engine.
             let extension_index_patches = visitor.extension_index_patches.clone();
             let updated_document = visitor.document.clone();
-            let mut direct_facts =
-                collect_direct_facts(server, content, updated_document.analysis_file_id());
+            let mut direct_facts = direct_facts_seed;
             add_extension_analysis_facts(
                 server,
                 &updated_document,
@@ -435,16 +443,18 @@ impl FileProcessor {
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
 
-        let mut index_visitor = IndexVisitor::with_extension_registry(
+        let direct_facts_seed = collect_direct_facts(server, content, analysis_file_id);
+        replace_analysis_facts_for_file(server, analysis_file_id, &direct_facts_seed);
+
+        let mut index_visitor = IndexVisitor::with_extension_registry_and_analysis_engine(
             self.index.clone(),
             document.clone(),
             self.extension_registry.clone(),
+            Some(server.analysis_engine.clone()),
         );
         index_visitor.visit(&node);
 
-        let mut direct_facts =
-            AnalysisIndexer::with_known_namespaces(analysis_file_id, HashSet::new())
-                .index_node(&node);
+        let mut direct_facts = direct_facts_seed;
         add_extension_analysis_facts(
             server,
             &document,
@@ -609,6 +619,31 @@ fn collect_direct_facts(
 ) -> ruby_analysis_indexer::AnalysisIndex {
     AnalysisIndexer::with_known_namespaces(file_id, collect_known_namespaces(server))
         .index_source(content)
+}
+
+fn replace_analysis_facts_for_file(
+    server: &RubyLanguageServer,
+    file_id: ruby_analysis_core::SourceFileId,
+    facts: &ruby_analysis_indexer::AnalysisIndex,
+) {
+    server
+        .analysis_engine
+        .lock()
+        .replace_symbol_facts_for_file(file_id, facts.symbols.clone());
+    server
+        .analysis_engine
+        .lock()
+        .replace_method_facts_for_file(file_id, facts.methods.clone());
+    server
+        .analysis_engine
+        .lock()
+        .replace_type_facts_for_file(file_id, facts.types.clone());
+    server.analysis_engine.lock().replace_graph_update_for_file(
+        file_id,
+        facts.graph_nodes.clone(),
+        facts.graph_edges.clone(),
+        facts.unresolved_graph_edges.clone(),
+    );
 }
 
 fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {

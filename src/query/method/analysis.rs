@@ -1,5 +1,3 @@
-use tower_lsp::lsp_types::Location;
-
 use crate::query::analysis_location::location_for_range;
 use crate::query::IndexQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -44,30 +42,4 @@ pub(super) fn resolve_constant_receiver(
     let engine = engine.lock();
     let analysis_query = ruby_analysis_engine::AnalysisQuery::new(&engine);
     Some(analysis_query.resolve_constant_receiver(path, current_namespace))
-}
-
-pub(super) fn method_locations(
-    query: &IndexQuery,
-    method_fqn: &FullyQualifiedName,
-    ancestor_chain: &[FullyQualifiedName],
-) -> Option<Vec<Location>> {
-    let engine = query.analysis_engine()?;
-    let engine = engine.lock();
-    let locations = engine
-        .method_facts_for(method_fqn)
-        .iter()
-        .filter(|fact| {
-            ancestor_chain.iter().any(|ancestor| {
-                ancestor.namespace_parts() == fact.owner.namespace_parts()
-                    && ancestor.namespace_kind() == fact.owner.namespace_kind()
-            })
-        })
-        .filter_map(|fact| location_for_range(&engine, fact.range))
-        .collect::<Vec<_>>();
-
-    if locations.is_empty() {
-        None
-    } else {
-        Some(locations)
-    }
 }
