@@ -3,7 +3,7 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::{EntryKind, NamespaceKind};
+use crate::indexer::entry::NamespaceKind;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
@@ -114,26 +114,7 @@ impl IndexQuery {
             return Some(locations);
         }
 
-        let index = self.index.lock();
-        let entries = index.get(&fqn)?;
-
-        // Filter for definition entries (classes or modules)
-        let locations: Vec<Location> = entries
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    EntryKind::Class(_) | EntryKind::Module(_) | EntryKind::Constant(_)
-                )
-            })
-            .filter_map(|e| index.to_lsp_location(&e.location))
-            .collect();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        None
     }
 }
 
@@ -278,13 +259,6 @@ impl IndexQuery {
             {
                 return Some(locations);
             }
-            let index = self.index.lock();
-            return index.get(&fqn).map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|e| index.to_lsp_location(&e.location))
-                    .collect()
-            });
         }
         None
     }
@@ -298,13 +272,6 @@ impl IndexQuery {
             {
                 return Some(locations);
             }
-            let index = self.index.lock();
-            return index.get(&fqn).map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|e| index.to_lsp_location(&e.location))
-                    .collect()
-            });
         }
         None
     }
@@ -319,38 +286,6 @@ impl IndexQuery {
             return fqn;
         }
 
-        let index = self.index.lock();
-        let mut current_context = ancestors.to_vec();
-
-        // 1. Iteratively check scopes from most specific to least specific
-        loop {
-            let mut probe_ns = current_context.clone();
-            probe_ns.extend(constant_path.iter().cloned());
-
-            // Try as Namespace first (for class/module definitions)
-            let probe_namespace_fqn = FullyQualifiedName::namespace(probe_ns.clone());
-            if index.get(&probe_namespace_fqn).is_some() {
-                return probe_namespace_fqn;
-            }
-
-            // Then try as Constant (for value constants like A = 1)
-            let probe_constant_fqn = FullyQualifiedName::Constant(probe_ns);
-            if index.get(&probe_constant_fqn).is_some() {
-                return probe_constant_fqn;
-            }
-
-            if current_context.is_empty() {
-                break;
-            }
-            current_context.pop();
-        }
-
-        // 2. Default to just the path (absolute/toplevel)
-        // Try namespace first, then constant as fallback
-        let namespace_fqn = FullyQualifiedName::namespace(constant_path.to_vec());
-        if index.get(&namespace_fqn).is_some() {
-            return namespace_fqn;
-        }
         FullyQualifiedName::Constant(constant_path.to_vec())
     }
 
@@ -368,13 +303,7 @@ impl IndexQuery {
             return Some(locations);
         }
 
-        let index = self.index.lock();
-        index.get(fqn).map(|entries| {
-            entries
-                .iter()
-                .filter_map(|e| index.to_lsp_location(&e.location))
-                .collect()
-        })
+        None
     }
 
     fn resolve_constant_fqn_from_analysis(
