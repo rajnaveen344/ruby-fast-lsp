@@ -144,7 +144,13 @@ impl FileProcessor {
             );
             // Still parse for syntax diagnostics
             let parse_result = ruby_prism::parse(content.as_bytes());
-            let doc = RubyDocument::new(uri.clone(), content.to_string(), 0);
+            let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+            let doc = RubyDocument::with_analysis_file_id(
+                uri.clone(),
+                content.to_string(),
+                0,
+                analysis_file_id,
+            );
             let diagnostics = generate_diagnostics(&parse_result, &doc);
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
@@ -155,7 +161,13 @@ impl FileProcessor {
         // 1. Parse ONLY ONCE
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
+        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let document = RubyDocument::with_analysis_file_id(
+            uri.clone(),
+            content.to_string(),
+            0,
+            analysis_file_id,
+        );
 
         // 2. Generate Syntax Diagnostics
         let mut diagnostics = generate_diagnostics(&parse_result, &document);

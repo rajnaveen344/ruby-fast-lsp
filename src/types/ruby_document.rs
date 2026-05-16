@@ -30,11 +30,22 @@ pub struct RubyDocument {
 
     /// Document-local type facts emitted during indexing.
     pub type_store: TypeStore,
+
+    analysis_file_id: SourceFileId,
 }
 
 impl RubyDocument {
     /// Creates a new document with the given URI, content, and version
     pub fn new(uri: Url, content: String, version: i32) -> Self {
+        Self::with_analysis_file_id(uri, content, version, SourceFileId(0))
+    }
+
+    pub fn with_analysis_file_id(
+        uri: Url,
+        content: String,
+        version: i32,
+        analysis_file_id: SourceFileId,
+    ) -> Self {
         let comments = parse_comments(&content);
         let mut doc = Self {
             uri,
@@ -46,6 +57,7 @@ impl RubyDocument {
             comments,
             variable_scopes: VariableScopes::new(),
             type_store: TypeStore::new(),
+            analysis_file_id,
         };
         doc.compute_line_offsets();
         doc
@@ -72,12 +84,13 @@ impl RubyDocument {
         self.compute_inlay_hints();
     }
 
-    /// Document-local source file id for type facts.
-    ///
-    /// This remains local to `RubyDocument` until a project-level analysis engine
-    /// owns stable file ids.
+    /// Source file id for type facts emitted from this document.
     pub fn analysis_file_id(&self) -> SourceFileId {
-        SourceFileId(0)
+        self.analysis_file_id
+    }
+
+    pub fn set_analysis_file_id(&mut self, analysis_file_id: SourceFileId) {
+        self.analysis_file_id = analysis_file_id;
     }
 
     /// Computes byte offsets at the start of each line

@@ -35,7 +35,7 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
-    server.open_or_update_analysis_file(&uri, content.clone());
+    let analysis_file_id = server.open_or_update_analysis_file(&uri, content.clone());
 
     // Only create a fresh document if one doesn't exist
     // IMPORTANT: Don't overwrite existing document that may have lvars from workspace indexing
@@ -43,10 +43,15 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         let mut docs = server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
             let mut doc_guard = existing_doc.write();
+            doc_guard.set_analysis_file_id(analysis_file_id);
             doc_guard.update(content.clone(), params.text_document.version);
         } else {
-            let document =
-                RubyDocument::new(uri.clone(), content.clone(), params.text_document.version);
+            let document = RubyDocument::with_analysis_file_id(
+                uri.clone(),
+                content.clone(),
+                params.text_document.version,
+                analysis_file_id,
+            );
             docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
         }
     }
@@ -102,16 +107,22 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         Some(change) => change.text.clone(),
         None => return,
     };
-    server.open_or_update_analysis_file(&uri, final_content.clone());
+    let analysis_file_id = server.open_or_update_analysis_file(&uri, final_content.clone());
 
     // Update or create the document atomically
     {
         let mut docs = server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
             let mut doc_guard = existing_doc.write();
+            doc_guard.set_analysis_file_id(analysis_file_id);
             doc_guard.update(final_content.clone(), version);
         } else {
-            let new_doc = RubyDocument::new(uri.clone(), final_content.clone(), version);
+            let new_doc = RubyDocument::with_analysis_file_id(
+                uri.clone(),
+                final_content.clone(),
+                version,
+                analysis_file_id,
+            );
             docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc)));
         }
     }

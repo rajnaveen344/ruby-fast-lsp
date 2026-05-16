@@ -58,6 +58,7 @@ pub struct TypeQuery<'a> {
     uri: &'a Url,
     content: &'a [u8],
     type_store: Option<&'a TypeStore>,
+    source_file_id: SourceFileId,
 }
 
 impl<'a> TypeQuery<'a> {
@@ -68,6 +69,7 @@ impl<'a> TypeQuery<'a> {
             uri,
             content,
             type_store: None,
+            source_file_id: SourceFileId(0),
         }
     }
 
@@ -77,11 +79,22 @@ impl<'a> TypeQuery<'a> {
         content: &'a [u8],
         type_store: &'a TypeStore,
     ) -> Self {
+        Self::with_type_store_for_file(index, uri, content, type_store, SourceFileId(0))
+    }
+
+    pub fn with_type_store_for_file(
+        index: Index<Unlocked>,
+        uri: &'a Url,
+        content: &'a [u8],
+        type_store: &'a TypeStore,
+        source_file_id: SourceFileId,
+    ) -> Self {
         Self {
             index,
             uri,
             content,
             type_store: Some(type_store),
+            source_file_id,
         }
     }
 
@@ -379,7 +392,7 @@ impl<'a> TypeQuery<'a> {
             let byte_offset = position_to_byte_offset(self.content, position)?;
             match type_store.type_at(
                 &TypeSubject::Constant(fqn.clone()),
-                SourceFileId(0),
+                self.source_file_id,
                 byte_offset,
             ) {
                 TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
@@ -659,7 +672,7 @@ impl<'a> TypeQuery<'a> {
                     scope_id,
                     name: name.to_string(),
                 },
-                SourceFileId(0),
+                self.source_file_id,
                 byte_offset,
             ) {
                 TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
@@ -733,7 +746,7 @@ impl<'a> TypeQuery<'a> {
             let byte_offset = position_to_byte_offset(self.content, position)?;
             match type_store.type_at(
                 &TypeSubject::MethodReturn(fqn.clone()),
-                SourceFileId(0),
+                self.source_file_id,
                 byte_offset,
             ) {
                 TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
