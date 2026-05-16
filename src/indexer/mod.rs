@@ -19,6 +19,7 @@
 //! - **`prefix_tree`**: Fast prefix-based search for auto-completion
 //! - **`version`**: Ruby version detection and management
 
+pub mod analysis_facts;
 pub mod coordinator;
 pub mod entry;
 pub mod file_processor;
