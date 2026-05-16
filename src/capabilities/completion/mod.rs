@@ -407,7 +407,6 @@ fn get_receiver_type_from_snapshots(
             | MethodReceiver::ClassVariable(name)
             | MethodReceiver::GlobalVariable(name) => {
                 lookup_variable_type_from_engine(server, uri, name, receiver)
-                    .or_else(|| lookup_variable_type_from_index(server, uri, name, receiver))
             }
             _ => None,
         };
@@ -561,7 +560,6 @@ fn resolve_method_receiver_type(
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
             lookup_variable_type_from_engine(server, uri, name, receiver)
-                .or_else(|| lookup_variable_type_from_index(server, uri, name, receiver))
         }
         MethodReceiver::MethodCall {
             inner_receiver,
@@ -843,40 +841,6 @@ fn lookup_variable_type_from_engine(
                 _,
             ) => None,
         })
-}
-
-fn lookup_variable_type_from_index(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    name: &str,
-    receiver: &MethodReceiver,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::indexer::entry::entry_kind::EntryKind;
-    use crate::inferrer::r#type::ruby::RubyType;
-
-    let index = server.index_for_uri(&uri).lock_arc();
-    // Search entries for this file to find the variable with matching name and type
-    for entry in index.file_entries(uri) {
-        match (&entry.kind, receiver) {
-            (EntryKind::InstanceVariable(data), MethodReceiver::InstanceVariable(_)) => {
-                if data.name == *name && data.r#type != RubyType::Unknown {
-                    return Some(data.r#type.clone());
-                }
-            }
-            (EntryKind::ClassVariable(data), MethodReceiver::ClassVariable(_)) => {
-                if data.name == *name && data.r#type != RubyType::Unknown {
-                    return Some(data.r#type.clone());
-                }
-            }
-            (EntryKind::GlobalVariable(data), MethodReceiver::GlobalVariable(_)) => {
-                if data.name == *name && data.r#type != RubyType::Unknown {
-                    return Some(data.r#type.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 fn infer_type_from_constructor_assignment(

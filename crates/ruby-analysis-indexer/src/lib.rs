@@ -825,6 +825,13 @@ fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<Ruby
 }
 
 fn literal_type(node: &Node<'_>) -> Option<RubyType> {
+    if let Some(call) = node.as_call_node() {
+        if call.name().as_slice() == b"new" {
+            let receiver = call.receiver()?;
+            let parts = constant_parts(&receiver)?;
+            return Some(RubyType::Class(FullyQualifiedName::constant(parts)));
+        }
+    }
     if let Some(read) = node.as_constant_read_node() {
         let name = String::from_utf8_lossy(read.name().as_slice()).to_string();
         let constant = RubyConstant::new(&name).ok()?;
@@ -1063,6 +1070,23 @@ mod tests {
                     == RubyType::ClassReference(FullyQualifiedName::constant(vec![
                         RubyConstant::new("User").unwrap(),
                     ]))
+        }));
+    }
+
+    #[test]
+    fn indexes_constructor_assignment_type_fact() {
+        let index =
+            AnalysisIndexer::new(file()).index_source("class User\nend\n@user = User.new\n");
+
+        assert!(index.types.iter().any(|fact| {
+            matches!(
+                &fact.subject,
+                TypeSubject::InstanceVariable { name, .. } if name == "@user"
+            ) && fact.ruby_type
+                == RubyType::Class(FullyQualifiedName::constant(vec![RubyConstant::new(
+                    "User",
+                )
+                .unwrap()]))
         }));
     }
 }
