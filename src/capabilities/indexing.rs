@@ -35,6 +35,7 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
+    server.open_or_update_analysis_file(&uri, content.clone());
 
     // Only create a fresh document if one doesn't exist
     // IMPORTANT: Don't overwrite existing document that may have lvars from workspace indexing
@@ -101,6 +102,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         Some(change) => change.text.clone(),
         None => return,
     };
+    server.open_or_update_analysis_file(&uri, final_content.clone());
 
     // Update or create the document atomically
     {
@@ -249,5 +251,65 @@ pub async fn handle_watched_files_changed(
     if has_ruby_changes {
         server.invalidate_namespace_tree_cache_debounced();
         debug!("Scheduled namespace tree cache invalidation for watched file changes");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn did_open_registers_source_in_analysis_engine() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "A = 1".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let path = uri.to_file_path().expect("file URI must convert to path");
+        let engine = server.analysis_engine.lock();
+        let file_id = engine
+            .file_id(path)
+            .expect("did_open must register file in analysis engine");
+        assert_eq!(engine.file(file_id).unwrap().source, "A = 1");
+    }
+
+    #[tokio::test]
+    async fn did_change_updates_analysis_engine_source() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_change(
+            &server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "A = 2".to_string(),
+                }],
+            },
+        )
+        .await;
+
+        let path = uri.to_file_path().expect("file URI must convert to path");
+        let engine = server.analysis_engine.lock();
+        let file_id = engine
+            .file_id(path)
+            .expect("did_change must register file in analysis engine");
+        assert_eq!(engine.file(file_id).unwrap().source, "A = 2");
     }
 }

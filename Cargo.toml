@@ -66,6 +66,7 @@ ruby-fast-lsp-extension-wasm-host = { path = "crates/extension-wasm-host" }
 ruby-prism = "1.4.0"
 rbs-parser = { path = "crates/rbs-parser" }
 ruby-analysis-core = { path = "crates/ruby-analysis-core" }
+ruby-analysis-engine = { path = "crates/ruby-analysis-engine" }
 
 # File system operations
 walkdir = "2.4.0"

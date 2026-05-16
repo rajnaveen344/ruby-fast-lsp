@@ -12,6 +12,8 @@ use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
+use ruby_analysis_core::SourceFileId;
+use ruby_analysis_engine::AnalysisEngine;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::exit;
@@ -112,6 +114,8 @@ pub struct RubyLanguageServer {
     /// Tests use this when no workspace is configured.
     pub orphan_index: Index<Unlocked>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
+    /// Editor-agnostic analysis state shared by LSP and future agent APIs.
+    pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub extension_registry: ExtensionRegistryHandle,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
@@ -133,6 +137,7 @@ impl RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             orphan_index,
             docs: Arc::new(Mutex::new(HashMap::new())),
+            analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(config)),
             extension_registry,
             namespace_tree_cache: Arc::new(Mutex::new(None)),
@@ -218,6 +223,19 @@ impl RubyLanguageServer {
             Some(ws) => ws.index,
             None => self.orphan_index.clone(),
         }
+    }
+
+    pub fn open_or_update_analysis_file(
+        &self,
+        uri: &Url,
+        source: impl Into<String>,
+    ) -> SourceFileId {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        self.analysis_engine
+            .lock()
+            .open_or_update_file(path, source)
     }
 
     /// Returns handles to every index, including the orphan fallback.
@@ -406,6 +424,7 @@ impl Default for RubyLanguageServer {
             workspaces: Arc::new(RwLock::new(Vec::new())),
             orphan_index,
             docs: Arc::new(Mutex::new(HashMap::new())),
+            analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
