@@ -267,6 +267,8 @@ pub async fn handle_watched_files_changed(
 
 #[cfg(test)]
 mod tests {
+    use ruby_analysis_core::{FullyQualifiedName, RubyConstant, SymbolKind};
+
     use super::*;
 
     #[tokio::test]
@@ -322,5 +324,51 @@ mod tests {
             .file_id(path)
             .expect("did_change must register file in analysis engine");
         assert_eq!(engine.file(file_id).unwrap().source, "A = 2");
+    }
+
+    #[tokio::test]
+    async fn did_change_replaces_analysis_engine_symbol_facts() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/user.rb").expect("test URI must parse");
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\nend".to_string(),
+                },
+            },
+        )
+        .await;
+        handle_did_change(
+            &server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "class Account\nend".to_string(),
+                }],
+            },
+        )
+        .await;
+
+        let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+        let account_fqn =
+            FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
+        let engine = server.analysis_engine.lock();
+        assert!(
+            engine.symbol_facts_for(&user_fqn).is_empty(),
+            "stale User symbol facts must be removed after reindex"
+        );
+        let account_facts = engine.symbol_facts_for(&account_fqn);
+        assert_eq!(account_facts.len(), 1);
+        assert_eq!(account_facts[0].kind, SymbolKind::Class);
     }
 }

@@ -20,6 +20,8 @@ use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
 use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
+use crate::indexer::entry::EntryKind;
+use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
@@ -27,6 +29,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
+use ruby_analysis_core::{SourceFileId, SymbolFact, SymbolKind, TextRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::Path;
@@ -205,10 +208,23 @@ impl FileProcessor {
             // Flush indexing-time type facts into the shared analysis engine.
             let type_facts = visitor.type_store.all_facts();
             let updated_document = visitor.document.clone();
+            let symbol_facts = {
+                let index = self.index.lock();
+                collect_symbol_facts_for_file(
+                    &index,
+                    &updated_document,
+                    uri,
+                    updated_document.analysis_file_id(),
+                )
+            };
             server
                 .analysis_engine
                 .lock()
                 .replace_type_facts_for_file(updated_document.analysis_file_id(), type_facts);
+            server
+                .analysis_engine
+                .lock()
+                .replace_symbol_facts_for_file(updated_document.analysis_file_id(), symbol_facts);
             if let Some(program) = node.as_program_node() {
                 // Run TypeTracker to infer types for all code
                 // Track top-level statements (outside methods)
@@ -406,4 +422,63 @@ impl FileProcessor {
         let content = std::fs::read_to_string(file_path)?;
         self.index_references(&uri, &content)
     }
+}
+
+fn collect_symbol_facts_for_file(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    uri: &Url,
+    file_id: SourceFileId,
+) -> Vec<SymbolFact> {
+    index
+        .file_entries(uri)
+        .into_iter()
+        .filter_map(|entry| {
+            let kind = symbol_kind_for_entry(&entry.kind)?;
+            let fqn = index.get_fqn(entry.fqn_id).unwrap_or_else(|| {
+                panic!(
+                    "INVARIANT VIOLATED: index entry references missing FQN id. \
+                     This is a bug because RubyIndex::add_entry must intern every FQN before storing entries. \
+                     Fix: build entries through EntryBuilder or intern the FQN before insertion."
+                )
+            });
+            let start_byte = byte_offset_u32(
+                document.position_to_offset(entry.location.range.start),
+                "symbol start offset exceeded u32",
+            );
+            let end_byte = byte_offset_u32(
+                document.position_to_offset(entry.location.range.end),
+                "symbol end offset exceeded u32",
+            );
+            Some(SymbolFact::new(
+                fqn.clone(),
+                kind,
+                TextRange::new(file_id, start_byte, end_byte),
+            ))
+        })
+        .collect()
+}
+
+fn symbol_kind_for_entry(entry_kind: &EntryKind) -> Option<SymbolKind> {
+    match entry_kind {
+        EntryKind::Class(_) => Some(SymbolKind::Class),
+        EntryKind::Module(_) => Some(SymbolKind::Module),
+        EntryKind::Method(_) => Some(SymbolKind::Method),
+        EntryKind::Constant(_) => Some(SymbolKind::Constant),
+        EntryKind::LocalVariable(_) => Some(SymbolKind::LocalVariable),
+        EntryKind::InstanceVariable(_) => Some(SymbolKind::InstanceVariable),
+        EntryKind::ClassVariable(_) => Some(SymbolKind::ClassVariable),
+        EntryKind::GlobalVariable(_) => Some(SymbolKind::GlobalVariable),
+        EntryKind::Reference(_) => None,
+    }
+}
+
+fn byte_offset_u32(byte_offset: usize, message: &str) -> u32 {
+    u32::try_from(byte_offset).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: {message}. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
+        )
+    })
 }

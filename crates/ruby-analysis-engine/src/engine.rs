@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ruby_analysis_core::{
-    SourceFileId, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
+    FullyQualifiedName, SourceFileId, SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution,
+    TypeStore, TypeSubject,
 };
 
 use crate::FileIdMap;
@@ -19,6 +20,7 @@ pub struct SourceFile {
 pub struct AnalysisEngine {
     file_ids: FileIdMap,
     files: HashMap<SourceFileId, SourceFile>,
+    symbol_store: SymbolStore,
     type_store: TypeStore,
 }
 
@@ -61,6 +63,26 @@ impl AnalysisEngine {
         self.type_store.add(fact);
     }
 
+    pub fn add_symbol_fact(&mut self, fact: SymbolFact) {
+        self.assert_known_file_id(
+            fact.range.file_id,
+            "symbol fact references unknown source file id",
+        );
+        self.symbol_store.add(fact);
+    }
+
+    pub fn replace_symbol_facts_for_file(
+        &mut self,
+        file_id: SourceFileId,
+        facts: impl IntoIterator<Item = SymbolFact>,
+    ) {
+        self.assert_known_file_id(
+            file_id,
+            "symbol fact replacement references unknown source file id",
+        );
+        self.symbol_store.replace_file(file_id, facts);
+    }
+
     pub fn replace_type_facts_for_file(
         &mut self,
         file_id: SourceFileId,
@@ -84,6 +106,14 @@ impl AnalysisEngine {
 
     pub fn type_facts_for(&self, subject: &TypeSubject) -> &[TypeFact] {
         self.type_store.facts_for(subject)
+    }
+
+    pub fn symbol_facts_for(&self, fqn: &FullyQualifiedName) -> &[SymbolFact] {
+        self.symbol_store.facts_for(fqn)
+    }
+
+    pub fn symbol_store(&self) -> &SymbolStore {
+        &self.symbol_store
     }
 
     pub fn type_store(&self) -> &TypeStore {
@@ -112,7 +142,8 @@ impl AnalysisEngine {
 #[cfg(test)]
 mod tests {
     use ruby_analysis_core::{
-        FullyQualifiedName, RubyConstant, RubyType, TypeProvenance, TypeSubject,
+        FullyQualifiedName, RubyConstant, RubyType, SymbolFact, SymbolKind, TypeProvenance,
+        TypeSubject,
     };
 
     use super::*;
@@ -184,6 +215,31 @@ mod tests {
             TypeResolution::Resolved(fact) => assert_eq!(fact.ruby_type, RubyType::string()),
             other => panic!("expected replacement fact, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn replace_symbol_facts_for_file_removes_stale_engine_facts() {
+        let mut engine = AnalysisEngine::new();
+        let file_id = engine.open_or_update_file("app/user.rb", "class User; end");
+        let fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+
+        engine.add_symbol_fact(SymbolFact::new(
+            fqn.clone(),
+            SymbolKind::Class,
+            engine.text_range(file_id, 0, 10),
+        ));
+        engine.replace_symbol_facts_for_file(
+            file_id,
+            [SymbolFact::new(
+                fqn.clone(),
+                SymbolKind::Class,
+                engine.text_range(file_id, 20, 30),
+            )],
+        );
+
+        let facts = engine.symbol_facts_for(&fqn);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].range.start_byte, 20);
     }
 
     #[test]
