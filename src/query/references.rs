@@ -239,6 +239,9 @@ impl IndexQuery {
         if let Some(locations) = self.find_method_refs_from_analysis(namespace_fqn, method) {
             return Some(locations);
         }
+        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
+            return None;
+        }
 
         let mut all_references = Vec::new();
         let kind = NamespaceKind::Instance;
@@ -271,6 +274,9 @@ impl IndexQuery {
         if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
             return Some(locations);
         }
+        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
+            return None;
+        }
 
         self.find_method_refs_in_ancestor_chain(receiver_fqn, method, NamespaceKind::Singleton)
     }
@@ -287,6 +293,9 @@ impl IndexQuery {
         );
         if let Some(locations) = self.find_method_refs_from_analysis(&namespace_fqn, method) {
             return Some(locations);
+        }
+        if self.analysis_engine().is_some() && !self.has_no_analysis_document_context() {
+            return None;
         }
 
         let mut all_references = Vec::new();
