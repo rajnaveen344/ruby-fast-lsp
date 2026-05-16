@@ -167,18 +167,8 @@ impl IndexQuery {
             ));
         }
 
-        let index = self.index.lock();
-        let current_fqn = FullyQualifiedName::namespace(current_namespace.to_vec());
-        let receiver_fqn = crate::analyzer_prism::utils::resolve_constant_fqn_from_parts(
-            &index,
-            path,
-            false,
-            &current_fqn,
-        )
-        .unwrap_or_else(|| FullyQualifiedName::Constant(path.to_vec()));
-
         Some(FullyQualifiedName::namespace_with_kind(
-            receiver_fqn.namespace_parts(),
+            path.to_vec(),
             NamespaceKind::Singleton,
         ))
     }
