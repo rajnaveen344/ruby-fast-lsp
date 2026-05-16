@@ -27,7 +27,7 @@ use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 use crate::analyzer_prism::utils::resolve_constant_fqn_from_parts;
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::MixinRef;
+use crate::indexer::entry::{MixinRef, NamespaceKind};
 use crate::indexer::index::{FileId, FqnId, RubyIndex};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
@@ -450,8 +450,17 @@ impl IndexQuery {
             }
             match edge.kind {
                 GraphEdgeKind::Superclass => subclass_edges.push(edge),
-                GraphEdgeKind::Include => included_by_edges.push(edge),
-                GraphEdgeKind::Prepend => prepended_by_edges.push(edge),
+                GraphEdgeKind::Include
+                    if edge.source.namespace_kind() == Some(NamespaceKind::Instance) =>
+                {
+                    included_by_edges.push(edge)
+                }
+                GraphEdgeKind::Prepend
+                    if edge.source.namespace_kind() == Some(NamespaceKind::Instance) =>
+                {
+                    prepended_by_edges.push(edge)
+                }
+                GraphEdgeKind::Include | GraphEdgeKind::Prepend => {}
                 GraphEdgeKind::Extend => extended_by_edges.push(edge),
             }
         }

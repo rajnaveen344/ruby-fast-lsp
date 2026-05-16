@@ -323,6 +323,9 @@ fn mixers_from_analysis(
                     edge.kind,
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
                 )
+                && (matches!(edge.kind, GraphEdgeKind::Extend)
+                    || edge.source.namespace_kind()
+                        == Some(crate::indexer::entry::NamespaceKind::Instance))
         })
         .map(|edge| edge.source)
         .collect::<Vec<_>>();

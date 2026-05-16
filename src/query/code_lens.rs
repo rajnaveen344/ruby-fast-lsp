@@ -159,6 +159,11 @@ fn mixin_usages_from_analysis(
         if edge.target.namespace_parts() != module_fqn.namespace_parts() {
             continue;
         }
+        if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+            && edge.source.namespace_kind() != Some(crate::indexer::entry::NamespaceKind::Instance)
+        {
+            continue;
+        }
         let Some(mixin_type) = mixin_type_for_graph_edge(edge.kind) else {
             continue;
         };
@@ -197,6 +202,12 @@ fn class_definition_locations_from_analysis(
                 edge.kind,
                 GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
             ) {
+                continue;
+            }
+            if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+                && edge.source.namespace_kind()
+                    != Some(crate::indexer::entry::NamespaceKind::Instance)
+            {
                 continue;
             }
             if edge.target.namespace_parts() != target.namespace_parts() {

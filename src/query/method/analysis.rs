@@ -15,13 +15,6 @@ pub(super) fn resolve_method_callees(
     namespace_fqn: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<Vec<ResolvedMethodCallee>> {
-    // Singleton MRO needs class singleton inheritance plus `extend` modeling.
-    // Analysis graph stores raw `extend` edges today, so keep legacy fallback
-    // until singleton graph facts are normalized.
-    if namespace_fqn.namespace_kind() == Some(NamespaceKind::Singleton) {
-        return None;
-    }
-
     let engine = query.analysis_engine()?;
     let engine = engine.lock();
     if !namespace_target_exists(&engine, namespace_fqn) {
@@ -145,6 +138,7 @@ fn module_includers(
     for edge in engine.all_graph_edges() {
         if &edge.target == module_fqn
             && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+            && edge.source.namespace_kind() == Some(NamespaceKind::Instance)
             && visited.insert(edge.source.clone())
         {
             queue.push_back(edge.source);
@@ -161,6 +155,7 @@ fn module_includers(
             for edge in engine.all_graph_edges() {
                 if edge.target == current
                     && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+                    && edge.source.namespace_kind() == Some(NamespaceKind::Instance)
                     && visited.insert(edge.source.clone())
                 {
                     queue.push_back(edge.source);

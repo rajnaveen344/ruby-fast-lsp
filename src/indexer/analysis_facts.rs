@@ -100,16 +100,24 @@ pub fn collect_graph_facts_for_file(
         });
         match &entry.kind {
             EntryKind::Class(data) => {
+                let range = text_range_from_lsp_range(
+                    document,
+                    file_id,
+                    entry.location.range,
+                    "graph node",
+                );
                 nodes.push(GraphNodeFact::new(
                     source.clone(),
                     GraphNodeKind::Class,
-                    text_range_from_lsp_range(
-                        document,
-                        file_id,
-                        entry.location.range,
-                        "graph node",
-                    ),
+                    range,
                 ));
+                if let Some(singleton_source) = source.to_singleton_namespace() {
+                    nodes.push(GraphNodeFact::new(
+                        singleton_source,
+                        GraphNodeKind::Class,
+                        range,
+                    ));
+                }
                 if let Some(superclass) = &data.superclass {
                     push_graph_edge(
                         index,
@@ -119,6 +127,9 @@ pub fn collect_graph_facts_for_file(
                         superclass,
                         GraphEdgeKind::Superclass,
                         &mut edges,
+                    );
+                    push_singleton_superclass_edge(
+                        index, document, file_id, source, superclass, &mut edges,
                     );
                 }
                 push_graph_edges(
@@ -148,18 +159,34 @@ pub fn collect_graph_facts_for_file(
                     GraphEdgeKind::Extend,
                     &mut edges,
                 );
+                push_normalized_extend_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.extends,
+                    &mut edges,
+                );
             }
             EntryKind::Module(data) => {
+                let range = text_range_from_lsp_range(
+                    document,
+                    file_id,
+                    entry.location.range,
+                    "graph node",
+                );
                 nodes.push(GraphNodeFact::new(
                     source.clone(),
                     GraphNodeKind::Module,
-                    text_range_from_lsp_range(
-                        document,
-                        file_id,
-                        entry.location.range,
-                        "graph node",
-                    ),
+                    range,
                 ));
+                if let Some(singleton_source) = source.to_singleton_namespace() {
+                    nodes.push(GraphNodeFact::new(
+                        singleton_source,
+                        GraphNodeKind::Module,
+                        range,
+                    ));
+                }
                 push_graph_edges(
                     index,
                     document,
@@ -187,6 +214,14 @@ pub fn collect_graph_facts_for_file(
                     GraphEdgeKind::Extend,
                     &mut edges,
                 );
+                push_normalized_extend_edges(
+                    index,
+                    document,
+                    file_id,
+                    source,
+                    &data.extends,
+                    &mut edges,
+                );
             }
             EntryKind::Method(_)
             | EntryKind::Constant(_)
@@ -199,6 +234,76 @@ pub fn collect_graph_facts_for_file(
     }
 
     (nodes, edges)
+}
+
+fn push_singleton_superclass_edge(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    source: &FullyQualifiedName,
+    superclass_ref: &MixinRef,
+    edges: &mut Vec<GraphEdgeFact>,
+) {
+    let Some(singleton_source) = source.to_singleton_namespace() else {
+        return;
+    };
+    let Some(superclass_target) = utils::resolve_constant_fqn_from_parts(
+        index,
+        &superclass_ref.parts,
+        superclass_ref.absolute,
+        source,
+    ) else {
+        return;
+    };
+    let Some(singleton_target) = superclass_target.to_singleton_namespace() else {
+        return;
+    };
+
+    edges.push(GraphEdgeFact::new(
+        singleton_source,
+        singleton_target,
+        GraphEdgeKind::Superclass,
+        text_range_from_lsp_range(
+            document,
+            file_id,
+            superclass_ref.location.range,
+            "graph singleton superclass edge",
+        ),
+    ));
+}
+
+fn push_normalized_extend_edges(
+    index: &RubyIndex,
+    document: &RubyDocument,
+    file_id: SourceFileId,
+    source: &FullyQualifiedName,
+    mixin_refs: &[MixinRef],
+    edges: &mut Vec<GraphEdgeFact>,
+) {
+    let Some(singleton_source) = source.to_singleton_namespace() else {
+        return;
+    };
+
+    for mixin_ref in mixin_refs {
+        if let Some(target) = utils::resolve_constant_fqn_from_parts(
+            index,
+            &mixin_ref.parts,
+            mixin_ref.absolute,
+            source,
+        ) {
+            edges.push(GraphEdgeFact::new(
+                singleton_source.clone(),
+                target,
+                GraphEdgeKind::Include,
+                text_range_from_lsp_range(
+                    document,
+                    file_id,
+                    mixin_ref.location.range,
+                    "graph normalized extend edge",
+                ),
+            ));
+        }
+    }
 }
 
 fn push_graph_edges(
