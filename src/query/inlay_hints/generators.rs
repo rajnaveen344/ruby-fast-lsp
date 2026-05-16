@@ -124,10 +124,6 @@ pub fn generate_variable_type_hints(
 /// Generate method return type and parameter hints.
 pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<InlayHintData> {
     let mut hints = Vec::new();
-    let index = context.index.lock();
-
-    // Get method entries for this file
-    let entries = index.file_entries(context.uri);
 
     for node in nodes {
         if let InlayNode::MethodDef {
@@ -137,61 +133,38 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
             ..
         } = node
         {
-            // Find the method entry in the index
-            let method_entry = entries.iter().find(|e| {
-                if let EntryKind::Method(data) = &e.kind {
-                    // Match by name and approximate position
-                    data.name.get_name() == *name
-                } else {
-                    false
-                }
+            let return_type_str =
+                method_return_type_from_analysis(name, *return_type_position, context)
+                    .map(|rt| rt.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+
+            hints.push(InlayHintData {
+                position: *return_type_position,
+                label: format!(" -> {}", return_type_str),
+                kind: InlayHintKind::MethodReturn,
+                tooltip: None,
+                padding_left: false,
+                padding_right: false,
             });
 
-            if let Some(entry) = method_entry {
-                if let EntryKind::Method(data) = &entry.kind {
-                    // Return type hint - always present (Unknown displays as "?")
-                    let return_type_str =
-                        method_return_type_from_analysis(name, *return_type_position, context)
-                            .or_else(|| data.return_type.clone())
-                            .map(|rt| rt.to_string())
-                            .unwrap_or_else(|| "?".to_string());
+            for param in params {
+                if let Some(param_type) =
+                    parameter_type_from_analysis(name, &param.name, *return_type_position, context)
+                {
+                    let label = if param.has_colon {
+                        format!(" {}", param_type)
+                    } else {
+                        format!(": {}", param_type)
+                    };
 
                     hints.push(InlayHintData {
-                        position: *return_type_position,
-                        label: format!(" -> {}", return_type_str),
-                        kind: InlayHintKind::MethodReturn,
-                        tooltip: data
-                            .yard_doc
-                            .as_ref()
-                            .and_then(|doc| doc.get_return_description().cloned()),
+                        position: param.end_position,
+                        label,
+                        kind: InlayHintKind::ParameterType,
+                        tooltip: None,
                         padding_left: false,
                         padding_right: false,
                     });
-
-                    // Parameter type hints from YARD
-                    if let Some(yard_doc) = &data.yard_doc {
-                        for param in params {
-                            if let Some(type_str) = yard_doc.get_param_type_str(&param.name) {
-                                let yard_param =
-                                    yard_doc.params.iter().find(|p| p.name == param.name);
-
-                                let label = if param.has_colon {
-                                    format!(" {}", type_str)
-                                } else {
-                                    format!(": {}", type_str)
-                                };
-
-                                hints.push(InlayHintData {
-                                    position: param.end_position,
-                                    label,
-                                    kind: InlayHintKind::ParameterType,
-                                    tooltip: yard_param.and_then(|p| p.description.clone()),
-                                    padding_left: false,
-                                    padding_right: false,
-                                });
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -252,7 +225,6 @@ fn infer_variable_type(
                 }
             }
 
-            // Fallback: Try inference from assignment (AST-based)
             let index = context.index.lock();
             crate::query::infer_type_from_assignment(context.content, name, &index)
         }
@@ -261,7 +233,6 @@ fn infer_variable_type(
                 return Some(ty);
             }
 
-            // Look up in index
             let index = context.index.lock();
             let entries = index.file_entries(context.uri);
 
@@ -309,6 +280,46 @@ fn method_return_type_from_analysis(
         .iter()
         .filter_map(|fact| match &fact.subject {
             TypeSubject::MethodReturn(method) if method == &method_fact.fqn => Some(fact),
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. }
+            | TypeSubject::Expression(_) => None,
+        })
+        .max_by_key(|fact| fact.range.start_byte)
+        .map(|fact| fact.ruby_type.clone())
+}
+
+fn parameter_type_from_analysis(
+    method_name: &str,
+    param_name: &str,
+    return_type_position: Position,
+    context: &HintContext,
+) -> Option<RubyType> {
+    let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
+    let method_fact = context.method_facts.iter().find(|fact| {
+        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+            return false;
+        };
+        method.as_str() == method_name
+            && fact.range.start_byte <= byte_offset
+            && byte_offset <= fact.range.end_byte
+    })?;
+
+    context
+        .type_facts
+        .iter()
+        .filter_map(|fact| match &fact.subject {
+            TypeSubject::Parameter { method, name }
+                if method == &method_fact.fqn
+                    && name == param_name
+                    && fact.ruby_type != RubyType::Unknown =>
+            {
+                Some(fact)
+            }
             TypeSubject::Constant(_)
             | TypeSubject::Local { .. }
             | TypeSubject::InstanceVariable { .. }
