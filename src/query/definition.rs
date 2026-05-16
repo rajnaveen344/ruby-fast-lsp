@@ -206,50 +206,6 @@ impl IndexQuery {
         self.find_constant_definitions_by_path(&constant_path, effective_ancestors)
     }
 
-    /// Find method definitions by name.
-    #[allow(dead_code)]
-    fn find_method_definitions_by_name(
-        &self,
-        method_name: &crate::types::ruby_method::RubyMethod,
-        ancestors: &[RubyConstant],
-    ) -> Option<Vec<Location>> {
-        let index = self.index.lock();
-
-        // First, look for methods in the current class/module ancestry
-        // Get ancestor chain (context_fqn is a Namespace FQN with Instance kind)
-        let context_fqn = FullyQualifiedName::from(ancestors.to_vec());
-        let ancestor_chain = index.get_ancestor_chain(&context_fqn);
-
-        for ancestor_fqn in &ancestor_chain {
-            if let Some(entries) = index.get_methods_by_name(method_name) {
-                let locations: Vec<Location> = entries
-                    .iter()
-                    .filter(|e| {
-                        // Check if method belongs to this ancestor
-                        if let Some(fqn) = index.get_fqn(e.fqn_id) {
-                            fqn.namespace_parts() == ancestor_fqn.namespace_parts()
-                        } else {
-                            false
-                        }
-                    })
-                    .filter_map(|e| index.to_lsp_location(&e.location))
-                    .collect();
-
-                if !locations.is_empty() {
-                    return Some(locations);
-                }
-            }
-        }
-
-        // Fallback: return any method with this name
-        index.get_methods_by_name(method_name).map(|entries| {
-            entries
-                .iter()
-                .filter_map(|e| index.to_lsp_location(&e.location))
-                .collect()
-        })
-    }
-
     /// Find instance variable definitions.
     fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Instance variables are stored with just their name (e.g., "@foo")
