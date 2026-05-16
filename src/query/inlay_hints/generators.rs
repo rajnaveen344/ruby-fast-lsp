@@ -4,13 +4,11 @@
 //! Generators are pure functions that take nodes and context, returning hints.
 
 use super::nodes::{InlayNode, VariableKind};
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use ruby_analysis_core::{MethodFact, TypeFact, TypeSubject};
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::Position;
 
 /// Unified inlay hint data structure.
 #[derive(Debug, Clone)]
@@ -38,8 +36,6 @@ pub enum InlayHintKind {
 
 /// Context for hint generation (provides access to type inference).
 pub struct HintContext<'a> {
-    pub index: Index<Unlocked>,
-    pub uri: &'a Url,
     pub content: &'a str,
     pub type_facts: Vec<TypeFact>,
     pub method_facts: Vec<MethodFact>,
@@ -225,32 +221,12 @@ fn infer_variable_type(
                 }
             }
 
-            let index = context.index.lock();
-            crate::query::infer_type_from_assignment(context.content, name, &index)
+            variable_type_from_analysis_facts(kind, name, context, position)
         }
         VariableKind::Instance | VariableKind::Class | VariableKind::Global => {
             if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, position) {
                 return Some(ty);
             }
-
-            let index = context.index.lock();
-            let entries = index.file_entries(context.uri);
-
-            for entry in &entries {
-                let var_type = match &entry.kind {
-                    EntryKind::InstanceVariable(data) if data.name == name => Some(&data.r#type),
-                    EntryKind::ClassVariable(data) if data.name == name => Some(&data.r#type),
-                    EntryKind::GlobalVariable(data) if data.name == name => Some(&data.r#type),
-                    _ => None,
-                };
-
-                if let Some(ty) = var_type {
-                    if *ty != RubyType::Unknown {
-                        return Some(ty.clone());
-                    }
-                }
-            }
-
             None
         }
         VariableKind::Constant => {
@@ -345,6 +321,13 @@ fn variable_type_from_analysis_facts(
         .iter()
         .filter(|fact| fact.range.start_byte <= byte_offset)
         .filter_map(|fact| match (&fact.subject, kind) {
+            (
+                TypeSubject::Local {
+                    scope_id: _,
+                    name: fact_name,
+                },
+                VariableKind::Local,
+            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
             (
                 TypeSubject::InstanceVariable {
                     name: fact_name, ..

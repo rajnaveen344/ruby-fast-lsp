@@ -55,8 +55,6 @@ impl IndexQuery {
         range: &Range,
         content: &str,
     ) -> Vec<InlayHintData> {
-        let uri = &document.uri;
-
         // Step 2: Parse AST
         let parse_result = ruby_prism::parse(content.as_bytes());
         let root = parse_result.node();
@@ -67,8 +65,6 @@ impl IndexQuery {
 
         // Step 4: Create hint context
         let context = HintContext {
-            index: self.index.clone(),
-            uri,
             content,
             type_facts: self
                 .analysis_engine()

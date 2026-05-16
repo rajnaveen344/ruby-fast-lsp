@@ -7,7 +7,6 @@ use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::index::FileId;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::method::resolver::MethodResolver;
 use crate::inferrer::r#type::literal::LiteralAnalyzer;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -26,6 +25,7 @@ mod def_node;
 mod global_variable_write_node;
 mod instance_variable_write_node;
 mod local_variable_write_node;
+mod method_return;
 mod module_node;
 mod parameters_node;
 mod singleton_class_node;
@@ -162,10 +162,7 @@ impl IndexVisitor {
                 }
             }
 
-            // Resolve method return type
-            let index = self.index.lock();
-            if let Some(return_type) =
-                MethodResolver::resolve_method_return_type(&*index, &receiver_type, &method_name)
+            if let Some(return_type) = self.resolve_method_return_type(&receiver_type, &method_name)
             {
                 return return_type;
             }
