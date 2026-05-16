@@ -15,6 +15,7 @@ use std::cmp::PartialEq;
 
 pub use entry_builder::EntryBuilder;
 pub use entry_kind::EntryKind;
+pub use ruby_analysis_core::NamespaceKind;
 
 use crate::indexer::index::FqnId;
 use crate::types::compact_location::CompactLocation;
@@ -57,18 +58,6 @@ impl Entry {
 // ============================================================================
 // Namespace Types
 // ============================================================================
-
-/// Distinguishes between instance namespace and singleton namespace
-/// In Ruby, all methods are instance methods - they differ in which namespace they belong to:
-/// - Instance namespace: Regular class/module (Foo)
-/// - Singleton namespace: The singleton class (#<Class:Foo>)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum NamespaceKind {
-    /// Instance namespace: methods defined on the regular class
-    Instance,
-    /// Singleton namespace: methods defined on the singleton class (class methods)
-    Singleton,
-}
 
 // Alias for backward compatibility during migration
 pub type MethodKind = NamespaceKind;

@@ -1,0 +1,11 @@
+[package]
+name = "ruby-analysis-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ruby Fast LSP Team"]
+description = "Core Ruby analysis data types shared by LSP and agent-facing tools"
+license = "MIT"
+
+[dependencies]
+unicode-ident = "1.0.18"
+ustr = "1.0"
