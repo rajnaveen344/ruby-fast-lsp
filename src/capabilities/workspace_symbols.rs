@@ -26,24 +26,10 @@ pub async fn handle_workspace_symbols(
         lang_server.orphan_index.clone(),
         lang_server.analysis_engine.clone(),
     );
-    let symbols = if engine_query.has_analysis_symbols() {
-        if query_text.is_empty() {
-            engine_query.get_top_level_symbols()
-        } else {
-            engine_query.search_workspace_symbols(&query_text)
-        }
+    let symbols = if query_text.is_empty() {
+        engine_query.get_top_level_symbols()
     } else {
-        let mut symbols: Vec<SymbolInformation> = Vec::new();
-        for index in lang_server.all_indices() {
-            let query = IndexQuery::new(index);
-            let part = if query_text.is_empty() {
-                query.get_top_level_symbols()
-            } else {
-                query.search_workspace_symbols(&query_text)
-            };
-            symbols.extend(part);
-        }
-        symbols
+        engine_query.search_workspace_symbols(&query_text)
     };
 
     info!(

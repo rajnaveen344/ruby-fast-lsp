@@ -1,11 +1,8 @@
-//! Workspace Symbol Query — Searches the index for symbols matching a query.
+//! Workspace Symbol Query — Searches analysis engine symbols matching a query.
 //!
 //! Supports multiple matching strategies: exact, prefix, camel case, and fuzzy
 //! subsequence matching. Results are ranked by relevance.
 
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::Entry;
-use crate::indexer::index::RubyIndex;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use ruby_analysis_core::{SymbolFact, SymbolKind as AnalysisSymbolKind};
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
@@ -27,41 +24,8 @@ impl IndexQuery {
 
     /// Return a limited set of top-level symbols (for empty queries).
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
-        if let Some(symbols) = self.top_level_symbols_from_analysis() {
-            return symbols;
-        }
-
-        let index = self.index.lock();
-        let mut symbols = Vec::new();
-        let mut count = 0;
-        const MAX_SYMBOLS: usize = 50;
-
-        for (fqn, entries) in index.definitions() {
-            if count >= MAX_SYMBOLS {
-                break;
-            }
-
-            match fqn {
-                FullyQualifiedName::Namespace(parts, _) | FullyQualifiedName::Constant(parts) => {
-                    if parts.len() == 1 {
-                        if let Some(entry) = entries.first() {
-                            if let Some(symbol) = convert_entry_to_symbol_information(entry, &index)
-                            {
-                                symbols.push(symbol);
-                                count += 1;
-                            }
-                        }
-                    }
-                }
-                FullyQualifiedName::Method(_, _)
-                | FullyQualifiedName::LocalVariable(_)
-                | FullyQualifiedName::InstanceVariable(_)
-                | FullyQualifiedName::ClassVariable(_)
-                | FullyQualifiedName::GlobalVariable(_) => {}
-            }
-        }
-
-        symbols
+        self.top_level_symbols_from_analysis()
+            .expect("INVARIANT VIOLATED: workspace symbols query requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct IndexQuery with with_engine().")
     }
 
     /// Search the index for symbols matching the given query string.
@@ -69,46 +33,8 @@ impl IndexQuery {
     /// Supports exact, prefix, camel case, and fuzzy subsequence matching.
     /// Results are ranked by relevance and limited to 100.
     pub fn search_workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
-        if let Some(symbols) = self.search_workspace_symbols_from_analysis(query) {
-            return symbols;
-        }
-
-        let index = self.index.lock();
-        let matcher = SymbolMatcher::new();
-        let mut results = Vec::new();
-
-        // Search through definitions.
-        for entries in index.definitions().map(|(_, e)| e) {
-            for entry in entries {
-                if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
-                    if let Some(relevance) = matcher.calculate_relevance(&symbol.name, query) {
-                        results.push(WorkspaceSymbolResult { symbol, relevance });
-                    }
-                }
-            }
-        }
-
-        // Search through methods by name.
-        for (method, entries) in index.methods_by_name() {
-            for entry in entries {
-                if let Some(symbol) = convert_entry_to_symbol_information(entry, &index) {
-                    let method_name = method.get_name();
-                    if let Some(relevance) = matcher.calculate_relevance(&method_name, query) {
-                        results.push(WorkspaceSymbolResult { symbol, relevance });
-                    }
-                }
-            }
-        }
-
-        // Sort by relevance (highest first) and limit results.
-        results.sort_by(|a, b| {
-            b.relevance
-                .partial_cmp(&a.relevance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        results.truncate(100);
-
-        results.into_iter().map(|r| r.symbol).collect()
+        self.search_workspace_symbols_from_analysis(query)
+            .expect("INVARIANT VIOLATED: workspace symbol search requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct IndexQuery with with_engine().")
     }
 
     fn top_level_symbols_from_analysis(&self) -> Option<Vec<SymbolInformation>> {
@@ -190,32 +116,6 @@ struct WorkspaceSymbolResult {
     relevance: f64,
 }
 
-/// Convert an Entry to SymbolInformation, filtering out local variables.
-fn convert_entry_to_symbol_information(
-    entry: &Entry,
-    index: &RubyIndex,
-) -> Option<SymbolInformation> {
-    if let EntryKind::LocalVariable(_) = &entry.kind {
-        return None;
-    }
-
-    let fqn = index.get_fqn(entry.fqn_id)?;
-    let name = extract_display_name(fqn);
-    let kind = entry_kind_to_symbol_kind(&entry.kind);
-    let container_name = extract_container_name(fqn);
-    let location = index.to_lsp_location(&entry.location)?;
-
-    Some(SymbolInformation {
-        name,
-        kind,
-        tags: None,
-        #[allow(deprecated)]
-        deprecated: Some(false),
-        location,
-        container_name,
-    })
-}
-
 fn convert_symbol_fact_to_symbol_information(
     fact: &SymbolFact,
     engine: &ruby_analysis_engine::AnalysisEngine,
@@ -245,20 +145,6 @@ fn analysis_symbol_kind_to_lsp_kind(kind: AnalysisSymbolKind) -> SymbolKind {
         | AnalysisSymbolKind::InstanceVariable
         | AnalysisSymbolKind::ClassVariable
         | AnalysisSymbolKind::GlobalVariable => SymbolKind::VARIABLE,
-    }
-}
-
-fn entry_kind_to_symbol_kind(kind: &EntryKind) -> SymbolKind {
-    match kind {
-        EntryKind::Class(_) => SymbolKind::CLASS,
-        EntryKind::Module(_) => SymbolKind::MODULE,
-        EntryKind::Method(_) => SymbolKind::METHOD,
-        EntryKind::Constant(_) => SymbolKind::CONSTANT,
-        EntryKind::LocalVariable(_)
-        | EntryKind::InstanceVariable(_)
-        | EntryKind::ClassVariable(_)
-        | EntryKind::GlobalVariable(_) => SymbolKind::VARIABLE,
-        EntryKind::Reference(_) => SymbolKind::KEY,
     }
 }
 
@@ -476,6 +362,7 @@ mod tests {
     use ruby_analysis_engine::AnalysisEngine;
 
     use super::*;
+    use crate::indexer::index::RubyIndex;
     use crate::indexer::index_ref::Index;
 
     fn query_with_analysis_symbols() -> IndexQuery {
