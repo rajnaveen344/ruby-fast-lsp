@@ -87,7 +87,7 @@ impl IndexerStdlib {
         }
 
         // Index core stubs first (if available)
-        self.index_core_stubs().await?;
+        self.index_core_stubs(server).await?;
 
         // Index required stdlib modules
         self.index_required_modules(server).await?;
@@ -101,7 +101,7 @@ impl IndexerStdlib {
     /// Stubs are loaded from the extension's stubs directory (stubs/rubystubsXY/).
     /// In production, these are extracted from zip files by the VS Code extension
     /// on first activation.
-    async fn index_core_stubs(&self) -> Result<()> {
+    async fn index_core_stubs(&self, server: &RubyLanguageServer) -> Result<()> {
         let Some(version) = &self.ruby_version else {
             return Ok(());
         };
@@ -131,7 +131,9 @@ impl IndexerStdlib {
                                 .lock()
                                 .register_file(&uri, FileSource::Stub);
 
-                            if let Err(e) = processor.index_definitions(&uri, &content) {
+                            if let Err(e) =
+                                processor.index_definitions_with_analysis(&uri, &content, server)
+                            {
                                 warn!("Failed to index stub {:?}: {}", path, e);
                             }
                         }
@@ -166,7 +168,9 @@ impl IndexerStdlib {
                         .lock()
                         .register_file(&uri, FileSource::Stub);
 
-                    if let Err(e) = processor.index_definitions(&uri, &content) {
+                    if let Err(e) =
+                        processor.index_definitions_with_analysis(&uri, &content, server)
+                    {
                         warn!("Failed to index stub {:?}: {}", path, e);
                     }
                 }
@@ -219,7 +223,9 @@ impl IndexerStdlib {
                             .lock()
                             .register_file(&uri, FileSource::Stdlib);
 
-                        if let Err(e) = processor.index_definitions(&uri, &content) {
+                        if let Err(e) =
+                            processor.index_definitions_with_analysis(&uri, &content, server)
+                        {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);
                         }
                     }

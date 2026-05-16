@@ -65,6 +65,11 @@ impl AnalysisIndexer {
         self.facts
     }
 
+    pub fn index_node(mut self, node: &Node<'_>) -> AnalysisIndex {
+        self.visit(node);
+        self.facts
+    }
+
     fn current_scope_kind(&self) -> ScopeKind {
         self.scope_stack
             .last()

@@ -182,7 +182,9 @@ impl IndexerProject {
                         .lock()
                         .register_file(&uri, FileSource::Project);
 
-                    if let Err(e) = file_processor_ref.index_definitions(&uri, &content) {
+                    if let Err(e) =
+                        file_processor_ref.index_definitions_with_analysis(&uri, &content, server)
+                    {
                         warn!("Failed to index definitions {:?}: {}", file_path, e);
                     }
                 } else {

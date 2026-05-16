@@ -132,7 +132,7 @@ impl IndexerGem {
                         "Indexing required gem: {} v{}",
                         gem_info.name, gem_info.version
                     );
-                    indexed_files.extend(self.index_gem_files(gem_info));
+                    indexed_files.extend(self.index_gem_files(gem_info, server));
                 }
             } else {
                 debug!("Required gem not found: {}", gem_name);
@@ -158,7 +158,7 @@ impl IndexerGem {
 
             if let Some(gem_info) = self.select_preferred_version(gem_versions) {
                 info!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
-                indexed_files.extend(self.index_gem_files(gem_info));
+                indexed_files.extend(self.index_gem_files(gem_info, server));
             }
         }
 
@@ -166,7 +166,7 @@ impl IndexerGem {
     }
 
     /// Index all Ruby files from a gem's lib paths
-    fn index_gem_files(&self, gem_info: &GemInfo) -> Vec<Url> {
+    fn index_gem_files(&self, gem_info: &GemInfo, server: &RubyLanguageServer) -> Vec<Url> {
         let Some(processor) = &self.file_processor else {
             warn!(
                 "No file processor set for gem indexer, skipping {}",
@@ -192,7 +192,9 @@ impl IndexerGem {
                                 .lock()
                                 .register_file(&uri, FileSource::Gem);
 
-                            if let Err(e) = processor.index_definitions(&uri, &content) {
+                            if let Err(e) =
+                                processor.index_definitions_with_analysis(&uri, &content, server)
+                            {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);
                             }
                         }

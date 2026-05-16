@@ -400,6 +400,65 @@ impl FileProcessor {
     /// is opened via did_open. The document is kept temporarily for the
     /// reference indexing phase and cleared by the coordinator after indexing.
     pub fn index_definitions(&self, uri: &Url, content: &str) -> Result<()> {
+        self.index_definitions_inner(uri, content)
+    }
+
+    pub fn index_definitions_with_analysis(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        let start = Instant::now();
+        debug!("Indexing definitions for: {:?}", uri);
+
+        self.index.lock().remove_entries_for_uri(uri);
+
+        let analysis_file_id = server.open_or_update_analysis_file(uri, content.to_string());
+        let document = RubyDocument::with_analysis_file_id(
+            uri.clone(),
+            content.to_string(),
+            0,
+            analysis_file_id,
+        );
+        let parse_result = document.parse();
+        let node = parse_result.node();
+
+        let mut index_visitor = IndexVisitor::with_extension_registry(
+            self.index.clone(),
+            document.clone(),
+            self.extension_registry.clone(),
+        );
+        index_visitor.visit(&node);
+
+        let mut direct_facts =
+            AnalysisIndexer::with_known_namespaces(analysis_file_id, HashSet::new())
+                .index_node(&node);
+        add_extension_analysis_facts(
+            server,
+            &document,
+            &index_visitor.extension_index_patches,
+            &mut direct_facts,
+        );
+        server
+            .analysis_engine
+            .lock()
+            .replace_symbol_facts_for_file(analysis_file_id, direct_facts.symbols);
+        server
+            .analysis_engine
+            .lock()
+            .replace_method_facts_for_file(analysis_file_id, direct_facts.methods);
+        server.analysis_engine.lock().replace_graph_update_for_file(
+            analysis_file_id,
+            direct_facts.graph_nodes,
+            direct_facts.graph_edges,
+            direct_facts.unresolved_graph_edges,
+        );
+        debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
+        Ok(())
+    }
+
+    fn index_definitions_inner(&self, uri: &Url, content: &str) -> Result<()> {
         let start = Instant::now();
         debug!("Indexing definitions for: {:?}", uri);
 
@@ -477,21 +536,23 @@ fn collect_direct_facts(
     content: &str,
     file_id: ruby_analysis_core::SourceFileId,
 ) -> ruby_analysis_indexer::AnalysisIndex {
-    let known_namespaces = {
-        let engine = server.analysis_engine.lock();
-        engine
-            .all_symbol_facts()
-            .into_iter()
-            .filter(|fact| {
-                matches!(
-                    fact.kind,
-                    AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
-                )
-            })
-            .filter_map(|fact| fact.fqn.to_instance_namespace())
-            .collect()
-    };
-    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_source(content)
+    AnalysisIndexer::with_known_namespaces(file_id, collect_known_namespaces(server))
+        .index_source(content)
+}
+
+fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
+    let engine = server.analysis_engine.lock();
+    engine
+        .all_symbol_facts()
+        .into_iter()
+        .filter(|fact| {
+            matches!(
+                fact.kind,
+                AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
+            )
+        })
+        .filter_map(|fact| fact.fqn.to_instance_namespace())
+        .collect()
 }
 
 fn add_extension_analysis_facts(
@@ -500,6 +561,10 @@ fn add_extension_analysis_facts(
     patches: &[IndexPatch],
     facts: &mut ruby_analysis_indexer::AnalysisIndex,
 ) {
+    if patches.is_empty() {
+        return;
+    }
+
     let mut known_namespaces = {
         let engine = server.analysis_engine.lock();
         engine
