@@ -18,15 +18,11 @@ pub async fn handle_namespace_tree(
     );
     let start_time = std::time::Instant::now();
 
-    // Build a tree from every workspace index plus the orphan index, then
-    // merge into a single response. We compute the cache key by XOR'ing the
-    // per-index hashes so changes in any workspace invalidate the cache.
-    let indices = lang_server.all_indices();
-    let mut combined_hash: u64 = 0;
-    for idx in &indices {
-        let q = IndexQuery::new(idx.clone());
-        combined_hash ^= q.compute_namespace_tree_hash(params.show_external_types);
-    }
+    let query = IndexQuery::with_engine(
+        lang_server.primary_index(),
+        lang_server.analysis_engine.clone(),
+    );
+    let combined_hash = query.compute_namespace_tree_hash(params.show_external_types);
 
     // Check cache
     {
@@ -40,16 +36,7 @@ pub async fn handle_namespace_tree(
     }
 
     debug!("[NAMESPACE_TREE] Cache miss, computing namespace tree");
-    let mut response = NamespaceTreeResponse {
-        modules: Vec::new(),
-        classes: Vec::new(),
-    };
-    for idx in indices {
-        let q = IndexQuery::new(idx);
-        let part = q.compute_namespace_tree(params.show_external_types);
-        response.modules.extend(part.modules);
-        response.classes.extend(part.classes);
-    }
+    let response = query.compute_namespace_tree(params.show_external_types);
 
     // Store in cache
     {
