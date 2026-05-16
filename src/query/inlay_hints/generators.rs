@@ -7,8 +7,9 @@ use super::nodes::{InlayNode, VariableKind};
 use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
+use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
-use ruby_analysis_core::{TypeFact, TypeSubject};
+use ruby_analysis_core::{MethodFact, TypeFact, TypeSubject};
 use tower_lsp::lsp_types::{Position, Url};
 
 /// Unified inlay hint data structure.
@@ -41,6 +42,7 @@ pub struct HintContext<'a> {
     pub uri: &'a Url,
     pub content: &'a str,
     pub type_facts: Vec<TypeFact>,
+    pub method_facts: Vec<MethodFact>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
@@ -148,11 +150,11 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
             if let Some(entry) = method_entry {
                 if let EntryKind::Method(data) = &entry.kind {
                     // Return type hint - always present (Unknown displays as "?")
-                    let return_type_str = data
-                        .return_type
-                        .as_ref()
-                        .map(|rt| rt.to_string())
-                        .unwrap_or_else(|| "?".to_string());
+                    let return_type_str =
+                        method_return_type_from_analysis(name, *return_type_position, context)
+                            .or_else(|| data.return_type.clone())
+                            .map(|rt| rt.to_string())
+                            .unwrap_or_else(|| "?".to_string());
 
                     hints.push(InlayHintData {
                         position: *return_type_position,
@@ -285,6 +287,39 @@ fn infer_variable_type(
             None
         }
     }
+}
+
+fn method_return_type_from_analysis(
+    name: &str,
+    return_type_position: Position,
+    context: &HintContext,
+) -> Option<RubyType> {
+    let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
+    let method_fact = context.method_facts.iter().find(|fact| {
+        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+            return false;
+        };
+        method.as_str() == name
+            && fact.range.start_byte <= byte_offset
+            && byte_offset <= fact.range.end_byte
+    })?;
+
+    context
+        .type_facts
+        .iter()
+        .filter_map(|fact| match &fact.subject {
+            TypeSubject::MethodReturn(method) if method == &method_fact.fqn => Some(fact),
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. }
+            | TypeSubject::Expression(_) => None,
+        })
+        .max_by_key(|fact| fact.range.start_byte)
+        .map(|fact| fact.ruby_type.clone())
 }
 
 fn variable_type_from_analysis_facts(

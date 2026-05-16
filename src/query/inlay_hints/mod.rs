@@ -61,8 +61,11 @@ impl IndexQuery {
     ) -> Vec<InlayHintData> {
         let uri = &document.uri;
 
-        // Step 1: Trigger method return type inference for visible methods
-        self.infer_and_update_visible_types(uri, content, range);
+        // Legacy callers without an analysis engine still populate return
+        // hints by mutating RubyIndex. LSP callers use analysis facts below.
+        if self.analysis_engine().is_none() {
+            self.infer_and_update_visible_types(uri, content, range);
+        }
 
         // Step 2: Parse AST
         let parse_result = ruby_prism::parse(content.as_bytes());
@@ -83,6 +86,15 @@ impl IndexQuery {
                     engine
                         .lock()
                         .type_store()
+                        .facts_in_file(document.analysis_file_id())
+                })
+                .unwrap_or_default(),
+            method_facts: self
+                .analysis_engine()
+                .map(|engine| {
+                    engine
+                        .lock()
+                        .method_store()
                         .facts_in_file(document.analysis_file_id())
                 })
                 .unwrap_or_default(),
