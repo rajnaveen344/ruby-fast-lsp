@@ -81,10 +81,9 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
 
-    // Add unresolved entry diagnostics and YARD diagnostics (no re-parsing needed)
+    // Add unresolved entry diagnostics from the analysis engine.
     let query = IndexQuery::with_engine(workspace_index, server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-    diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Publish diagnostics for files affected by removed definitions (cross-file propagation)
@@ -213,10 +212,9 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // Invalidate namespace tree cache
     server.invalidate_namespace_tree_cache_debounced();
 
-    // Add unresolved diagnostics and YARD diagnostics (no re-parsing needed)
+    // Add unresolved diagnostics from the analysis engine.
     let query = IndexQuery::with_engine(workspace_index, server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
-    diagnostics.extend(query.get_yard_diagnostics(&uri));
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Publish diagnostics for files affected by removed definitions

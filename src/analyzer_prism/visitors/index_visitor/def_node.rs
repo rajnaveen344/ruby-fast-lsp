@@ -15,7 +15,7 @@ use crate::{
 
 use crate::types::scope::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
-use crate::yard::YardTypeConverter;
+use crate::yard::{YardMethodDoc, YardTypeConverter};
 
 use super::IndexVisitor;
 
@@ -156,6 +156,15 @@ impl IndexVisitor {
                 is_singleton,
             )
         };
+
+        if let Some(ref doc) = yard_doc {
+            self.emit_yard_diagnostics(
+                doc,
+                &params,
+                rbs_return_type.as_ref(),
+                yard_return_type.as_ref(),
+            );
+        }
 
         // Prioritize: RBS > YARD > TypeTracker inference
         // Always store the inferred type - Unknown displays as "?" in hints
@@ -403,6 +412,92 @@ impl IndexVisitor {
         }
 
         params
+    }
+
+    fn emit_yard_diagnostics(
+        &mut self,
+        yard_doc: &YardMethodDoc,
+        method_params: &[MethodParamInfo],
+        rbs_return_type: Option<&RubyType>,
+        yard_return_type: Option<&RubyType>,
+    ) {
+        let actual_param_names: Vec<&str> = method_params.iter().map(|p| p.name.as_str()).collect();
+
+        for (yard_param, range) in yard_doc.find_unmatched_params(&actual_param_names) {
+            self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
+                range,
+                severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
+                code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                    "yard-unknown-param".to_string(),
+                )),
+                source: Some("ruby-fast-lsp".to_string()),
+                message: format!(
+                    "YARD @param '{}' does not match any method parameter",
+                    yard_param.name
+                ),
+                ..Default::default()
+            });
+        }
+
+        let unknown_type_diagnostics = {
+            let index = self.index.lock();
+            let mut diagnostics = Vec::new();
+            for param in &yard_doc.params {
+                let result =
+                    YardTypeConverter::convert_multiple_with_validation(&param.types, Some(&index));
+                for unresolved in result.unresolved_types {
+                    let diagnostic_range = param.types_range.or(param.range);
+                    if let Some(range) = diagnostic_range {
+                        diagnostics.push(tower_lsp::lsp_types::Diagnostic {
+                            range,
+                            severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                            code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                                "yard-unknown-type".to_string(),
+                            )),
+                            source: Some("ruby-fast-lsp".to_string()),
+                            message: format!(
+                                "Unknown type '{}' in YARD @param documentation",
+                                unresolved.type_name
+                            ),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+            diagnostics
+        };
+        self.diagnostics.extend(unknown_type_diagnostics);
+
+        let Some(rbs_type) = rbs_return_type else {
+            return;
+        };
+        let Some(yard_type) = yard_return_type else {
+            return;
+        };
+        if *rbs_type == RubyType::Unknown || yard_type == rbs_type {
+            return;
+        }
+
+        let Some(first_return) = yard_doc.returns.first() else {
+            return;
+        };
+        let Some(range) = first_return.types_range.or(first_return.range) else {
+            return;
+        };
+
+        self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
+            range,
+            severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
+            code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                "yard-rbs-mismatch".to_string(),
+            )),
+            source: Some("ruby-fast-lsp".to_string()),
+            message: format!(
+                "YARD return type '{}' conflicts with RBS type '{}'",
+                yard_type, rbs_type
+            ),
+            ..Default::default()
+        });
     }
 }
 

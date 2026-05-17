@@ -556,10 +556,13 @@ impl FakeEditor {
         let mut diagnostics =
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
 
-        // Add YARD diagnostics
         {
-            let index = self.server.index_for_uri(&uri).lock_arc();
-            diagnostics.extend(crate::query::generate_yard_diagnostics_inner(&index, &uri));
+            use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+            use ruby_prism::Visit;
+
+            let mut visitor = IndexVisitor::new(self.server.index_for_uri(&uri), document.clone());
+            visitor.visit(&parse_result.node());
+            diagnostics.extend(visitor.diagnostics);
         }
 
         // Add unresolved entry diagnostics

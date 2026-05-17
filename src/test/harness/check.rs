@@ -55,7 +55,6 @@ use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::capabilities::inlay_hints::handle_inlay_hints;
 use crate::capabilities::type_hierarchy;
 use crate::handlers::request;
-use crate::query::generate_yard_diagnostics_inner;
 
 /// All supported tag names for extraction.
 pub(super) const ALL_TAGS: &[&str] = &[
@@ -986,13 +985,8 @@ async fn run_diagnostics_check(
     let parse_result = ruby_prism::parse(content.as_bytes());
 
     let mut diagnostics = generate_diagnostics(&parse_result, &document);
-    {
-        let index = server.index_for_uri(uri).lock_arc();
-        diagnostics.extend(generate_yard_diagnostics_inner(&index, uri));
-    }
-
-    // Run IndexVisitor directly on the parsed AST to collect its diagnostics
-    // (e.g., return type mismatches) without mutating server state.
+    // Run IndexVisitor directly on the parsed AST to collect indexing-time diagnostics
+    // (e.g., YARD checks and return type mismatches).
     {
         use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
         use ruby_prism::Visit;
