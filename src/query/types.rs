@@ -48,6 +48,14 @@ impl<'a> TypeQuery<'a> {
         type_store: &'a TypeStore,
         source_file_id: SourceFileId,
     ) -> Self {
+        Self::with_type_store_snapshot(content, type_store, source_file_id)
+    }
+
+    pub fn with_type_store_snapshot(
+        content: &'a [u8],
+        type_store: &'a TypeStore,
+        source_file_id: SourceFileId,
+    ) -> Self {
         Self {
             content,
             type_store: Some(type_store),

@@ -49,8 +49,6 @@ impl IndexQuery {
 
         // Step 3: Create context for generators
         let context = HoverContext {
-            index: self.index.clone(),
-            uri,
             content,
             document: self.doc.as_ref(),
             analysis_engine: self.analysis_engine.as_ref(),

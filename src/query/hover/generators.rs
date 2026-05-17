@@ -5,10 +5,7 @@
 
 use super::nodes::HoverNode;
 use crate::analyzer_prism::MethodReceiver;
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::return_type::infer_return_type_for_node;
 use crate::query::TypeQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
@@ -18,12 +15,10 @@ use parking_lot::Mutex;
 use ruby_analysis_core::{GraphNodeKind, TypeSubject};
 use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::Position;
 
 /// Context for hover generation (provides access to necessary data).
 pub struct HoverContext<'a> {
-    pub index: Index<Unlocked>,
-    pub uri: &'a Url,
     pub content: &'a str,
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
     pub analysis_engine: Option<&'a Arc<Mutex<AnalysisEngine>>>,
@@ -114,10 +109,8 @@ fn get_type_from_type_query(
         .analysis_engine
         .map(|engine| engine.lock().type_store().clone());
     let doc = context.document.map(|doc| doc.read().clone());
-    let type_query = if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
-        let type_query = TypeQuery::with_type_store_for_file(
-            context.index.clone(),
-            context.uri,
+    if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
+        let type_query = TypeQuery::with_type_store_snapshot(
             context.content.as_bytes(),
             type_store,
             doc.analysis_file_id(),
@@ -132,15 +125,10 @@ fn get_type_from_type_query(
              This is a bug because analysis TypeSubject stores scope ids as u32. \
              Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
         );
-        return type_query.get_local_variable_type_at(name, scope_id, position);
+        type_query.get_local_variable_type_at(name, scope_id, position)
     } else {
-        TypeQuery::new(
-            context.index.clone(),
-            context.uri,
-            context.content.as_bytes(),
-        )
-    };
-    type_query.get_local_variable_type(name, position)
+        None
+    }
 }
 
 /// Get type from VariableScopes tree (unified type info).
@@ -181,47 +169,7 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
     if context.analysis_engine.is_some() {
         return Some(HoverInfo::text(constant_path_to_string(path)));
     }
-
-    let index = context.index.lock();
-
-    if let Some(entries) = index.get(&constant_fqn) {
-        if let Some(ty) = entries.iter().find_map(|entry| {
-            if let EntryKind::Constant(data) = &entry.kind {
-                if data.r#type != RubyType::Unknown {
-                    return Some(data.r#type.clone());
-                }
-            }
-            None
-        }) {
-            let fqn_str = constant_path_to_string(path);
-            return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
-        }
-    }
-
-    if let Some(entries) = index.get(&fqn) {
-        let entry_kind = entries.iter().find_map(|entry| match &entry.kind {
-            EntryKind::Class(_) => Some("class"),
-            EntryKind::Module(_) => Some("module"),
-            _ => None,
-        });
-
-        let fqn_str = path
-            .iter()
-            .map(|c| c.to_string())
-            .collect::<Vec<_>>()
-            .join("::");
-
-        let content = match entry_kind {
-            Some("class") => format!("class {}", fqn_str),
-            Some("module") => format!("module {}", fqn_str),
-            _ => fqn_str,
-        };
-
-        Some(HoverInfo::text(content))
-    } else {
-        let fqn_str = constant_path_to_string(path);
-        Some(HoverInfo::text(fqn_str))
-    }
+    Some(HoverInfo::text(constant_path_to_string(path)))
 }
 
 /// Generate hover info for a method (call or definition).
@@ -268,34 +216,10 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
 
 /// Generate hover info for a variable (instance, class, or global).
 pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
-    let (name, variable_kind, matcher): (
-        &str,
-        VariableHoverKind,
-        fn(&EntryKind) -> Option<(&str, &RubyType)>,
-    ) = match node {
-        HoverNode::InstanceVariable { name } => {
-            (name.as_str(), VariableHoverKind::Instance, |kind| {
-                if let EntryKind::InstanceVariable(data) = kind {
-                    Some((&data.name, &data.r#type))
-                } else {
-                    None
-                }
-            })
-        }
-        HoverNode::ClassVariable { name } => (name.as_str(), VariableHoverKind::Class, |kind| {
-            if let EntryKind::ClassVariable(data) = kind {
-                Some((&data.name, &data.r#type))
-            } else {
-                None
-            }
-        }),
-        HoverNode::GlobalVariable { name } => (name.as_str(), VariableHoverKind::Global, |kind| {
-            if let EntryKind::GlobalVariable(data) = kind {
-                Some((&data.name, &data.r#type))
-            } else {
-                None
-            }
-        }),
+    let (name, variable_kind): (&str, VariableHoverKind) = match node {
+        HoverNode::InstanceVariable { name } => (name.as_str(), VariableHoverKind::Instance),
+        HoverNode::ClassVariable { name } => (name.as_str(), VariableHoverKind::Class),
+        HoverNode::GlobalVariable { name } => (name.as_str(), VariableHoverKind::Global),
         _ => return None,
     };
 
@@ -305,18 +229,7 @@ pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Opti
     if context.analysis_engine.is_some() {
         return Some(HoverInfo::text(name.to_string()));
     }
-
-    let index = context.index.lock();
-    let type_str = index.file_entries(context.uri).iter().find_map(|entry| {
-        matcher(&entry.kind)
-            .filter(|(n, t)| n == &name && *t != &RubyType::Unknown)
-            .map(|(_, t)| t.to_string())
-    });
-
-    match type_str {
-        Some(t) => Some(HoverInfo::text(format!("{}: {}", name, t))),
-        None => Some(HoverInfo::text(name.to_string())),
-    }
+    Some(HoverInfo::text(name.to_string()))
 }
 
 /// Generate hover info for a YARD type reference.
@@ -653,94 +566,6 @@ fn generate_method_definition_hover(
     if context.analysis_engine.is_some() {
         return Some(HoverInfo::ruby_code(format!("def {}", method_name)));
     }
-
-    let index = context.index.lock();
-
-    // Find method entry at position
-    let method_entry = index.file_entries(context.uri).into_iter().find(|entry| {
-        if let EntryKind::Method(data) = &entry.kind {
-            if data.name.to_string() == method_name {
-                let range = &entry.location.range;
-                return position.line >= range.start.line && position.line <= range.end.line;
-            }
-        }
-        false
-    });
-
-    if let Some(entry) = method_entry {
-        if let EntryKind::Method(data) = &entry.kind {
-            // Check if we already have a return type
-            if let Some(rt) = &data.return_type {
-                if *rt != RubyType::Unknown {
-                    return Some(HoverInfo::ruby_code(format!(
-                        "def {} -> {}",
-                        method_name, rt
-                    )));
-                }
-            }
-
-            // Check YARD docs
-            if let Some(yard_doc) = &data.yard_doc {
-                if let Some(return_type) = yard_doc.format_return_type() {
-                    return Some(HoverInfo::ruby_code(format!(
-                        "def {} -> {}",
-                        method_name, return_type
-                    )));
-                }
-            }
-
-            // Try on-demand inference
-            if let Some(pos) = data.return_type_position {
-                let owner_fqn = data.owner.clone();
-                let entry_id_opt =
-                    index
-                        .get_entry_ids_for_uri(context.uri)
-                        .into_iter()
-                        .find(|eid| {
-                            if let Some(e) = index.get_entry(*eid) {
-                                if let EntryKind::Method(d) = &e.kind {
-                                    return d.name.to_string() == method_name
-                                        && d.return_type_position == Some(pos);
-                                }
-                            }
-                            false
-                        });
-
-                if let Some(entry_id) = entry_id_opt {
-                    drop(index); // Release lock before parsing
-
-                    // Parse and infer
-                    let parse_result = ruby_prism::parse(context.content.as_bytes());
-                    let node = parse_result.node();
-
-                    if let Some(def_node) =
-                        crate::utils::ast::find_def_node_at_line(&node, pos.line, context.content)
-                    {
-                        let mut index = context.index.lock();
-                        if let Some(inferred_ty) = infer_return_type_for_node(
-                            &mut index,
-                            context.content.as_bytes(),
-                            &def_node,
-                            Some(owner_fqn),
-                            None,
-                        ) {
-                            if inferred_ty != RubyType::Unknown {
-                                // Cache in index
-                                index.update_method_return_type(entry_id, inferred_ty.clone());
-
-                                return Some(HoverInfo::ruby_code(format!(
-                                    "def {} -> {}",
-                                    method_name, inferred_ty
-                                )));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback - just show the method name
     Some(HoverInfo::ruby_code(format!("def {}", method_name)))
 }
 
@@ -821,17 +646,7 @@ fn resolve_receiver_type(
                 if context.analysis_engine.is_some() {
                     return RubyType::Class(fqn);
                 }
-                let index = context.index.lock();
-                let is_module = index.get(&fqn).map_or(false, |entries| {
-                    entries
-                        .iter()
-                        .any(|e| matches!(e.kind, EntryKind::Module(_)))
-                });
-                if is_module {
-                    RubyType::Module(fqn)
-                } else {
-                    RubyType::Class(fqn)
-                }
+                RubyType::Class(fqn)
             }
         }
         MethodReceiver::Constant(path) => {
@@ -852,12 +667,8 @@ fn resolve_receiver_type(
                 .analysis_engine
                 .map(|engine| engine.lock().type_store().clone());
             let doc = context.document.map(|doc| doc.read().clone());
-            let type_query = if let (Some(type_store), Some(doc)) =
-                (type_store.as_ref(), doc.as_ref())
-            {
-                let type_query = TypeQuery::with_type_store_for_file(
-                    context.index.clone(),
-                    context.uri,
+            if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
+                let type_query = TypeQuery::with_type_store_snapshot(
                     context.content.as_bytes(),
                     type_store,
                     doc.analysis_file_id(),
@@ -875,17 +686,6 @@ fn resolve_receiver_type(
                 if let Some(t) = type_query.get_local_variable_type_at(name, scope_id, position) {
                     return t;
                 }
-                return RubyType::Unknown;
-            } else {
-                TypeQuery::new(
-                    context.index.clone(),
-                    context.uri,
-                    context.content.as_bytes(),
-                )
-            };
-
-            if let Some(t) = type_query.get_local_variable_type(name, position) {
-                return t;
             }
 
             RubyType::Unknown
@@ -896,22 +696,7 @@ fn resolve_receiver_type(
             {
                 return ruby_type;
             }
-            if context.analysis_engine.is_some() {
-                return RubyType::Unknown;
-            }
-            let index = context.index.lock();
-            index
-                .file_entries(context.uri)
-                .iter()
-                .find_map(|entry| {
-                    if let EntryKind::InstanceVariable(data) = &entry.kind {
-                        if &data.name == name && data.r#type != RubyType::Unknown {
-                            return Some(data.r#type.clone());
-                        }
-                    }
-                    None
-                })
-                .unwrap_or(RubyType::Unknown)
+            RubyType::Unknown
         }
         MethodReceiver::ClassVariable(name) => {
             if let Some(ruby_type) =
@@ -919,22 +704,7 @@ fn resolve_receiver_type(
             {
                 return ruby_type;
             }
-            if context.analysis_engine.is_some() {
-                return RubyType::Unknown;
-            }
-            let index = context.index.lock();
-            index
-                .file_entries(context.uri)
-                .iter()
-                .find_map(|entry| {
-                    if let EntryKind::ClassVariable(data) = &entry.kind {
-                        if &data.name == name && data.r#type != RubyType::Unknown {
-                            return Some(data.r#type.clone());
-                        }
-                    }
-                    None
-                })
-                .unwrap_or(RubyType::Unknown)
+            RubyType::Unknown
         }
         MethodReceiver::GlobalVariable(name) => {
             if let Some(ruby_type) =
@@ -942,22 +712,7 @@ fn resolve_receiver_type(
             {
                 return ruby_type;
             }
-            if context.analysis_engine.is_some() {
-                return RubyType::Unknown;
-            }
-            let index = context.index.lock();
-            index
-                .file_entries(context.uri)
-                .iter()
-                .find_map(|entry| {
-                    if let EntryKind::GlobalVariable(data) = &entry.kind {
-                        if &data.name == name && data.r#type != RubyType::Unknown {
-                            return Some(data.r#type.clone());
-                        }
-                    }
-                    None
-                })
-                .unwrap_or(RubyType::Unknown)
+            RubyType::Unknown
         }
         MethodReceiver::MethodCall {
             inner_receiver,
