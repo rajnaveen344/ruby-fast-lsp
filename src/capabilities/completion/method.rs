@@ -1,61 +1,17 @@
 //! Type-aware method completion
 //!
 //! Provides method completions based on the receiver's inferred type.
-//! Uses both the Ruby index (for user-defined methods) and RBS (for built-in methods).
+//! User-defined methods are resolved through `query::completion`; this module
+//! only supplies RBS-backed built-in method completions.
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
-use crate::indexer::entry::entry_kind::EntryKind;
 use crate::indexer::entry::NamespaceKind;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::inferrer::rbs::{get_rbs_class_methods, RbsMethodInfo};
 use crate::types::fully_qualified_name::FullyQualifiedName;
-
-/// Find method completions for a receiver type
-pub fn find_method_completions(
-    index: &Index<Unlocked>,
-    receiver_type: &RubyType,
-    partial_method: &str,
-    kind: NamespaceKind,
-) -> Vec<CompletionItem> {
-    let mut completions = find_rbs_method_completions(receiver_type, partial_method, kind);
-    let mut seen_methods = completions
-        .iter()
-        .map(|item| item.label.clone())
-        .collect::<std::collections::HashSet<_>>();
-    let is_singleton = kind == NamespaceKind::Singleton;
-
-    // Get the class name for lookups
-    let class_names = get_class_names_for_type(receiver_type);
-
-    for class_name in &class_names {
-        // Get methods from Ruby index (user-defined types) including ancestor chain
-        let index_methods =
-            get_index_methods_with_ancestors(index, class_name, partial_method, kind);
-        for (method_name, return_type, params) in index_methods {
-            if seen_methods.contains(&method_name) {
-                continue;
-            }
-            seen_methods.insert(method_name.clone());
-
-            let method_info = RbsMethodInfo {
-                name: method_name,
-                return_type,
-                is_singleton,
-                params,
-            };
-            completions.push(create_method_completion_item(&method_info));
-        }
-    }
-
-    // Sort by name
-    completions.sort_by(|a, b| a.label.cmp(&b.label));
-
-    completions
-}
 
 pub fn find_rbs_method_completions(
     receiver_type: &RubyType,
@@ -165,153 +121,6 @@ fn get_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
     }
 }
 
-/// Get methods from the Ruby index for a class, including methods from ancestor chain
-fn get_index_methods_with_ancestors(
-    index: &Index<Unlocked>,
-    class_name: &str,
-    partial_method: &str,
-    kind: NamespaceKind,
-) -> Vec<(String, Option<RubyType>, Vec<String>)> {
-    let index = index.lock();
-    let mut methods = Vec::new();
-    let mut seen_methods = std::collections::HashSet::new();
-
-    // Try to find the FQN for the class, with the appropriate namespace kind
-    let class_fqn = FullyQualifiedName::try_from(class_name);
-
-    // Get the ancestor chain for the class
-    let ancestors = if let Ok(fqn) = &class_fqn {
-        // Convert to Namespace FQN with the appropriate kind for correct ancestor chain
-        let ns_fqn = FullyQualifiedName::namespace_with_kind(fqn.namespace_parts(), kind);
-        index.get_ancestor_chain(&ns_fqn)
-    } else {
-        vec![]
-    };
-
-    // Collect class names to search (the class itself + all ancestors)
-    let mut classes_to_search: Vec<String> = vec![class_name.to_string()];
-    for ancestor in &ancestors {
-        let parts = match ancestor {
-            FullyQualifiedName::Namespace(parts, _) => parts,
-            FullyQualifiedName::Constant(parts) => parts,
-            _ => continue,
-        };
-        let ancestor_name = parts
-            .iter()
-            .map(|c| c.to_string())
-            .collect::<Vec<_>>()
-            .join("::");
-        if !ancestor_name.is_empty() && !classes_to_search.contains(&ancestor_name) {
-            classes_to_search.push(ancestor_name);
-        }
-        // Also add the simple name
-        if let Some(simple_name) = parts.last().map(|c| c.to_string()) {
-            if !simple_name.is_empty() && !classes_to_search.contains(&simple_name) {
-                classes_to_search.push(simple_name);
-            }
-        }
-    }
-
-    // Search through methods_by_name
-    for (ruby_method, entries) in index.methods_by_name() {
-        // Check if method name matches partial
-        let method_name = ruby_method.get_name();
-        if !method_name.starts_with(partial_method) {
-            continue;
-        }
-
-        // Skip if already seen
-        if seen_methods.contains(&method_name.to_string()) {
-            continue;
-        }
-
-        // Check if method belongs to any class in our search list
-        for entry in entries {
-            if let EntryKind::Method(data) = &entry.kind {
-                let owner = &data.owner;
-                let return_type = &data.return_type;
-                let params = &data.params;
-
-                // Check if owner's namespace kind matches what we're looking for
-                let owner_kind = owner.namespace_kind().unwrap_or(NamespaceKind::Instance);
-                if owner_kind != kind {
-                    continue;
-                }
-
-                // Check if owner matches any class in our list
-                let owner_parts = owner.namespace_parts();
-                let owner_name = owner_parts
-                    .iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<_>>()
-                    .join("::");
-                let simple_name = owner_parts.last().map(|c| c.to_string());
-
-                let owner_matches = classes_to_search.contains(&owner_name)
-                    || simple_name
-                        .as_ref()
-                        .map(|s| classes_to_search.contains(s))
-                        .unwrap_or(false);
-
-                if owner_matches {
-                    seen_methods.insert(method_name.to_string());
-                    let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-                    methods.push((method_name.to_string(), return_type.clone(), param_names));
-                    break;
-                }
-            }
-        }
-    }
-
-    methods
-}
-
-/// Find top-level methods (methods defined outside any class/module) matching a partial.
-///
-/// These methods have an empty owner namespace (the root namespace).
-/// Examples: methods defined in rake tasks, scripts, or at the top of a file.
-pub fn find_top_level_method_completions(
-    index: &Index<Unlocked>,
-    partial_method: &str,
-) -> Vec<CompletionItem> {
-    let index = index.lock();
-    let mut completions = Vec::new();
-    let mut seen_methods = std::collections::HashSet::new();
-
-    for (ruby_method, entries) in index.methods_by_name() {
-        let method_name = ruby_method.get_name();
-        if !method_name.starts_with(partial_method) {
-            continue;
-        }
-        if seen_methods.contains(&method_name.to_string()) {
-            continue;
-        }
-
-        for entry in entries {
-            if let EntryKind::Method(data) = &entry.kind {
-                let owner = &data.owner;
-                // Top-level methods have an empty namespace (root)
-                if owner.namespace_parts().is_empty() {
-                    seen_methods.insert(method_name.to_string());
-                    let param_names: Vec<String> =
-                        data.params.iter().map(|p| p.name.clone()).collect();
-                    let method_info = RbsMethodInfo {
-                        name: method_name.to_string(),
-                        return_type: data.return_type.clone(),
-                        is_singleton: false,
-                        params: param_names,
-                    };
-                    completions.push(create_method_completion_item(&method_info));
-                    break;
-                }
-            }
-        }
-    }
-
-    completions.sort_by(|a, b| a.label.cmp(&b.label));
-    completions
-}
-
 /// Create a completion item for a method
 fn create_method_completion_item(method_info: &RbsMethodInfo) -> CompletionItem {
     let return_type_str = method_info
@@ -357,13 +166,6 @@ fn create_method_completion_item(method_info: &RbsMethodInfo) -> CompletionItem 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::index::RubyIndex;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-
-    fn create_test_index() -> Index<Unlocked> {
-        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
-    }
 
     #[test]
     fn test_get_class_names_for_string_type() {
@@ -388,11 +190,9 @@ mod tests {
 
     #[test]
     fn test_find_string_methods() {
-        let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions =
-            find_method_completions(&index, &string_type, "", NamespaceKind::Instance);
+        let completions = find_rbs_method_completions(&string_type, "", NamespaceKind::Instance);
 
         // Should have methods from RBS
         assert!(!completions.is_empty(), "Should have string methods");
@@ -411,11 +211,9 @@ mod tests {
 
     #[test]
     fn test_find_methods_with_partial() {
-        let index = create_test_index();
         let string_type = RubyType::string();
 
-        let completions =
-            find_method_completions(&index, &string_type, "up", NamespaceKind::Instance);
+        let completions = find_rbs_method_completions(&string_type, "up", NamespaceKind::Instance);
 
         // Should only have methods starting with "up"
         for completion in &completions {
@@ -429,11 +227,10 @@ mod tests {
 
     #[test]
     fn test_method_completion_item_has_return_type() {
-        let index = create_test_index();
         let string_type = RubyType::string();
 
         let completions =
-            find_method_completions(&index, &string_type, "length", NamespaceKind::Instance);
+            find_rbs_method_completions(&string_type, "length", NamespaceKind::Instance);
 
         // Find the length method
         let length_completion = completions.iter().find(|c| c.label == "length");
@@ -451,11 +248,10 @@ mod tests {
 
     #[test]
     fn test_union_type_completion_includes_all_types() {
-        let index = create_test_index();
         // Create a union type: String | Integer
         let union_type = RubyType::union(vec![RubyType::string(), RubyType::integer()]);
 
-        let completions = find_method_completions(&index, &union_type, "", NamespaceKind::Instance);
+        let completions = find_rbs_method_completions(&union_type, "", NamespaceKind::Instance);
 
         let method_names: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
 

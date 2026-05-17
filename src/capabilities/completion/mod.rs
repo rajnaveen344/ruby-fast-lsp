@@ -1,9 +1,5 @@
-pub mod completion_ranker;
-pub mod constant;
 pub mod constant_completion;
-pub mod constant_matcher;
 pub mod method;
-pub mod scope_resolver;
 pub mod snippets;
 pub mod variable;
 
@@ -20,12 +16,7 @@ use crate::{
     utils::{ast::is_in_statement_position, position_to_offset},
 };
 
-pub use completion_ranker::CompletionRanker;
-pub use constant_completion::{
-    ConstantCompletionContext, ConstantCompletionEngine, ConstantCompletionItem,
-};
-pub use constant_matcher::ConstantMatcher;
-pub use scope_resolver::ScopeResolver;
+pub use constant_completion::ConstantCompletionContext;
 pub use snippets::RubySnippets;
 
 pub async fn find_completion_at_position(
@@ -785,12 +776,7 @@ fn infer_bare_method_return_type_from_analysis(
     None
 }
 
-/// Look for a constructor assignment pattern like `var = ClassName.new` in the source
-/// and return the class instance type if found.
-/// Look up the type of an instance/class/global variable from the index.
-///
-/// These variables have their types tracked in EntryKind::InstanceVariable,
-/// ClassVariable, and GlobalVariable entries in the RubyIndex.
+/// Look up the type of an instance/class/global variable from analysis type facts.
 fn lookup_variable_type_from_engine(
     server: &RubyLanguageServer,
     uri: &Url,
