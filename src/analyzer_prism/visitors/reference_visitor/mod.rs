@@ -1,6 +1,9 @@
 use once_cell::unsync::OnceCell;
+use parking_lot::Mutex;
+use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
@@ -66,6 +69,7 @@ pub struct ReferenceVisitor {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub include_local_vars: bool,
+    pub analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
     /// When true, track unresolved constants in the index for diagnostics
     pub track_unresolved: bool,
     /// Reference / unresolved-entry writes buffered during the visit and
@@ -96,10 +100,16 @@ impl ReferenceVisitor {
             document,
             scope_tracker,
             include_local_vars,
+            analysis_engine: None,
             track_unresolved: false,
             staged: PendingWrites::default(),
             variable_types: OnceCell::new(),
         }
+    }
+
+    pub fn with_analysis_engine(mut self, analysis_engine: Arc<Mutex<AnalysisEngine>>) -> Self {
+        self.analysis_engine = Some(analysis_engine);
+        self
     }
 
     /// Create a visitor that tracks unresolved constants
@@ -114,6 +124,7 @@ impl ReferenceVisitor {
             document,
             scope_tracker,
             include_local_vars,
+            analysis_engine: None,
             track_unresolved: true,
             staged: PendingWrites::default(),
             variable_types: OnceCell::new(),
@@ -130,6 +141,39 @@ impl ReferenceVisitor {
             .variable_types
             .get_or_init(|| build_variable_type_map(&self.document.content));
         map.get(var_name).cloned()
+    }
+
+    pub fn resolve_constant_from_analysis(
+        &self,
+        parts: &[crate::types::ruby_namespace::RubyConstant],
+        current_namespace: &[crate::types::ruby_namespace::RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        let engine = self.analysis_engine.as_ref()?.lock();
+        let mut search = current_namespace.to_vec();
+
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+
+            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
+            if !engine.graph_nodes_for(&namespace_fqn).is_empty()
+                || !engine.symbol_facts_for(&namespace_fqn).is_empty()
+            {
+                return Some(namespace_fqn);
+            }
+
+            let constant_fqn = FullyQualifiedName::Constant(probe);
+            if !engine.symbol_facts_for(&constant_fqn).is_empty() {
+                return Some(constant_fqn);
+            }
+
+            if search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+
+        None
     }
 }
 

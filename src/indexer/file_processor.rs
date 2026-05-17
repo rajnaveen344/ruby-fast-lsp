@@ -379,7 +379,8 @@ impl FileProcessor {
                     self.index.clone(),
                     document,
                     options.include_local_vars,
-                );
+                )
+                .with_analysis_engine(server.analysis_engine.clone());
                 visitor.visit(&node);
 
                 let reference_facts = collect_reference_facts_from_locations(
@@ -605,7 +606,8 @@ impl FileProcessor {
         let node = parse_result.node();
 
         let mut visitor =
-            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
+            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true)
+                .with_analysis_engine(server.analysis_engine.clone());
         visitor.visit(&node);
 
         let reference_facts = collect_reference_facts_from_locations(

@@ -43,28 +43,29 @@ impl ReferenceVisitor {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let ns_len = current_namespace.len();
 
-        // Resolve under a shared read lock; writes are staged for one flush.
-        let resolved = {
-            let index = self.index.read();
-            let mut found: Option<FullyQualifiedName> = None;
-            for depth in (0..=ns_len).rev() {
-                let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
-                combined_ns.extend(namespaces.iter().cloned());
+        let resolved = self
+            .resolve_constant_from_analysis(&namespaces, &current_namespace)
+            .or_else(|| {
+                let index = self.index.read();
+                let mut found: Option<FullyQualifiedName> = None;
+                for depth in (0..=ns_len).rev() {
+                    let mut combined_ns: Vec<_> = current_namespace[0..depth].to_vec();
+                    combined_ns.extend(namespaces.iter().cloned());
 
-                let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
-                if index.contains_fqn(&namespace_fqn) {
-                    found = Some(namespace_fqn);
-                    break;
-                }
+                    let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+                    if index.contains_fqn(&namespace_fqn) {
+                        found = Some(namespace_fqn);
+                        break;
+                    }
 
-                let constant_fqn = FullyQualifiedName::Constant(combined_ns);
-                if index.contains_fqn(&constant_fqn) {
-                    found = Some(constant_fqn);
-                    break;
+                    let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+                    if index.contains_fqn(&constant_fqn) {
+                        found = Some(constant_fqn);
+                        break;
+                    }
                 }
-            }
-            found
-        };
+                found
+            });
 
         if let Some(fqn) = resolved {
             let location = self

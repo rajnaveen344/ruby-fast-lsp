@@ -22,33 +22,31 @@ impl ReferenceVisitor {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let ns_len = current_namespace.len();
 
-        // Resolve under a SHARED read lock so other workers can run the
-        // same lookups in parallel. Writes land in `self.staged` and are
-        // flushed once per file by the file processor under a brief
-        // write lock.
-        let resolution = {
-            let index = self.index.read();
-            let mut resolved: Option<FullyQualifiedName> = None;
-            for depth in (0..=ns_len).rev() {
-                let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
-                combined_ns.push(constant.clone());
+        let resolution = self
+            .resolve_constant_from_analysis(std::slice::from_ref(&constant), &current_namespace)
+            .or_else(|| {
+                let index = self.index.read();
+                let mut resolved: Option<FullyQualifiedName> = None;
+                for depth in (0..=ns_len).rev() {
+                    let mut combined_ns: Vec<RubyConstant> = current_namespace[0..depth].to_vec();
+                    combined_ns.push(constant.clone());
 
-                // Try as Namespace first (class/module definitions)
-                let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
-                if index.contains_fqn(&namespace_fqn) {
-                    resolved = Some(namespace_fqn);
-                    break;
-                }
+                    // Try as Namespace first (class/module definitions)
+                    let namespace_fqn = FullyQualifiedName::namespace(combined_ns.clone());
+                    if index.contains_fqn(&namespace_fqn) {
+                        resolved = Some(namespace_fqn);
+                        break;
+                    }
 
-                // Then try as Constant (value constants like VALUE = 42)
-                let constant_fqn = FullyQualifiedName::Constant(combined_ns);
-                if index.contains_fqn(&constant_fqn) {
-                    resolved = Some(constant_fqn);
-                    break;
+                    // Then try as Constant (value constants like VALUE = 42)
+                    let constant_fqn = FullyQualifiedName::Constant(combined_ns);
+                    if index.contains_fqn(&constant_fqn) {
+                        resolved = Some(constant_fqn);
+                        break;
+                    }
                 }
-            }
-            resolved
-        };
+                resolved
+            });
 
         if let Some(fqn) = resolution {
             let location = self
