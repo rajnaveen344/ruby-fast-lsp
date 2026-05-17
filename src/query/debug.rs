@@ -1,307 +1,125 @@
-//! Debug Query — Index queries for debug/inspection commands.
+//! Debug Query — analysis-engine inspection commands.
 //!
-//! Moves all index-heavy logic out of the capability handlers so they
-//! become thin wrappers that extract params → call query → return response.
+//! Debug commands are LSP-visible, so they should inspect the same analysis
+//! facts that editor features and future agent APIs use.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::capabilities::debug::{
     AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,
 };
-use crate::indexer::entry::entry_kind::EntryKind;
-use crate::indexer::entry::NamespaceKind;
-use crate::indexer::graph::NodeKind;
-use crate::indexer::index::RubyIndex;
-use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::query::analysis_location::location_for_range;
+use crate::types::fully_qualified_name::{FullyQualifiedName, NamespaceKind};
+use ruby_analysis_core::{
+    GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodFact, RubyMethod, RubyType, SymbolFact,
+    SymbolKind,
+};
+use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery};
 
 use super::IndexQuery;
 
 impl IndexQuery {
-    /// Query the index for a fully qualified name, returning matching entries.
+    /// Query the analysis engine for a fully qualified name.
     pub fn debug_lookup(&self, fqn_str: &str) -> LookupResponse {
-        let index = self.index.lock();
-
-        // Parse the FQN string
-        let fqn = parse_fqn(fqn_str);
-
-        match fqn {
-            Some(fqn) => {
-                // Try as parsed FQN first
-                let mut entries = index.get(&fqn);
-
-                // If not found and it's a Constant, also try as Namespace (class/module)
-                if entries.is_none() {
-                    if let FullyQualifiedName::Constant(parts) = &fqn {
-                        let namespace_fqn = FullyQualifiedName::Namespace(
-                            parts.clone(),
-                            crate::indexer::entry::NamespaceKind::Instance,
-                        );
-                        entries = index.get(&namespace_fqn);
-                    }
-                }
-
-                match entries {
-                    Some(entries) => {
-                        let lookup_entries: Vec<LookupEntry> = entries
-                            .iter()
-                            .map(|entry| {
-                                let (kind, visibility, return_type, parameters) = match &entry.kind
-                                {
-                                    EntryKind::Class(data) => {
-                                        let superclass = data
-                                            .superclass
-                                            .as_ref()
-                                            .map(|s| format!(" < {}", format_mixin_ref(s)))
-                                            .unwrap_or_default();
-                                        (format!("Class{}", superclass), None, None, None)
-                                    }
-                                    EntryKind::Module(_) => {
-                                        ("Module".to_string(), None, None, None)
-                                    }
-                                    EntryKind::Method(data) => {
-                                        let vis = format!("{:?}", data.visibility);
-                                        let ret = data.return_type.as_ref().map(|t| t.to_string());
-                                        let params: Vec<String> =
-                                            data.params.iter().map(|p| p.name.clone()).collect();
-                                        // Get kind from owner namespace
-                                        let kind = data.owner.namespace_kind().unwrap_or(
-                                            crate::indexer::entry::NamespaceKind::Instance,
-                                        );
-                                        (
-                                            format!("Method({:?})", kind),
-                                            Some(vis),
-                                            ret,
-                                            if params.is_empty() {
-                                                None
-                                            } else {
-                                                Some(params)
-                                            },
-                                        )
-                                    }
-                                    EntryKind::Constant(data) => {
-                                        let vis =
-                                            data.visibility.as_ref().map(|v| format!("{:?}", v));
-                                        ("Constant".to_string(), vis, None, None)
-                                    }
-                                    EntryKind::InstanceVariable(data) => {
-                                        let type_str = if data.r#type
-                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                        {
-                                            Some(data.r#type.to_string())
-                                        } else {
-                                            None
-                                        };
-                                        ("InstanceVariable".to_string(), None, type_str, None)
-                                    }
-                                    EntryKind::ClassVariable(data) => {
-                                        let type_str = if data.r#type
-                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                        {
-                                            Some(data.r#type.to_string())
-                                        } else {
-                                            None
-                                        };
-                                        ("ClassVariable".to_string(), None, type_str, None)
-                                    }
-                                    EntryKind::GlobalVariable(data) => {
-                                        let type_str = if data.r#type
-                                            != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                        {
-                                            Some(data.r#type.to_string())
-                                        } else {
-                                            None
-                                        };
-                                        ("GlobalVariable".to_string(), None, type_str, None)
-                                    }
-                                    EntryKind::LocalVariable(data) => {
-                                        let type_str = if let Some(last_assignment) =
-                                            data.assignments.last()
-                                        {
-                                            if last_assignment.r#type
-                                                != crate::inferrer::r#type::ruby::RubyType::Unknown
-                                            {
-                                                Some(last_assignment.r#type.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        };
-                                        ("LocalVariable".to_string(), None, type_str, None)
-                                    }
-                                    EntryKind::Reference(_) => {
-                                        ("Reference".to_string(), None, None, None)
-                                    }
-                                };
-
-                                // Get location string - return full URI for proper navigation
-                                let location = index
-                                    .get_file_url(entry.location.file_id)
-                                    .map(|url| {
-                                        format!(
-                                            "{}:{}:{}",
-                                            url.as_str(),
-                                            entry.location.range.start.line,
-                                            entry.location.range.start.character
-                                        )
-                                    })
-                                    .unwrap_or_else(|| "unknown".to_string());
-
-                                LookupEntry {
-                                    fqn: index
-                                        .get_fqn(entry.fqn_id)
-                                        .map(|f| f.to_string())
-                                        .unwrap_or_else(|| fqn_str.to_string()),
-                                    kind,
-                                    location,
-                                    visibility,
-                                    return_type,
-                                    parameters,
-                                }
-                            })
-                            .collect();
-
-                        LookupResponse {
-                            found: true,
-                            entries: lookup_entries,
-                        }
-                    }
-                    None => LookupResponse {
-                        found: false,
-                        entries: vec![],
-                    },
-                }
-            }
-            None => LookupResponse {
+        let engine = self.debug_engine();
+        let Some(fqn) = parse_fqn(fqn_str) else {
+            return LookupResponse {
                 found: false,
-                entries: vec![],
-            },
+                entries: Vec::new(),
+            };
+        };
+
+        let mut entries = Vec::new();
+        if let FullyQualifiedName::Method(_, _) = &fqn {
+            entries.extend(
+                engine
+                    .method_facts_for(&fqn)
+                    .iter()
+                    .map(|fact| lookup_entry_from_method_fact(&engine, fact)),
+            );
+        }
+
+        if entries.is_empty() {
+            for candidate in lookup_candidates(&fqn) {
+                entries.extend(
+                    engine
+                        .symbol_facts_for(&candidate)
+                        .iter()
+                        .map(|fact| lookup_entry_from_symbol_fact(&engine, fact)),
+                );
+            }
+        }
+
+        entries.sort_by_key(|entry| {
+            (
+                entry.fqn.clone(),
+                entry.kind.clone(),
+                entry.location.clone(),
+            )
+        });
+        LookupResponse {
+            found: !entries.is_empty(),
+            entries,
         }
     }
 
-    /// Return index statistics.
+    /// Return analysis-engine statistics.
     pub fn debug_stats(&self, indexing_complete: bool) -> StatsResponse {
-        let index = self.index.lock();
-
-        let mut classes = 0;
-        let mut modules = 0;
-        let mut methods = 0;
-        let mut constants = 0;
-        let mut instance_variables = 0;
-        let mut total_entries = 0;
-
-        // Count entries by kind
-        for entry in index.all_entries() {
-            total_entries += 1;
-            match &entry.kind {
-                EntryKind::Class(_) => classes += 1,
-                EntryKind::Module(_) => modules += 1,
-                EntryKind::Method(_) => methods += 1,
-                EntryKind::Constant(_) => constants += 1,
-                EntryKind::InstanceVariable(_) => instance_variables += 1,
-                EntryKind::ClassVariable(_) => {}
-                EntryKind::GlobalVariable(_) => {}
-                EntryKind::LocalVariable(_) => {}
-                EntryKind::Reference(_) => {}
-            }
-        }
+        let engine = self.debug_engine();
+        let symbols = engine.all_symbol_facts();
+        let unique_definitions = symbols
+            .iter()
+            .map(|fact| fact.fqn.clone())
+            .collect::<HashSet<_>>()
+            .len();
 
         StatsResponse {
-            total_definitions: index.definitions_len(),
-            total_entries,
-            classes,
-            modules,
-            methods,
-            constants,
-            instance_variables,
-            files_indexed: index.files_count(),
+            total_definitions: unique_definitions,
+            total_entries: symbols.len(),
+            classes: count_symbols(&symbols, SymbolKind::Class),
+            modules: count_symbols(&symbols, SymbolKind::Module),
+            methods: count_symbols(&symbols, SymbolKind::Method),
+            constants: count_symbols(&symbols, SymbolKind::Constant),
+            instance_variables: count_symbols(&symbols, SymbolKind::InstanceVariable),
+            files_indexed: engine.file_count(),
             indexing_complete,
         }
     }
 
-    /// Get inheritance chain for a class or module.
+    /// Get direct inheritance/mixin edges for a class or module.
     pub fn debug_ancestors(&self, class_name: &str) -> AncestorsResponse {
-        let index = self.index.lock();
-
-        let mut ancestors = Vec::new();
-
-        // Parse the class name into an FQN
-        let parts: Vec<&str> = class_name.split("::").collect();
-        let namespace: Vec<crate::types::ruby_namespace::RubyConstant> = parts
+        let engine = self.debug_engine();
+        let Some(namespace) = parse_namespace(class_name) else {
+            return AncestorsResponse {
+                class: class_name.to_string(),
+                ancestors: Vec::new(),
+            };
+        };
+        let fqn = FullyQualifiedName::namespace_with_kind(namespace, NamespaceKind::Instance);
+        let ancestors = engine
+            .graph_edges_from(&fqn)
             .iter()
-            .filter_map(|p| crate::types::ruby_namespace::RubyConstant::new(p).ok())
+            .filter_map(|edge| match edge.kind {
+                GraphEdgeKind::Superclass => Some(AncestorEntry {
+                    name: fqn_to_key(&edge.target),
+                    kind: "superclass".to_string(),
+                }),
+                GraphEdgeKind::Include => Some(AncestorEntry {
+                    name: fqn_to_key(&edge.target),
+                    kind: "include".to_string(),
+                }),
+                GraphEdgeKind::Extend => Some(AncestorEntry {
+                    name: fqn_to_key(&edge.target),
+                    kind: "extend".to_string(),
+                }),
+                GraphEdgeKind::Prepend => Some(AncestorEntry {
+                    name: fqn_to_key(&edge.target),
+                    kind: "prepend".to_string(),
+                }),
+            })
             .collect();
-
-        let fqn = FullyQualifiedName::Constant(namespace);
-
-        // Look up the class
-        if let Some(entries) = index.get(&fqn) {
-            for entry in entries {
-                match &entry.kind {
-                    EntryKind::Class(data) => {
-                        // Add superclass
-                        if let Some(superclass) = &data.superclass {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(superclass),
-                                kind: "superclass".to_string(),
-                            });
-                        }
-
-                        // Add includes
-                        for mixin in &data.includes {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "include".to_string(),
-                            });
-                        }
-
-                        // Add extends
-                        for mixin in &data.extends {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "extend".to_string(),
-                            });
-                        }
-
-                        // Add prepends
-                        for mixin in &data.prepends {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "prepend".to_string(),
-                            });
-                        }
-                    }
-                    EntryKind::Module(data) => {
-                        // Add includes
-                        for mixin in &data.includes {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "include".to_string(),
-                            });
-                        }
-
-                        // Add extends
-                        for mixin in &data.extends {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "extend".to_string(),
-                            });
-                        }
-
-                        // Add prepends
-                        for mixin in &data.prepends {
-                            ancestors.push(AncestorEntry {
-                                name: format_mixin_ref(mixin),
-                                kind: "prepend".to_string(),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
 
         AncestorsResponse {
             class: class_name.to_string(),
@@ -309,42 +127,35 @@ impl IndexQuery {
         }
     }
 
-    /// List all methods for a class.
+    /// List methods directly owned by a class/module.
     pub fn debug_methods(&self, class_name: &str) -> MethodsResponse {
-        let index = self.index.lock();
-
-        let mut methods = Vec::new();
-
-        // Parse the class name into namespace parts
-        let parts: Vec<&str> = class_name.split("::").collect();
-        let namespace: Vec<crate::types::ruby_namespace::RubyConstant> = parts
-            .iter()
-            .filter_map(|p| crate::types::ruby_namespace::RubyConstant::new(p).ok())
-            .collect();
-
-        // Look for all methods with this namespace prefix
-        for entry in index.all_entries() {
-            if let EntryKind::Method(data) = &entry.kind {
-                // Check if this method belongs to the requested class
-                if let Some(fqn) = index.get_fqn(entry.fqn_id) {
-                    if let FullyQualifiedName::Method(ns, method) = fqn {
-                        if *ns == namespace {
-                            // Get kind from owner namespace
-                            let kind = data
-                                .owner
-                                .namespace_kind()
-                                .unwrap_or(crate::indexer::entry::NamespaceKind::Instance);
-                            methods.push(MethodEntry {
-                                name: method.to_string(),
-                                kind: format!("{:?}", kind),
-                                visibility: format!("{:?}", data.visibility),
-                                return_type: data.return_type.as_ref().map(|t| t.to_string()),
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        let engine = self.debug_engine();
+        let Some(namespace) = parse_namespace(class_name) else {
+            return MethodsResponse {
+                class: class_name.to_string(),
+                methods: Vec::new(),
+            };
+        };
+        let query = AnalysisQuery::new(&engine);
+        let mut methods = engine
+            .all_method_facts()
+            .into_iter()
+            .filter(|fact| fact.owner.namespace_parts() == namespace)
+            .map(|fact| MethodEntry {
+                name: method_name(&fact),
+                kind: format!(
+                    "{:?}",
+                    fact.owner
+                        .namespace_kind()
+                        .unwrap_or(NamespaceKind::Instance)
+                ),
+                visibility: "Public".to_string(),
+                return_type: query
+                    .method_return_type(&fact)
+                    .and_then(non_unknown_type_string),
+            })
+            .collect::<Vec<_>>();
+        methods.sort_by_key(|method| (method.kind.clone(), method.name.clone()));
 
         MethodsResponse {
             class: class_name.to_string(),
@@ -354,34 +165,30 @@ impl IndexQuery {
 
     /// Get type inference statistics and coverage.
     pub fn debug_inference_stats(&self) -> InferenceStatsResponse {
-        let index = self.index.lock();
-
-        let mut total_methods = 0;
-        let mut methods_with_return_type = 0;
+        let engine = self.debug_engine();
+        let query = AnalysisQuery::new(&engine);
+        let methods = engine.all_method_facts();
+        let total_methods = methods.len();
+        let mut methods_with_return_type = 0usize;
         let mut file_method_counts: HashMap<String, usize> = HashMap::new();
 
-        for entry in index.all_entries() {
-            if let EntryKind::Method(data) = &entry.kind {
-                total_methods += 1;
-
-                if data.return_type.is_some()
-                    && data.return_type.as_ref()
-                        != Some(&crate::inferrer::r#type::ruby::RubyType::Unknown)
-                {
-                    methods_with_return_type += 1;
-                }
-
-                // Count methods per file
-                if let Some(url) = index.get_file_url(entry.location.file_id) {
-                    let file_name = url
-                        .path()
-                        .split('/')
-                        .last()
-                        .unwrap_or("unknown")
-                        .to_string();
-                    *file_method_counts.entry(file_name).or_insert(0) += 1;
-                }
+        for fact in &methods {
+            if query
+                .method_return_type(fact)
+                .and_then(non_unknown_type_string)
+                .is_some()
+            {
+                methods_with_return_type += 1;
             }
+            let file_name = engine
+                .file(fact.range.file_id)
+                .and_then(|file| {
+                    file.path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            *file_method_counts.entry(file_name).or_insert(0) += 1;
         }
 
         let methods_without_return_type = total_methods - methods_with_return_type;
@@ -391,16 +198,12 @@ impl IndexQuery {
             0.0
         };
 
-        // Get top 10 files by method count
-        let mut file_counts: Vec<_> = file_method_counts.into_iter().collect();
-        file_counts.sort_by(|a, b| b.1.cmp(&a.1));
-        let top_files_by_method_count: Vec<FileMethodCount> = file_counts
+        let mut file_counts = file_method_counts.into_iter().collect::<Vec<_>>();
+        file_counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        let top_files_by_method_count = file_counts
             .into_iter()
             .take(10)
-            .map(|(file, count)| FileMethodCount {
-                file,
-                method_count: count,
-            })
+            .map(|(file, method_count)| FileMethodCount { file, method_count })
             .collect();
 
         InferenceStatsResponse {
@@ -414,97 +217,38 @@ impl IndexQuery {
 
     /// Export the inheritance graph as a snapshot.
     pub fn debug_export_graph(&self) -> ExportGraphResponse {
-        let index = self.index.lock();
-        let graph = index.get_graph();
-
+        let engine = self.debug_engine();
+        let nodes_by_fqn = graph_nodes_by_fqn(&engine);
         let mut nodes = HashMap::new();
 
-        // Helper to convert FQN to a readable key
-        // Instance: "A::B::C"
-        // Singleton: "#<Class:A::B::C>"
-        let fqn_to_key = |fqn: &FullyQualifiedName| -> String {
-            match fqn {
-                FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => parts
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join("::"),
-                FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
-                    let name = parts
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<_>>()
-                        .join("::");
-                    format!("#<Class:{}>", name)
-                }
-                other => other.to_string(),
-            }
-        };
-
-        // Resolve FqnId to readable key
-        let resolve_key = |id| index.get_fqn(id).map(|f| fqn_to_key(f));
-
-        // Iterate through all definitions
-        for (fqn, _entries) in index.definitions() {
-            // Only process namespaces (classes/modules)
-            let FullyQualifiedName::Namespace(_, _) = fqn else {
-                continue;
-            };
-
-            let Some(fqn_id) = index.get_fqn_id(fqn) else {
-                continue;
-            };
-
-            let Some(node) = graph.get_node(fqn_id) else {
-                continue;
-            };
-
-            let key = fqn_to_key(fqn);
-
-            // Compute MRO using the graph's method_lookup_chain
-            let mro: Vec<String> = graph
-                .method_lookup_chain(fqn_id)
+        for (fqn, kind) in &nodes_by_fqn {
+            let outgoing = engine.graph_edges_from(fqn);
+            let superclass = outgoing
                 .iter()
-                .filter_map(|&id| resolve_key(id))
-                .collect();
-
-            // For modules, find all classes that ultimately include this module
-            let included_by_classes = if node.kind == NodeKind::Module {
-                find_including_classes(fqn, &index, &fqn_to_key)
+                .find(|edge| edge.kind == GraphEdgeKind::Superclass)
+                .map(|edge| fqn_to_key(&edge.target));
+            let includes = edge_targets(outgoing, GraphEdgeKind::Include);
+            let prepends = edge_targets(outgoing, GraphEdgeKind::Prepend);
+            let included_by = reverse_edge_sources(&engine, fqn, GraphEdgeKind::Include);
+            let prepended_by = reverse_edge_sources(&engine, fqn, GraphEdgeKind::Prepend);
+            let children = reverse_edge_sources(&engine, fqn, GraphEdgeKind::Superclass);
+            let included_by_classes = if *kind == GraphNodeKind::Module {
+                included_by_classes(&engine, fqn)
             } else {
                 Vec::new()
             };
+            let mro = method_resolution_order(&engine, fqn);
 
             nodes.insert(
-                key,
+                fqn_to_key(fqn),
                 GraphNodeSnapshot {
-                    kind: format!("{:?}", node.kind),
-                    superclass: node.superclass.and_then(|id| resolve_key(id)),
-                    includes: node
-                        .includes
-                        .iter()
-                        .filter_map(|&id| resolve_key(id))
-                        .collect(),
-                    prepends: node
-                        .prepends
-                        .iter()
-                        .filter_map(|&id| resolve_key(id))
-                        .collect(),
-                    included_by: node
-                        .included_by
-                        .iter()
-                        .filter_map(|&id| resolve_key(id))
-                        .collect(),
-                    prepended_by: node
-                        .prepended_by
-                        .iter()
-                        .filter_map(|&id| resolve_key(id))
-                        .collect(),
-                    children: node
-                        .children
-                        .iter()
-                        .filter_map(|&id| resolve_key(id))
-                        .collect(),
+                    kind: format!("{:?}", kind),
+                    superclass,
+                    includes,
+                    prepends,
+                    included_by,
+                    prepended_by,
+                    children,
                     included_by_classes,
                     mro,
                 },
@@ -516,30 +260,112 @@ impl IndexQuery {
             nodes,
         }
     }
+
+    fn debug_engine(&self) -> parking_lot::MutexGuard<'_, AnalysisEngine> {
+        self.analysis_engine
+            .as_ref()
+            .expect(
+                "INVARIANT VIOLATED: debug query requested without analysis engine. \
+                 This is a bug because debug LSP commands must inspect AnalysisEngine facts. \
+                 Fix: construct IndexQuery with with_engine().",
+            )
+            .lock()
+    }
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
+fn lookup_candidates(fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName> {
+    match fqn {
+        FullyQualifiedName::Constant(parts) => vec![
+            fqn.clone(),
+            FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Instance),
+            FullyQualifiedName::namespace_with_kind(parts.clone(), NamespaceKind::Singleton),
+        ],
+        _ => vec![fqn.clone()],
+    }
+}
+
+fn lookup_entry_from_symbol_fact(engine: &AnalysisEngine, fact: &SymbolFact) -> LookupEntry {
+    LookupEntry {
+        fqn: fact.fqn.to_string(),
+        kind: format!("{:?}", fact.kind),
+        location: location_string(engine, fact.range),
+        visibility: None,
+        return_type: None,
+        parameters: None,
+    }
+}
+
+fn lookup_entry_from_method_fact(engine: &AnalysisEngine, fact: &MethodFact) -> LookupEntry {
+    let query = AnalysisQuery::new(engine);
+    LookupEntry {
+        fqn: fact.fqn.to_string(),
+        kind: format!(
+            "Method({:?})",
+            fact.owner
+                .namespace_kind()
+                .unwrap_or(NamespaceKind::Instance)
+        ),
+        location: location_string(engine, fact.range),
+        visibility: Some("Public".to_string()),
+        return_type: query
+            .method_return_type(fact)
+            .and_then(non_unknown_type_string),
+        parameters: if fact.params.is_empty() {
+            None
+        } else {
+            Some(fact.params.clone())
+        },
+    }
+}
+
+fn count_symbols(symbols: &[SymbolFact], kind: SymbolKind) -> usize {
+    symbols.iter().filter(|fact| fact.kind == kind).count()
+}
+
+fn non_unknown_type_string(ruby_type: RubyType) -> Option<String> {
+    if ruby_type == RubyType::Unknown {
+        None
+    } else {
+        Some(ruby_type.to_string())
+    }
+}
+
+fn method_name(fact: &MethodFact) -> String {
+    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+        panic!(
+            "INVARIANT VIOLATED: MethodFact FQN is not a method: {}. \
+             This is a bug because MethodStore must only contain method FQNs. \
+             Fix: validate MethodFact before insertion.",
+            fact.fqn
+        );
+    };
+    method.get_name().to_string()
+}
+
+fn location_string(engine: &AnalysisEngine, range: ruby_analysis_core::TextRange) -> String {
+    location_for_range(engine, range)
+        .map(|location| {
+            format!(
+                "{}:{}:{}",
+                location.uri.as_str(),
+                location.range.start.line,
+                location.range.start.character
+            )
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 /// Parse a string FQN into a FullyQualifiedName.
 fn parse_fqn(fqn_str: &str) -> Option<FullyQualifiedName> {
-    // Check if it's a method (contains # or .)
     if let Some(hash_pos) = fqn_str.find('#') {
-        // Instance method: Foo::Bar#baz
         let namespace_str = &fqn_str[..hash_pos];
         let method_name = &fqn_str[hash_pos + 1..];
-
         let namespace = parse_namespace(namespace_str)?;
-        let method = crate::types::ruby_method::RubyMethod::new(method_name).ok()?;
-
-        Some(FullyQualifiedName::Method(namespace, method))
+        let method = RubyMethod::new(method_name).ok()?;
+        Some(FullyQualifiedName::method(namespace, method))
     } else if let Some(dot_pos) = fqn_str.rfind('.') {
-        // Check if it's a class method (Foo.bar) or just namespace (Foo::Bar)
         let before_dot = &fqn_str[..dot_pos];
         let after_dot = &fqn_str[dot_pos + 1..];
-
-        // If before_dot contains ::, treat as class method
         if before_dot.contains("::")
             || before_dot
                 .chars()
@@ -548,25 +374,23 @@ fn parse_fqn(fqn_str: &str) -> Option<FullyQualifiedName> {
                 .unwrap_or(false)
         {
             let namespace = parse_namespace(before_dot)?;
-            let method = crate::types::ruby_method::RubyMethod::new(after_dot).ok()?;
-            Some(FullyQualifiedName::Method(namespace, method))
+            let method = RubyMethod::new(after_dot).ok()?;
+            Some(FullyQualifiedName::method(namespace, method))
         } else {
-            // Just a namespace
-            Some(FullyQualifiedName::Constant(parse_namespace(fqn_str)?))
+            Some(FullyQualifiedName::constant(parse_namespace(fqn_str)?))
         }
     } else {
-        // Just a namespace: Foo::Bar
-        Some(FullyQualifiedName::Constant(parse_namespace(fqn_str)?))
+        Some(FullyQualifiedName::constant(parse_namespace(fqn_str)?))
     }
 }
 
 /// Parse a namespace string into a vector of RubyConstants.
 fn parse_namespace(namespace_str: &str) -> Option<Vec<crate::types::ruby_namespace::RubyConstant>> {
-    let parts: Vec<&str> = namespace_str.split("::").collect();
-    let namespace: Vec<crate::types::ruby_namespace::RubyConstant> = parts
+    let parts = namespace_str.split("::").collect::<Vec<_>>();
+    let namespace = parts
         .iter()
-        .filter_map(|p| crate::types::ruby_namespace::RubyConstant::new(p.trim()).ok())
-        .collect();
+        .filter_map(|part| crate::types::ruby_namespace::RubyConstant::new(part.trim()).ok())
+        .collect::<Vec<_>>();
 
     if namespace.len() == parts.len() {
         Some(namespace)
@@ -575,26 +399,138 @@ fn parse_namespace(namespace_str: &str) -> Option<Vec<crate::types::ruby_namespa
     }
 }
 
-/// Find all classes that ultimately include a module by traversing included_by/prepended_by edges.
-/// Uses the index's `including_classes` method which does BFS through intermediate modules.
-fn find_including_classes(
-    module_fqn: &FullyQualifiedName,
-    index: &RubyIndex,
-    fqn_to_key: &impl Fn(&FullyQualifiedName) -> String,
-) -> Vec<String> {
-    let mut classes: Vec<String> = index
-        .including_classes(module_fqn)
-        .iter()
-        .map(|(fqn, _via_modules)| fqn_to_key(fqn))
-        .collect();
-
-    classes.sort();
-    classes
+fn fqn_to_key(fqn: &FullyQualifiedName) -> String {
+    match fqn {
+        FullyQualifiedName::Namespace(parts, NamespaceKind::Instance) => parts
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        FullyQualifiedName::Namespace(parts, NamespaceKind::Singleton) => {
+            let name = parts
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            format!("#<Class:{}>", name)
+        }
+        other => other.to_string(),
+    }
 }
 
-/// Format a MixinRef as a string.
-fn format_mixin_ref(mixin: &crate::indexer::entry::MixinRef) -> String {
-    let prefix = if mixin.absolute { "::" } else { "" };
-    let parts: Vec<String> = mixin.parts.iter().map(|p| p.to_string()).collect();
-    format!("{}{}", prefix, parts.join("::"))
+fn graph_nodes_by_fqn(engine: &AnalysisEngine) -> HashMap<FullyQualifiedName, GraphNodeKind> {
+    let mut nodes = HashMap::new();
+    for node in engine.graph_store().all_nodes() {
+        nodes.entry(node.fqn).or_insert(node.kind);
+    }
+    nodes
+}
+
+fn node_kind(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+    engine.graph_nodes_for(fqn).first().map(|node| node.kind)
+}
+
+fn edge_targets(edges: &[GraphEdgeFact], kind: GraphEdgeKind) -> Vec<String> {
+    edges
+        .iter()
+        .filter(|edge| edge.kind == kind)
+        .map(|edge| fqn_to_key(&edge.target))
+        .collect()
+}
+
+fn reverse_edge_sources(
+    engine: &AnalysisEngine,
+    target: &FullyQualifiedName,
+    kind: GraphEdgeKind,
+) -> Vec<String> {
+    let mut result = engine
+        .all_graph_edges()
+        .into_iter()
+        .filter(|edge| edge.kind == kind && edge.target == *target)
+        .map(|edge| fqn_to_key(&edge.source))
+        .collect::<Vec<_>>();
+    result.sort();
+    result
+}
+
+fn included_by_classes(engine: &AnalysisEngine, module_fqn: &FullyQualifiedName) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    for edge in engine.all_graph_edges() {
+        if edge.target == *module_fqn
+            && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+            && visited.insert(edge.source.clone())
+        {
+            queue.push_back(edge.source);
+        }
+    }
+
+    while let Some(current) = queue.pop_front() {
+        match node_kind(engine, &current) {
+            Some(GraphNodeKind::Class) => result.push(fqn_to_key(&current)),
+            Some(GraphNodeKind::Module) => {
+                for edge in engine.all_graph_edges() {
+                    if edge.target == current
+                        && matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+                        && visited.insert(edge.source.clone())
+                    {
+                        queue.push_back(edge.source);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    result.sort();
+    result
+}
+
+fn method_resolution_order(engine: &AnalysisEngine, fqn: &FullyQualifiedName) -> Vec<String> {
+    let mut chain = Vec::new();
+    let mut visited = HashSet::new();
+    build_mro(engine, fqn, &mut chain, &mut visited);
+    chain.into_iter().map(|item| fqn_to_key(&item)).collect()
+}
+
+fn build_mro(
+    engine: &AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    chain: &mut Vec<FullyQualifiedName>,
+    visited: &mut HashSet<FullyQualifiedName>,
+) {
+    if !visited.insert(fqn.clone()) {
+        return;
+    }
+
+    let mut prepends = edges_from(engine, fqn, GraphEdgeKind::Prepend);
+    for edge in prepends.iter_mut().rev() {
+        build_mro(engine, &edge.target, chain, visited);
+    }
+
+    chain.push(fqn.clone());
+
+    let mut includes = edges_from(engine, fqn, GraphEdgeKind::Include);
+    for edge in includes.iter_mut().rev() {
+        build_mro(engine, &edge.target, chain, visited);
+    }
+
+    if let Some(superclass) = edges_from(engine, fqn, GraphEdgeKind::Superclass).first() {
+        build_mro(engine, &superclass.target, chain, visited);
+    }
+}
+
+fn edges_from(
+    engine: &AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    kind: GraphEdgeKind,
+) -> Vec<GraphEdgeFact> {
+    engine
+        .graph_edges_from(fqn)
+        .iter()
+        .filter(|edge| edge.kind == kind)
+        .cloned()
+        .collect()
 }

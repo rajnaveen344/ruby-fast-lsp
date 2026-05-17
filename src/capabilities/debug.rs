@@ -229,21 +229,21 @@ pub fn handle_list_commands() -> ListCommandsResponse {
 /// Handle `ruby-fast-lsp/debug/lookup` - query the index for an FQN.
 pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> LookupResponse {
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_lookup(&params.fqn)
 }
 
 /// Handle `ruby-fast-lsp/debug/stats` - return index statistics.
 pub fn handle_stats(server: &RubyLanguageServer) -> StatsResponse {
     debug!("[DEBUG] Getting index stats");
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_stats(server.is_indexing_complete())
 }
 
 /// Handle `ruby-fast-lsp/debug/ancestors` - get inheritance chain for a class.
 pub fn handle_ancestors(server: &RubyLanguageServer, params: AncestorsParams) -> AncestorsResponse {
     debug!("[DEBUG] Getting ancestors for: {}", params.class);
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_ancestors(&params.class)
 }
 
@@ -274,7 +274,7 @@ pub struct MethodsResponse {
 /// Handle `ruby-fast-lsp/debug/methods` - list methods for a class.
 pub fn handle_methods(server: &RubyLanguageServer, params: MethodsParams) -> MethodsResponse {
     debug!("[DEBUG] Getting methods for: {}", params.class);
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_methods(&params.class)
 }
 
@@ -305,7 +305,7 @@ pub struct FileMethodCount {
 /// Handle `ruby-fast-lsp/debug/inference-stats` - get type inference statistics.
 pub fn handle_inference_stats(server: &RubyLanguageServer) -> InferenceStatsResponse {
     debug!("[DEBUG] Getting inference stats");
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_inference_stats()
 }
 
@@ -315,6 +315,6 @@ pub fn handle_export_graph(
     _params: ExportGraphParams,
 ) -> ExportGraphResponse {
     debug!("[DEBUG] Exporting inheritance graph");
-    let query = IndexQuery::new(server.primary_index());
+    let query = IndexQuery::with_engine(server.primary_index(), server.analysis_engine.clone());
     query.debug_export_graph()
 }
