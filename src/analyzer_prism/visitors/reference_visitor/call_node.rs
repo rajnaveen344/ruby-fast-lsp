@@ -271,6 +271,21 @@ impl ReferenceVisitor {
         receiver_node: &Node,
         current_namespace: &Vec<RubyConstant>,
     ) -> (Vec<RubyConstant>, NamespaceKind) {
+        if let Some(mixin_ref) =
+            utils::mixin_ref_from_node(receiver_node, CompactLocation::default())
+        {
+            let context = if mixin_ref.absolute {
+                Vec::new()
+            } else {
+                current_namespace.clone()
+            };
+            if let Some(resolved_fqn) =
+                self.resolve_constant_from_analysis(&mixin_ref.parts, &context)
+            {
+                return (resolved_fqn.namespace_parts(), NamespaceKind::Singleton);
+            }
+        }
+
         // Use the centralized constant resolution utility
         let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
         let index_guard = self.index.lock();
@@ -359,6 +374,12 @@ impl ReferenceVisitor {
 
             // Now resolve the method's return type. Pure read — use the
             // shared guard so multiple workers can recurse in parallel.
+            if let Some(return_type) =
+                self.resolve_method_return_type_from_analysis(&inner_type, &inner_method)
+            {
+                return Some(return_type);
+            }
+
             let index = self.index.read();
             return MethodResolver::resolve_method_return_type(&*index, &inner_type, &inner_method);
         }
@@ -372,6 +393,28 @@ impl ReferenceVisitor {
             RubyType::Class(fqn) | RubyType::Module(fqn) => Some(fqn.namespace_parts()),
             _ => None,
         }
+    }
+
+    fn resolve_method_return_type_from_analysis(
+        &self,
+        receiver_type: &RubyType,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        if method_name == "new" {
+            if let RubyType::ClassReference(fqn) = receiver_type {
+                return Some(RubyType::Class(fqn.clone()));
+            }
+        }
+
+        let method = RubyMethod::new(method_name).ok()?;
+        let engine = self.analysis_engine.as_ref()?.lock();
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        for namespace in receiver_type_to_analysis_namespaces(receiver_type) {
+            if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
+                return Some(return_type);
+            }
+        }
+        None
     }
 
     /// Resolve relative constant paths by checking namespace hierarchy
@@ -437,5 +480,27 @@ impl ReferenceVisitor {
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {
         // Nothing to do on exit
+    }
+}
+
+fn receiver_type_to_analysis_namespaces(receiver_type: &RubyType) -> Vec<FullyQualifiedName> {
+    match receiver_type {
+        RubyType::Class(fqn) | RubyType::Module(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                NamespaceKind::Instance,
+            )]
+        }
+        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                NamespaceKind::Singleton,
+            )]
+        }
+        RubyType::Union(types) => types
+            .iter()
+            .flat_map(receiver_type_to_analysis_namespaces)
+            .collect(),
+        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
     }
 }
