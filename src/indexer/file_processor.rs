@@ -26,7 +26,6 @@ use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
 use crate::types::file_source::FileSource;
 use crate::types::ruby_document::RubyDocument;
-use crate::utils::file_ops;
 use anyhow::Result;
 use log::{debug, warn};
 use ruby_analysis_core::{
@@ -38,7 +37,6 @@ use ruby_analysis_indexer::AnalysisIndexer;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::{Diagnostic, Url};
@@ -372,16 +370,6 @@ impl FileProcessor {
     // Content-based Indexing (in-memory content)
     // ========================================================================
 
-    /// Index definitions from Ruby content
-    /// NOTE: This is used during global workspace indexing.
-    /// It only populates the RubyIndex with definitions - it does NOT store
-    /// lvars or compute inlay hints. Those are computed on-demand when a file
-    /// is opened via did_open. The document is kept temporarily for the
-    /// reference indexing phase and cleared by the coordinator after indexing.
-    pub fn index_definitions(&self, uri: &Url, content: &str) -> Result<()> {
-        self.index_definitions_inner(uri, content)
-    }
-
     pub fn index_definitions_with_analysis(
         &self,
         uri: &Url,
@@ -454,60 +442,6 @@ impl FileProcessor {
             .unwrap_or(SourceKind::Project)
     }
 
-    fn index_definitions_inner(&self, uri: &Url, content: &str) -> Result<()> {
-        let start = Instant::now();
-        debug!("Indexing definitions for: {:?}", uri);
-
-        // Remove existing entries for this URI
-        self.index.lock().remove_entries_for_uri(uri);
-
-        // Parse and visit AST for definitions
-        // Create a document for the visitor (needed for position conversion)
-        // NOTE: We don't store lvars here - they are computed on-demand when file is opened
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-
-        // Clone document because parse_result borrows from the original
-        let mut index_visitor = IndexVisitor::with_extension_registry(
-            self.index.clone(),
-            document.clone(),
-            self.extension_registry.clone(),
-        );
-        index_visitor.visit(&node);
-
-        // NOTE: Return type inference is now done lazily when inlay hints are requested
-
-        debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
-        Ok(())
-    }
-
-    /// Index references and unresolved diagnostic entries from Ruby content.
-    pub fn index_references(&self, uri: &Url, content: &str) -> Result<()> {
-        let start = Instant::now();
-        debug!(
-            "Indexing references for: {:?} (track_unresolved: true)",
-            uri
-        );
-
-        // Remove stale unresolved entries
-        self.index.lock().remove_unresolved_entries_for_uri(uri);
-
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-
-        let document = RubyDocument::new(uri.clone(), content.to_string(), 0);
-        let mut visitor =
-            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true);
-        visitor.visit(&node);
-
-        let staged = std::mem::take(&mut visitor.staged);
-        staged.flush(&mut self.index.lock());
-
-        debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
-        Ok(())
-    }
-
     pub fn index_references_with_analysis(
         &self,
         uri: &Url,
@@ -554,24 +488,6 @@ impl FileProcessor {
 
         debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
         Ok(())
-    }
-
-    // ========================================================================
-    // File-based Indexing (reads from disk)
-    // ========================================================================
-
-    /// Index definitions from a single Ruby file
-    pub fn index_file_definitions(&self, file_path: &Path) -> Result<()> {
-        let uri = file_ops::path_to_uri(file_path)?;
-        let content = std::fs::read_to_string(file_path)?;
-        self.index_definitions(&uri, &content)
-    }
-
-    /// Index references from a single Ruby file
-    pub fn index_file_references(&self, file_path: &Path) -> Result<()> {
-        let uri = file_ops::path_to_uri(file_path)?;
-        let content = std::fs::read_to_string(file_path)?;
-        self.index_references(&uri, &content)
     }
 }
 

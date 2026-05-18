@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
-use crate::indexer::index::RubyIndex;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
@@ -40,15 +39,6 @@ impl PendingWrites {
 
     pub fn push_unresolved(&mut self, uri: Url, entry: UnresolvedEntry) {
         self.unresolved.push((uri, entry));
-    }
-
-    pub fn flush(self, index: &mut RubyIndex) {
-        for (fqn, loc, caller) in self.references {
-            index.add_reference(fqn, loc, caller);
-        }
-        for (uri, entry) in self.unresolved {
-            index.add_unresolved_entry(uri, entry);
-        }
     }
 }
 
