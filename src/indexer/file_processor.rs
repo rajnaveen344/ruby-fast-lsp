@@ -30,6 +30,7 @@ use anyhow::Result;
 use log::{debug, warn};
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
+    MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
@@ -593,7 +594,12 @@ fn add_extension_analysis_facts(
                     AnalysisSymbolKind::Method,
                     range,
                 ));
-                facts.methods.push(MethodFact::new(fqn, owner, range));
+                facts.methods.push(MethodFact::with_param_facts(
+                    fqn,
+                    owner,
+                    range,
+                    analysis_method_params_from_extension(&method.params),
+                ));
             }
             IndexPatch::ApplyMixin(mixin) => {
                 let mut source_parts = ruby_constants(&mixin.namespace, "ApplyMixin namespace");
@@ -747,6 +753,37 @@ fn analysis_mixin_kind(kind: MixinKind) -> GraphEdgeKind {
         MixinKind::Include => GraphEdgeKind::Include,
         MixinKind::Prepend => GraphEdgeKind::Prepend,
         MixinKind::Extend => GraphEdgeKind::Extend,
+    }
+}
+
+fn analysis_method_params_from_extension(
+    params: &[ruby_fast_lsp_extension_api::MethodParamPatch],
+) -> Vec<MethodParamFact> {
+    params
+        .iter()
+        .map(|param| {
+            MethodParamFact::new(param.name.clone(), analysis_method_param_kind(param.kind))
+        })
+        .collect()
+}
+
+fn analysis_method_param_kind(
+    kind: ruby_fast_lsp_extension_api::MethodParamKind,
+) -> AnalysisMethodParamKind {
+    match kind {
+        ruby_fast_lsp_extension_api::MethodParamKind::Required => AnalysisMethodParamKind::Required,
+        ruby_fast_lsp_extension_api::MethodParamKind::Optional => AnalysisMethodParamKind::Optional,
+        ruby_fast_lsp_extension_api::MethodParamKind::Rest => AnalysisMethodParamKind::Rest,
+        ruby_fast_lsp_extension_api::MethodParamKind::RequiredKeyword => {
+            AnalysisMethodParamKind::RequiredKeyword
+        }
+        ruby_fast_lsp_extension_api::MethodParamKind::OptionalKeyword => {
+            AnalysisMethodParamKind::OptionalKeyword
+        }
+        ruby_fast_lsp_extension_api::MethodParamKind::KeywordRest => {
+            AnalysisMethodParamKind::KeywordRest
+        }
+        ruby_fast_lsp_extension_api::MethodParamKind::Block => AnalysisMethodParamKind::Block,
     }
 }
 
