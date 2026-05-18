@@ -285,10 +285,6 @@ impl FileProcessor {
                 );
             }
 
-            if options.resolve_mixins {
-                self.index.lock().resolve_mixins_for_uri(uri);
-            }
-
             server.analysis_engine.lock().replace_graph_update_for_file(
                 updated_document.analysis_file_id(),
                 direct_facts.graph_nodes,

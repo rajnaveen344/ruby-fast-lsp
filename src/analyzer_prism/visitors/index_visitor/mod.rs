@@ -83,9 +83,16 @@ impl IndexVisitor {
         self.diagnostics.push(diagnostic);
     }
 
+    pub fn writes_legacy_index(&self) -> bool {
+        self.analysis_engine.is_none()
+    }
+
     /// Add an entry to the index immediately
     /// Converts placeholder FileId to actual FileId using document URI
     pub fn add_entry(&mut self, mut entry: Entry) {
+        if !self.writes_legacy_index() {
+            return;
+        }
         let mut index = self.index.lock();
         // Convert placeholder FileId::default() to actual FileId
         if entry.location.file_id == FileId::default() {
