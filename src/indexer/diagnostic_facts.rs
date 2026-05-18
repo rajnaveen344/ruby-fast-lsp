@@ -1,9 +1,8 @@
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::unresolved_index::UnresolvedEntry;
 use ruby_analysis_core::{DiagnosticFact, DiagnosticSeverity, TextRange};
-use tower_lsp::lsp_types::{Range, Url};
+use tower_lsp::lsp_types::Range;
 
 pub fn replace_unresolved_diagnostic_facts_for_document<'a>(
     server: &RubyLanguageServer,
@@ -18,29 +17,6 @@ pub fn replace_unresolved_diagnostic_facts_for_document<'a>(
         .analysis_engine
         .lock()
         .replace_diagnostic_facts_for_file(document.analysis_file_id(), facts);
-}
-
-pub fn replace_unresolved_diagnostic_facts_for_uri_from_index(
-    server: &RubyLanguageServer,
-    index: Index<Unlocked>,
-    uri: &Url,
-) {
-    let entries = index.lock().get_unresolved_entries(uri);
-    let (file_id, source) = {
-        let engine = server.analysis_engine.lock();
-        let path = uri
-            .to_file_path()
-            .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-        let Some(file_id) = engine.file_id(&path) else {
-            return;
-        };
-        let Some(file) = engine.file(file_id) else {
-            return;
-        };
-        (file_id, file.source.clone())
-    };
-    let document = RubyDocument::with_analysis_file_id(uri.clone(), source, 0, file_id);
-    replace_unresolved_diagnostic_facts_for_document(server, &document, entries.iter());
 }
 
 fn diagnostic_fact_from_unresolved_entry(
