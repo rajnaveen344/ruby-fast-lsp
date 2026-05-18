@@ -204,6 +204,48 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
+    pub fn method_fact_for_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<MethodFact> {
+        if !namespace_target_exists(self.engine, namespace_fqn) {
+            return None;
+        }
+
+        for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
+            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
+            let mut facts = self
+                .engine
+                .method_facts_for(&method_fqn)
+                .iter()
+                .filter(|fact| {
+                    fact.owner.namespace_parts() == ancestor.namespace_parts()
+                        && fact.owner.namespace_kind() == ancestor.namespace_kind()
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+
+            facts.sort_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                    fact.fqn.to_string(),
+                )
+            });
+            facts.dedup();
+
+            match facts.len() {
+                0 => continue,
+                1 => return facts.pop(),
+                _ => return None,
+            }
+        }
+
+        None
+    }
+
     pub fn method_return_type(&self, fact: &MethodFact) -> Option<ruby_analysis_core::RubyType> {
         match self.engine.type_at(
             &TypeSubject::MethodReturn(fact.fqn.clone()),
