@@ -1,3 +1,4 @@
+use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery};
 use ruby_prism::CallNode;
 
 use crate::analyzer_prism::utils;
@@ -122,6 +123,46 @@ fn is_exception_class(symbols: &dyn SymbolTable, name: &str) -> bool {
     true
 }
 
+fn is_exception_class_analysis(engine: &AnalysisEngine, name: &str) -> bool {
+    if EXCEPTION_WHITELIST.contains(&name) {
+        return true;
+    }
+    if name.ends_with("Error") || name.ends_with("Exception") {
+        return true;
+    }
+    let Ok(ruby_const) = RubyConstant::new(name) else {
+        return true;
+    };
+    let ns_fqn = FullyQualifiedName::namespace_with_kind(
+        vec![ruby_const],
+        crate::indexer::entry::NamespaceKind::Instance,
+    );
+    if engine.graph_nodes_for(&ns_fqn).is_empty() && engine.symbol_facts_for(&ns_fqn).is_empty() {
+        return true;
+    }
+
+    let mut current = ns_fqn;
+    let mut visited = std::collections::HashSet::new();
+    while visited.insert(current.clone()) {
+        for edge in engine.all_graph_edges() {
+            if edge.kind != ruby_analysis_core::GraphEdgeKind::Superclass || edge.source != current
+            {
+                continue;
+            }
+            let last = edge.target.namespace_parts().last().map(|c| c.to_string());
+            if let Some(n) = last {
+                if EXCEPTION_WHITELIST.contains(&n.as_str()) {
+                    return true;
+                }
+            }
+            current = edge.target;
+            break;
+        }
+    }
+
+    false
+}
+
 /// Returns `true` when `ty` is safe to raise or uncertain (silent).
 /// Returns `false` when `ty` is provably non-exception (warn).
 ///
@@ -150,6 +191,28 @@ fn classify_raise_type(symbols: &dyn SymbolTable, ty: &RubyType) -> bool {
         // Union/Unknown → uncertain, skip.
         RubyType::Union(_) | RubyType::Unknown => true,
         // Everything else (Array, Hash, Integer, etc.) → warn.
+        _ => false,
+    }
+}
+
+fn classify_raise_type_analysis(engine: &AnalysisEngine, ty: &RubyType) -> bool {
+    match ty {
+        RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+            let name = fqn
+                .namespace_parts()
+                .last()
+                .map(|c| c.to_string())
+                .unwrap_or_default();
+            if name == "String" {
+                return true;
+            }
+            if NON_EXCEPTION_TYPES.contains(&name.as_str()) {
+                return false;
+            }
+            is_exception_class_analysis(engine, &name)
+        }
+        RubyType::Module(_) | RubyType::ModuleReference(_) => false,
+        RubyType::Union(_) | RubyType::Unknown => true,
         _ => false,
     }
 }
@@ -185,6 +248,30 @@ fn resolve_bare_call_return_type(
                 }
             }
         }
+    }
+    None
+}
+
+fn resolve_bare_call_return_type_analysis(
+    engine: &AnalysisEngine,
+    current_namespace: &[RubyConstant],
+    method_name: &str,
+) -> Option<RubyType> {
+    let method = RubyMethod::new(method_name).ok()?;
+    let query = AnalysisQuery::new(engine);
+    let mut ns = current_namespace.to_vec();
+    loop {
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            ns.clone(),
+            crate::indexer::entry::NamespaceKind::Instance,
+        );
+        if let Some(fact) = query.method_fact_for_receiver(&namespace_fqn, &method) {
+            return query.method_return_type(&fact).or(Some(RubyType::Unknown));
+        }
+        if ns.is_empty() {
+            break;
+        }
+        ns.pop();
     }
     None
 }
@@ -302,5 +389,88 @@ pub fn check(
     }
 
     // Anything else (interpolation, etc.) → uncertain, skip.
+    None
+}
+
+pub fn check_with_engine(
+    node: &CallNode,
+    engine: &AnalysisEngine,
+    document: &RubyDocument,
+    current_namespace: &[RubyConstant],
+) -> Option<UnresolvedEntry> {
+    let args = node.arguments()?;
+    let first_arg = args.arguments().iter().next()?;
+
+    let arg_loc = document.prism_location_to_lsp_location(&first_arg.location());
+    let arg_repr = String::from_utf8_lossy(first_arg.location().as_slice()).to_string();
+
+    if first_arg.as_string_node().is_some() {
+        return None;
+    }
+
+    if first_arg.as_integer_node().is_some()
+        || first_arg.as_float_node().is_some()
+        || first_arg.as_array_node().is_some()
+        || first_arg.as_hash_node().is_some()
+        || first_arg.as_symbol_node().is_some()
+        || first_arg.as_true_node().is_some()
+        || first_arg.as_false_node().is_some()
+        || first_arg.as_nil_node().is_some()
+        || first_arg.as_range_node().is_some()
+    {
+        return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+    }
+
+    if let Some(const_read) = first_arg.as_constant_read_node() {
+        let name = utils::utf8_str(const_read.name().as_slice());
+        if !is_exception_class_analysis(engine, name) {
+            return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+        }
+        return None;
+    }
+
+    if first_arg.as_constant_path_node().is_some() {
+        let full_name = crate::analyzer_prism::utils::build_constant_path_name(&first_arg);
+        let last_segment = full_name.split("::").last().unwrap_or(&full_name);
+        if !is_exception_class_analysis(engine, last_segment) {
+            return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+        }
+        return None;
+    }
+
+    if let Some(local) = first_arg.as_local_variable_read_node() {
+        let var_name = utils::utf8_str(local.name().as_slice());
+        let var_loc = first_arg.location();
+        let var_pos = document.offset_to_position(var_loc.start_offset());
+        let scopes = document.variable_scopes();
+        let scope_id = scopes
+            .find_scope_for_variable_at(var_name, var_pos)
+            .or_else(|| scopes.scope_at_position(var_pos));
+        if let Some(sid) = scope_id {
+            if let Some(ty) = scopes.get_type_at_position(&var_name, sid, var_pos) {
+                if !classify_raise_type_analysis(engine, ty) {
+                    return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+                }
+                return None;
+            }
+        }
+        return None;
+    }
+
+    if let Some(inner_call) = first_arg.as_call_node() {
+        if inner_call.receiver().is_none() {
+            let method_name = utils::utf8_str(inner_call.name().as_slice());
+            if let Some(ty) =
+                resolve_bare_call_return_type_analysis(engine, current_namespace, method_name)
+            {
+                if !classify_raise_type_analysis(engine, &ty) {
+                    return Some(UnresolvedEntry::raise_non_exception(arg_repr, arg_loc));
+                }
+                return None;
+            }
+        }
+        return None;
+    }
+
     None
 }

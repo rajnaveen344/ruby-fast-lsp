@@ -172,12 +172,23 @@ impl ReferenceVisitor {
         // arg. The module acquires short-lived read locks internally — no outer
         // index guard is held here so no reentrancy.
         if self.track_unresolved && method_name == "raise" && node.receiver().is_none() {
-            if let Some(entry) = crate::analyzer_prism::diagnostics::raise_non_exception::check(
-                node,
-                &self.index,
-                &self.document,
-                &self.scope_tracker.get_ns_stack(),
-            ) {
+            let entry = if let Some(analysis_engine) = &self.analysis_engine {
+                let engine = analysis_engine.lock();
+                crate::analyzer_prism::diagnostics::raise_non_exception::check_with_engine(
+                    node,
+                    &engine,
+                    &self.document,
+                    &self.scope_tracker.get_ns_stack(),
+                )
+            } else {
+                crate::analyzer_prism::diagnostics::raise_non_exception::check(
+                    node,
+                    &self.index,
+                    &self.document,
+                    &self.scope_tracker.get_ns_stack(),
+                )
+            };
+            if let Some(entry) = entry {
                 self.staged
                     .push_unresolved(self.document.uri.clone(), entry);
             }
