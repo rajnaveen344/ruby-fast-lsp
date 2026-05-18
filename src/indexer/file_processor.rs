@@ -21,10 +21,7 @@ use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
-use crate::indexer::diagnostic_facts::{
-    replace_unresolved_diagnostic_facts_for_document,
-    replace_unresolved_diagnostic_facts_for_uri_from_index,
-};
+use crate::indexer::diagnostic_facts::replace_unresolved_diagnostic_facts_for_document;
 use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
@@ -225,12 +222,11 @@ impl FileProcessor {
             });
         }
 
-        let mut affected_uris = HashSet::new();
+        let affected_uris = HashSet::new();
 
         // 3. Index Definitions (Phase 1)
         if options.index_definitions {
-            let removed_fqns = self.index.lock().remove_entries_for_uri(uri);
-            let removed_fqn_set: HashSet<_> = removed_fqns.into_iter().collect();
+            self.index.lock().remove_entries_for_uri(uri);
 
             // The `document` variable from above is already initialized with content and parse_result
             // We just need to ensure it's mutable for the visitor.
@@ -317,57 +313,13 @@ impl FileProcessor {
             // NOTE: Return type inference is now done lazily when inlay hints are requested
             // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
 
-            // Calculate diff for cross-file diagnostics
-            let added_fqns: Vec<_> = {
-                let index = self.index.lock();
-                index
-                    .file_entries(uri)
-                    .iter()
-                    .filter_map(|e| index.get_fqn(e.fqn_id).cloned())
-                    .collect()
-            };
-
-            let added_fqn_set: HashSet<_> = added_fqns.iter().cloned().collect();
-            let truly_removed: Vec<_> = removed_fqn_set
-                .difference(&added_fqn_set)
-                .cloned()
-                .collect();
-
-            if !truly_removed.is_empty() {
-                let removed_affected = self
-                    .index
-                    .lock()
-                    .mark_references_as_unresolved(&truly_removed);
-                for affected_uri in &removed_affected {
-                    replace_unresolved_diagnostic_facts_for_uri_from_index(
-                        server,
-                        self.index.clone(),
-                        affected_uri,
-                    );
-                }
-                affected_uris.extend(removed_affected);
-            }
-
-            if !added_fqns.is_empty() {
-                let resolved_affected = self.index.lock().clear_resolved_entries(&added_fqns);
-                for affected_uri in &resolved_affected {
-                    replace_unresolved_diagnostic_facts_for_uri_from_index(
-                        server,
-                        self.index.clone(),
-                        affected_uri,
-                    );
-                }
-                affected_uris.extend(resolved_affected);
-            }
+            // Cross-file unresolved diagnostics are now analysis-engine facts
+            // produced when each referencing file is indexed. The old RubyIndex
+            // unresolved store is not updated on the analysis path.
         }
 
         // 4. Index References (Phase 2)
         if options.index_references {
-            let mut index = self.index.lock();
-            index.remove_references_for_uri(uri);
-            index.remove_unresolved_entries_for_uri(uri);
-            drop(index);
-
             // Retrieve document from cache (it was inserted in step 3)
             let document = {
                 let docs = server.docs.lock();
@@ -400,15 +352,6 @@ impl FileProcessor {
                     &visitor.document,
                     visitor.staged.unresolved.iter().map(|(_, entry)| entry),
                 );
-
-                // Flush staged writes under a single brief write lock.
-                let staged = std::mem::take(&mut visitor.staged);
-                {
-                    let mut index = self.index.lock();
-                    staged.flush(&mut index);
-                    index.clear_ancestor_chain_cache();
-                }
-
                 // Update the document with VariableScopes from visitor (includes references)
                 let docs = server.docs.lock();
                 if let Some(doc_arc) = docs.get(uri) {
@@ -417,11 +360,10 @@ impl FileProcessor {
                 }
             } else {
                 warn!("Document not found for reference indexing: {}", uri);
-                replace_unresolved_diagnostic_facts_for_uri_from_index(
-                    server,
-                    self.index.clone(),
-                    uri,
-                );
+                server
+                    .analysis_engine
+                    .lock()
+                    .replace_diagnostic_facts_for_file(analysis_file_id, std::iter::empty());
             }
         }
 
@@ -591,8 +533,6 @@ impl FileProcessor {
             uri
         );
 
-        self.index.lock().remove_unresolved_entries_for_uri(uri);
-
         let source_kind = self.analysis_source_kind_for_uri(uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
@@ -624,9 +564,6 @@ impl FileProcessor {
             &visitor.document,
             visitor.staged.unresolved.iter().map(|(_, entry)| entry),
         );
-
-        let staged = std::mem::take(&mut visitor.staged);
-        staged.flush(&mut self.index.lock());
 
         debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
         Ok(())
