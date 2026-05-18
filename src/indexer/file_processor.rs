@@ -23,7 +23,6 @@ use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
 use crate::indexer::diagnostic_facts::replace_unresolved_diagnostic_facts_for_document;
 use crate::indexer::index_ref::{Index, Unlocked};
-use crate::inferrer::type_tracker::TypeTracker;
 use crate::server::RubyLanguageServer;
 use crate::types::file_source::FileSource;
 use crate::types::ruby_document::RubyDocument;
@@ -274,21 +273,9 @@ impl FileProcessor {
                 .analysis_engine
                 .lock()
                 .replace_method_facts_for_file(updated_document.analysis_file_id(), method_facts);
-            if let Some(program) = node.as_program_node() {
-                // Run TypeTracker to infer types for all code
-                // Track top-level statements (outside methods)
-                let mut top_level_tracker =
-                    TypeTracker::new(content.as_bytes(), self.index.clone(), uri);
-                top_level_tracker.track_program(&program);
-
-                // TypeTracker results are no longer needed — VariableScopes tree
-                // already has types from IndexVisitor at assignment positions.
-                let _var_types = top_level_tracker.into_var_types();
-
-                // NOTE: Method return types are ONLY derived from YARD/RBS signatures.
-                // We do NOT infer return types from method bodies to keep the system simple and fast.
-                // Methods without YARD/RBS annotations will have Unknown return type.
-            }
+            // NOTE: Method return types are ONLY derived from YARD/RBS signatures.
+            // We do NOT infer return types from method bodies to keep the system simple and fast.
+            // Methods without YARD/RBS annotations will have Unknown return type.
 
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
             {
