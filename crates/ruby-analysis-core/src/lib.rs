@@ -23,7 +23,7 @@ pub use graph_store::{
     GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
-pub use method_store::{MethodFact, MethodStore};
+pub use method_store::{MethodFact, MethodParamFact, MethodParamKind, MethodStore};
 pub use reference_store::{ReferenceFact, ReferenceStore};
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;

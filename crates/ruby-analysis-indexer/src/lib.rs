@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact,
-    TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
+    MethodParamFact, MethodParamKind, RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact,
+    SymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use ruby_prism::{
     visit_call_node, visit_class_node, visit_class_variable_and_write_node,
@@ -451,13 +451,13 @@ impl Visit<'_> for AnalysisIndexer {
         let owner =
             FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
         let range = self.range(&node.location());
-        let params = method_param_names(node);
+        let params = method_param_facts(node);
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.facts
             .methods
-            .push(MethodFact::with_params(fqn, owner, range, params));
+            .push(MethodFact::with_param_facts(fqn, owner, range, params));
 
         visit_def_node(self, node);
     }
@@ -746,7 +746,7 @@ fn constant_path_parts(path: &ConstantPathNode<'_>) -> Option<Vec<RubyConstant>>
     (!parts.is_empty()).then_some(parts)
 }
 
-fn method_param_names(node: &DefNode<'_>) -> Vec<String> {
+fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
     let mut params = Vec::new();
     let Some(params_node) = node.parameters() else {
         return params;
@@ -754,51 +754,68 @@ fn method_param_names(node: &DefNode<'_>) -> Vec<String> {
 
     for required in params_node.requireds().iter() {
         if let Some(param) = required.as_required_parameter_node() {
-            params.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+            params.push(MethodParamFact::new(
+                String::from_utf8_lossy(param.name().as_slice()).to_string(),
+                MethodParamKind::Required,
+            ));
         }
     }
 
     for optional in params_node.optionals().iter() {
         if let Some(param) = optional.as_optional_parameter_node() {
-            params.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+            params.push(MethodParamFact::new(
+                String::from_utf8_lossy(param.name().as_slice()).to_string(),
+                MethodParamKind::Optional,
+            ));
         }
     }
 
     if let Some(rest) = params_node.rest() {
         if let Some(param) = rest.as_rest_parameter_node() {
             if let Some(name) = param.name() {
-                params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+                params.push(MethodParamFact::new(
+                    String::from_utf8_lossy(name.as_slice()).to_string(),
+                    MethodParamKind::Rest,
+                ));
             }
         }
     }
 
     for keyword in params_node.keywords().iter() {
         if let Some(param) = keyword.as_required_keyword_parameter_node() {
-            params.push(
+            params.push(MethodParamFact::new(
                 String::from_utf8_lossy(param.name().as_slice())
                     .trim_end_matches(':')
                     .to_string(),
-            );
+                MethodParamKind::RequiredKeyword,
+            ));
         } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
-            params.push(
+            params.push(MethodParamFact::new(
                 String::from_utf8_lossy(param.name().as_slice())
                     .trim_end_matches(':')
                     .to_string(),
-            );
+                MethodParamKind::OptionalKeyword,
+            ));
         }
     }
 
     if let Some(kwrest) = params_node.keyword_rest() {
         if let Some(param) = kwrest.as_keyword_rest_parameter_node() {
             if let Some(name) = param.name() {
-                params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+                params.push(MethodParamFact::new(
+                    String::from_utf8_lossy(name.as_slice()).to_string(),
+                    MethodParamKind::KeywordRest,
+                ));
             }
         }
     }
 
     if let Some(block) = params_node.block() {
         if let Some(name) = block.name() {
-            params.push(String::from_utf8_lossy(name.as_slice()).to_string());
+            params.push(MethodParamFact::new(
+                String::from_utf8_lossy(name.as_slice()).to_string(),
+                MethodParamKind::Block,
+            ));
         }
     }
 
@@ -954,6 +971,23 @@ mod tests {
         assert_eq!(
             method.params,
             vec!["id", "name", "rest", "active", "role", "opts", "block"]
+        );
+        let kinds = method
+            .param_facts
+            .iter()
+            .map(|param| param.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                MethodParamKind::Required,
+                MethodParamKind::Optional,
+                MethodParamKind::Rest,
+                MethodParamKind::RequiredKeyword,
+                MethodParamKind::OptionalKeyword,
+                MethodParamKind::KeywordRest,
+                MethodParamKind::Block,
+            ]
         );
     }
 

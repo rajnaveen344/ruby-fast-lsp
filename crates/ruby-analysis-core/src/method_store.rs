@@ -2,12 +2,43 @@ use std::collections::HashMap;
 
 use crate::{FullyQualifiedName, TextRange};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MethodParamKind {
+    Required,
+    Optional,
+    Rest,
+    RequiredKeyword,
+    OptionalKeyword,
+    KeywordRest,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodParamFact {
+    pub name: String,
+    pub kind: MethodParamKind,
+}
+
+impl MethodParamFact {
+    pub fn new(name: impl Into<String>, kind: MethodParamKind) -> Self {
+        let name = name.into();
+        assert!(
+            !name.is_empty(),
+            "INVARIANT VIOLATED: method parameter fact name is empty. \
+             This is a bug because parameter facts must identify a Ruby parameter. \
+             Fix: skip anonymous parameters or assign a valid generated name before inserting."
+        );
+        Self { name, kind }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodFact {
     pub fqn: FullyQualifiedName,
     pub owner: FullyQualifiedName,
     pub range: TextRange,
     pub params: Vec<String>,
+    pub param_facts: Vec<MethodParamFact>,
 }
 
 impl MethodFact {
@@ -17,6 +48,7 @@ impl MethodFact {
             owner,
             range,
             params: Vec::new(),
+            param_facts: Vec::new(),
         }
     }
 
@@ -26,11 +58,26 @@ impl MethodFact {
         range: TextRange,
         params: Vec<String>,
     ) -> Self {
+        let param_facts = params
+            .iter()
+            .map(|name| MethodParamFact::new(name.clone(), MethodParamKind::Required))
+            .collect();
+        Self::with_param_facts(fqn, owner, range, param_facts)
+    }
+
+    pub fn with_param_facts(
+        fqn: FullyQualifiedName,
+        owner: FullyQualifiedName,
+        range: TextRange,
+        param_facts: Vec<MethodParamFact>,
+    ) -> Self {
+        let params = param_facts.iter().map(|param| param.name.clone()).collect();
         Self {
             fqn,
             owner,
             range,
             params,
+            param_facts,
         }
     }
 }
