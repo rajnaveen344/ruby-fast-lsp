@@ -43,9 +43,11 @@ impl ReferenceVisitor {
         let current_namespace = self.scope_tracker.get_ns_stack();
         let ns_len = current_namespace.len();
 
-        let resolved = self
-            .resolve_constant_from_analysis(&namespaces, &current_namespace)
-            .or_else(|| {
+        let resolved = self.resolve_constant_from_analysis(&namespaces, &current_namespace);
+        let resolved = if resolved.is_some() || self.analysis_engine.is_some() {
+            resolved
+        } else {
+            let resolved = {
                 let index = self.index.read();
                 let mut found: Option<FullyQualifiedName> = None;
                 for depth in (0..=ns_len).rev() {
@@ -65,7 +67,9 @@ impl ReferenceVisitor {
                     }
                 }
                 found
-            });
+            };
+            resolved
+        };
 
         if let Some(fqn) = resolved {
             let location = self

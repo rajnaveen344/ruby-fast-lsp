@@ -23,8 +23,11 @@ impl ReferenceVisitor {
         let ns_len = current_namespace.len();
 
         let resolution = self
-            .resolve_constant_from_analysis(std::slice::from_ref(&constant), &current_namespace)
-            .or_else(|| {
+            .resolve_constant_from_analysis(std::slice::from_ref(&constant), &current_namespace);
+        let resolution = if resolution.is_some() || self.analysis_engine.is_some() {
+            resolution
+        } else {
+            let resolution = {
                 let index = self.index.read();
                 let mut resolved: Option<FullyQualifiedName> = None;
                 for depth in (0..=ns_len).rev() {
@@ -46,7 +49,9 @@ impl ReferenceVisitor {
                     }
                 }
                 resolved
-            });
+            };
+            resolution
+        };
 
         if let Some(fqn) = resolution {
             let location = self

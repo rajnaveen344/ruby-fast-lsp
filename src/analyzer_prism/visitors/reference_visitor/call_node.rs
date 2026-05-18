@@ -329,14 +329,16 @@ impl ReferenceVisitor {
             }
         }
 
-        // Use the centralized constant resolution utility
-        let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
-        let index_guard = self.index.lock();
-        if let Some(resolved_fqn) =
-            utils::resolve_constant_fqn(&index_guard, receiver_node, &current_fqn)
-        {
-            if let FullyQualifiedName::Constant(parts) = resolved_fqn {
-                return (parts, NamespaceKind::Singleton);
+        if self.analysis_engine.is_none() {
+            // Use the centralized constant resolution utility
+            let current_fqn = FullyQualifiedName::Constant(current_namespace.clone());
+            let index_guard = self.index.lock();
+            if let Some(resolved_fqn) =
+                utils::resolve_constant_fqn(&index_guard, receiver_node, &current_fqn)
+            {
+                if let FullyQualifiedName::Constant(parts) = resolved_fqn {
+                    return (parts, NamespaceKind::Singleton);
+                }
             }
         }
 
@@ -423,8 +425,14 @@ impl ReferenceVisitor {
                 return Some(return_type);
             }
 
-            let index = self.index.read();
-            return MethodResolver::resolve_method_return_type(&*index, &inner_type, &inner_method);
+            if self.analysis_engine.is_none() {
+                let index = self.index.read();
+                return MethodResolver::resolve_method_return_type(
+                    &*index,
+                    &inner_type,
+                    &inner_method,
+                );
+            }
         }
 
         None
