@@ -1,8 +1,8 @@
 use ruby_prism::{CallNode, Node};
 
 use crate::{
-    analyzer_prism::utils, indexer::index::UnresolvedEntry, inferrer::r#type::ruby::RubyType,
-    types::ruby_document::RubyDocument,
+    analyzer_prism::utils, inferrer::r#type::ruby::RubyType, types::ruby_document::RubyDocument,
+    types::unresolved_index::UnresolvedEntry,
 };
 
 /// Check *splat and **splat arguments at a callsite for type mismatches.

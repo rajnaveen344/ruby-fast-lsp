@@ -12,13 +12,12 @@ use crate::{
             entry_kind::{EntryKind, ParamKind},
             NamespaceKind,
         },
-        index::UnresolvedEntry,
         symbol_table::SymbolTable,
     },
     inferrer::r#type::ruby::RubyType,
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_document::RubyDocument,
-        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant, unresolved_index::UnresolvedEntry,
     },
 };
 

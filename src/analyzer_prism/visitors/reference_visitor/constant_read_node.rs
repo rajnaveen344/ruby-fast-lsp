@@ -2,7 +2,7 @@ use log::trace;
 use ruby_prism::ConstantReadNode;
 
 use crate::analyzer_prism::utils;
-use crate::indexer::index::UnresolvedEntry;
+use crate::types::unresolved_index::UnresolvedEntry;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::ReferenceVisitor;

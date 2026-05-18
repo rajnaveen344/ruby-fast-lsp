@@ -5,13 +5,12 @@ use crate::{
     analyzer_prism::diagnostics::ReceiverInfo,
     indexer::{
         entry::{entry_kind::EntryKind, NamespaceKind},
-        index::UnresolvedEntry,
         symbol_table::SymbolTable,
     },
     inferrer::r#type::ruby::RubyType,
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
-        ruby_namespace::RubyConstant,
+        ruby_namespace::RubyConstant, unresolved_index::UnresolvedEntry,
     },
 };
 

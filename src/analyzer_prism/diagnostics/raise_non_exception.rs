@@ -5,14 +5,13 @@ use crate::analyzer_prism::utils;
 use crate::{
     indexer::{
         entry::entry_kind::EntryKind,
-        index::UnresolvedEntry,
         index_ref::{Index, Unlocked},
         symbol_table::SymbolTable,
     },
     inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_document::RubyDocument,
-        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant, unresolved_index::UnresolvedEntry,
     },
 };
 

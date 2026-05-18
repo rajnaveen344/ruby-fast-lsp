@@ -34,9 +34,6 @@ pub struct MixinUsage {
     pub location: Location,
 }
 
-// Re-export for backward compatibility
-pub use crate::types::unresolved_index::{UnresolvedEntry, UnresolvedIndex};
-
 /// Mixin edge kind used when deferring edges whose target FQN isn't yet in the index.
 ///
 /// Each variant encodes the exact graph operation to retry once the target is resolvable.
@@ -116,9 +113,6 @@ pub struct RubyIndex {
     // Prefix tree for fast auto-completion lookups
     pub prefix_tree: PrefixTree,
 
-    // Unresolved entries index
-    pub unresolved: UnresolvedIndex,
-
     /// Mixin edges whose target FQN wasn't indexed yet. Keyed by source file so
     /// re-indexing a file cleanly drops its pending edges before re-inserting.
     /// Retried after `resolve_mixins_for_uri` and `resolve_all_mixins`.
@@ -151,7 +145,6 @@ impl RubyIndex {
 
             // Other indexes
             prefix_tree: PrefixTree::new(),
-            unresolved: UnresolvedIndex::new(),
             unresolved_mixin_edges: HashMap::new(),
         }
     }
@@ -564,85 +557,6 @@ impl RubyIndex {
         removed_fqns
     }
 
-    /// Mark references to the given FQNs as unresolved in their respective files
-    /// Returns the set of URIs that were affected (for diagnostic publishing)
-    ///
-    /// OPTIMIZED: Uses HashSet for batch deduplication instead of O(N) Vec::contains()
-    /// Mark references to the given FQNs as unresolved in their respective files
-    /// Returns the set of URIs that were affected (for diagnostic publishing)
-    pub fn mark_references_as_unresolved(
-        &mut self,
-        removed_fqns: &[FullyQualifiedName],
-    ) -> HashSet<Url> {
-        let mut references_map: HashMap<FullyQualifiedName, Vec<Location>> = HashMap::new();
-        for fqn in removed_fqns {
-            let refs = self.references(fqn);
-            if !refs.is_empty() {
-                references_map.insert(fqn.clone(), refs);
-            }
-        }
-
-        self.unresolved
-            .mark_references_as_unresolved(removed_fqns, &references_map)
-    }
-
-    /// Clear unresolved entries that match the given FQNs (now that they're defined)
-    /// Returns the set of URIs that were affected (for diagnostic publishing)
-    ///
-    /// Uses Ruby's reverse namespace lookup to determine if a newly defined FQN
-    /// would resolve an unresolved reference.
-    ///
-    /// OPTIMIZED: Uses `unresolved_by_name` reverse index to only check files
-    /// that have unresolved refs matching the added FQN names.
-    pub fn clear_resolved_entries(&mut self, added_fqns: &[FullyQualifiedName]) -> HashSet<Url> {
-        self.unresolved
-            .clear_resolved(added_fqns, Self::would_fqn_resolve_reference)
-    }
-
-    /// Check if any of the added FQNs would resolve the given unresolved reference
-    /// using Ruby's reverse namespace lookup algorithm.
-    ///
-    /// Ruby looks for constants in this order:
-    /// 1. Current namespace + name (e.g., Outer::Inner::Name for "Name" in Outer::Inner)
-    /// 2. Parent namespace + name (e.g., Outer::Name)
-    /// 3. ... up to root
-    /// 4. Root namespace (e.g., ::Name)
-    fn would_fqn_resolve_reference(
-        unresolved_name: &str,
-        namespace_context: &[String],
-        added_fqns: &std::collections::HashSet<String>,
-    ) -> bool {
-        // If the unresolved name contains "::", it's an explicit path
-        // Only exact match or path from current context would work
-        if unresolved_name.contains("::") {
-            // Try from each ancestor namespace
-            let mut ancestors = namespace_context.to_vec();
-            while !ancestors.is_empty() {
-                let candidate = format!("{}::{}", ancestors.join("::"), unresolved_name);
-                if added_fqns.contains(&candidate) {
-                    return true;
-                }
-                ancestors.pop();
-            }
-            // Try as absolute path (root level)
-            return added_fqns.contains(unresolved_name);
-        }
-
-        // Simple name - Ruby does reverse namespace lookup
-        // Try from current namespace up to root
-        let mut ancestors = namespace_context.to_vec();
-        while !ancestors.is_empty() {
-            let candidate = format!("{}::{}", ancestors.join("::"), unresolved_name);
-            if added_fqns.contains(&candidate) {
-                return true;
-            }
-            ancestors.pop();
-        }
-
-        // Finally check root namespace
-        added_fqns.contains(unresolved_name)
-    }
-
     /// Get entries by FQN (returns Vec for compatibility)
     /// Filters out references to return only definitions (legacy behavior)
     pub fn get(&self, fqn: &FullyQualifiedName) -> Option<Vec<&Entry>> {
@@ -957,31 +871,6 @@ impl RubyIndex {
         if let Some(caller) = caller_fqn {
             self.by_caller.entry(caller).or_default().push(entry_id);
         }
-    }
-
-    /// Remove all references for a URI - Now handled by remove_entries_for_uri
-    pub fn remove_references_for_uri(&mut self, _uri: &Url) {
-        // No-op: References are now stored in the central SlotMap and removed automatically
-        // by remove_entries_for_uri via the by_file index.
-    }
-
-    // ========================================================================
-    // Unresolved Entries (Diagnostics)
-    // ========================================================================
-
-    /// Add an unresolved entry for a file
-    pub fn add_unresolved_entry(&mut self, uri: Url, entry: UnresolvedEntry) {
-        self.unresolved.add(uri, entry);
-    }
-
-    /// Remove all unresolved entries for a file
-    pub fn remove_unresolved_entries_for_uri(&mut self, uri: &Url) {
-        self.unresolved.remove_for_uri(uri);
-    }
-
-    /// Get all unresolved entries for a file
-    pub fn get_unresolved_entries(&self, uri: &Url) -> Vec<UnresolvedEntry> {
-        self.unresolved.get(uri)
     }
 
     // ========================================================================

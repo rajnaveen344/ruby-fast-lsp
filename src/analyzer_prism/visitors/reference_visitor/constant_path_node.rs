@@ -2,8 +2,8 @@ use log::trace;
 use ruby_prism::ConstantPathNode;
 
 use crate::analyzer_prism::utils::collect_namespaces;
-use crate::indexer::index::UnresolvedEntry;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::types::unresolved_index::UnresolvedEntry;
 
 use super::ReferenceVisitor;
 

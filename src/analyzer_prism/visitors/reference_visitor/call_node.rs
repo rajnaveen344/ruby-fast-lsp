@@ -4,11 +4,11 @@ use tower_lsp::lsp_types::Url;
 
 use crate::{
     analyzer_prism::{diagnostics::ReceiverInfo, utils},
-    indexer::{entry::NamespaceKind, index::UnresolvedEntry},
+    indexer::entry::NamespaceKind,
     inferrer::{method::resolver::MethodResolver, r#type::ruby::RubyType},
     types::{
         compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
-        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+        ruby_method::RubyMethod, ruby_namespace::RubyConstant, unresolved_index::UnresolvedEntry,
     },
 };
 
