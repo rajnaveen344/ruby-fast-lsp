@@ -95,7 +95,38 @@ impl ReferenceVisitor {
         // never hold the read lock while also mutating `self`.
         let diagnostics_to_stage: Vec<(Url, UnresolvedEntry)> = if self.track_unresolved {
             let mut out: Vec<(Url, UnresolvedEntry)> = Vec::new();
-            {
+            if let Some(analysis_engine) = &self.analysis_engine {
+                let engine = analysis_engine.lock();
+                if let Some(entry) =
+                    crate::analyzer_prism::diagnostics::unresolved_method::check_with_engine(
+                        &receiver_info,
+                        inferred_expr_type.as_ref(),
+                        &method_name,
+                        &target_namespace,
+                        namespace_kind,
+                        &message_location,
+                        &engine,
+                    )
+                {
+                    trace!("Adding unresolved method call: {}", method_name);
+                    out.push((self.document.uri.clone(), entry));
+                }
+                let entries =
+                    crate::analyzer_prism::diagnostics::signature_mismatch::check_with_engine(
+                        node,
+                        &receiver_info,
+                        inferred_expr_type.as_ref(),
+                        &method_name,
+                        &target_namespace,
+                        namespace_kind,
+                        &message_location,
+                        &self.document,
+                        &engine,
+                    );
+                for entry in entries {
+                    out.push((self.document.uri.clone(), entry));
+                }
+            } else {
                 let index = self.index.read();
                 if let Some(entry) = crate::analyzer_prism::diagnostics::unresolved_method::check(
                     &receiver_info,
@@ -125,25 +156,6 @@ impl ReferenceVisitor {
                     for entry in entries {
                         out.push((self.document.uri.clone(), entry));
                     }
-                }
-            }
-
-            if let Some(analysis_engine) = &self.analysis_engine {
-                let engine = analysis_engine.lock();
-                let entries =
-                    crate::analyzer_prism::diagnostics::signature_mismatch::check_with_engine(
-                        node,
-                        &receiver_info,
-                        inferred_expr_type.as_ref(),
-                        &method_name,
-                        &target_namespace,
-                        namespace_kind,
-                        &message_location,
-                        &self.document,
-                        &engine,
-                    );
-                for entry in entries {
-                    out.push((self.document.uri.clone(), entry));
                 }
             }
 
