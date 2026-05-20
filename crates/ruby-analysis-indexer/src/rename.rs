@@ -31,7 +31,7 @@ use ruby_prism::{
 };
 use tower_lsp::lsp_types::Range;
 
-use crate::types::ruby_document::RubyDocument;
+use crate::RubyDocument;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Phase {
