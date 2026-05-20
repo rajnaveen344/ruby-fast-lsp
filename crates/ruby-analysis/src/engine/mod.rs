@@ -11,6 +11,7 @@ mod file_id_map;
 mod namespace_tree;
 mod query;
 mod query_types;
+mod workspace_symbols;
 
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
