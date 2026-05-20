@@ -12,17 +12,15 @@
 
 mod narrow;
 
-use crate::analyzer_prism::control_flow;
-use crate::inferrer::r#type::literal::LiteralAnalyzer;
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_namespace::RubyConstant;
+use crate::control_flow;
+use crate::r#type::literal::LiteralAnalyzer;
+use crate::r#type::ruby::RubyType;
 use parking_lot::Mutex;
+use ruby_analysis_core::{FullyQualifiedName, RubyConstant};
 use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery};
 use ruby_prism::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tower_lsp::lsp_types::Url;
 
 /// Simple forward type tracker with control flow merging.
 ///
@@ -47,10 +45,6 @@ pub struct TypeTracker<'a> {
     /// Engine for method return type lookups on analysis path
     analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 
-    /// Current URI (for cross-file lookups)
-    #[allow(dead_code)]
-    uri: &'a Url,
-
     /// Max loop iterations (to prevent infinite loops)
     max_loop_iterations: usize,
 
@@ -60,14 +54,13 @@ pub struct TypeTracker<'a> {
 
 impl<'a> TypeTracker<'a> {
     /// Create a new type tracker for the given source.
-    pub fn new(source: &'a [u8], uri: &'a Url) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             vars: HashMap::new(),
             var_types: BTreeMap::new(),
             source,
             literal_analyzer: LiteralAnalyzer::new(),
             analysis_engine: None,
-            uri,
             max_loop_iterations: 10,
             current_class: None,
         }
@@ -623,11 +616,7 @@ impl<'a> TypeTracker<'a> {
             RubyType::Hash(_, _) => Some("Hash".to_string()),
             RubyType::Union(_) | RubyType::Unknown => None,
         }?;
-        crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
-            method_name,
-            is_singleton,
-        )
+        crate::rbs::get_rbs_method_return_type_as_ruby_type(&class_name, method_name, is_singleton)
     }
 
     fn resolve_method_return_type_from_analysis(
@@ -636,7 +625,7 @@ impl<'a> TypeTracker<'a> {
         method_name: &str,
     ) -> Option<RubyType> {
         let analysis_engine = self.analysis_engine.as_ref()?;
-        let method = crate::types::ruby_method::RubyMethod::new(method_name).ok()?;
+        let method = ruby_analysis_core::RubyMethod::new(method_name).ok()?;
         let (receiver_fqn, namespace_kind) = match receiver_type {
             RubyType::Class(fqn) | RubyType::Module(fqn) => {
                 (fqn.clone(), ruby_analysis_core::NamespaceKind::Instance)
@@ -795,15 +784,14 @@ pub fn get_var_type_at(
 mod tests {
     use super::*;
 
-    fn create_test_tracker<'a>(source: &'a str, uri: &'a Url) -> TypeTracker<'a> {
-        TypeTracker::new(source.as_bytes(), uri)
+    fn create_test_tracker<'a>(source: &'a str) -> TypeTracker<'a> {
+        TypeTracker::new(source.as_bytes())
     }
 
     #[test]
     fn test_simple_method_tracking() {
         let source = "def foo\n  5\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -819,8 +807,7 @@ mod tests {
     #[test]
     fn test_local_variable_assignment() {
         let source = "def foo\n  x = 5\n  x\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -845,8 +832,7 @@ mod tests {
     #[test]
     fn test_multiple_assignments() {
         let source = "def foo\n  x = 5\n  y = \"hello\"\n  x\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -871,8 +857,7 @@ mod tests {
     #[test]
     fn test_reassignment_changes_type() {
         let source = "def foo\n  x = 5\n  x = \"hello\"\n  x\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -904,8 +889,7 @@ mod tests {
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -934,8 +918,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -966,8 +949,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -999,8 +981,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -1033,8 +1014,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -1065,8 +1045,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -1095,8 +1074,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -1125,8 +1103,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();
@@ -1154,8 +1131,7 @@ end"#;
   end
   x
 end"#;
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let mut tracker = create_test_tracker(source, &uri);
+        let mut tracker = create_test_tracker(source);
 
         let parse_result = ruby_prism::parse(source.as_bytes());
         let root = parse_result.node();

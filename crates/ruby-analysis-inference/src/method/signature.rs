@@ -1,4 +1,4 @@
-use crate::inferrer::RubyType;
+use crate::RubyType;
 use std::collections::HashMap;
 
 /// Represents a method parameter with its type information
@@ -136,7 +136,7 @@ impl Parameter {
         Self {
             name,
             param_type: RubyType::Class(
-                crate::types::fully_qualified_name::FullyQualifiedName::try_from("Proc").unwrap(),
+                ruby_analysis_core::FullyQualifiedName::try_from("Proc").unwrap(),
             ),
             required: false,
             has_default: false,

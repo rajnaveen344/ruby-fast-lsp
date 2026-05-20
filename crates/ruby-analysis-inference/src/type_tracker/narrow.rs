@@ -13,9 +13,9 @@
 //!
 //! Anything else is a no-op (we don't pretend to narrow what we can't prove).
 
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_namespace::RubyConstant;
+use crate::r#type::ruby::RubyType;
+use ruby_analysis_core::FullyQualifiedName;
+use ruby_analysis_core::RubyConstant;
 use ruby_prism::Node;
 use std::collections::HashMap;
 

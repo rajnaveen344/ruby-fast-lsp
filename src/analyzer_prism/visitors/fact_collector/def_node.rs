@@ -186,8 +186,7 @@ impl FactCollector {
             (Some(return_type), TypeProvenance::Yard)
         } else {
             // Infer return type from method body using TypeTracker
-            let mut tracker =
-                TypeTracker::new(self.document.content.as_bytes(), &self.document.uri);
+            let mut tracker = TypeTracker::new(self.document.content.as_bytes());
             tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
             // Set the current class context for self resolution
             if !namespace_parts.is_empty() {

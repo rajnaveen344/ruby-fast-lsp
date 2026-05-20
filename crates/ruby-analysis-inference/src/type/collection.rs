@@ -1,10 +1,10 @@
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::types::fully_qualified_name::FullyQualifiedName;
+use crate::r#type::ruby::RubyType;
+use ruby_analysis_core::FullyQualifiedName;
 use ruby_prism::*;
 
 /// Analyzer for inferring types of collection elements (arrays, hashes)
 pub struct CollectionAnalyzer {
-    literal_analyzer: crate::inferrer::r#type::literal::LiteralAnalyzer,
+    literal_analyzer: crate::r#type::literal::LiteralAnalyzer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,7 +33,7 @@ impl Default for CollectionAnalyzer {
 impl CollectionAnalyzer {
     pub fn new() -> Self {
         Self {
-            literal_analyzer: crate::inferrer::r#type::literal::LiteralAnalyzer::new(),
+            literal_analyzer: crate::r#type::literal::LiteralAnalyzer::new(),
         }
     }
 
