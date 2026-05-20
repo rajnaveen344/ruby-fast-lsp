@@ -238,20 +238,15 @@ impl FactCollector {
             }
 
             if !inferred_ty.is_subtype_of(expected_type) {
-                let start_pos = self.document.offset_to_position(start);
-                let end_pos = self.document.offset_to_position(end);
-                let range = tower_lsp::lsp_types::Range::new(start_pos, end_pos);
-
-                self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
+                let range = self.text_range_from_offsets(start, end);
+                self.push_warning_diagnostic(
                     range,
-                    severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
-                    message: format!(
+                    "declared-return-type-mismatch",
+                    format!(
                         "Expected return type {}, but found {}",
                         expected_type, inferred_ty
                     ),
-                    source: Some("ruby-fast-lsp".to_string()),
-                    ..Default::default()
-                });
+                );
             }
         }
     }
@@ -393,19 +388,14 @@ impl FactCollector {
         let actual_param_names: Vec<&str> = method_params.iter().map(|p| p.name.as_str()).collect();
 
         for (yard_param, range) in yard_doc.find_unmatched_params(&actual_param_names) {
-            self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
-                range,
-                severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
-                code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                    "yard-unknown-param".to_string(),
-                )),
-                source: Some("ruby-fast-lsp".to_string()),
-                message: format!(
+            self.push_warning_diagnostic(
+                self.text_range_from_lsp_range(range, "YARD unknown param"),
+                "yard-unknown-param",
+                format!(
                     "YARD @param '{}' does not match any method parameter",
                     yard_param.name
                 ),
-                ..Default::default()
-            });
+            );
         }
 
         let Some(rbs_type) = rbs_return_type else {
@@ -425,19 +415,14 @@ impl FactCollector {
             return;
         };
 
-        self.push_diagnostic(tower_lsp::lsp_types::Diagnostic {
-            range,
-            severity: Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING),
-            code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                "yard-rbs-mismatch".to_string(),
-            )),
-            source: Some("ruby-fast-lsp".to_string()),
-            message: format!(
+        self.push_warning_diagnostic(
+            self.text_range_from_lsp_range(range, "YARD RBS mismatch"),
+            "yard-rbs-mismatch",
+            format!(
                 "YARD return type '{}' conflicts with RBS type '{}'",
                 yard_type, rbs_type
             ),
-            ..Default::default()
-        });
+        );
     }
 }
 

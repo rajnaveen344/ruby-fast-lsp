@@ -1,8 +1,10 @@
 use once_cell::unsync::OnceCell;
-use ruby_analysis_core::{DiagnosticCandidate, ReferenceCandidate, TypeStore};
+use ruby_analysis_core::{
+    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ReferenceCandidate, TextRange,
+    TypeStore,
+};
 use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::*;
-use tower_lsp::lsp_types::Diagnostic;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::extensions::ExtensionRegistryHandle;
@@ -37,7 +39,7 @@ pub struct FactCollector {
     pub document: RubyDocument,
     pub scope_tracker: ScopeTracker,
     pub literal_analyzer: LiteralAnalyzer,
-    pub diagnostics: Vec<Diagnostic>,
+    pub analysis_diagnostics: Vec<DiagnosticFact>,
     pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
     pub extension_index_patches: Vec<ruby_fast_lsp_extension_api::IndexPatch>,
@@ -50,8 +52,32 @@ pub struct FactCollector {
 }
 
 impl FactCollector {
-    pub fn push_diagnostic(&mut self, diagnostic: tower_lsp::lsp_types::Diagnostic) {
-        self.diagnostics.push(diagnostic);
+    pub fn push_warning_diagnostic(
+        &mut self,
+        range: TextRange,
+        code: &'static str,
+        message: String,
+    ) {
+        self.analysis_diagnostics.push(DiagnosticFact::new(
+            range,
+            DiagnosticSeverity::Warning,
+            code,
+            message,
+        ));
+    }
+
+    pub fn text_range_from_offsets(&self, start: usize, end: usize) -> TextRange {
+        let start_byte = u32::try_from(start).expect(
+            "INVARIANT VIOLATED: diagnostic start offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        let end_byte = u32::try_from(end).expect(
+            "INVARIANT VIOLATED: diagnostic end offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        TextRange::new(self.document.analysis_file_id(), start_byte, end_byte)
     }
 
     pub fn analysis_only(
@@ -64,7 +90,7 @@ impl FactCollector {
             document,
             scope_tracker,
             literal_analyzer: LiteralAnalyzer::new(),
-            diagnostics: Vec::new(),
+            analysis_diagnostics: Vec::new(),
             type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
             extension_index_patches: Vec::new(),

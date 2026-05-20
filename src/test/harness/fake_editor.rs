@@ -566,7 +566,6 @@ impl FakeEditor {
                 self.server.analysis_engine.clone(),
             );
             visitor.visit(&parse_result.node());
-            diagnostics.extend(visitor.diagnostics);
             self.server
                 .analysis_engine
                 .lock()
@@ -574,7 +573,7 @@ impl FakeEditor {
                     visitor.document.analysis_file_id(),
                     visitor.reference_candidates,
                     visitor.diagnostic_candidates,
-                    Vec::new(),
+                    visitor.analysis_diagnostics,
                 );
         }
 

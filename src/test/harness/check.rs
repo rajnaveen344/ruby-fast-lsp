@@ -1031,7 +1031,6 @@ async fn run_diagnostics_check(
             server.analysis_engine.clone(),
         );
         visitor.visit(&parse_result.node());
-        diagnostics.extend(visitor.diagnostics);
         server
             .analysis_engine
             .lock()
@@ -1039,7 +1038,7 @@ async fn run_diagnostics_check(
                 visitor.document.analysis_file_id(),
                 visitor.reference_candidates,
                 visitor.diagnostic_candidates,
-                Vec::new(),
+                visitor.analysis_diagnostics,
             );
     }
 

@@ -125,7 +125,7 @@ impl FileProcessor {
         );
 
         // 2. Generate Syntax Diagnostics
-        let mut diagnostics = generate_diagnostics(&parse_result, &document);
+        let diagnostics = generate_diagnostics(&parse_result, &document);
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
@@ -151,7 +151,6 @@ impl FileProcessor {
             server.analysis_engine.clone(),
         );
         visitor.visit(&node);
-        diagnostics.extend(visitor.diagnostics);
 
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
@@ -187,7 +186,7 @@ impl FileProcessor {
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
                 reference_candidates: visitor.reference_candidates,
                 diagnostic_candidates: visitor.diagnostic_candidates,
-                diagnostics: Vec::new(),
+                diagnostics: visitor.analysis_diagnostics,
             },
         );
 
@@ -275,7 +274,7 @@ impl FileProcessor {
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
                 reference_candidates: fact_collector.reference_candidates,
                 diagnostic_candidates: fact_collector.diagnostic_candidates,
-                diagnostics: Vec::new(),
+                diagnostics: fact_collector.analysis_diagnostics,
             },
         );
         debug!("Collected facts for {:?} in {:?}", uri, start.elapsed());
