@@ -838,6 +838,44 @@ impl<'a> AnalysisQuery<'a> {
         compute_namespace_tree(self.engine, show_external_types)
     }
 
+    pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
+        self.engine
+            .reference_facts_for(fqn)
+            .iter()
+            .map(|fact| fact.range)
+            .collect()
+    }
+
+    pub fn method_reference_ranges(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let mut ranges = Vec::new();
+        for target in self.method_reference_targets(namespace_fqn, method) {
+            ranges.extend(
+                self.engine
+                    .reference_facts_for(&target)
+                    .iter()
+                    .map(|fact| fact.range),
+            );
+        }
+        ranges
+    }
+
+    pub fn symbol_definition_ranges(
+        &self,
+        fqn: &FullyQualifiedName,
+        allowed_kinds: &[SymbolKind],
+    ) -> Vec<TextRange> {
+        self.engine
+            .symbol_facts_for(fqn)
+            .iter()
+            .filter(|fact| allowed_kinds.contains(&fact.kind))
+            .map(|fact| fact.range)
+            .collect()
+    }
+
     pub fn debug_lookup(&self, fqn: &str) -> LookupResponse {
         let Some(fqn) = parse_debug_fqn(fqn) else {
             return LookupResponse {

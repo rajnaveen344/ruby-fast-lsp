@@ -9,6 +9,7 @@ use crate::yard::YardParser;
 use log::info;
 use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
+use ruby_analysis_engine::AnalysisQuery;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
@@ -269,34 +270,7 @@ impl EngineQuery {
     ) -> Option<FullyQualifiedName> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
-        let mut current_context = ancestors.to_vec();
-
-        loop {
-            let mut probe_ns = current_context.clone();
-            probe_ns.extend(constant_path.iter().cloned());
-
-            let namespace_fqn = FullyQualifiedName::namespace(probe_ns.clone());
-            if !engine.symbol_facts_for(&namespace_fqn).is_empty() {
-                return Some(namespace_fqn);
-            }
-
-            let constant_fqn = FullyQualifiedName::Constant(probe_ns);
-            if !engine.symbol_facts_for(&constant_fqn).is_empty() {
-                return Some(constant_fqn);
-            }
-
-            if current_context.is_empty() {
-                break;
-            }
-            current_context.pop();
-        }
-
-        let namespace_fqn = FullyQualifiedName::namespace(constant_path.to_vec());
-        if !engine.symbol_facts_for(&namespace_fqn).is_empty() {
-            return Some(namespace_fqn);
-        }
-
-        None
+        AnalysisQuery::new(&engine).resolve_constant_in_context(constant_path, ancestors)
     }
 
     fn symbol_locations_from_analysis(
@@ -306,11 +280,11 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
-        let locations = engine
-            .symbol_facts_for(fqn)
-            .iter()
-            .filter(|fact| allowed_kinds.contains(&fact.kind))
-            .filter_map(|fact| location_for_range(&engine, fact.range))
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .symbol_definition_ranges(fqn, allowed_kinds)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
             .collect::<Vec<_>>();
 
         if locations.is_empty() {
