@@ -7,6 +7,7 @@
 
 mod completion;
 mod debug;
+mod diagnostic_helpers;
 mod diagnostics;
 mod engine;
 mod file_id_map;
