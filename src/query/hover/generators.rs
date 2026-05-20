@@ -6,7 +6,6 @@
 use super::nodes::HoverNode;
 use crate::analyzer_prism::MethodReceiver;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::query::TypeQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
@@ -104,30 +103,23 @@ fn get_type_from_type_query(
     name: &str,
     position: Position,
 ) -> Option<RubyType> {
-    let type_store = context
-        .analysis_engine
-        .map(|engine| engine.lock().type_store().clone());
-    let doc = context.document.map(|doc| doc.read().clone());
-    if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
-        let type_query = TypeQuery::with_type_store_snapshot(
-            context.content.as_bytes(),
-            type_store,
-            doc.analysis_file_id(),
-        );
-        let scope_id = doc
-            .variable_scopes()
-            .find_scope_for_variable_at(name, position)
-            .or_else(|| doc.variable_scopes().scope_at_position(position))
-            .unwrap_or(0);
-        let scope_id = u32::try_from(scope_id).expect(
-            "INVARIANT VIOLATED: local variable scope id exceeded u32. \
-             This is a bug because analysis TypeSubject stores scope ids as u32. \
-             Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
-        );
-        type_query.get_local_variable_type_at(name, scope_id, position)
-    } else {
-        None
-    }
+    let doc = context.document?.read();
+    let file_id = doc.analysis_file_id();
+    let scope_id = doc
+        .variable_scopes()
+        .find_scope_for_variable_at(name, position)
+        .or_else(|| doc.variable_scopes().scope_at_position(position))
+        .unwrap_or(0);
+    let scope_id = u32::try_from(scope_id).expect(
+        "INVARIANT VIOLATED: local variable scope id exceeded u32. \
+         This is a bug because analysis TypeSubject stores scope ids as u32. \
+         Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
+    );
+    drop(doc);
+
+    let byte_offset = position_to_byte_offset(context.content, position)?;
+    let engine = context.analysis_engine?.lock();
+    AnalysisQuery::new(&engine).local_variable_type_at(name, scope_id, file_id, byte_offset)
 }
 
 /// Get type from VariableScopes tree (unified type info).
@@ -585,30 +577,9 @@ fn resolve_receiver_type(
                 return t;
             }
 
-            // Fall back to TypeQuery (AST-based inference)
-            let type_store = context
-                .analysis_engine
-                .map(|engine| engine.lock().type_store().clone());
-            let doc = context.document.map(|doc| doc.read().clone());
-            if let (Some(type_store), Some(doc)) = (type_store.as_ref(), doc.as_ref()) {
-                let type_query = TypeQuery::with_type_store_snapshot(
-                    context.content.as_bytes(),
-                    type_store,
-                    doc.analysis_file_id(),
-                );
-                let scope_id = doc
-                    .variable_scopes()
-                    .find_scope_for_variable_at(name, position)
-                    .or_else(|| doc.variable_scopes().scope_at_position(position))
-                    .unwrap_or(0);
-                let scope_id = u32::try_from(scope_id).expect(
-                        "INVARIANT VIOLATED: local variable scope id exceeded u32. \
-                         This is a bug because analysis TypeSubject stores scope ids as u32. \
-                         Fix: widen TypeSubject scope ids before storing more than u32::MAX scopes.",
-                    );
-                if let Some(t) = type_query.get_local_variable_type_at(name, scope_id, position) {
-                    return t;
-                }
+            // Fall back to analysis facts.
+            if let Some(t) = get_type_from_type_query(context, name, position) {
+                return t;
             }
 
             RubyType::Unknown

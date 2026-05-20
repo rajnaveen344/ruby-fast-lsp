@@ -872,6 +872,49 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.ruby_type)
     }
 
+    pub fn local_variable_type_at(
+        &self,
+        name: &str,
+        scope_id: u32,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        match self.engine.type_store().type_at(
+            &TypeSubject::Local {
+                scope_id,
+                name: name.to_string(),
+            },
+            file_id,
+            byte_offset,
+        ) {
+            TypeResolution::Resolved(fact) => return Some(fact.ruby_type),
+            TypeResolution::Ambiguous(_) => return None,
+            TypeResolution::Unresolved => {}
+        }
+
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.range.start_byte <= byte_offset)
+            .filter_map(|fact| match &fact.subject {
+                TypeSubject::Parameter {
+                    method: _,
+                    name: fact_name,
+                } if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
     pub fn variable_type_in_file(
         &self,
         kind: VariableTypeKind,
@@ -931,6 +974,15 @@ impl<'a> AnalysisQuery<'a> {
                 )
             })
             .map(|fact| fact.ruby_type.clone())
+    }
+
+    pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {
+        self.engine
+            .all_symbol_facts()
+            .into_iter()
+            .filter(|fact| matches!(fact.kind, SymbolKind::Class | SymbolKind::Module))
+            .filter_map(|fact| fact.fqn.to_instance_namespace())
+            .collect()
     }
 
     pub fn method_fact_for_receiver(

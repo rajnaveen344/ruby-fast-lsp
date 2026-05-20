@@ -27,7 +27,7 @@ use ruby_analysis_core::{
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
-use ruby_analysis_engine::FileAnalysisFacts;
+use ruby_analysis_engine::{AnalysisQuery, FileAnalysisFacts};
 use ruby_analysis_indexer::AnalysisIndexer;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
@@ -333,17 +333,7 @@ fn file_analysis_facts_from_index(
 
 fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
     let engine = server.analysis_engine.lock();
-    engine
-        .all_symbol_facts()
-        .into_iter()
-        .filter(|fact| {
-            matches!(
-                fact.kind,
-                AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
-            )
-        })
-        .filter_map(|fact| fact.fqn.to_instance_namespace())
-        .collect()
+    AnalysisQuery::new(&engine).known_namespace_fqns()
 }
 
 fn add_extension_analysis_facts(
@@ -358,17 +348,7 @@ fn add_extension_analysis_facts(
 
     let mut known_namespaces = {
         let engine = server.analysis_engine.lock();
-        engine
-            .all_symbol_facts()
-            .into_iter()
-            .filter(|fact| {
-                matches!(
-                    fact.kind,
-                    AnalysisSymbolKind::Class | AnalysisSymbolKind::Module
-                )
-            })
-            .filter_map(|fact| fact.fqn.to_instance_namespace())
-            .collect::<HashSet<_>>()
+        AnalysisQuery::new(&engine).known_namespace_fqns()
     };
     for node in &facts.graph_nodes {
         if let Some(namespace) = node.fqn.to_instance_namespace() {
