@@ -226,10 +226,10 @@ pub async fn handle_watched_files_changed(
 
 #[cfg(test)]
 mod tests {
-    use ruby_analysis_core::{
+    use ruby_analysis::core::{
         FullyQualifiedName, GraphEdgeKind, NamespaceKind, RubyConstant, RubyMethod, SymbolKind,
     };
-    use ruby_analysis_engine::AnalysisQuery;
+    use ruby_analysis::engine::AnalysisQuery;
 
     use super::*;
 

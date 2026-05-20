@@ -5,7 +5,7 @@
 //! and execute debug commands.
 
 use log::debug;
-pub use ruby_analysis_engine::{
+pub use ruby_analysis::engine::{
     AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,

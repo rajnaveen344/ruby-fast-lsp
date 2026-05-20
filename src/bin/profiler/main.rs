@@ -23,7 +23,7 @@
 mod sample_project;
 
 use log::{info, LevelFilter};
-use ruby_analysis_core::TypeSubject;
+use ruby_analysis::core::TypeSubject;
 use ruby_fast_lsp::capabilities::indexing;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;

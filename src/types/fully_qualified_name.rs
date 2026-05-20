@@ -1,2 +1,2 @@
-pub use ruby_analysis_core::FullyQualifiedName;
-pub use ruby_analysis_core::NamespaceKind;
+pub use ruby_analysis::core::FullyQualifiedName;
+pub use ruby_analysis::core::NamespaceKind;

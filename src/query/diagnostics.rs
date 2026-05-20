@@ -5,7 +5,7 @@
 //!
 //! AST-only diagnostics (syntax errors/warnings) remain in `capabilities/diagnostics.rs`.
 
-use ruby_analysis_core::{DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity};
+use ruby_analysis::core::{DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity};
 use std::path::PathBuf;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
@@ -36,7 +36,7 @@ impl EngineQuery {
 }
 
 fn diagnostic_from_fact(
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     fact: &DiagnosticFact,
 ) -> Option<Diagnostic> {
     let location = location_for_range(engine, fact.range)?;

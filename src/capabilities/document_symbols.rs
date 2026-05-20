@@ -5,8 +5,8 @@ use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolR
 
 use crate::server::RubyLanguageServer;
 
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_indexer::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::indexer::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
 
 /// Handle document symbols request for a Ruby file
 pub async fn handle_document_symbols(

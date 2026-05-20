@@ -3,4 +3,4 @@
 //! Implementation lives in `ruby-analysis-inference`; this module preserves the
 //! existing LSP import path.
 
-pub use ruby_analysis_inference::control_flow::*;
+pub use ruby_analysis::inference::control_flow::*;

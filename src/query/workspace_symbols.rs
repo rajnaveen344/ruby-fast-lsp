@@ -1,7 +1,7 @@
 //! Workspace Symbol Query — LSP adapter over analysis-engine symbol search.
 
-use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
-use ruby_analysis_engine::AnalysisQuery;
+use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
+use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
 
 use super::analysis_location::location_for_range;
@@ -46,8 +46,8 @@ impl EngineQuery {
 }
 
 fn symbol_information_from_engine_symbol(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    symbol: ruby_analysis_engine::WorkspaceSymbolMatch,
+    engine: &ruby_analysis::engine::AnalysisEngine,
+    symbol: ruby_analysis::engine::WorkspaceSymbolMatch,
 ) -> Option<SymbolInformation> {
     Some(SymbolInformation {
         name: symbol.name,
@@ -78,11 +78,11 @@ mod tests {
     use std::sync::Arc;
 
     use parking_lot::Mutex;
-    use ruby_analysis_core::{
+    use ruby_analysis::core::{
         FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolFact,
         SymbolKind as AnalysisSymbolKind, TextRange,
     };
-    use ruby_analysis_engine::AnalysisEngine;
+    use ruby_analysis::engine::AnalysisEngine;
 
     use super::*;
 

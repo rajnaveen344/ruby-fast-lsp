@@ -4,7 +4,7 @@ pub mod scope_tracker;
 pub mod utils;
 pub mod visitors;
 
-pub use ruby_analysis_indexer::{Identifier, IdentifierType, MethodReceiver, RubyPrismAnalyzer};
+pub use ruby_analysis::indexer::{Identifier, IdentifierType, MethodReceiver, RubyPrismAnalyzer};
 
 #[cfg(test)]
 mod tests {

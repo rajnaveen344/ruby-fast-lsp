@@ -25,8 +25,8 @@ use crate::query::MethodCalleeResolution;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
@@ -1083,14 +1083,14 @@ fn resolved_callees_for_call(visitor: &FactCollector, node: &CallNode) -> Vec<Re
 }
 
 fn resolved_callees_for_call_analysis(
-    engine: &Arc<Mutex<ruby_analysis_engine::AnalysisEngine>>,
+    engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
     receiver: &CoreMethodReceiver,
     method: &RubyMethod,
     current_namespace: &[RubyConstant],
     namespace_kind: NamespaceKind,
 ) -> Vec<ResolvedCallee> {
     let engine = engine.lock();
-    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let namespace_fqn = match receiver {
         CoreMethodReceiver::Constant(path) => {
             query.resolve_constant_receiver(path, current_namespace)

@@ -5,6 +5,7 @@ members = [
     "crates/rbs-parser",
     "crates/lsp-repl",
     "crates/lsp-test-harness",
+    "crates/ruby-analysis",
     "crates/ruby-analysis-core",
     "crates/ruby-analysis-engine",
     "crates/ruby-analysis-inference",
@@ -63,10 +64,7 @@ ruby-fast-lsp-extension-wasm-host = { path = "crates/extension-wasm-host" }
 # Ruby parsing and analysis
 ruby-prism = "1.4.0"
 rbs-parser = { path = "crates/rbs-parser" }
-ruby-analysis-core = { path = "crates/ruby-analysis-core" }
-ruby-analysis-engine = { path = "crates/ruby-analysis-engine" }
-ruby-analysis-inference = { path = "crates/ruby-analysis-inference" }
-ruby-analysis-indexer = { path = "crates/ruby-analysis-indexer" }
+ruby-analysis = { path = "crates/ruby-analysis" }
 
 # File system operations
 walkdir = "2.4.0"

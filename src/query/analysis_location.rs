@@ -1,5 +1,5 @@
-use ruby_analysis_core::TextRange;
-use ruby_analysis_engine::{AnalysisEngine, SourceFile};
+use ruby_analysis::core::TextRange;
+use ruby_analysis::engine::{AnalysisEngine, SourceFile};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 pub(crate) fn location_for_range(engine: &AnalysisEngine, range: TextRange) -> Option<Location> {

@@ -8,12 +8,12 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::capabilities::completion::method;
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
-use ruby_analysis_engine::{
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
+use ruby_analysis::engine::{
     ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate,
 };
-use ruby_analysis_inference::RubyType;
+use ruby_analysis::inference::RubyType;
 
 use super::EngineQuery;
 
@@ -39,7 +39,7 @@ impl EngineQuery {
     ) -> Option<Vec<CompletionItem>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         if !query.has_symbols() {
             return None;
         }
@@ -96,7 +96,7 @@ impl EngineQuery {
             return Vec::new();
         };
         let engine = engine.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
             .method_completion_candidates(receiver_type, partial_method, kind)
             .into_iter()
@@ -117,7 +117,7 @@ impl EngineQuery {
             return Vec::new();
         };
         let engine = engine.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
             .top_level_method_completion_candidates(partial_method)
             .into_iter()

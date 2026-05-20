@@ -1,1 +1,1 @@
-pub use ruby_analysis_core::RubyConstant;
+pub use ruby_analysis::core::RubyConstant;

@@ -20,15 +20,15 @@ use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::debug;
-use ruby_analysis_core::{
+use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
-use ruby_analysis_engine::{AnalysisQuery, FileAnalysisFacts};
-use ruby_analysis_indexer::fact_collector::FactCollector;
-use ruby_analysis_indexer::AnalysisIndexer;
+use ruby_analysis::engine::{AnalysisQuery, FileAnalysisFacts};
+use ruby_analysis::indexer::fact_collector::FactCollector;
+use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
@@ -297,16 +297,16 @@ impl FileProcessor {
 fn collect_direct_facts(
     server: &RubyLanguageServer,
     content: &str,
-    file_id: ruby_analysis_core::SourceFileId,
-) -> ruby_analysis_indexer::AnalysisIndex {
+    file_id: ruby_analysis::core::SourceFileId,
+) -> ruby_analysis::indexer::AnalysisIndex {
     AnalysisIndexer::with_known_namespaces(file_id, collect_known_namespaces(server))
         .index_source(content)
 }
 
 fn replace_analysis_facts_for_file(
     server: &RubyLanguageServer,
-    file_id: ruby_analysis_core::SourceFileId,
-    facts: &ruby_analysis_indexer::AnalysisIndex,
+    file_id: ruby_analysis::core::SourceFileId,
+    facts: &ruby_analysis::indexer::AnalysisIndex,
 ) {
     server
         .analysis_engine
@@ -315,7 +315,7 @@ fn replace_analysis_facts_for_file(
 }
 
 fn file_analysis_facts_from_index(
-    facts: &ruby_analysis_indexer::AnalysisIndex,
+    facts: &ruby_analysis::indexer::AnalysisIndex,
 ) -> FileAnalysisFacts {
     FileAnalysisFacts {
         symbols: facts.symbols.clone(),
@@ -339,7 +339,7 @@ fn add_extension_analysis_facts(
     server: &RubyLanguageServer,
     document: &RubyDocument,
     patches: &[IndexPatch],
-    facts: &mut ruby_analysis_indexer::AnalysisIndex,
+    facts: &mut ruby_analysis::indexer::AnalysisIndex,
 ) {
     if patches.is_empty() {
         return;
@@ -449,7 +449,7 @@ fn add_extension_analysis_facts(
 }
 
 fn push_extension_graph_edge(
-    facts: &mut ruby_analysis_indexer::AnalysisIndex,
+    facts: &mut ruby_analysis::indexer::AnalysisIndex,
     known_namespaces: &HashSet<FullyQualifiedName>,
     source: FullyQualifiedName,
     target_parts: &[RubyConstant],

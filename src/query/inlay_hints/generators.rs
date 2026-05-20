@@ -6,9 +6,9 @@
 use super::nodes::{InlayNode, VariableKind};
 use crate::types::ruby_document::RubyDocument;
 use parking_lot::Mutex;
-use ruby_analysis_core::SourceFileId;
-use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
-use ruby_analysis_inference::RubyType;
+use ruby_analysis::core::SourceFileId;
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 

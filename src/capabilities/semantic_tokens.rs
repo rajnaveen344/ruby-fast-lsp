@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::server::RubyLanguageServer;
-use ruby_analysis_indexer::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
+use ruby_analysis::indexer::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
 
 pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     SemanticTokensOptions {

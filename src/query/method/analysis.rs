@@ -13,7 +13,7 @@ pub(super) fn resolve_method_callees(
 ) -> Option<Vec<ResolvedMethodCallee>> {
     let engine = query.analysis_engine()?;
     let engine = engine.lock();
-    let analysis_query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let callees = analysis_query.resolve_method_callees(namespace_fqn, method)?;
 
     Some(
@@ -40,6 +40,6 @@ pub(super) fn resolve_constant_receiver(
 ) -> Option<FullyQualifiedName> {
     let engine = query.analysis_engine()?;
     let engine = engine.lock();
-    let analysis_query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     Some(analysis_query.resolve_constant_receiver(path, current_namespace))
 }

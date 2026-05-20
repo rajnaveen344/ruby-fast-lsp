@@ -1,6 +1,6 @@
 //! Debug Query — LSP adapter over analysis-engine inspection commands.
 
-use ruby_analysis_engine::{
+use ruby_analysis::engine::{
     AnalysisQuery, AncestorsResponse, ExportGraphResponse, InferenceStatsResponse, LookupResponse,
     MethodsResponse, StatsResponse,
 };
@@ -44,7 +44,7 @@ impl EngineQuery {
         AnalysisQuery::new(&engine).debug_export_graph()
     }
 
-    fn debug_engine(&self) -> &parking_lot::Mutex<ruby_analysis_engine::AnalysisEngine> {
+    fn debug_engine(&self) -> &parking_lot::Mutex<ruby_analysis::engine::AnalysisEngine> {
         self.analysis_engine.as_ref().expect(
             "INVARIANT VIOLATED: debug query requested without analysis engine. \
              This is a bug because debug LSP commands must inspect AnalysisEngine facts. \

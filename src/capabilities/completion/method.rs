@@ -9,9 +9,9 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_inference::rbs::{get_rbs_class_methods, RbsMethodInfo};
-use ruby_analysis_inference::RubyType;
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::inference::rbs::{get_rbs_class_methods, RbsMethodInfo};
+use ruby_analysis::inference::RubyType;
 
 pub fn find_rbs_method_completions(
     receiver_type: &RubyType,

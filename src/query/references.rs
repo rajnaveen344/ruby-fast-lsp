@@ -8,8 +8,8 @@ use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardTypeConverter;
 use log::info;
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_engine::AnalysisQuery;
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::engine::AnalysisQuery;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
@@ -263,7 +263,7 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let locations = query
             .method_reference_ranges(namespace_fqn, method)
             .into_iter()

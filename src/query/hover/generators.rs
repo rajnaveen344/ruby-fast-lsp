@@ -10,8 +10,8 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
-use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
-use ruby_analysis_inference::RubyType;
+use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
@@ -275,10 +275,10 @@ fn constant_hover_from_analysis(
     let node_kind = query.namespace_node_kind(namespace_fqn);
 
     match node_kind {
-        Some(ruby_analysis_core::GraphNodeKind::Class) => {
+        Some(ruby_analysis::core::GraphNodeKind::Class) => {
             return Some(HoverInfo::text(format!("class {}", fqn_str)));
         }
-        Some(ruby_analysis_core::GraphNodeKind::Module) => {
+        Some(ruby_analysis::core::GraphNodeKind::Module) => {
             return Some(HoverInfo::text(format!("module {}", fqn_str)));
         }
         None => {}
@@ -334,7 +334,7 @@ fn method_call_return_type(
     let method = RubyMethod::new(method_name).ok()?;
     if let Some(engine) = context.analysis_engine {
         let engine = engine.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         for namespace in receiver_type_to_analysis_namespaces(receiver_type) {
             if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
                 return Some(return_type);
@@ -348,7 +348,7 @@ fn method_call_return_type(
 fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
     match receiver_type {
         RubyType::Array(element_types) => {
-            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Array",
                 method_name,
                 false,
@@ -360,7 +360,7 @@ fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -
                 RubyType::union(key_types.clone()),
                 RubyType::union(value_types.clone()),
             ];
-            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Hash",
                 method_name,
                 false,
@@ -414,7 +414,7 @@ fn rbs_method_return_for_fqn(
 ) -> Option<RubyType> {
     for class_name in class_names_for_fqn(fqn) {
         if let Some(return_type) =
-            ruby_analysis_inference::rbs::get_rbs_method_return_type_as_ruby_type(
+            ruby_analysis::inference::rbs::get_rbs_method_return_type_as_ruby_type(
                 &class_name,
                 method_name,
                 is_singleton,
@@ -503,7 +503,7 @@ fn method_definition_hover_from_analysis(
 
     let byte_offset = position_to_byte_offset(context.content, position)?;
     let engine = context.analysis_engine?.lock();
-    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let return_type = query.method_return_type_at(method_name, file_id, byte_offset)?;
     if return_type == RubyType::Unknown {
         return None;

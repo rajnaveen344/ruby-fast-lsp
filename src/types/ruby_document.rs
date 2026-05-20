@@ -1,1 +1,1 @@
-pub use ruby_analysis_indexer::RubyDocument;
+pub use ruby_analysis::indexer::RubyDocument;

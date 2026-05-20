@@ -91,7 +91,7 @@ fn method_fact_in_path(
 ) -> bool {
     let engine = server.analysis_engine.lock();
     engine.all_method_facts().into_iter().any(|fact| {
-        let ruby_analysis_core::FullyQualifiedName::Method(_, method) = fact.fqn else {
+        let ruby_analysis::core::FullyQualifiedName::Method(_, method) = fact.fqn else {
             return false;
         };
         if method.as_str() != method_name {

@@ -1,1 +1,1 @@
-pub use ruby_analysis_indexer::{ScopeFrame, ScopeTracker};
+pub use ruby_analysis::indexer::{ScopeFrame, ScopeTracker};

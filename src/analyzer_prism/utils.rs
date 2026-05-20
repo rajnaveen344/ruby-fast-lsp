@@ -1,2 +1,2 @@
-pub use ruby_analysis_indexer::analyzer_utils::*;
-pub use ruby_analysis_indexer::utf8_str;
+pub use ruby_analysis::indexer::analyzer_utils::*;
+pub use ruby_analysis::indexer::utf8_str;

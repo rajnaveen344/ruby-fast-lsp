@@ -1,1 +1,1 @@
-pub use ruby_analysis_indexer::yard::*;
+pub use ruby_analysis::indexer::yard::*;

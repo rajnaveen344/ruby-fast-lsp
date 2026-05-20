@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{RenameParams, TextEdit, WorkspaceEdit};
 
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
-use ruby_analysis_indexer::RenameVisitor;
+use ruby_analysis::indexer::RenameVisitor;
 
 pub async fn handle_rename(
     server: &RubyLanguageServer,

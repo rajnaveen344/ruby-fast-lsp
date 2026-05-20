@@ -20,7 +20,7 @@
 //! The supertypes list follows this exact order (excluding self).
 
 use log::{debug, info};
-use ruby_analysis_engine::{AnalysisQuery, TypeHierarchyEntry, TypeHierarchyRelation};
+use ruby_analysis::engine::{AnalysisQuery, TypeHierarchyEntry, TypeHierarchyRelation};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
@@ -193,7 +193,7 @@ impl EngineQuery {
 // ============================================================================
 
 fn type_hierarchy_item_from_engine_entry(
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     entry: TypeHierarchyEntry,
 ) -> Option<TypeHierarchyItem> {
     let kind = match entry.node_kind {
@@ -216,10 +216,10 @@ fn type_hierarchy_item_from_engine_entry(
 }
 
 fn type_hierarchy_item_from_parts(
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     fqn: &FullyQualifiedName,
     kind: SymbolKind,
-    range: ruby_analysis_core::TextRange,
+    range: ruby_analysis::core::TextRange,
     detail: Option<String>,
 ) -> Option<TypeHierarchyItem> {
     let location = location_for_range(engine, range)?;
@@ -240,10 +240,10 @@ fn type_hierarchy_item_from_parts(
     })
 }
 
-fn graph_node_kind_to_symbol_kind(kind: ruby_analysis_core::GraphNodeKind) -> SymbolKind {
+fn graph_node_kind_to_symbol_kind(kind: ruby_analysis::core::GraphNodeKind) -> SymbolKind {
     match kind {
-        ruby_analysis_core::GraphNodeKind::Class => SymbolKind::CLASS,
-        ruby_analysis_core::GraphNodeKind::Module => SymbolKind::MODULE,
+        ruby_analysis::core::GraphNodeKind::Class => SymbolKind::CLASS,
+        ruby_analysis::core::GraphNodeKind::Module => SymbolKind::MODULE,
     }
 }
 
@@ -273,8 +273,8 @@ fn relation_symbol_kind(relation: TypeHierarchyRelation) -> SymbolKind {
 }
 
 fn file_name_for(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    file_id: ruby_analysis_core::SourceFileId,
+    engine: &ruby_analysis::engine::AnalysisEngine,
+    file_id: ruby_analysis::core::SourceFileId,
 ) -> String {
     engine
         .file(file_id)

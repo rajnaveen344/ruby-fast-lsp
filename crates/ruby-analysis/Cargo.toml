@@ -1,0 +1,13 @@
+[package]
+name = "ruby-analysis"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ruby Fast LSP Team"]
+description = "Unified Ruby analysis API for LSP and agent-facing tools"
+license = "MIT"
+
+[dependencies]
+ruby-analysis-core = { path = "../ruby-analysis-core" }
+ruby-analysis-engine = { path = "../ruby-analysis-engine" }
+ruby-analysis-inference = { path = "../ruby-analysis-inference" }
+ruby-analysis-indexer = { path = "../ruby-analysis-indexer" }

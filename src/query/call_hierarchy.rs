@@ -10,7 +10,7 @@
 //! calls simple grouping operations on existing analysis data.
 
 use log::info;
-use ruby_analysis_engine::{AnalysisQuery, CallHierarchyMethod};
+use ruby_analysis::engine::{AnalysisQuery, CallHierarchyMethod};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, SymbolKind,
@@ -166,7 +166,7 @@ impl EngineQuery {
 // ============================================================================
 
 fn call_hierarchy_item_from_engine_method(
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     method: CallHierarchyMethod,
 ) -> Option<CallHierarchyItem> {
     let location = location_for_range(engine, method.range)?;

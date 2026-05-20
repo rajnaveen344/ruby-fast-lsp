@@ -139,7 +139,7 @@ impl IndexerProject {
                         &uri,
                         &content,
                         server,
-                        ruby_analysis_core::SourceKind::Project,
+                        ruby_analysis::core::SourceKind::Project,
                     ) {
                         warn!("Failed to collect facts {:?}: {}", file_path, e);
                     }

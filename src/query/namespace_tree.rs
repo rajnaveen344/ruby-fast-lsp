@@ -1,11 +1,11 @@
 //! Namespace Tree Query — LSP adapter over analysis-engine namespace tree.
 
-use ruby_analysis_engine::AnalysisQuery;
+use ruby_analysis::engine::AnalysisQuery;
 use serde::{Deserialize, Serialize};
 
 use super::EngineQuery;
 
-pub use ruby_analysis_engine::{
+pub use ruby_analysis::engine::{
     IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 
@@ -42,11 +42,11 @@ impl EngineQuery {
 mod tests {
     use super::*;
     use parking_lot::Mutex;
-    use ruby_analysis_core::{
+    use ruby_analysis::core::{
         FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
         RubyConstant, SourceKind, TextRange,
     };
-    use ruby_analysis_engine::AnalysisEngine;
+    use ruby_analysis::engine::AnalysisEngine;
     use std::sync::Arc;
 
     fn empty_query(engine: AnalysisEngine) -> EngineQuery {

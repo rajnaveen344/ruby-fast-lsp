@@ -7,8 +7,8 @@
 //! directly interacting with inference internals.
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use ruby_analysis_core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
-use ruby_analysis_inference::RubyType;
+use ruby_analysis::core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
+use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Unified type query interface.

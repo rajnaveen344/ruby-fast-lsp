@@ -41,7 +41,7 @@ pub use types::TypeQuery;
 
 use crate::types::ruby_document::RubyDocument;
 use parking_lot::{Mutex, RwLock};
-use ruby_analysis_engine::AnalysisEngine;
+use ruby_analysis::engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 

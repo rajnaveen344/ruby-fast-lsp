@@ -19,9 +19,9 @@ use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::deduplicate_locations;
 use log::trace;
-pub use ruby_analysis_core::MethodCalleeResolution;
-use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_inference::RubyType;
+pub use ruby_analysis::core::MethodCalleeResolution;
+use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;
@@ -261,7 +261,7 @@ impl EngineQuery {
         drop(doc);
 
         let engine = self.analysis_engine()?.lock();
-        ruby_analysis_engine::AnalysisQuery::new(&engine).variable_type_any_before(
+        ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_any_before(
             var_name,
             file_id,
             byte_offset,
@@ -298,7 +298,7 @@ impl EngineQuery {
 
         let method = RubyMethod::new(method_name).ok()?;
         let engine = self.analysis_engine()?.lock();
-        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query.method_return_type_for_receiver(&inner_namespace, &method)
     }
 

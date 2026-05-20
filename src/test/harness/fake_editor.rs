@@ -557,7 +557,7 @@ impl FakeEditor {
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
 
         {
-            use ruby_analysis_indexer::fact_collector::FactCollector;
+            use ruby_analysis::indexer::fact_collector::FactCollector;
             use ruby_prism::Visit;
             use std::sync::Arc;
 

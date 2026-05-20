@@ -1,1 +1,1 @@
-pub use ruby_analysis_indexer::{LVScopeId, LVScopeKind};
+pub use ruby_analysis::indexer::{LVScopeId, LVScopeKind};

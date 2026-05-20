@@ -128,7 +128,7 @@ impl IndexerStdlib {
                                 &uri,
                                 &content,
                                 server,
-                                ruby_analysis_core::SourceKind::Stub,
+                                ruby_analysis::core::SourceKind::Stub,
                             ) {
                                 warn!("Failed to index stub {:?}: {}", path, e);
                             }
@@ -162,7 +162,7 @@ impl IndexerStdlib {
                         &uri,
                         &content,
                         server,
-                        ruby_analysis_core::SourceKind::Stub,
+                        ruby_analysis::core::SourceKind::Stub,
                     ) {
                         warn!("Failed to index stub {:?}: {}", path, e);
                     }
@@ -214,7 +214,7 @@ impl IndexerStdlib {
                             &uri,
                             &content,
                             server,
-                            ruby_analysis_core::SourceKind::Stdlib,
+                            ruby_analysis::core::SourceKind::Stdlib,
                         ) {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);
                         }

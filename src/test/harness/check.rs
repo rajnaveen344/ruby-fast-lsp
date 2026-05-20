@@ -649,7 +649,7 @@ async fn run_type_check(
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
     use crate::query::TypeQuery;
-    use ruby_analysis_inference::RubyType;
+    use ruby_analysis::inference::RubyType;
 
     for expected in expected_types {
         let expected_type = expected
@@ -752,7 +752,7 @@ async fn run_type_check(
 
                         if let Some(fqn) = method_fqn {
                             let engine = server.analysis_engine.lock();
-                            let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+                            let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
                             let return_types = query
                                 .methods_for_fqn(&fqn)
                                 .iter()
@@ -854,20 +854,20 @@ async fn run_type_check(
 
 fn method_call_return_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
-    receiver_type: &ruby_analysis_inference::RubyType,
+    receiver_type: &ruby_analysis::inference::RubyType,
     method_name: &str,
-) -> Option<ruby_analysis_inference::RubyType> {
+) -> Option<ruby_analysis::inference::RubyType> {
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_method::RubyMethod;
-    use ruby_analysis_inference::RubyType;
+    use ruby_analysis::inference::RubyType;
 
     let method = RubyMethod::new(method_name).ok()?;
     let (receiver_fqn, namespace_kind) = match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            (fqn.clone(), ruby_analysis_core::NamespaceKind::Instance)
+            (fqn.clone(), ruby_analysis::core::NamespaceKind::Instance)
         }
         RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            (fqn.clone(), ruby_analysis_core::NamespaceKind::Singleton)
+            (fqn.clone(), ruby_analysis::core::NamespaceKind::Singleton)
         }
         RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {
             return None;
@@ -876,7 +876,7 @@ fn method_call_return_type_from_analysis(
     let namespace =
         FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
     let engine = server.analysis_engine.lock();
-    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     query.method_return_type_for_receiver(&namespace, &method)
 }
 
@@ -884,8 +884,8 @@ fn variable_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
     name: &str,
     kind: &str,
-) -> Option<ruby_analysis_inference::RubyType> {
-    use ruby_analysis_core::{RubyType, TypeSubject};
+) -> Option<ruby_analysis::inference::RubyType> {
+    use ruby_analysis::core::{RubyType, TypeSubject};
 
     let type_store = server.analysis_engine.lock().type_store().clone();
     type_store
@@ -1022,7 +1022,7 @@ async fn run_diagnostics_check(
     // Run FactCollector directly on the parsed AST to collect indexing-time diagnostics
     // (e.g., YARD checks and return type mismatches).
     {
-        use ruby_analysis_indexer::fact_collector::FactCollector;
+        use ruby_analysis::indexer::fact_collector::FactCollector;
         use ruby_prism::Visit;
         use std::sync::Arc;
         let mut visitor = FactCollector::analysis_only(

@@ -1,1 +1,1 @@
-pub use ruby_analysis_core::RubyMethod;
+pub use ruby_analysis::core::RubyMethod;

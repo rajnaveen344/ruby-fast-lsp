@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use log::debug;
-use ruby_analysis_engine::{AnalysisQuery, MixinUsageKind};
+use ruby_analysis::engine::{AnalysisQuery, MixinUsageKind};
 use ruby_prism::{ModuleNode, Node, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -148,7 +148,7 @@ impl EngineQuery {
 
 fn mixin_usages_from_analysis(
     query: &AnalysisQuery<'_>,
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<(MixinType, Location)> {
     let mut usages = query
@@ -173,7 +173,7 @@ fn mixin_usages_from_analysis(
 
 fn class_definition_locations_from_analysis(
     query: &AnalysisQuery<'_>,
-    engine: &ruby_analysis_engine::AnalysisEngine,
+    engine: &ruby_analysis::engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<Location> {
     let mut result = query

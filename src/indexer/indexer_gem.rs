@@ -193,7 +193,7 @@ impl IndexerGem {
                                 &uri,
                                 &content,
                                 server,
-                                ruby_analysis_core::SourceKind::Gem,
+                                ruby_analysis::core::SourceKind::Gem,
                             ) {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);
                             }
