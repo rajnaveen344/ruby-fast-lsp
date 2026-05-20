@@ -2,13 +2,13 @@
 //!
 //! Consolidates definition logic from `capabilities/definitions/`.
 
-use ruby_analysis::indexer::yard::YardParser;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::AnalysisQuery;
+use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
