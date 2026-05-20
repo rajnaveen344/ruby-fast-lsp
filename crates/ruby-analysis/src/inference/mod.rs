@@ -3,6 +3,7 @@
 //! This crate owns type inference helpers, RBS lookup, literal/collection
 //! analysis, and forward local type tracking.
 
+pub mod completion;
 pub mod control_flow;
 pub mod method;
 pub mod rbs;

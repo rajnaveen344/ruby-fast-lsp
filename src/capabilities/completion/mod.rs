@@ -420,7 +420,9 @@ fn get_receiver_type_from_snapshots(
     // before we strip to just the last word token. This handles cases
     // like `"hello".upcase` and `[1,2,3].first` where the literal
     // expression contains non-alphanumeric chars.
-    if let Some(literal_type) = infer_literal_type_from_expression(before_dot) {
+    if let Some(literal_type) =
+        ruby_analysis::inference::completion::infer_literal_type_from_expression(before_dot)
+    {
         return Some(literal_type);
     }
 
@@ -438,7 +440,9 @@ fn get_receiver_type_from_snapshots(
     }
 
     // Handle literals from single-word text (e.g., integer `42.abs`)
-    if let Some(literal_type) = infer_literal_type(receiver_text) {
+    if let Some(literal_type) =
+        ruby_analysis::inference::completion::infer_literal_type(receiver_text)
+    {
         return Some(literal_type);
     }
 
@@ -457,7 +461,7 @@ fn get_receiver_type_from_snapshots(
     }
 
     // For variables, use VariableScopes tree for type resolution
-    if is_variable_name(receiver_text) {
+    if ruby_analysis::inference::completion::is_variable_name(receiver_text) {
         let receiver_position = Position {
             line: position.line,
             character: (dot_pos - receiver_text.len()) as u32,
@@ -481,7 +485,10 @@ fn get_receiver_type_from_snapshots(
         }
 
         // Fallback: Look for constructor assignment pattern (var = ClassName.new)
-        if let Some(ty) = infer_type_from_constructor_assignment(content, receiver_text) {
+        if let Some(ty) = ruby_analysis::inference::completion::infer_constructor_assignment_type(
+            content,
+            receiver_text,
+        ) {
             return Some(ty);
         }
     }
@@ -531,7 +538,7 @@ fn resolve_method_receiver_type(
                 }
             }
             // Fallback to constructor pattern
-            infer_type_from_constructor_assignment(content, name)
+            ruby_analysis::inference::completion::infer_constructor_assignment_type(content, name)
         }
         MethodReceiver::SelfReceiver => {
             // Would need namespace context — not available here
@@ -798,199 +805,4 @@ fn lookup_variable_type_from_engine(
 
     let engine = server.analysis_engine.lock();
     ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_in_file(kind, name, file_id)
-}
-
-fn infer_type_from_constructor_assignment(
-    content: &str,
-    var_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::core::FullyQualifiedName;
-    use ruby_analysis::core::RubyConstant;
-    use ruby_analysis::inference::RubyType;
-
-    // Pattern: `var_name = SomeClass.new` or `var_name = Some::Namespaced::Class.new`
-    // We search for assignments to this variable
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Look for assignment pattern: `var = ...`
-        if let Some(rest) = trimmed.strip_prefix(var_name) {
-            // Make sure we matched the whole variable name (not just a prefix)
-            // The next character should be whitespace or '='
-            let next_char = rest.chars().next();
-            if !matches!(next_char, Some(' ') | Some('\t') | Some('=')) {
-                continue;
-            }
-
-            let rest = rest.trim();
-            if let Some(rest) = rest.strip_prefix('=') {
-                let rhs = rest.trim();
-
-                // Check for `.new` pattern
-                if rhs.ends_with(".new") || rhs.contains(".new(") || rhs.contains(".new ") {
-                    // Extract the class name before .new
-                    let new_pos = rhs.find(".new")?;
-                    let class_part = rhs[..new_pos].trim();
-
-                    // Validate it's a constant (starts with uppercase)
-                    if class_part
-                        .chars()
-                        .next()
-                        .map(|c| c.is_uppercase())
-                        .unwrap_or(false)
-                    {
-                        // Parse the constant path (e.g., "Some::Namespaced::Class")
-                        let parts: Vec<_> = class_part
-                            .split("::")
-                            .filter_map(|s| RubyConstant::new(s.trim()).ok())
-                            .collect();
-
-                        if !parts.is_empty() {
-                            let fqn = FullyQualifiedName::Constant(parts);
-                            // RubyType::Class represents an instance of the class
-                            return Some(RubyType::Class(fqn));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Infer type from a literal expression at the end of text before a dot.
-///
-/// Unlike `infer_literal_type` which works on a single token, this handles
-/// full expressions like `"hello"`, `[1, 2, 3]`, `{ a: 1 }` by looking
-/// at the trailing expression in the text.
-fn infer_literal_type_from_expression(text: &str) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::inference::RubyType;
-
-    let trimmed = text.trim();
-
-    // String literal ending: ..." or ...'
-    if trimmed.ends_with('"') || trimmed.ends_with('\'') {
-        return Some(RubyType::string());
-    }
-
-    // Array literal ending: ...]
-    if trimmed.ends_with(']') && trimmed.starts_with('[') {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        let element_types = infer_array_element_types(inner);
-        return Some(RubyType::Array(element_types));
-    }
-
-    // Hash literal ending: ...}
-    if trimmed.ends_with('}') {
-        return Some(RubyType::Hash(
-            vec![RubyType::Unknown],
-            vec![RubyType::Unknown],
-        ));
-    }
-
-    // Symbol literal: check for :word pattern at end
-    if let Some(rest) = trimmed.rsplit_once(|c: char| c.is_whitespace() || c == '(' || c == ',') {
-        if rest.1.starts_with(':') {
-            return Some(RubyType::symbol());
-        }
-    } else if trimmed.starts_with(':') {
-        return Some(RubyType::symbol());
-    }
-
-    None
-}
-
-/// Infer element types from array literal content (e.g., "1, 2, 3" → [Integer])
-fn infer_array_element_types(inner: &str) -> Vec<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::inference::RubyType;
-
-    let mut types = Vec::new();
-    for element in inner.split(',') {
-        let el = element.trim();
-        if el.is_empty() {
-            continue;
-        }
-        let ty = if el.starts_with('"') || el.starts_with('\'') {
-            RubyType::string()
-        } else if el.starts_with(':') {
-            RubyType::symbol()
-        } else if el.parse::<i64>().is_ok() {
-            RubyType::integer()
-        } else if el.parse::<f64>().is_ok() {
-            RubyType::float()
-        } else if el == "true" || el == "false" {
-            RubyType::true_class()
-        } else if el == "nil" {
-            RubyType::nil_class()
-        } else {
-            RubyType::Unknown
-        };
-        if ty != RubyType::Unknown && !types.contains(&ty) {
-            types.push(ty);
-        }
-    }
-    if types.is_empty() {
-        vec![RubyType::Unknown]
-    } else {
-        types
-    }
-}
-
-/// Infer type from a literal expression
-fn infer_literal_type(text: &str) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::inference::RubyType;
-
-    // String literal
-    if text.starts_with('"') || text.starts_with('\'') {
-        return Some(RubyType::string());
-    }
-
-    // Symbol literal
-    if text.starts_with(':') {
-        return Some(RubyType::symbol());
-    }
-
-    // Array literal
-    if text.starts_with('[') {
-        return Some(RubyType::Array(vec![RubyType::Unknown]));
-    }
-
-    // Hash literal
-    if text.starts_with('{') {
-        return Some(RubyType::Hash(
-            vec![RubyType::Unknown],
-            vec![RubyType::Unknown],
-        ));
-    }
-
-    // Integer literal (must check before float)
-    if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit() || c == '_') {
-        return Some(RubyType::integer());
-    }
-
-    // Float literal
-    if text.contains('.')
-        && text
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '_' || c == '.')
-    {
-        return Some(RubyType::float());
-    }
-
-    None
-}
-
-/// Check if text is a valid Ruby variable name (lowercase identifier)
-fn is_variable_name(text: &str) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-
-    let first_char = text.chars().next().unwrap();
-    if !first_char.is_lowercase() && first_char != '_' {
-        return false;
-    }
-
-    text.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
