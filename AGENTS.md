@@ -93,6 +93,101 @@ cargo build --release         # Release build
 - `src/inferrer/` - Type inference
 - `src/analyzer_prism/` - AST analysis
 
+## Architecture Direction: LSP Wrapper Over Engine + Inference
+
+Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable
+analysis crates. Editors are not the only consumers; agents and CLIs should be
+able to ask graph/type questions without speaking LSP.
+
+### Crate Responsibilities
+
+```text
+ruby-analysis-core
+  Shared data contracts only:
+  FQN, RubyConstant, RubyMethod, RubyType, TextRange, SourceFileId,
+  SymbolFact, MethodFact, GraphFact, ReferenceFact, DiagnosticFact, TypeFact.
+
+ruby-analysis-engine
+  Owns indexed facts and deterministic graph/fact queries:
+  symbols, methods, refs, graph, diagnostics, workspace symbols,
+  definitions/references, ancestors, implementors, namespace tree, debug views.
+  It stores type facts already computed, but should not do heavy expression inference.
+
+ruby-type-inference (planned)
+  Owns type algorithms:
+  literal/expression type inference, local flow/type tracking, narrowing,
+  method return inference, RBS lookup/substitution.
+  It depends on ruby-analysis-core and an engine query trait, not on LSP.
+
+ruby-analysis-indexer
+  Owns parsing/fact collection from Ruby source. FactCollector should eventually
+  live here, emitting facts/candidates into ruby-analysis-engine.
+
+ruby-fast-lsp
+  Thin wrapper:
+  server lifecycle, document cache, LSP handlers/capabilities, VS Code/Zed
+  adapter behavior, and mapping TextRange/domain results to LSP protocol types.
+```
+
+### Dependency Direction
+
+Preferred:
+
+```text
+ruby-analysis-engine -> ruby-analysis-core
+ruby-type-inference -> ruby-analysis-core
+ruby-fast-lsp -> engine + inference + indexer
+```
+
+Avoid:
+
+```text
+ruby-analysis-engine -> ruby-type-inference
+```
+
+Engine should remain stable fact DB + graph/query layer. Inference should be
+smart/pluggable and ask engine questions through a trait.
+
+Sketch:
+
+```rust
+pub trait InferenceQuery {
+    fn method_candidates(&self, receiver: &RubyType, method: RubyMethod) -> Vec<MethodFact>;
+    fn type_fact(&self, subject: &TypeSubject, at: TextRange) -> TypeResolution;
+    fn ancestors(&self, fqn: &FullyQualifiedName) -> Vec<FullyQualifiedName>;
+}
+```
+
+`ruby_analysis_engine::AnalysisQuery` should implement this trait when
+`ruby-type-inference` exists.
+
+### Migration Backlog
+
+Move remaining non-LSP logic out of `src/`:
+
+1. `src/query/implementation.rs` -> engine domain query. LSP keeps only
+   `TextRange -> Location`.
+2. `src/query/namespace_tree.rs` -> engine snapshot/projection. LSP keeps JSON
+   command adapter.
+3. `src/query/debug.rs` -> engine debug/introspection query. LSP keeps command
+   response shaping.
+4. `src/query/references.rs` -> engine target resolution/reference grouping.
+   LSP keeps cursor identifier + `Location` mapping.
+5. `src/query/definition.rs` -> engine symbol/method/global lookup. LSP keeps
+   cursor identifier + protocol mapping.
+6. `src/query/completion.rs` and `src/capabilities/completion/*` -> engine
+   candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
+7. `src/query/hover/*` -> split domain hover content from protocol hover.
+8. `src/inferrer/*` -> new `ruby-type-inference` crate.
+9. `src/analyzer_prism/visitors/fact_collector/*` -> `ruby-analysis-indexer`.
+10. `src/analyzer_prism/mod.rs` -> split into smaller parser/identifier/source
+    utilities; keep LSP-specific position handling in adapter layer where possible.
+
+Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
+`Url`, editor commands, or publish diagnostics can stay in `ruby-fast-lsp`.
+Anything returning `TextRange`, FQN, facts, graph entries, or `RubyType` belongs
+in reusable crates.
+
 ## Testing
 
 ### Tag-Based Test Harness (`check()`)
