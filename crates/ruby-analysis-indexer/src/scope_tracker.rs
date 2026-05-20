@@ -48,6 +48,12 @@ pub enum ScopeFrame {
     Singleton,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MixinRef {
+    pub parts: Vec<RubyConstant>,
+    pub absolute: bool,
+}
+
 impl ScopeTracker {
     pub fn new() -> Self {
         Self {
@@ -218,6 +224,47 @@ pub fn get_method_namespace_kind(
 
 pub fn utf8_str(bytes: &[u8]) -> &str {
     std::str::from_utf8(bytes).unwrap_or("")
+}
+
+pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
+    if let Some(n) = node.as_constant_read_node() {
+        let name = utf8_str(n.name().as_slice());
+        let constant = RubyConstant::new(name).ok()?;
+        return Some(MixinRef {
+            parts: vec![constant],
+            absolute: false,
+        });
+    }
+
+    if let Some(n) = node.as_constant_path_node() {
+        let mut parts = Vec::new();
+        collect_namespaces(&n, &mut parts);
+        return Some(MixinRef {
+            parts,
+            absolute: n.parent().is_none(),
+        });
+    }
+
+    None
+}
+
+pub fn build_constant_path_name(node: &Node) -> String {
+    let mut parts = Vec::new();
+    collect_constant_path_parts_for_name(node, &mut parts);
+    parts.join("::")
+}
+
+fn collect_constant_path_parts_for_name(node: &Node, parts: &mut Vec<String>) {
+    if let Some(constant_path) = node.as_constant_path_node() {
+        if let Some(parent) = constant_path.parent() {
+            collect_constant_path_parts_for_name(&parent, parts);
+        }
+        if let Some(name_bytes) = constant_path.name() {
+            parts.push(utf8_str(name_bytes.as_slice()).to_string());
+        }
+    } else if let Some(constant_read) = node.as_constant_read_node() {
+        parts.push(utf8_str(constant_read.name().as_slice()).to_string());
+    }
 }
 
 #[cfg(test)]

@@ -1,20 +1,25 @@
 use log::trace;
 use ruby_analysis_core::{
-    DiagnosticCandidate, DiagnosticCandidateKind, KeywordArgCandidate,
+    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, KeywordArgCandidate,
     MethodCallSignatureCandidate, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
+    RubyConstant, RubyMethod,
 };
+use ruby_analysis_indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use ruby_prism::{CallNode, Node};
 
-use crate::{
-    analyzer_prism::{diagnostics::bad_splat::BadSplatCandidate, diagnostics::ReceiverInfo, utils},
-    types::{
-        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
-        ruby_namespace::RubyConstant,
-    },
-};
+use crate::analyzer_prism::diagnostics::bad_splat::BadSplatCandidate;
 use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
+
+#[derive(Debug, Clone)]
+enum ReceiverInfo {
+    NoReceiver,
+    SelfReceiver,
+    ConstantReceiver(String),
+    ExpressionReceiver,
+    InvalidConstantPath,
+}
 
 impl FactCollector {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
@@ -27,7 +32,7 @@ impl FactCollector {
     }
 
     fn process_call_reference_candidate(&mut self, node: &CallNode) {
-        let method_name = utils::utf8_str(node.name().as_slice());
+        let method_name = utf8_str(node.name().as_slice());
         if !RubyMethod::is_valid_ruby_method_name(method_name) {
             trace!("Skipping method call with invalid name: {}", method_name);
             return;
@@ -133,12 +138,12 @@ impl FactCollector {
                 None,
             )
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
-            let name = utils::utf8_str(constant_read.name().as_slice()).to_string();
+            let name = utf8_str(constant_read.name().as_slice()).to_string();
             let (ns, kind) = self.handle_constant_read_receiver(&constant_read, current_namespace);
             (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
             if self.is_valid_constant_path_receiver(receiver_node) {
-                let receiver_name = utils::build_constant_path_name(receiver_node);
+                let receiver_name = build_constant_path_name(receiver_node);
                 let (ns, kind) = self.handle_constant_path_receiver(
                     &constant_path,
                     receiver_node,
@@ -167,7 +172,7 @@ impl FactCollector {
         constant_read: &ruby_prism::ConstantReadNode,
         current_namespace: &[RubyConstant],
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        let name = utils::utf8_str(constant_read.name().as_slice());
+        let name = utf8_str(constant_read.name().as_slice());
         if let Ok(constant) = RubyConstant::new(name) {
             let mut receiver_namespace = current_namespace.to_vec();
             receiver_namespace.push(constant);
@@ -183,7 +188,7 @@ impl FactCollector {
         receiver_node: &Node,
         current_namespace: &[RubyConstant],
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
+        if let Some(mixin_ref) = mixin_ref_from_node(receiver_node) {
             let context = if mixin_ref.absolute {
                 Vec::new()
             } else {
@@ -196,7 +201,7 @@ impl FactCollector {
             }
         }
 
-        if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
+        if let Some(mixin_ref) = mixin_ref_from_node(receiver_node) {
             let final_namespace = if mixin_ref.absolute {
                 mixin_ref.parts
             } else {
@@ -229,7 +234,7 @@ impl FactCollector {
 
     fn infer_expression_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
-            let var_name = utils::utf8_str(local_var.name().as_slice());
+            let var_name = utf8_str(local_var.name().as_slice());
             if let Some(ty) = self.get_local_var_type(var_name, &local_var.location()) {
                 return Some(ty);
             }
@@ -237,10 +242,10 @@ impl FactCollector {
         }
 
         if let Some(call) = receiver_node.as_call_node() {
-            let inner_method = utils::utf8_str(call.name().as_slice());
+            let inner_method = utf8_str(call.name().as_slice());
             let inner_type = if let Some(inner_receiver) = call.receiver() {
                 if let Some(constant_read) = inner_receiver.as_constant_read_node() {
-                    let name = utils::utf8_str(constant_read.name().as_slice());
+                    let name = utf8_str(constant_read.name().as_slice());
                     Some(RubyType::ClassReference(FullyQualifiedName::Constant(
                         vec![RubyConstant::new(name).ok()?],
                     )))
@@ -364,7 +369,7 @@ impl FactCollector {
                     let Some(value_loc) = symbol.value_loc() else {
                         continue;
                     };
-                    let name = utils::utf8_str(value_loc.as_slice()).to_string();
+                    let name = utf8_str(value_loc.as_slice()).to_string();
                     signature.keyword_args.push(KeywordArgCandidate {
                         name,
                         range: self.text_range_from_prism_location(
@@ -404,9 +409,9 @@ impl FactCollector {
         {
             RaiseArgCandidate::NonExceptionLiteral
         } else if let Some(const_read) = first_arg.as_constant_read_node() {
-            RaiseArgCandidate::Constant(utils::utf8_str(const_read.name().as_slice()).to_string())
+            RaiseArgCandidate::Constant(utf8_str(const_read.name().as_slice()).to_string())
         } else if first_arg.as_constant_path_node().is_some() {
-            let full_name = utils::build_constant_path_name(&first_arg);
+            let full_name = build_constant_path_name(&first_arg);
             let last_segment = full_name
                 .split("::")
                 .last()
@@ -414,7 +419,7 @@ impl FactCollector {
                 .to_string();
             RaiseArgCandidate::Constant(last_segment)
         } else if let Some(local) = first_arg.as_local_variable_read_node() {
-            let var_name = utils::utf8_str(local.name().as_slice());
+            let var_name = utf8_str(local.name().as_slice());
             let var_pos = self
                 .document
                 .offset_to_position(first_arg.location().start_offset());
@@ -433,7 +438,7 @@ impl FactCollector {
             }
         } else if let Some(inner_call) = first_arg.as_call_node() {
             if inner_call.receiver().is_none() {
-                let method_name = utils::utf8_str(inner_call.name().as_slice());
+                let method_name = utf8_str(inner_call.name().as_slice());
                 match RubyMethod::new(method_name) {
                     Ok(method) => RaiseArgCandidate::BareMethodReturn {
                         current_namespace: self.scope_tracker.get_ns_stack(),

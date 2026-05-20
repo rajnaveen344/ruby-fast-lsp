@@ -36,8 +36,8 @@ use ruby_prism::{
 };
 
 pub use scope_tracker::{
-    collect_namespaces, get_method_namespace_kind, utf8_str, LocalScopeKind, ScopeFrame,
-    ScopeTracker,
+    build_constant_path_name, collect_namespaces, get_method_namespace_kind, mixin_ref_from_node,
+    utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
 };
 
 #[derive(Debug, Clone, Default)]
