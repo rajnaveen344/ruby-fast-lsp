@@ -75,7 +75,7 @@ impl EngineQuery {
         // 2. We need offset→position conversion. Use attached document.
         let doc_arc = self
             .doc()
-            .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc(). Fix: call EngineQuery::with_doc() before get_code_lenses()");
+            .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc_and_engine(). Fix: call EngineQuery::with_doc_and_engine() before get_code_lenses()");
         let document = doc_arc.read();
 
         let mut results = Vec::new();
