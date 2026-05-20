@@ -1,5 +1,3 @@
-use crate::capabilities::semantic_tokens::{TOKEN_MODIFIERS_MAP, TOKEN_TYPES_MAP};
-use crate::types::ruby_document::RubyDocument;
 use log::trace;
 use ruby_prism::{
     visit_block_local_variable_node, visit_constant_path_node, visit_local_variable_and_write_node,
@@ -7,7 +5,67 @@ use ruby_prism::{
     visit_local_variable_read_node, visit_local_variable_target_node,
     visit_local_variable_write_node, CallNode, Location, Visit,
 };
+use std::collections::HashMap;
+use std::sync::LazyLock;
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
+
+use crate::RubyDocument;
+
+pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
+    SemanticTokenType::NAMESPACE,
+    SemanticTokenType::TYPE,
+    SemanticTokenType::CLASS,
+    SemanticTokenType::ENUM,
+    SemanticTokenType::INTERFACE,
+    SemanticTokenType::STRUCT,
+    SemanticTokenType::TYPE_PARAMETER,
+    SemanticTokenType::PARAMETER,
+    SemanticTokenType::VARIABLE,
+    SemanticTokenType::PROPERTY,
+    SemanticTokenType::ENUM_MEMBER,
+    SemanticTokenType::EVENT,
+    SemanticTokenType::FUNCTION,
+    SemanticTokenType::METHOD,
+    SemanticTokenType::MACRO,
+    SemanticTokenType::KEYWORD,
+    SemanticTokenType::MODIFIER,
+    SemanticTokenType::COMMENT,
+    SemanticTokenType::STRING,
+    SemanticTokenType::NUMBER,
+    SemanticTokenType::REGEXP,
+    SemanticTokenType::OPERATOR,
+    SemanticTokenType::DECORATOR,
+];
+
+pub static TOKEN_TYPES_MAP: LazyLock<HashMap<SemanticTokenType, u32>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    for (index, token_type) in TOKEN_TYPES.iter().enumerate() {
+        map.insert(token_type.clone(), index as u32);
+    }
+    map
+});
+
+pub const TOKEN_MODIFIERS: [SemanticTokenModifier; 10] = [
+    SemanticTokenModifier::DECLARATION,
+    SemanticTokenModifier::DEFINITION,
+    SemanticTokenModifier::READONLY,
+    SemanticTokenModifier::STATIC,
+    SemanticTokenModifier::DEPRECATED,
+    SemanticTokenModifier::ABSTRACT,
+    SemanticTokenModifier::ASYNC,
+    SemanticTokenModifier::MODIFICATION,
+    SemanticTokenModifier::DOCUMENTATION,
+    SemanticTokenModifier::DEFAULT_LIBRARY,
+];
+
+pub static TOKEN_MODIFIERS_MAP: LazyLock<HashMap<SemanticTokenModifier, usize>> =
+    LazyLock::new(|| {
+        let mut map = HashMap::new();
+        for (index, token_modifier) in TOKEN_MODIFIERS.iter().enumerate() {
+            map.insert(token_modifier.clone(), index);
+        }
+        map
+    });
 
 pub struct TokenVisitor<'a> {
     document: &'a RubyDocument,

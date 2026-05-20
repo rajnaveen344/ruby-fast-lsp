@@ -1,73 +1,13 @@
-use lazy_static::lazy_static;
 use log::{debug, info};
 use ruby_prism::Visit;
-use std::{collections::HashMap, time::Instant};
+use std::time::Instant;
 use tower_lsp::lsp_types::{
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensResult, Url,
-    WorkDoneProgressOptions,
+    SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    SemanticTokensResult, Url, WorkDoneProgressOptions,
 };
 
-use crate::{analyzer_prism::visitors::token_visitor::TokenVisitor, server::RubyLanguageServer};
-
-pub const TOKEN_TYPES: [SemanticTokenType; 23] = [
-    SemanticTokenType::NAMESPACE,
-    SemanticTokenType::TYPE,
-    SemanticTokenType::CLASS,
-    SemanticTokenType::ENUM,
-    SemanticTokenType::INTERFACE,
-    SemanticTokenType::STRUCT,
-    SemanticTokenType::TYPE_PARAMETER,
-    SemanticTokenType::PARAMETER,
-    SemanticTokenType::VARIABLE,
-    SemanticTokenType::PROPERTY,
-    SemanticTokenType::ENUM_MEMBER,
-    SemanticTokenType::EVENT,
-    SemanticTokenType::FUNCTION,
-    SemanticTokenType::METHOD,
-    SemanticTokenType::MACRO,
-    SemanticTokenType::KEYWORD,
-    SemanticTokenType::MODIFIER,
-    SemanticTokenType::COMMENT,
-    SemanticTokenType::STRING,
-    SemanticTokenType::NUMBER,
-    SemanticTokenType::REGEXP,
-    SemanticTokenType::OPERATOR,
-    SemanticTokenType::DECORATOR,
-];
-
-lazy_static! {
-    pub static ref TOKEN_TYPES_MAP: HashMap<SemanticTokenType, u32> = {
-        let mut map = HashMap::new();
-        for (index, token_type) in TOKEN_TYPES.iter().enumerate() {
-            map.insert(token_type.clone(), index as u32);
-        }
-        map
-    };
-}
-
-pub const TOKEN_MODIFIERS: [SemanticTokenModifier; 10] = [
-    SemanticTokenModifier::DECLARATION,
-    SemanticTokenModifier::DEFINITION,
-    SemanticTokenModifier::READONLY,
-    SemanticTokenModifier::STATIC,
-    SemanticTokenModifier::DEPRECATED,
-    SemanticTokenModifier::ABSTRACT,
-    SemanticTokenModifier::ASYNC,
-    SemanticTokenModifier::MODIFICATION,
-    SemanticTokenModifier::DOCUMENTATION,
-    SemanticTokenModifier::DEFAULT_LIBRARY,
-];
-
-lazy_static! {
-    pub static ref TOKEN_MODIFIERS_MAP: HashMap<SemanticTokenModifier, usize> = {
-        let mut map = HashMap::new();
-        for (index, token_modifier) in TOKEN_MODIFIERS.iter().enumerate() {
-            map.insert(token_modifier.clone(), index);
-        }
-        map
-    };
-}
+use crate::server::RubyLanguageServer;
+use ruby_analysis_indexer::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
 
 pub fn get_semantic_tokens_options() -> SemanticTokensOptions {
     SemanticTokensOptions {
