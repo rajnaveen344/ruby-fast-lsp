@@ -9,8 +9,8 @@ use crate::{
     analyzer_prism::{diagnostics::bad_splat::BadSplatCandidate, diagnostics::ReceiverInfo, utils},
     inferrer::r#type::ruby::RubyType,
     types::{
-        compact_location::CompactLocation, fully_qualified_name::FullyQualifiedName,
-        ruby_method::RubyMethod, ruby_namespace::RubyConstant,
+        fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
+        ruby_namespace::RubyConstant,
     },
 };
 
@@ -183,9 +183,7 @@ impl FactCollector {
         receiver_node: &Node,
         current_namespace: &[RubyConstant],
     ) -> (Vec<RubyConstant>, NamespaceKind) {
-        if let Some(mixin_ref) =
-            utils::mixin_ref_from_node(receiver_node, CompactLocation::default())
-        {
+        if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
             let context = if mixin_ref.absolute {
                 Vec::new()
             } else {
@@ -198,9 +196,7 @@ impl FactCollector {
             }
         }
 
-        if let Some(mixin_ref) =
-            utils::mixin_ref_from_node(receiver_node, CompactLocation::default())
-        {
+        if let Some(mixin_ref) = utils::mixin_ref_from_node(receiver_node) {
             let final_namespace = if mixin_ref.absolute {
                 mixin_ref.parts
             } else {

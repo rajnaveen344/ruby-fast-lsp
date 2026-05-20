@@ -2,7 +2,6 @@ use ruby_analysis_core::NamespaceKind;
 use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
 use tower_lsp::lsp_types::Location as LspLocation;
 
-use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
@@ -11,7 +10,6 @@ use crate::types::ruby_namespace::RubyConstant;
 pub struct MixinRef {
     pub parts: Vec<RubyConstant>,
     pub absolute: bool,
-    pub location: CompactLocation,
 }
 
 /// Recursively collect all namespaces from a ConstantPathNode
@@ -46,16 +44,13 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
 /// This captures the textual representation of the constant without trying to resolve it,
 /// which is deferred until a capability requests the ancestor chain.
 ///
-/// The `location` parameter should be the CompactLocation of where the include/extend/prepend
-/// call was made (for CodeLens and other features that need to show the call site).
-pub fn mixin_ref_from_node(node: &Node, location: CompactLocation) -> Option<MixinRef> {
+pub fn mixin_ref_from_node(node: &Node) -> Option<MixinRef> {
     if let Some(n) = node.as_constant_read_node() {
         let name = utf8_str(n.name().as_slice());
         if let Ok(constant) = RubyConstant::new(name) {
             Some(MixinRef {
                 parts: vec![constant],
                 absolute: false,
-                location,
             })
         } else {
             None
@@ -66,11 +61,7 @@ pub fn mixin_ref_from_node(node: &Node, location: CompactLocation) -> Option<Mix
         // A ConstantPathNode is absolute if its `parent` is `None`,
         // which corresponds to a `::` at the beginning.
         let absolute = n.parent().is_none();
-        Some(MixinRef {
-            parts,
-            absolute,
-            location,
-        })
+        Some(MixinRef { parts, absolute })
     } else {
         None
     }

@@ -1,4 +1,3 @@
-pub mod compact_location;
 pub mod file_source;
 pub mod fully_qualified_name;
 pub mod ruby_document;

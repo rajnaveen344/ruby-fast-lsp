@@ -54,12 +54,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     // Process file with unified FileProcessor::process_file. Route the index
     // by URI so the file lands in its workspace's own index.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions {
-        collect_facts: true,
-        index_references: true,
-        resolve_mixins: true, // resolve mixins on open
-        include_local_vars: true,
-    };
+    let options = ProcessingOptions::full_analysis();
 
     let (affected_uris, mut diagnostics) =
         match indexer.process_file(&uri, &content, server, options) {
@@ -119,12 +114,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Full processing on every change - includes unresolved diagnostics.
     // Route by URI so the file's workspace index is the one updated.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions {
-        collect_facts: true,
-        index_references: true,
-        resolve_mixins: true, // Must resolve mixins to keep inheritance graph up-to-date
-        include_local_vars: true,
-    };
+    let options = ProcessingOptions::full_analysis();
 
     let (affected_uris, mut diagnostics) =
         match indexer.process_file(&uri, &final_content, server, options) {
@@ -178,12 +168,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // On save: do full indexing with unresolved tracking (for cross-file
     // diagnostics). Route by URI for multi-workspace correctness.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions {
-        collect_facts: true,
-        index_references: true,
-        resolve_mixins: true, // resolve mixins on save
-        include_local_vars: true,
-    };
+    let options = ProcessingOptions::full_analysis();
 
     let (affected_uris, mut diagnostics) =
         match indexer.process_file(&uri, &content, server, options) {

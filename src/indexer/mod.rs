@@ -17,11 +17,8 @@
 //! - **`inheritance_graph`**: Method resolution order, inheritance, and mixin handling
 //! - **`version`**: Ruby version detection and management
 
-pub mod analysis_facts;
 pub mod coordinator;
 pub mod file_processor;
-pub mod graph;
-pub mod ids;
 pub mod indexer_gem;
 pub mod indexer_project;
 pub mod indexer_stdlib;

@@ -134,12 +134,7 @@ fn main() {
 
             // Process file (collect facts/references)
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let options = ProcessingOptions {
-                collect_facts: true,
-                index_references: true,
-                resolve_mixins: true,
-                include_local_vars: true,
-            };
+            let options = ProcessingOptions::full_analysis();
             let _ = indexer.process_file(&file_uri, &content, &server, options);
         }
 
@@ -212,12 +207,7 @@ fn main() {
             drop(docs);
 
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let options = ProcessingOptions {
-                collect_facts: true,
-                index_references: true,
-                resolve_mixins: true,
-                include_local_vars: true,
-            };
+            let options = ProcessingOptions::full_analysis();
             let _ = indexer.process_file(&file_uri, &content, &server, options);
         }
 

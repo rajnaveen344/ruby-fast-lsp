@@ -21,7 +21,7 @@ use crate::extensions::ExtensionRegistryHandle;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
-use log::{debug, warn};
+use log::debug;
 use ruby_analysis_core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
@@ -43,17 +43,18 @@ use tower_lsp::lsp_types::{Diagnostic, Url};
 // ============================================================================
 
 /// Options for processing a file
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ProcessingOptions {
-    /// Whether to collect symbols, methods, graph facts, references, and diagnostics.
-    pub collect_facts: bool,
-    /// Kept for compatibility with callers that still pass phase-style options.
-    /// References are emitted by FactCollector when definitions are collected.
-    pub index_references: bool,
-    /// Whether to resolve mixins immediately (can be slow)
-    pub resolve_mixins: bool,
     /// Whether to include local variables in reference facts
     pub include_local_vars: bool,
+}
+
+impl Default for ProcessingOptions {
+    fn default() -> Self {
+        Self {
+            include_local_vars: true,
+        }
+    }
 }
 
 impl ProcessingOptions {
@@ -62,21 +63,7 @@ impl ProcessingOptions {
     }
 
     pub fn full_analysis() -> Self {
-        Self {
-            collect_facts: true,
-            index_references: true,
-            resolve_mixins: true,
-            include_local_vars: true,
-        }
-    }
-
-    pub fn fast_analysis() -> Self {
-        Self {
-            collect_facts: true,
-            index_references: true,
-            resolve_mixins: false,
-            include_local_vars: true,
-        }
+        Self::default()
     }
 }
 
@@ -109,7 +96,7 @@ impl FileProcessor {
         Self { extension_registry }
     }
 
-    /// Process a file: parse, collect facts, index references, and return diagnostics.
+    /// Process a file: parse, collect facts and reference candidates, and return diagnostics.
     /// This prevents double-parsing and centralizes the logic.
     pub fn process_file(
         &self,
@@ -186,91 +173,62 @@ impl FileProcessor {
         let affected_uris = HashSet::new();
 
         // 3. Collect facts.
-        if options.collect_facts {
-            // The `document` variable from above is already initialized with content and parse_result
-            // We just need to ensure it's mutable for the visitor.
-            // Clone document because parse_result borrows from the original
-            let direct_facts_seed =
-                collect_direct_facts(server, content, document.analysis_file_id());
-            replace_analysis_facts_for_file(
-                server,
-                document.analysis_file_id(),
-                &direct_facts_seed,
-            );
+        let direct_facts_seed = collect_direct_facts(server, content, document.analysis_file_id());
+        replace_analysis_facts_for_file(server, document.analysis_file_id(), &direct_facts_seed);
 
-            let mut visitor = FactCollector::analysis_only(
-                document.clone(),
-                self.extension_registry.clone(),
-                server.analysis_engine.clone(),
-            );
-            visitor.include_local_vars = options.include_local_vars;
-            visitor.visit(&node);
-            diagnostics.extend(visitor.diagnostics);
+        let mut visitor = FactCollector::analysis_only(
+            document.clone(),
+            self.extension_registry.clone(),
+            server.analysis_engine.clone(),
+        );
+        visitor.include_local_vars = options.include_local_vars;
+        visitor.visit(&node);
+        diagnostics.extend(visitor.diagnostics);
 
-            // Flush indexing-time type facts into the shared analysis engine.
-            let extension_index_patches = visitor.extension_index_patches.clone();
-            let updated_document = visitor.document.clone();
-            let mut direct_facts = direct_facts_seed;
-            add_extension_analysis_facts(
-                server,
-                &updated_document,
-                &extension_index_patches,
-                &mut direct_facts,
-            );
-            let symbol_facts = direct_facts.symbols;
-            let method_facts = direct_facts.methods;
-            let mut type_facts = direct_facts.types;
-            let existing_type_subjects = type_facts
-                .iter()
-                .map(|fact| fact.subject.clone())
-                .collect::<HashSet<_>>();
-            type_facts.extend(
-                visitor
-                    .type_store
-                    .all_facts()
-                    .into_iter()
-                    .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
-            );
-            server.analysis_engine.lock().replace_file_analysis(
-                updated_document.analysis_file_id(),
-                FileAnalysisFacts {
-                    symbols: symbol_facts,
-                    methods: method_facts,
-                    types: type_facts,
-                    graph_nodes: direct_facts.graph_nodes,
-                    graph_edges: direct_facts.graph_edges,
-                    unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                    reference_candidates: visitor.reference_candidates,
-                    diagnostic_candidates: visitor.diagnostic_candidates,
-                    diagnostics: Vec::new(),
-                },
-            );
-            // Direct facts own simple method return seeds. Visitor facts fill
-            // gaps for YARD/RBS and legacy-compatible inference without
-            // overriding direct analysis-indexer subjects.
+        let extension_index_patches = visitor.extension_index_patches.clone();
+        let updated_document = visitor.document.clone();
+        let mut direct_facts = direct_facts_seed;
+        add_extension_analysis_facts(
+            server,
+            &updated_document,
+            &extension_index_patches,
+            &mut direct_facts,
+        );
+        let symbol_facts = direct_facts.symbols;
+        let method_facts = direct_facts.methods;
+        let mut type_facts = direct_facts.types;
+        let existing_type_subjects = type_facts
+            .iter()
+            .map(|fact| fact.subject.clone())
+            .collect::<HashSet<_>>();
+        type_facts.extend(
+            visitor
+                .type_store
+                .all_facts()
+                .into_iter()
+                .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
+        );
+        server.analysis_engine.lock().replace_file_analysis(
+            updated_document.analysis_file_id(),
+            FileAnalysisFacts {
+                symbols: symbol_facts,
+                methods: method_facts,
+                types: type_facts,
+                graph_nodes: direct_facts.graph_nodes,
+                graph_edges: direct_facts.graph_edges,
+                unresolved_graph_edges: direct_facts.unresolved_graph_edges,
+                reference_candidates: visitor.reference_candidates,
+                diagnostic_candidates: visitor.diagnostic_candidates,
+                diagnostics: Vec::new(),
+            },
+        );
 
-            // Update document with visitor's state (includes lvars for LocalVariable lookup)
-            {
-                let mut docs = server.docs.lock();
-                docs.insert(
-                    uri.clone(),
-                    Arc::new(parking_lot::RwLock::new(updated_document.clone())),
-                );
-            }
-
-            // NOTE: Return type inference is now done lazily when inlay hints are requested
-            // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
-
-            // Cross-file unresolved diagnostics are analysis-engine facts
-            // produced when each referencing file is indexed.
-        }
-
-        if !options.collect_facts && options.index_references {
-            warn!(
-                "Reference-only indexing requested for {}. Running full fact collection because references now depend on FactCollector scopes.",
-                uri
+        {
+            let mut docs = server.docs.lock();
+            docs.insert(
+                uri.clone(),
+                Arc::new(parking_lot::RwLock::new(updated_document.clone())),
             );
-            self.collect_file_facts_as(uri, content, server, source_kind)?;
         }
 
         // Mark as indexed
