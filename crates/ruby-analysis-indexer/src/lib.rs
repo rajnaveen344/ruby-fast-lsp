@@ -4,6 +4,7 @@
 //! facts consumed by `ruby-analysis-engine`.
 
 mod scope_tracker;
+mod source_document;
 
 use std::collections::HashSet;
 
@@ -39,6 +40,7 @@ pub use scope_tracker::{
     build_constant_path_name, collect_namespaces, get_method_namespace_kind, mixin_ref_from_node,
     utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
 };
+pub use source_document::SourceDocument;
 
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {

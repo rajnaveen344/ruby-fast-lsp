@@ -1,6 +1,6 @@
 use ruby_analysis_core::{SourceFileId, TextRange};
+use ruby_analysis_indexer::SourceDocument;
 use ruby_prism::Location as PrismLocation;
-use std::cmp;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
 use crate::types::variable_scopes::VariableScopes;
@@ -13,22 +13,13 @@ pub struct RubyDocument {
     pub version: i32,
     /// The version at which this document was last indexed (None if never indexed)
     pub indexed_version: Option<i32>,
-    /// Byte offset at the start of each line (last element is total content length)
-    /// Eg. def foo\n  puts 'Hello'\nend\n
-    ///     ^ -> 0   ^ -> 8          ^ -> 23
-    ///     line_offsets = [0, 8, 23, 27]
-    line_offsets: Vec<usize>,
+    source: SourceDocument,
 
     /// Inlay hints in the document for modules, classes, methods, etc.
     inlay_hints: Vec<InlayHint>,
 
-    /// Comments in the document (start_offset, end_offset)
-    comments: Vec<(usize, usize)>,
-
     /// Variable scopes for local variable tracking (definitions, references, types)
     pub variable_scopes: VariableScopes,
-
-    analysis_file_id: SourceFileId,
 }
 
 impl RubyDocument {
@@ -43,20 +34,15 @@ impl RubyDocument {
         version: i32,
         analysis_file_id: SourceFileId,
     ) -> Self {
-        let comments = parse_comments(&content);
-        let mut doc = Self {
+        Self {
             uri,
+            source: SourceDocument::new(content.clone(), analysis_file_id),
             content,
             version,
             indexed_version: None,
-            line_offsets: Vec::new(),
             inlay_hints: Vec::new(),
-            comments,
             variable_scopes: VariableScopes::new(),
-            analysis_file_id,
-        };
-        doc.compute_line_offsets();
-        doc
+        }
     }
 
     /// Parses the document content and returns a Prism ParseResult
@@ -64,88 +50,39 @@ impl RubyDocument {
         ruby_prism::parse(self.content.as_bytes())
     }
 
-    pub fn get_comments(&self) -> &Vec<(usize, usize)> {
-        &self.comments
+    pub fn get_comments(&self) -> &[(usize, usize)] {
+        self.source.comments()
     }
 
     /// Updates document content and version, recomputing line offsets
     /// Clears variable scopes since they will be re-indexed.
     pub fn update(&mut self, content: String, version: i32) {
-        self.comments = parse_comments(&content);
+        self.source.update(content.clone());
         self.content = content;
         self.version = version;
         self.variable_scopes = VariableScopes::new();
-        self.compute_line_offsets();
         self.compute_inlay_hints();
     }
 
     /// Source file id for type facts emitted from this document.
     pub fn analysis_file_id(&self) -> SourceFileId {
-        self.analysis_file_id
+        self.source.file_id()
     }
 
     pub fn set_analysis_file_id(&mut self, analysis_file_id: SourceFileId) {
-        self.analysis_file_id = analysis_file_id;
-    }
-
-    /// Computes byte offsets at the start of each line
-    fn compute_line_offsets(&mut self) {
-        self.line_offsets = vec![0]; // First line starts at offset 0
-
-        let mut offset = 0;
-        for c in self.content.chars() {
-            offset += c.len_utf8();
-            if c == '\n' {
-                self.line_offsets.push(offset);
-            }
-        }
-
-        // Ensure the last element is the total content length
-        if self.line_offsets.last() != Some(&self.content.len()) {
-            self.line_offsets.push(self.content.len());
-        }
+        self.source.set_file_id(analysis_file_id);
     }
 
     /// Converts a byte offset to an LSP Position (line, character)
     pub fn offset_to_position(&self, offset: usize) -> Position {
-        let offset = cmp::min(offset, self.content.len());
-
-        // Find line containing this offset
-        let line_index = match self.line_offsets.binary_search(&offset) {
-            Ok(exact) => exact,      // Offset is exactly at line start
-            Err(after) => after - 1, // Offset is within a line
-        };
-
-        // Count UTF-8 characters from line start to offset
-        let line_start = self.line_offsets[line_index];
-        let character = self.content[line_start..offset].chars().count();
-
-        Position::new(line_index as u32, character as u32)
+        let (line, character) = self.source.offset_to_line_character(offset);
+        Position::new(line, character)
     }
 
     /// Converts an LSP Position to a byte offset
     pub fn position_to_offset(&self, position: Position) -> usize {
-        let line = position.line as usize;
-
-        // Handle out-of-bounds line
-        if line >= self.line_offsets.len() - 1 {
-            return self.content.len();
-        }
-
-        let line_start = self.line_offsets[line];
-        let line_end = self.line_offsets[line + 1];
-        let target_char = position.character as usize;
-
-        let mut byte_offset = 0;
-
-        for (chars_seen, c) in self.content[line_start..line_end].chars().enumerate() {
-            if chars_seen >= target_char || c == '\n' {
-                break;
-            }
-            byte_offset += c.len_utf8();
-        }
-
-        line_start + byte_offset
+        self.source
+            .line_character_to_offset(position.line, position.character)
     }
 
     /// Converts a ruby_prism Location to an LSP Range
@@ -157,17 +94,7 @@ impl RubyDocument {
     }
 
     pub fn prism_location_to_text_range(&self, location: &PrismLocation) -> TextRange {
-        let start_byte = u32::try_from(location.start_offset()).expect(
-            "INVARIANT VIOLATED: Prism start offset exceeded u32. \
-             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
-        );
-        let end_byte = u32::try_from(location.end_offset()).expect(
-            "INVARIANT VIOLATED: Prism end offset exceeded u32. \
-             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
-             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
-        );
-        TextRange::new(self.analysis_file_id(), start_byte, end_byte)
+        self.source.prism_location_to_text_range(location)
     }
 
     pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {
@@ -216,17 +143,6 @@ impl RubyDocument {
     }
 }
 
-/// Helper to parse comments from content
-fn parse_comments(content: &str) -> Vec<(usize, usize)> {
-    let parse_result = ruby_prism::parse(content.as_bytes());
-    let mut comments = Vec::new();
-    for comment in parse_result.comments() {
-        let loc = comment.location();
-        comments.push((loc.start_offset(), loc.end_offset()));
-    }
-    comments
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +158,7 @@ mod tests {
     fn test_compute_line_offsets() {
         let doc = create_test_document();
         // Expected: [0, 8, 23, 27] representing start offsets of each line
-        assert_eq!(doc.line_offsets, vec![0, 8, 23, 27]);
+        assert_eq!(doc.source.line_offsets(), &[0, 8, 23, 27]);
     }
 
     #[test]
@@ -287,7 +203,7 @@ mod tests {
         assert_eq!(doc.content, new_content);
 
         // Verify line offsets recomputed correctly
-        assert_eq!(doc.line_offsets, vec![0, 10, 20, 26, 29]);
+        assert_eq!(doc.source.line_offsets(), &[0, 10, 20, 26, 29]);
 
         // Verify position conversions with new content
         assert_eq!(doc.offset_to_position(15), Position::new(1, 5));
@@ -319,7 +235,7 @@ mod tests {
         let doc = RubyDocument::new(uri, "".to_string(), 1);
 
         // Empty document should have just one line offset
-        assert_eq!(doc.line_offsets, vec![0]);
+        assert_eq!(doc.source.line_offsets(), &[0]);
 
         // Test basic position conversions
         assert_eq!(doc.offset_to_position(0), Position::new(0, 0));
@@ -345,11 +261,14 @@ mod tests {
         let second_line_bytes = second_line.len();
 
         // Verify line offsets are computed correctly
-        assert_eq!(doc.line_offsets[0], 0);
-        assert_eq!(doc.line_offsets[1], first_line_bytes);
-        assert_eq!(doc.line_offsets[2], first_line_bytes + second_line_bytes);
+        assert_eq!(doc.source.line_offsets()[0], 0);
+        assert_eq!(doc.source.line_offsets()[1], first_line_bytes);
         assert_eq!(
-            doc.line_offsets[3],
+            doc.source.line_offsets()[2],
+            first_line_bytes + second_line_bytes
+        );
+        assert_eq!(
+            doc.source.line_offsets()[3],
             first_line_bytes + second_line_bytes + third_line.len()
         );
 

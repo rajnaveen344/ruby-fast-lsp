@@ -190,6 +190,13 @@ Move remaining non-LSP logic out of `src/`:
     `identifier.rs`. Remaining: move large test module and split parser/source
     utilities; keep LSP-specific position handling in adapter layer where possible.
 
+### Performance Backlog
+
+- Indexing feels slow in real VS Code usage after extension packaging. Do not
+  optimize mid-refactor; profile after architecture cleanup. Likely targets:
+  duplicate parse/fact passes, full-file processing on every change, extension
+  hook overhead, source offset conversions, and repeated engine graph resolution.
+
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
 `Url`, editor commands, or publish diagnostics can stay in `ruby-fast-lsp`.
 Anything returning `TextRange`, FQN, facts, graph entries, or `RubyType` belongs
