@@ -6,12 +6,12 @@ use tower_lsp::lsp_types::Diagnostic;
 
 use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::inferrer::r#type::literal::LiteralAnalyzer;
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use parking_lot::Mutex;
+use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
+use ruby_analysis_inference::RubyType;
 use std::collections::HashMap;
 use std::sync::Arc;
 

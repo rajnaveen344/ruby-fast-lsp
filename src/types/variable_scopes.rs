@@ -16,9 +16,9 @@
 
 use tower_lsp::lsp_types::{Location, Position, Range};
 
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::scope::LVScopeId;
 pub use crate::types::scope::LVScopeKind;
+use ruby_analysis_inference::RubyType;
 
 /// A tree structure representing the nesting of local variable scopes.
 /// Each node represents a scope with its variables and relationships.

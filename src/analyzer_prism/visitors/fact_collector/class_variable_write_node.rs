@@ -5,8 +5,8 @@ use ruby_prism::{
     ClassVariableTargetNode, ClassVariableWriteNode, Node,
 };
 
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
+use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
 

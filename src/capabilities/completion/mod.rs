@@ -248,7 +248,7 @@ pub async fn find_completion_at_position(
                 }
             } else if matches!(
                 receiver_type,
-                crate::inferrer::r#type::ruby::RubyType::ClassReference(_)
+                ruby_analysis_inference::RubyType::ClassReference(_)
             ) {
                 // Dot-trigger on a constant (e.g., "UserA.") — partial_name is None
                 // but the text-based receiver detection found a ClassReference
@@ -320,10 +320,10 @@ fn get_receiver_type_from_snapshots(
     content: &str,
     position: Position,
     identifier: &Option<Identifier>,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
+    use ruby_analysis_inference::RubyType;
 
     // If we have a method identifier with constant receiver, use it directly
     if let Some(Identifier::RubyMethod {
@@ -509,9 +509,9 @@ fn resolve_method_receiver_type(
     content: &str,
     position: Position,
     receiver: &MethodReceiver,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::fully_qualified_name::FullyQualifiedName;
+    use ruby_analysis_inference::RubyType;
 
     match receiver {
         MethodReceiver::Constant(parts) => {
@@ -570,11 +570,11 @@ fn resolve_method_receiver_type(
 
 fn infer_method_call_return_type_from_analysis(
     server: &RubyLanguageServer,
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
     method_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis_inference::RubyType;
 
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
@@ -599,14 +599,14 @@ fn infer_method_call_return_type_from_analysis(
 }
 
 fn infer_generic_rbs_method_return_type(
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
     method_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
+    use ruby_analysis_inference::RubyType;
 
     match receiver_type {
         RubyType::Array(element_types) => {
-            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Array",
                 method_name,
                 false,
@@ -618,7 +618,7 @@ fn infer_generic_rbs_method_return_type(
                 RubyType::union(key_types.clone()),
                 RubyType::union(value_types.clone()),
             ];
-            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Hash",
                 method_name,
                 false,
@@ -635,10 +635,10 @@ fn infer_generic_rbs_method_return_type(
 }
 
 fn infer_rbs_method_return_type(
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
     method_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
+    use ruby_analysis_inference::RubyType;
 
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {
@@ -670,9 +670,9 @@ fn infer_rbs_method_return_type(
 }
 
 fn infer_method_call_return_type_from_analysis_fallback(
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
     method_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+) -> Option<ruby_analysis_inference::RubyType> {
     infer_generic_rbs_method_return_type(receiver_type, method_name)
         .or_else(|| infer_rbs_method_return_type(receiver_type, method_name))
 }
@@ -681,13 +681,15 @@ fn rbs_method_return_for_fqn(
     fqn: &FullyQualifiedName,
     method_name: &str,
     is_singleton: bool,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+) -> Option<ruby_analysis_inference::RubyType> {
     for class_name in class_names_for_fqn(fqn) {
-        if let Some(return_type) = crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
-            method_name,
-            is_singleton,
-        ) {
+        if let Some(return_type) =
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_as_ruby_type(
+                &class_name,
+                method_name,
+                is_singleton,
+            )
+        {
             return Some(return_type);
         }
     }
@@ -716,10 +718,10 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
 }
 
 fn receiver_type_to_analysis_namespaces(
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
 ) -> Vec<FullyQualifiedName> {
-    use crate::inferrer::r#type::ruby::RubyType;
     use crate::types::fully_qualified_name::NamespaceKind;
+    use ruby_analysis_inference::RubyType;
 
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {
@@ -746,7 +748,7 @@ fn infer_bare_method_return_type_from_analysis(
     server: &RubyLanguageServer,
     method_name: &str,
     identifier: &Option<Identifier>,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::fully_qualified_name::NamespaceKind;
     use crate::types::ruby_method::RubyMethod;
 
@@ -779,7 +781,7 @@ fn lookup_variable_type_from_engine(
     uri: &Url,
     name: &str,
     receiver: &MethodReceiver,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+) -> Option<ruby_analysis_inference::RubyType> {
     use ruby_analysis_engine::VariableTypeKind;
 
     let file_id = {
@@ -808,10 +810,10 @@ fn lookup_variable_type_from_engine(
 fn infer_type_from_constructor_assignment(
     content: &str,
     var_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_namespace::RubyConstant;
+    use ruby_analysis_inference::RubyType;
 
     // Pattern: `var_name = SomeClass.new` or `var_name = Some::Namespaced::Class.new`
     // We search for assignments to this variable
@@ -869,10 +871,8 @@ fn infer_type_from_constructor_assignment(
 /// Unlike `infer_literal_type` which works on a single token, this handles
 /// full expressions like `"hello"`, `[1, 2, 3]`, `{ a: 1 }` by looking
 /// at the trailing expression in the text.
-fn infer_literal_type_from_expression(
-    text: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+fn infer_literal_type_from_expression(text: &str) -> Option<ruby_analysis_inference::RubyType> {
+    use ruby_analysis_inference::RubyType;
 
     let trimmed = text.trim();
 
@@ -909,8 +909,8 @@ fn infer_literal_type_from_expression(
 }
 
 /// Infer element types from array literal content (e.g., "1, 2, 3" → [Integer])
-fn infer_array_element_types(inner: &str) -> Vec<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+fn infer_array_element_types(inner: &str) -> Vec<ruby_analysis_inference::RubyType> {
+    use ruby_analysis_inference::RubyType;
 
     let mut types = Vec::new();
     for element in inner.split(',') {
@@ -945,8 +945,8 @@ fn infer_array_element_types(inner: &str) -> Vec<crate::inferrer::r#type::ruby::
 }
 
 /// Infer type from a literal expression
-fn infer_literal_type(text: &str) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+fn infer_literal_type(text: &str) -> Option<ruby_analysis_inference::RubyType> {
+    use ruby_analysis_inference::RubyType;
 
     // String literal
     if text.starts_with('"') || text.starts_with('\'') {

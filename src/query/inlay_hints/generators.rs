@@ -4,11 +4,11 @@
 //! Generators are pure functions that take nodes and context, returning hints.
 
 use super::nodes::{InlayNode, VariableKind};
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
 use parking_lot::Mutex;
 use ruby_analysis_core::SourceFileId;
 use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis_inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 

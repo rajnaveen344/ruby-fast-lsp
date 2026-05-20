@@ -1,13 +1,13 @@
 use ruby_analysis_core::{TypeResolution, TypeSubject};
 use ruby_analysis_engine::AnalysisQuery;
 
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::rbs::{
-    get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
-};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_inference::rbs::{
+    get_rbs_method_return_type_as_ruby_type, get_rbs_method_return_type_with_type_args,
+};
+use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
 

@@ -6,7 +6,7 @@ use ruby_prism::{
 };
 
 use super::FactCollector;
-use crate::inferrer::r#type::ruby::RubyType;
+use ruby_analysis_inference::RubyType;
 
 impl FactCollector {
     /// Process local variable write with type inference

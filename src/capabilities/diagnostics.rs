@@ -4,9 +4,9 @@
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
 use crate::analyzer_prism::control_flow;
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::ruby_document::RubyDocument;
 use log::debug;
+use ruby_analysis_inference::RubyType;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 

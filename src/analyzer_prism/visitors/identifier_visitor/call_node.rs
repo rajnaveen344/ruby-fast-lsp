@@ -2,9 +2,9 @@ use ruby_prism::{CallNode, Node};
 
 use crate::{
     analyzer_prism::{utils, Identifier, MethodReceiver},
-    inferrer::r#type::ruby::RubyType,
     types::{ruby_method::RubyMethod, ruby_namespace::RubyConstant},
 };
+use ruby_analysis_inference::RubyType;
 
 use super::{IdentifierType, IdentifierVisitor};
 
@@ -61,7 +61,7 @@ fn extract_receiver_from_node(node: &Node) -> MethodReceiver {
 
 /// Infer the RubyType from a literal AST node used as a receiver
 fn infer_literal_receiver_type(node: &Node) -> Option<RubyType> {
-    use crate::inferrer::r#type::literal::LiteralAnalyzer;
+    use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
 
     if node.as_string_node().is_some() || node.as_interpolated_string_node().is_some() {
         return Some(RubyType::string());

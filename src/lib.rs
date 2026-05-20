@@ -4,7 +4,6 @@ pub mod config;
 pub mod extensions;
 pub mod handlers;
 pub mod indexer;
-pub mod inferrer;
 pub mod perf;
 pub mod query;
 pub mod server;

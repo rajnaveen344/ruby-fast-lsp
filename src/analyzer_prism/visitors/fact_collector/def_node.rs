@@ -4,9 +4,9 @@ use ruby_prism::*;
 use tower_lsp::lsp_types::Position;
 
 use crate::analyzer_prism::utils;
-use crate::inferrer::r#type::literal::LiteralAnalyzer;
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::type_tracker::TypeTracker;
+use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
+use ruby_analysis_inference::type_tracker::TypeTracker;
+use ruby_analysis_inference::RubyType;
 
 use crate::types::scope::LVScopeKind;
 use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
@@ -160,7 +160,7 @@ impl FactCollector {
                 .join("::");
             let is_singleton = actual_namespace_kind == NamespaceKind::Singleton;
 
-            crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_as_ruby_type(
                 &class_name,
                 &method_name_str,
                 is_singleton,

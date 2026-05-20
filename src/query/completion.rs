@@ -8,12 +8,12 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::capabilities::completion::method;
-use crate::inferrer::r#type::ruby::RubyType;
 use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis_engine::{
     ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate,
 };
+use ruby_analysis_inference::RubyType;
 
 use super::EngineQuery;
 

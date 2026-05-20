@@ -648,8 +648,8 @@ async fn run_type_check(
     _all_file_contents: &[(Url, Vec<u8>)],
 ) {
     use crate::analyzer_prism::RubyPrismAnalyzer;
-    use crate::inferrer::r#type::ruby::RubyType;
     use crate::query::TypeQuery;
+    use ruby_analysis_inference::RubyType;
 
     for expected in expected_types {
         let expected_type = expected
@@ -855,12 +855,12 @@ async fn run_type_check(
 
 fn method_call_return_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
-    receiver_type: &crate::inferrer::r#type::ruby::RubyType,
+    receiver_type: &ruby_analysis_inference::RubyType,
     method_name: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use crate::inferrer::r#type::ruby::RubyType;
+) -> Option<ruby_analysis_inference::RubyType> {
     use crate::types::fully_qualified_name::FullyQualifiedName;
     use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis_inference::RubyType;
 
     let method = RubyMethod::new(method_name).ok()?;
     let (receiver_fqn, namespace_kind) = match receiver_type {
@@ -885,7 +885,7 @@ fn variable_type_from_analysis(
     server: &crate::server::RubyLanguageServer,
     name: &str,
     kind: &str,
-) -> Option<crate::inferrer::r#type::ruby::RubyType> {
+) -> Option<ruby_analysis_inference::RubyType> {
     use ruby_analysis_core::{RubyType, TypeSubject};
 
     let type_store = server.analysis_engine.lock().type_store().clone();

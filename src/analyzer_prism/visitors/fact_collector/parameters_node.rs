@@ -1,7 +1,7 @@
 use log::error;
 use ruby_prism::ParametersNode;
 
-use crate::inferrer::r#type::ruby::RubyType;
+use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
 

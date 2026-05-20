@@ -5,13 +5,13 @@
 
 use super::nodes::HoverNode;
 use crate::analyzer_prism::MethodReceiver;
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
 use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis_inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
@@ -353,7 +353,7 @@ fn method_call_return_type(
 fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
     match receiver_type {
         RubyType::Array(element_types) => {
-            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Array",
                 method_name,
                 false,
@@ -365,7 +365,7 @@ fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -
                 RubyType::union(key_types.clone()),
                 RubyType::union(value_types.clone()),
             ];
-            crate::inferrer::rbs::get_rbs_method_return_type_with_type_args(
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_with_type_args(
                 "Hash",
                 method_name,
                 false,
@@ -418,11 +418,13 @@ fn rbs_method_return_for_fqn(
     is_singleton: bool,
 ) -> Option<RubyType> {
     for class_name in class_names_for_fqn(fqn) {
-        if let Some(return_type) = crate::inferrer::rbs::get_rbs_method_return_type_as_ruby_type(
-            &class_name,
-            method_name,
-            is_singleton,
-        ) {
+        if let Some(return_type) =
+            ruby_analysis_inference::rbs::get_rbs_method_return_type_as_ruby_type(
+                &class_name,
+                method_name,
+                is_singleton,
+            )
+        {
             return Some(return_type);
         }
     }

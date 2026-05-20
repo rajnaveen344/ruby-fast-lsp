@@ -8,10 +8,10 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::inferrer::rbs::{get_rbs_class_methods, RbsMethodInfo};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use ruby_analysis_core::NamespaceKind;
+use ruby_analysis_inference::rbs::{get_rbs_class_methods, RbsMethodInfo};
+use ruby_analysis_inference::RubyType;
 
 pub fn find_rbs_method_completions(
     receiver_type: &RubyType,

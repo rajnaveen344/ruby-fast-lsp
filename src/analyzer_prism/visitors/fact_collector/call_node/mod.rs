@@ -7,12 +7,12 @@ use ruby_prism::{CallNode, Node};
 
 use crate::{
     analyzer_prism::{diagnostics::bad_splat::BadSplatCandidate, diagnostics::ReceiverInfo, utils},
-    inferrer::r#type::ruby::RubyType,
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod,
         ruby_namespace::RubyConstant,
     },
 };
+use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
 

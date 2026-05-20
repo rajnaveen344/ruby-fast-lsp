@@ -14,7 +14,6 @@
 mod analysis;
 
 use crate::analyzer_prism::MethodReceiver;
-use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -22,6 +21,7 @@ use crate::utils::deduplicate_locations;
 use log::trace;
 pub use ruby_analysis_core::MethodCalleeResolution;
 use ruby_analysis_core::NamespaceKind;
+use ruby_analysis_inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;
