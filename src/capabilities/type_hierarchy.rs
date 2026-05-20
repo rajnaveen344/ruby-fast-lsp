@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
     TypeHierarchySupertypesParams,
 };
 
-pub use crate::query::type_hierarchy::{RelationType, TypeHierarchyData};
+pub use crate::query::type_hierarchy::TypeHierarchyData;
 
 /// Handle `textDocument/prepareTypeHierarchy` request
 pub async fn handle_prepare_type_hierarchy(

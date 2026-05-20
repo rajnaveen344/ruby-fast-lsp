@@ -40,6 +40,28 @@ pub struct OutgoingCall {
     pub from_ranges: Vec<TextRange>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeHierarchyRelation {
+    Superclass,
+    Include,
+    Prepend,
+    Extend,
+    Subclass,
+    IncludedBy,
+    PrependedBy,
+    ExtendedBy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeHierarchyEntry {
+    pub fqn: FullyQualifiedName,
+    pub node_kind: Option<GraphNodeKind>,
+    pub relation: TypeHierarchyRelation,
+    pub range: TextRange,
+    pub edge_file_id: Option<SourceFileId>,
+    pub unresolved: bool,
+}
+
 impl<'a> AnalysisQuery<'a> {
     pub fn new(engine: &'a AnalysisEngine) -> Self {
         Self { engine }
@@ -491,6 +513,135 @@ impl<'a> AnalysisQuery<'a> {
             ruby_analysis_core::NamespaceKind::Singleton,
         )
     }
+
+    pub fn parse_namespace_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {
+        parse_namespace_fqn_string(fqn)
+    }
+
+    pub fn resolve_constant_in_context(
+        &self,
+        parts: &[RubyConstant],
+        context: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        let context_fqn = FullyQualifiedName::namespace(context.to_vec());
+        resolve_constant_fqn(self.engine, parts, false, &context_fqn)
+    }
+
+    pub fn type_hierarchy_node(
+        &self,
+        fqn: &FullyQualifiedName,
+    ) -> Option<(GraphNodeKind, TextRange)> {
+        let node = self.engine.graph_nodes_for(fqn).first()?;
+        Some((node.kind, node.range))
+    }
+
+    pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
+        let primary_file_id = match self.engine.graph_nodes_for(fqn).first() {
+            Some(node) => node.range.file_id,
+            None => return Vec::new(),
+        };
+
+        let edges = self.engine.graph_edges_from(fqn);
+        let mut supertypes = Vec::new();
+        push_supertype_entries(
+            self.engine,
+            edges,
+            GraphEdgeKind::Prepend,
+            TypeHierarchyRelation::Prepend,
+            &mut supertypes,
+        );
+        push_supertype_entries(
+            self.engine,
+            edges,
+            GraphEdgeKind::Include,
+            TypeHierarchyRelation::Include,
+            &mut supertypes,
+        );
+        push_supertype_entries(
+            self.engine,
+            edges,
+            GraphEdgeKind::Superclass,
+            TypeHierarchyRelation::Superclass,
+            &mut supertypes,
+        );
+        push_supertype_entries(
+            self.engine,
+            edges,
+            GraphEdgeKind::Extend,
+            TypeHierarchyRelation::Extend,
+            &mut supertypes,
+        );
+        push_unresolved_supertype_entries(self.engine, fqn, &mut supertypes);
+
+        for entry in &mut supertypes {
+            if entry.edge_file_id == Some(primary_file_id) {
+                entry.edge_file_id = None;
+            }
+        }
+
+        supertypes
+    }
+
+    pub fn subtypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
+        if self.engine.graph_nodes_for(fqn).is_empty() {
+            return Vec::new();
+        }
+
+        let mut subclass_edges = Vec::new();
+        let mut included_by_edges = Vec::new();
+        let mut prepended_by_edges = Vec::new();
+        let mut extended_by_edges = Vec::new();
+
+        for edge in self.engine.all_graph_edges() {
+            if &edge.target != fqn {
+                continue;
+            }
+            match edge.kind {
+                GraphEdgeKind::Superclass => subclass_edges.push(edge),
+                GraphEdgeKind::Include
+                    if edge.source.namespace_kind()
+                        == Some(ruby_analysis_core::NamespaceKind::Instance) =>
+                {
+                    included_by_edges.push(edge)
+                }
+                GraphEdgeKind::Prepend
+                    if edge.source.namespace_kind()
+                        == Some(ruby_analysis_core::NamespaceKind::Instance) =>
+                {
+                    prepended_by_edges.push(edge)
+                }
+                GraphEdgeKind::Include | GraphEdgeKind::Prepend => {}
+                GraphEdgeKind::Extend => extended_by_edges.push(edge),
+            }
+        }
+
+        let mut subtypes = Vec::new();
+        push_subtype_entries(
+            self.engine,
+            &mut subclass_edges,
+            TypeHierarchyRelation::Subclass,
+            &mut subtypes,
+        );
+        push_subtype_entries(
+            self.engine,
+            &mut included_by_edges,
+            TypeHierarchyRelation::IncludedBy,
+            &mut subtypes,
+        );
+        push_subtype_entries(
+            self.engine,
+            &mut prepended_by_edges,
+            TypeHierarchyRelation::PrependedBy,
+            &mut subtypes,
+        );
+        push_subtype_entries(
+            self.engine,
+            &mut extended_by_edges,
+            TypeHierarchyRelation::ExtendedBy,
+            &mut subtypes,
+        );
+        subtypes
+    }
 }
 
 fn workspace_symbol_match(fact: SymbolFact, relevance: f64) -> Option<WorkspaceSymbolMatch> {
@@ -569,6 +720,18 @@ fn parse_method_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
     Some(FullyQualifiedName::method(namespace, method))
 }
 
+fn parse_namespace_fqn_string(fqn: &str) -> Option<FullyQualifiedName> {
+    let namespace = fqn
+        .split("::")
+        .map(RubyConstant::new)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if namespace.is_empty() {
+        return None;
+    }
+    Some(FullyQualifiedName::namespace(namespace))
+}
+
 fn push_grouped_text_range(
     grouped: &mut Vec<(FullyQualifiedName, Vec<TextRange>)>,
     fqn: FullyQualifiedName,
@@ -579,6 +742,87 @@ fn push_grouped_text_range(
         return;
     }
     grouped.push((fqn, vec![range]));
+}
+
+fn push_subtype_entries(
+    engine: &crate::AnalysisEngine,
+    edges: &mut [GraphEdgeFact],
+    relation: TypeHierarchyRelation,
+    entries: &mut Vec<TypeHierarchyEntry>,
+) {
+    edges.sort_by(|left, right| left.source.to_string().cmp(&right.source.to_string()));
+    for edge in edges {
+        if let Some(entry) = hierarchy_entry_for_node(engine, &edge.source, relation, None, false) {
+            entries.push(entry);
+        }
+    }
+}
+
+fn push_supertype_entries(
+    engine: &crate::AnalysisEngine,
+    edges: &[GraphEdgeFact],
+    kind: GraphEdgeKind,
+    relation: TypeHierarchyRelation,
+    entries: &mut Vec<TypeHierarchyEntry>,
+) {
+    edges
+        .iter()
+        .filter(|edge| edge.kind == kind)
+        .rev()
+        .filter_map(|edge| {
+            hierarchy_entry_for_node(
+                engine,
+                &edge.target,
+                relation,
+                Some(edge.range.file_id),
+                false,
+            )
+        })
+        .for_each(|entry| entries.push(entry));
+}
+
+fn push_unresolved_supertype_entries(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    entries: &mut Vec<TypeHierarchyEntry>,
+) {
+    for edge in engine.unresolved_graph_edges() {
+        if edge.source != *fqn {
+            continue;
+        }
+        let relation = match edge.kind {
+            GraphEdgeKind::Superclass => TypeHierarchyRelation::Superclass,
+            GraphEdgeKind::Include => TypeHierarchyRelation::Include,
+            GraphEdgeKind::Prepend => TypeHierarchyRelation::Prepend,
+            GraphEdgeKind::Extend => TypeHierarchyRelation::Extend,
+        };
+        entries.push(TypeHierarchyEntry {
+            fqn: FullyQualifiedName::constant(edge.target_parts.clone()),
+            node_kind: None,
+            relation,
+            range: edge.range,
+            edge_file_id: Some(edge.range.file_id),
+            unresolved: true,
+        });
+    }
+}
+
+fn hierarchy_entry_for_node(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+    relation: TypeHierarchyRelation,
+    edge_file_id: Option<SourceFileId>,
+    unresolved: bool,
+) -> Option<TypeHierarchyEntry> {
+    let node = engine.graph_nodes_for(fqn).first()?;
+    Some(TypeHierarchyEntry {
+        fqn: fqn.clone(),
+        node_kind: Some(node.kind),
+        relation,
+        range: node.range,
+        edge_file_id,
+        unresolved,
+    })
 }
 
 struct SymbolMatcher;
@@ -1118,5 +1362,24 @@ mod tests {
         );
         assert_eq!(query.parse_method_fqn("#foo").unwrap().to_string(), "#foo");
         assert!(query.parse_method_fqn("Foo::bar").is_none());
+    }
+
+    #[test]
+    fn parse_namespace_fqn_strings() {
+        let (engine, _) = query_with_symbols();
+        let query = AnalysisQuery::new(&engine);
+
+        assert_eq!(
+            query
+                .parse_namespace_fqn("Foo::Bar::Baz")
+                .unwrap()
+                .to_string(),
+            "Foo::Bar::Baz"
+        );
+        assert_eq!(
+            query.parse_namespace_fqn("User").unwrap().to_string(),
+            "User"
+        );
+        assert!(query.parse_namespace_fqn("").is_none());
     }
 }
