@@ -5,6 +5,7 @@
 
 pub mod analyzer;
 pub mod analyzer_utils;
+pub mod document_symbols;
 pub mod fact_collector;
 pub mod identifier;
 pub mod identifier_visitor;
@@ -45,6 +46,7 @@ use ruby_prism::{
 };
 
 pub use analyzer::RubyPrismAnalyzer;
+pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
 pub use identifier::{Identifier, MethodReceiver};
 pub use identifier_visitor::{IdentifierType, IdentifierVisitor};
 pub use ruby_document::RubyDocument;

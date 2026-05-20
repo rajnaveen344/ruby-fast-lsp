@@ -5,14 +5,30 @@ use ruby_prism::{
     visit_module_node, visit_singleton_class_node, CallNode, ClassNode, ConstantWriteNode, DefNode,
     ModuleNode, SingletonClassNode, Visit,
 };
-use tower_lsp::lsp_types::SymbolKind;
+use tower_lsp::lsp_types::{Range, SymbolKind};
 
-use crate::{
-    analyzer_prism::scope_tracker::ScopeTracker,
-    capabilities::document_symbols::{MethodVisibility, RubySymbolContext},
-    types::ruby_document::RubyDocument,
-};
-use ruby_analysis_core::NamespaceKind;
+use crate::{LVScopeKind, RubyDocument, ScopeTracker};
+use ruby_analysis_core::{NamespaceKind, RubyConstant};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodVisibility {
+    Public,
+    Protected,
+    Private,
+}
+
+/// Internal representation of a Ruby symbol with additional context.
+#[derive(Debug, Clone)]
+pub struct RubySymbolContext {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub detail: Option<String>,
+    pub range: Range,
+    pub selection_range: Range,
+    pub children: Vec<RubySymbolContext>,
+    pub visibility: Option<MethodVisibility>,
+    pub namespace_kind: Option<NamespaceKind>,
+}
 
 pub struct DocumentSymbolsVisitor<'a> {
     flat_symbols: Vec<(RubySymbolContext, Option<usize>)>, // (symbol, parent_index)
@@ -179,13 +195,12 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         };
 
         // Push namespace scope
-        if let Ok(namespace) = crate::types::ruby_namespace::RubyConstant::new(&name) {
+        if let Ok(namespace) = RubyConstant::new(&name) {
             self.scope_tracker.push_ns_scope(namespace);
         }
 
         // Push local variable scope kind
-        self.scope_tracker
-            .push_scope_kind(crate::types::scope::LVScopeKind::Constant);
+        self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
         // Map scope to symbol for hierarchy building
         let scope_id = node.location().start_offset() + 1;
@@ -221,13 +236,12 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         };
 
         // Push namespace scope
-        if let Ok(namespace) = crate::types::ruby_namespace::RubyConstant::new(&name) {
+        if let Ok(namespace) = RubyConstant::new(&name) {
             self.scope_tracker.push_ns_scope(namespace);
         }
 
         // Push local variable scope kind
-        self.scope_tracker
-            .push_scope_kind(crate::types::scope::LVScopeKind::Constant);
+        self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 
         // Map scope to symbol for hierarchy building
         let scope_id = node.location().start_offset() + 1;
@@ -272,9 +286,9 @@ impl<'a> DocumentSymbolsVisitor<'a> {
 
         // Push method scope kind
         let scope_kind = if node.receiver().is_some() || self.scope_tracker.in_singleton() {
-            crate::types::scope::LVScopeKind::ClassMethod
+            LVScopeKind::ClassMethod
         } else {
-            crate::types::scope::LVScopeKind::InstanceMethod
+            LVScopeKind::InstanceMethod
         };
         self.scope_tracker.push_scope_kind(scope_kind);
     }

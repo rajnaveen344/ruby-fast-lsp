@@ -1,23 +1,12 @@
 use log::{debug, info};
 use ruby_prism::Visit;
 use std::time::Instant;
-use tower_lsp::lsp_types::{
-    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, SymbolKind,
-};
+use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse};
 
-use crate::{
-    analyzer_prism::visitors::document_symbols_visitor::DocumentSymbolsVisitor,
-    server::RubyLanguageServer,
-};
+use crate::server::RubyLanguageServer;
 
 use ruby_analysis_core::NamespaceKind;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MethodVisibility {
-    Public,
-    Protected,
-    Private,
-}
+use ruby_analysis_indexer::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
 
 /// Handle document symbols request for a Ruby file
 pub async fn handle_document_symbols(
@@ -149,27 +138,6 @@ fn build_symbol_detail(ruby_symbol: &RubySymbolContext) -> Option<String> {
     } else {
         Some(detail_parts.join(" • "))
     }
-}
-
-/// Internal representation of a Ruby symbol with additional context
-#[derive(Debug, Clone)]
-pub struct RubySymbolContext {
-    /// The symbol name
-    pub name: String,
-    /// Symbol kind (Class, Module, Method, etc.)
-    pub kind: SymbolKind,
-    /// Additional details (method signature, inheritance, etc.)
-    pub detail: Option<String>,
-    /// Full range including body
-    pub range: tower_lsp::lsp_types::Range,
-    /// Selection range (just the name)
-    pub selection_range: tower_lsp::lsp_types::Range,
-    /// Nested symbols
-    pub children: Vec<RubySymbolContext>,
-    /// Symbol visibility (public, private, protected)
-    pub visibility: Option<MethodVisibility>,
-    /// Whether it's a singleton method (class method) vs instance method
-    pub namespace_kind: Option<NamespaceKind>,
 }
 
 #[cfg(test)]
