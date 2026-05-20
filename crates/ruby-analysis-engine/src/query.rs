@@ -99,6 +99,15 @@ pub struct MixinUsage {
     pub range: TextRange,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VariableTypeKind {
+    Local,
+    Instance,
+    Class,
+    Global,
+    Constant,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamespaceNode {
     pub name: String,
@@ -679,6 +688,148 @@ impl<'a> AnalysisQuery<'a> {
         result.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
         result.dedup();
         result
+    }
+
+    pub fn method_return_type_at(
+        &self,
+        name: &str,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        let method_fact = self
+            .engine
+            .method_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .find(|fact| {
+                let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                    return false;
+                };
+                method.as_str() == name
+                    && fact.range.start_byte <= byte_offset
+                    && byte_offset <= fact.range.end_byte
+            })?;
+
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter_map(|fact| match &fact.subject {
+                TypeSubject::MethodReturn(method) if method == &method_fact.fqn => Some(fact),
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
+    pub fn parameter_type_at(
+        &self,
+        method_name: &str,
+        param_name: &str,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        let method_fact = self
+            .engine
+            .method_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .find(|fact| {
+                let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+                    return false;
+                };
+                method.as_str() == method_name
+                    && fact.range.start_byte <= byte_offset
+                    && byte_offset <= fact.range.end_byte
+            })?;
+
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter_map(|fact| match &fact.subject {
+                TypeSubject::Parameter { method, name }
+                    if method == &method_fact.fqn
+                        && name == param_name
+                        && fact.ruby_type != RubyType::Unknown =>
+                {
+                    Some(fact)
+                }
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
+    pub fn variable_type_before(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.range.start_byte <= byte_offset)
+            .filter_map(|fact| match (&fact.subject, kind) {
+                (
+                    TypeSubject::Local {
+                        scope_id: _,
+                        name: fact_name,
+                    },
+                    VariableTypeKind::Local,
+                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                (
+                    TypeSubject::InstanceVariable {
+                        name: fact_name, ..
+                    },
+                    VariableTypeKind::Instance,
+                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                (
+                    TypeSubject::ClassVariable {
+                        name: fact_name, ..
+                    },
+                    VariableTypeKind::Class,
+                ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global)
+                    if fact_name == name && fact.ruby_type != RubyType::Unknown =>
+                {
+                    Some(fact)
+                }
+                (
+                    TypeSubject::Constant(_)
+                    | TypeSubject::Local { .. }
+                    | TypeSubject::InstanceVariable { .. }
+                    | TypeSubject::ClassVariable { .. }
+                    | TypeSubject::GlobalVariable(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+                    | TypeSubject::Expression(_),
+                    VariableTypeKind::Local
+                    | VariableTypeKind::Instance
+                    | VariableTypeKind::Class
+                    | VariableTypeKind::Global
+                    | VariableTypeKind::Constant,
+                ) => None,
+            })
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
     }
 
     pub fn method_fact_for_receiver(

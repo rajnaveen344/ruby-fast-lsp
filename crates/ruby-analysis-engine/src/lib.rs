@@ -17,5 +17,6 @@ pub use query::{
     GraphNodeSnapshot, IncluderInfo, IncomingCall, InferenceStatsResponse, LocationInfo,
     LookupEntry, LookupResponse, MethodCompletionCandidate, MethodEntry, MethodsResponse,
     MixinInfo, MixinUsage, MixinUsageKind, NamespaceNode, NamespaceTreeResponse, OutgoingCall,
-    StatsResponse, TypeHierarchyEntry, TypeHierarchyRelation, ViaModuleInfo, WorkspaceSymbolMatch,
+    StatsResponse, TypeHierarchyEntry, TypeHierarchyRelation, VariableTypeKind, ViaModuleInfo,
+    WorkspaceSymbolMatch,
 };

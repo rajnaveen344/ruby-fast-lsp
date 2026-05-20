@@ -66,24 +66,8 @@ impl EngineQuery {
         // Step 4: Create hint context
         let context = HintContext {
             content,
-            type_facts: self
-                .analysis_engine()
-                .map(|engine| {
-                    engine
-                        .lock()
-                        .type_store()
-                        .facts_in_file(document.analysis_file_id())
-                })
-                .unwrap_or_default(),
-            method_facts: self
-                .analysis_engine()
-                .map(|engine| {
-                    engine
-                        .lock()
-                        .method_store()
-                        .facts_in_file(document.analysis_file_id())
-                })
-                .unwrap_or_default(),
+            file_id: document.analysis_file_id(),
+            analysis_engine: self.analysis_engine().cloned(),
         };
 
         // Step 5: Generate hints from collected nodes

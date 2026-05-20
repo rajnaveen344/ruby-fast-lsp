@@ -5,9 +5,11 @@
 
 use super::nodes::{InlayNode, VariableKind};
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
-use ruby_analysis_core::{MethodFact, TypeFact, TypeSubject};
+use parking_lot::Mutex;
+use ruby_analysis_core::SourceFileId;
+use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
 /// Unified inlay hint data structure.
@@ -37,8 +39,8 @@ pub enum InlayHintKind {
 /// Context for hint generation (provides access to type inference).
 pub struct HintContext<'a> {
     pub content: &'a str,
-    pub type_facts: Vec<TypeFact>,
-    pub method_facts: Vec<MethodFact>,
+    pub file_id: SourceFileId,
+    pub analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
@@ -242,31 +244,9 @@ fn method_return_type_from_analysis(
     context: &HintContext,
 ) -> Option<RubyType> {
     let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
-    let method_fact = context.method_facts.iter().find(|fact| {
-        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            return false;
-        };
-        method.as_str() == name
-            && fact.range.start_byte <= byte_offset
-            && byte_offset <= fact.range.end_byte
-    })?;
-
-    context
-        .type_facts
-        .iter()
-        .filter_map(|fact| match &fact.subject {
-            TypeSubject::MethodReturn(method) if method == &method_fact.fqn => Some(fact),
-            TypeSubject::Constant(_)
-            | TypeSubject::Local { .. }
-            | TypeSubject::InstanceVariable { .. }
-            | TypeSubject::ClassVariable { .. }
-            | TypeSubject::GlobalVariable(_)
-            | TypeSubject::MethodReturn(_)
-            | TypeSubject::Parameter { .. }
-            | TypeSubject::Expression(_) => None,
-        })
-        .max_by_key(|fact| fact.range.start_byte)
-        .map(|fact| fact.ruby_type.clone())
+    let engine = context.analysis_engine.as_ref()?;
+    let engine = engine.lock();
+    AnalysisQuery::new(&engine).method_return_type_at(name, context.file_id, byte_offset)
 }
 
 fn parameter_type_from_analysis(
@@ -276,37 +256,14 @@ fn parameter_type_from_analysis(
     context: &HintContext,
 ) -> Option<RubyType> {
     let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
-    let method_fact = context.method_facts.iter().find(|fact| {
-        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-            return false;
-        };
-        method.as_str() == method_name
-            && fact.range.start_byte <= byte_offset
-            && byte_offset <= fact.range.end_byte
-    })?;
-
-    context
-        .type_facts
-        .iter()
-        .filter_map(|fact| match &fact.subject {
-            TypeSubject::Parameter { method, name }
-                if method == &method_fact.fqn
-                    && name == param_name
-                    && fact.ruby_type != RubyType::Unknown =>
-            {
-                Some(fact)
-            }
-            TypeSubject::Constant(_)
-            | TypeSubject::Local { .. }
-            | TypeSubject::InstanceVariable { .. }
-            | TypeSubject::ClassVariable { .. }
-            | TypeSubject::GlobalVariable(_)
-            | TypeSubject::MethodReturn(_)
-            | TypeSubject::Parameter { .. }
-            | TypeSubject::Expression(_) => None,
-        })
-        .max_by_key(|fact| fact.range.start_byte)
-        .map(|fact| fact.ruby_type.clone())
+    let engine = context.analysis_engine.as_ref()?;
+    let engine = engine.lock();
+    AnalysisQuery::new(&engine).parameter_type_at(
+        method_name,
+        param_name,
+        context.file_id,
+        byte_offset,
+    )
 }
 
 fn variable_type_from_analysis_facts(
@@ -316,49 +273,24 @@ fn variable_type_from_analysis_facts(
     position: &Position,
 ) -> Option<RubyType> {
     let byte_offset = position_to_byte_offset(context.content, *position)?;
-    context
-        .type_facts
-        .iter()
-        .filter(|fact| fact.range.start_byte <= byte_offset)
-        .filter_map(|fact| match (&fact.subject, kind) {
-            (
-                TypeSubject::Local {
-                    scope_id: _,
-                    name: fact_name,
-                },
-                VariableKind::Local,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (
-                TypeSubject::InstanceVariable {
-                    name: fact_name, ..
-                },
-                VariableKind::Instance,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (
-                TypeSubject::ClassVariable {
-                    name: fact_name, ..
-                },
-                VariableKind::Class,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (TypeSubject::GlobalVariable(fact_name), VariableKind::Global)
-                if fact_name == name && fact.ruby_type != RubyType::Unknown =>
-            {
-                Some(fact)
-            }
-            (
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_),
-                _,
-            ) => None,
-        })
-        .max_by_key(|fact| fact.range.start_byte)
-        .map(|fact| fact.ruby_type.clone())
+    let engine = context.analysis_engine.as_ref()?;
+    let engine = engine.lock();
+    AnalysisQuery::new(&engine).variable_type_before(
+        variable_type_kind(kind),
+        name,
+        context.file_id,
+        byte_offset,
+    )
+}
+
+fn variable_type_kind(kind: VariableKind) -> VariableTypeKind {
+    match kind {
+        VariableKind::Local => VariableTypeKind::Local,
+        VariableKind::Instance => VariableTypeKind::Instance,
+        VariableKind::Class => VariableTypeKind::Class,
+        VariableKind::Global => VariableTypeKind::Global,
+        VariableKind::Constant => VariableTypeKind::Constant,
+    }
 }
 
 fn position_to_byte_offset(content: &str, position: Position) -> Option<u32> {
