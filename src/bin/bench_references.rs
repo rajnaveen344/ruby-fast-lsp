@@ -1,7 +1,7 @@
 //! bench_references — targeted perf harness for reference/fact indexing.
 //!
 //! Loads a named corpus (via `src/perf/corpus.rs`), runs full indexing, and
-//! reports wall-time breakdown — fact collection, reserved/legacy reserved,
+//! reports wall-time breakdown — fact collection, reserved resolution,
 //! diagnostics publishing, and total. Optionally repeats the full
 //! pass K times on a fresh index each iteration to measure variance.
 //!

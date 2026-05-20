@@ -13,7 +13,6 @@ reference candidates, resolved references, and diagnostics.
 - `indexer_project.rs`: project file discovery and dependency scan
 - `indexer_stdlib.rs`: standard library file discovery
 - `indexer_gem.rs`: gem file discovery
-- `graph.rs`: legacy in-process graph helper still used by tests/debug paths
 
 ## Current Flow
 

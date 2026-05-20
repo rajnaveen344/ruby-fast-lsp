@@ -4,8 +4,7 @@
 //! inheritance patterns including diamond inheritance, prepend vs include priority,
 //! and complex mixin hierarchies.
 //!
-//! Note: Basic graph traversal is unit-tested in `src/indexer/graph.rs`.
-//! These integration tests verify the end-to-end behavior through goto definition.
+//! These integration tests verify graph behavior through goto definition.
 
 use crate::test::harness::check;
 

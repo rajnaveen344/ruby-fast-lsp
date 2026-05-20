@@ -10,7 +10,7 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 src/
 ├── analyzer_prism/ - Ruby AST analysis and visitors
 ├── capabilities/   - LSP feature implementations (AST-only logic)
-├── indexer/        - Data Layer: Global symbol indexing and workspace tracking
+├── indexer/        - File discovery and fact collection orchestration
 ├── query/          - Service Layer: Unified AnalysisEngine query engine
 ├── inferrer/       - Type inference and RBS integration
 ├── handlers/       - LSP request/notification routing
@@ -31,23 +31,24 @@ tests/
 
 ### 1. Indexer (`src/indexer/`)
 
-The Indexer is responsible for building and maintaining an index of Ruby symbols across the workspace.
+The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis-engine`.
 
-- **Primary Responsibility**: Track the location of all symbols in the workspace
-- **Secondary Responsibility**: Handle file events (open, change, close)
+- **Primary Responsibility**: Workspace scanning and per-file fact collection
+- **Secondary Responsibility**: Coordinate gem, stdlib, and project indexing
 
 #### Key Files:
 
-- `entry.rs`: Defines the structure for index entries (classes, methods, etc.)
-- `index.rs`: Core index data structure that maps symbols to their locations
-- `traverser.rs`: Traverses Ruby AST to build the index
-- `events.rs`: Handles workspace indexing and file change events
+- `coordinator.rs`: Orchestrates workspace indexing
+- `file_processor.rs`: Parses one file and runs `FactCollector`
+- `indexer_project.rs`: Discovers and indexes project files
+- `indexer_gem.rs`: Discovers and indexes gem files
+- `indexer_stdlib.rs`: Discovers and indexes stdlib files
 
 #### Design Decisions:
 
-- The indexer maintains maps of symbols to their locations for efficient lookup
-- The indexer does not perform code analysis - it just stores locations
-- File operations are separated from the core indexing logic
+- Storage is owned by `ruby-analysis-engine`
+- `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass
+- File discovery and parsing stay separate from engine query logic
 
 ### 2. Analyzer (`src/analyzer_prism/`)
 

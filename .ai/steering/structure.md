@@ -5,6 +5,8 @@
 ```
 ├── src/                    # Main LSP server source code
 ├── crates/                 # Additional workspace crates
+│   ├── ruby-analysis-core/  # Shared facts, graph, diagnostics, and type stores
+│   ├── ruby-analysis-engine/# Engine facade over indexed analysis facts
 │   ├── ast-visualizer/     # Web-based AST visualization tool
 │   ├── lsp-repl/           # LSP REPL debugger
 │   └── rbs-parser/         # RBS type signature parser
@@ -56,24 +58,17 @@ analyzer_prism/
     │   ├── def_node.rs
     │   ├── local_variable_read_node.rs
     │   └── ...
-    ├── index_visitor/               # Symbol indexing visitors
+    ├── fact_collector/              # Single-pass facts, references, diagnostics, scopes
     │   ├── mod.rs
     │   ├── class_node.rs
     │   ├── module_node.rs
     │   ├── def_node.rs
-    │   ├── constant_write_node.rs
-    │   ├── local_variable_write_node.rs
-    │   ├── instance_variable_write_node.rs
-    │   ├── class_variable_write_node.rs
-    │   ├── global_variable_write_node.rs
-    │   └── ...
-    ├── reference_visitor/           # Reference finding visitors
-    │   ├── mod.rs
+    │   ├── call_node/
     │   ├── constant_read_node.rs
-    │   ├── constant_path_node.rs
+    │   ├── constant_write_node.rs
     │   ├── local_variable_read_node.rs
+    │   ├── local_variable_write_node.rs
     │   └── ...
-    ├── inlay_visitor.rs             # Inlay hints generation
     └── token_visitor.rs             # Semantic token generation
 ```
 
@@ -82,21 +77,13 @@ analyzer_prism/
 ```
 indexer/
 ├── mod.rs                  # Module exports
-├── index.rs                # Core RubyIndex data structure
 ├── coordinator.rs          # Orchestrates indexing operations
-├── graph.rs                # Symbol dependency graph
 ├── indexer_project.rs      # Project file indexing
 ├── indexer_stdlib.rs       # Ruby stdlib stubs indexing
 ├── indexer_gem.rs          # Gem dependency indexing
-├── index_ref.rs            # Reference indexing
 ├── file_processor.rs       # Individual file processing logic
 ├── interner.rs             # String interning for memory efficiency
-├── prefix_tree.rs          # Trie for completion lookups
-├── version/                # Ruby version detection
-└── entry/                  # Index entry definitions
-    ├── mod.rs
-    ├── entry_builder.rs    # Builder pattern for entries
-    └── entry_kind.rs       # Entry type definitions
+└── version/                # Ruby version detection
 ```
 
 ## Query Module (`src/query/`)
@@ -201,21 +188,21 @@ test/
 
 ### Files and Modules
 
-- Snake_case for file names: `ruby_document.rs`, `index_visitor.rs`
+- Snake_case for file names: `ruby_document.rs`, `fact_collector.rs`
 - Module names match file names without extension
 - Visitor files named after AST node type: `class_node.rs`, `def_node.rs`
 
 ### Code Structure
 
 - Each visitor handles one specific AST node type
-- Capabilities combine indexer and analyzer functionality
+- Capabilities adapt LSP requests to the query layer and engine-backed facts
 - Types are shared across modules but defined centrally
 - Error handling uses `anyhow::Result<T>` consistently
 
 ## Key Architectural Patterns
 
 1. **Visitor Pattern**: Used extensively for AST traversal
-2. **Builder Pattern**: Used for constructing index entries
+2. **Fact Collection**: Single-pass AST traversal emits engine-owned facts
 3. **3-Layer Architecture**: `handlers/` (API) → `query/` (Service) → `indexer/` (Data)
 4. **Thin Capabilities**: `capabilities/` are adapters; business logic lives in `query/`
 5. **Separation of Concerns**: Clear boundaries between parsing, indexing, analysis, and LSP features

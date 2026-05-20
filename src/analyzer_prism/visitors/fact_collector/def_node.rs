@@ -231,10 +231,7 @@ impl FactCollector {
         let Some(expected_type) = return_type else {
             return;
         };
-        let return_values = infer_return_values_for_node_for_legacy_validation(
-            self.document.content.as_bytes(),
-            node,
-        );
+        let return_values = infer_return_values_for_declared_type_check(node);
 
         for (inferred_ty, start, end) in return_values {
             if inferred_ty == RubyType::Unknown {
@@ -445,8 +442,7 @@ impl FactCollector {
     }
 }
 
-fn infer_return_values_for_node_for_legacy_validation(
-    _source: &[u8],
+fn infer_return_values_for_declared_type_check(
     def_node: &DefNode,
 ) -> Vec<(RubyType, usize, usize)> {
     let Some(body) = def_node.body() else {
