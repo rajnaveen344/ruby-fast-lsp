@@ -7,6 +7,8 @@
 ├── crates/                 # Additional workspace crates
 │   ├── ruby-analysis-core/  # Shared facts, graph, diagnostics, and type stores
 │   ├── ruby-analysis-engine/# Engine facade over indexed analysis facts
+│   ├── ruby-analysis-inference/ # Type inference, RBS, control-flow analysis
+│   ├── ruby-analysis-indexer/   # Parser-to-facts indexing primitives
 │   ├── ast-visualizer/     # Web-based AST visualization tool
 │   ├── lsp-repl/           # LSP REPL debugger
 │   └── rbs-parser/         # RBS type signature parser
@@ -32,7 +34,6 @@
 - `analyzer_prism/` - Ruby code analysis using Prism parser
 - `indexer/` - Symbol indexing and workspace tracking
 - `capabilities/` - LSP feature implementations
-- `inferrer/` - Type inference engine and RBS integration
 - `handlers/` - Request and notification handlers
 - `types/` - Core data structures and representation
 - `bin/` - CLI tools and profilers
@@ -151,17 +152,15 @@ types/
 └── unresolved_index.rs       # Handling for unresolved constants
 ```
 
-## Type Inference Module (`src/type_inference/`)
+## Type Inference Crate (`crates/ruby-analysis-inference/`)
 
 ```
-inferrer/
-├── mod.rs                  # Module exports
-├── ruby_type.rs            # Type representation
-├── query.rs                # Type query engine
+crates/ruby-analysis-inference/src/
+├── lib.rs                  # Crate exports
+├── control_flow.rs         # Structural reachability analysis
 ├── rbs.rs                  # RBS integration
-├── return_type.rs          # Method return type inference
-├── cfg/                    # Control Flow Graph for inference
 ├── method/                 # Method-specific inference
+├── type_tracker/           # Local flow/type tracking and narrowing
 └── type/                   # Specialized type inference
 ```
 

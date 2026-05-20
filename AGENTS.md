@@ -89,9 +89,11 @@ cargo build --release         # Release build
 - `src/server.rs` - LSP server core
 - `src/handlers/` - Request/notification routing
 - `src/capabilities/` - Feature implementations
-- `src/indexer/` - Symbol indexing
-- `src/inferrer/` - Type inference
+- `src/indexer/` - LSP/workspace indexing orchestration
 - `src/analyzer_prism/` - AST analysis
+- `crates/ruby-analysis-engine/` - Analysis facts and graph/query engine
+- `crates/ruby-analysis-inference/` - Type inference, RBS lookup, control-flow analysis
+- `crates/ruby-analysis-indexer/` - Parser-to-facts indexing primitives
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
@@ -113,11 +115,11 @@ ruby-analysis-engine
   definitions/references, ancestors, implementors, namespace tree, debug views.
   It stores type facts already computed, but should not do heavy expression inference.
 
-ruby-type-inference (planned)
+ruby-analysis-inference
   Owns type algorithms:
   literal/expression type inference, local flow/type tracking, narrowing,
   method return inference, RBS lookup/substitution.
-  It depends on ruby-analysis-core and an engine query trait, not on LSP.
+  It depends on ruby-analysis-core and ruby-analysis-engine, not on LSP.
 
 ruby-analysis-indexer
   Owns parsing/fact collection from Ruby source. FactCollector should eventually
@@ -135,14 +137,14 @@ Preferred:
 
 ```text
 ruby-analysis-engine -> ruby-analysis-core
-ruby-type-inference -> ruby-analysis-core
+ruby-analysis-inference -> ruby-analysis-core
 ruby-fast-lsp -> engine + inference + indexer
 ```
 
 Avoid:
 
 ```text
-ruby-analysis-engine -> ruby-type-inference
+ruby-analysis-engine -> ruby-analysis-inference
 ```
 
 Engine should remain stable fact DB + graph/query layer. Inference should be
@@ -158,8 +160,8 @@ pub trait InferenceQuery {
 }
 ```
 
-`ruby_analysis_engine::AnalysisQuery` should implement this trait when
-`ruby-type-inference` exists.
+`ruby_analysis_engine::AnalysisQuery` should implement this trait when the
+inference/query seam is formalized.
 
 ### Migration Backlog
 
@@ -178,9 +180,9 @@ Move remaining non-LSP logic out of `src/`:
 6. `src/query/completion.rs` and `src/capabilities/completion/*` -> engine
    candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
 7. `src/query/hover/*` -> split domain hover content from protocol hover.
-8. `src/inferrer/*` -> new `ruby-type-inference` crate.
-9. `src/analyzer_prism/visitors/fact_collector/*` -> `ruby-analysis-indexer`.
-10. `src/analyzer_prism/mod.rs` -> split into smaller parser/identifier/source
+8. Done: `src/inferrer/*` -> `crates/ruby-analysis-inference`.
+9. Remaining: `src/analyzer_prism/visitors/fact_collector/*` -> `ruby-analysis-indexer`.
+10. Remaining: `src/analyzer_prism/mod.rs` -> split into smaller parser/identifier/source
     utilities; keep LSP-specific position handling in adapter layer where possible.
 
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
@@ -329,9 +331,9 @@ For generic types (`Array`, `Hash`), the user index is **skipped** and RBS is us
 RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
 
 **Key files:**
-- `src/inferrer/method/resolver.rs` — `resolve_method_return_type()` orchestrates both paths
-- `src/inferrer/rbs.rs` — RBS type lookup with generic substitution
-- `src/capabilities/completion/method.rs` — method completion with ancestor chain walking
+- `crates/ruby-analysis-inference/src/type_tracker/mod.rs` — local flow/type tracking
+- `crates/ruby-analysis-inference/src/rbs.rs` — RBS type lookup with generic substitution
+- `src/capabilities/completion/method.rs` — LSP completion item mapping for RBS methods
 
 ## Subagent Delegation
 

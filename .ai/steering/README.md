@@ -15,8 +15,10 @@ This folder contains context and guidance for AI assistants working on the Ruby 
 - `src/handlers/` - Request/Notification routing
 - `src/capabilities/` - Feature implementations (hover, completion, etc.)
 - `src/indexer/` - Symbol indexing system
-- `src/inferrer/` - Type inference engine
 - `src/analyzer_prism/` - AST analysis using Prism
+- `crates/ruby-analysis-engine/` - Analysis facts and graph/query engine
+- `crates/ruby-analysis-inference/` - Type inference, RBS, control-flow analysis
+- `crates/ruby-analysis-indexer/` - Parser-to-facts indexing primitives
 
 ## Documentation Index
 
@@ -92,7 +94,7 @@ This folder contains context and guidance for AI assistants working on the Ruby 
                               ▼
 ┌───────────────────┐  ┌───────────────┐  ┌────────────────────┐
 │      Indexer      │  │   Inferrer    │  │  Analyzer (Prism)  │
-│   (src/indexer)   │  │(src/inferrer) │  │(src/analyzer_prism)│
+│   (src/indexer)   │  │   (crates/)   │  │(src/analyzer_prism)│
 └───────────────────┘  └───────────────┘  └────────────────────┘
 ```
 
