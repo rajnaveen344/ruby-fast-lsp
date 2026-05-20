@@ -275,31 +275,8 @@ impl FactCollector {
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
         let engine = self.analysis_engine.lock();
-        let mut search = current_namespace.to_vec();
-
-        loop {
-            let mut probe = search.clone();
-            probe.extend(parts.iter().cloned());
-
-            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
-            if !engine.graph_nodes_for(&namespace_fqn).is_empty()
-                || !engine.symbol_facts_for(&namespace_fqn).is_empty()
-            {
-                return Some(namespace_fqn);
-            }
-
-            let constant_fqn = FullyQualifiedName::Constant(probe);
-            if !engine.symbol_facts_for(&constant_fqn).is_empty() {
-                return Some(constant_fqn);
-            }
-
-            if search.is_empty() {
-                break;
-            }
-            search.pop();
-        }
-
-        None
+        ruby_analysis_engine::AnalysisQuery::new(&engine)
+            .resolve_constant_in_context(parts, current_namespace)
     }
 
     fn resolve_relative_constant_path(
