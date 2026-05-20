@@ -832,6 +832,67 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.ruby_type)
     }
 
+    pub fn variable_type_in_file(
+        &self,
+        kind: VariableTypeKind,
+        name: &str,
+        file_id: SourceFileId,
+    ) -> Option<RubyType> {
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter_map(|fact| variable_type_fact_match(fact, kind, name))
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
+    pub fn namespace_node_kind(&self, namespace_fqn: &FullyQualifiedName) -> Option<GraphNodeKind> {
+        self.engine
+            .graph_nodes_for(namespace_fqn)
+            .iter()
+            .max_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                )
+            })
+            .map(|fact| fact.kind)
+    }
+
+    pub fn namespace_type(&self, namespace_fqn: &FullyQualifiedName) -> Option<RubyType> {
+        match self.namespace_node_kind(namespace_fqn)? {
+            GraphNodeKind::Class => Some(RubyType::Class(namespace_fqn.clone())),
+            GraphNodeKind::Module => Some(RubyType::Module(namespace_fqn.clone())),
+        }
+    }
+
+    pub fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
+        let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
+        let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
+        match self.namespace_node_kind(&namespace_fqn)? {
+            GraphNodeKind::Class => Some(RubyType::ClassReference(constant_fqn)),
+            GraphNodeKind::Module => Some(RubyType::ModuleReference(constant_fqn)),
+        }
+    }
+
+    pub fn constant_value_type(&self, constant_fqn: &FullyQualifiedName) -> Option<RubyType> {
+        self.engine
+            .type_store()
+            .facts_for(&TypeSubject::Constant(constant_fqn.clone()))
+            .iter()
+            .filter(|fact| fact.ruby_type != RubyType::Unknown)
+            .max_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                )
+            })
+            .map(|fact| fact.ruby_type.clone())
+    }
+
     pub fn method_fact_for_receiver(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -2492,6 +2553,54 @@ fn mixin_usage_kind_for_graph_edge(kind: GraphEdgeKind) -> Option<MixinUsageKind
         GraphEdgeKind::Prepend => Some(MixinUsageKind::Prepend),
         GraphEdgeKind::Extend => Some(MixinUsageKind::Extend),
         GraphEdgeKind::Superclass => None,
+    }
+}
+
+fn variable_type_fact_match(
+    fact: TypeFact,
+    kind: VariableTypeKind,
+    name: &str,
+) -> Option<TypeFact> {
+    match (&fact.subject, kind) {
+        (
+            TypeSubject::Local {
+                scope_id: _,
+                name: fact_name,
+            },
+            VariableTypeKind::Local,
+        ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+        (
+            TypeSubject::InstanceVariable {
+                name: fact_name, ..
+            },
+            VariableTypeKind::Instance,
+        ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+        (
+            TypeSubject::ClassVariable {
+                name: fact_name, ..
+            },
+            VariableTypeKind::Class,
+        ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+        (TypeSubject::GlobalVariable(fact_name), VariableTypeKind::Global)
+            if fact_name == name && fact.ruby_type != RubyType::Unknown =>
+        {
+            Some(fact)
+        }
+        (
+            TypeSubject::Constant(_)
+            | TypeSubject::Local { .. }
+            | TypeSubject::InstanceVariable { .. }
+            | TypeSubject::ClassVariable { .. }
+            | TypeSubject::GlobalVariable(_)
+            | TypeSubject::MethodReturn(_)
+            | TypeSubject::Parameter { .. }
+            | TypeSubject::Expression(_),
+            VariableTypeKind::Local
+            | VariableTypeKind::Instance
+            | VariableTypeKind::Class
+            | VariableTypeKind::Global
+            | VariableTypeKind::Constant,
+        ) => None,
     }
 }
 

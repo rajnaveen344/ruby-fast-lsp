@@ -12,8 +12,7 @@ use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
-use ruby_analysis_core::{GraphNodeKind, TypeSubject};
-use ruby_analysis_engine::AnalysisEngine;
+use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
@@ -251,6 +250,14 @@ enum VariableHoverKind {
     Global,
 }
 
+fn variable_type_kind(kind: VariableHoverKind) -> VariableTypeKind {
+    match kind {
+        VariableHoverKind::Instance => VariableTypeKind::Instance,
+        VariableHoverKind::Class => VariableTypeKind::Class,
+        VariableHoverKind::Global => VariableTypeKind::Global,
+    }
+}
+
 fn variable_type_from_analysis(
     context: &HoverContext,
     name: &str,
@@ -261,42 +268,11 @@ fn variable_type_from_analysis(
     drop(doc);
 
     let engine = context.analysis_engine?.lock();
-    engine
-        .type_store()
-        .facts_in_file(file_id)
-        .into_iter()
-        .filter_map(|fact| match (&fact.subject, variable_kind) {
-            (
-                TypeSubject::InstanceVariable {
-                    name: fact_name, ..
-                },
-                VariableHoverKind::Instance,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (
-                TypeSubject::ClassVariable {
-                    name: fact_name, ..
-                },
-                VariableHoverKind::Class,
-            ) if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
-            (TypeSubject::GlobalVariable(fact_name), VariableHoverKind::Global)
-                if fact_name == name && fact.ruby_type != RubyType::Unknown =>
-            {
-                Some(fact)
-            }
-            (
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_),
-                _,
-            ) => None,
-        })
-        .max_by_key(|fact| fact.range.start_byte)
-        .map(|fact| fact.ruby_type)
+    AnalysisQuery::new(&engine).variable_type_in_file(
+        variable_type_kind(variable_kind),
+        name,
+        file_id,
+    )
 }
 
 fn constant_hover_from_analysis(
@@ -306,40 +282,22 @@ fn constant_hover_from_analysis(
     namespace_fqn: &FullyQualifiedName,
 ) -> Option<HoverInfo> {
     let engine = context.analysis_engine?.lock();
+    let query = AnalysisQuery::new(&engine);
     let fqn_str = constant_path_to_string(path);
 
-    let node_kind = engine
-        .graph_nodes_for(namespace_fqn)
-        .iter()
-        .max_by_key(|fact| {
-            (
-                fact.range.file_id,
-                fact.range.start_byte,
-                fact.range.end_byte,
-            )
-        })
-        .map(|fact| fact.kind);
+    let node_kind = query.namespace_node_kind(namespace_fqn);
 
     match node_kind {
-        Some(GraphNodeKind::Class) => return Some(HoverInfo::text(format!("class {}", fqn_str))),
-        Some(GraphNodeKind::Module) => return Some(HoverInfo::text(format!("module {}", fqn_str))),
+        Some(ruby_analysis_core::GraphNodeKind::Class) => {
+            return Some(HoverInfo::text(format!("class {}", fqn_str)));
+        }
+        Some(ruby_analysis_core::GraphNodeKind::Module) => {
+            return Some(HoverInfo::text(format!("module {}", fqn_str)));
+        }
         None => {}
     }
 
-    if let Some(ty) = engine
-        .type_store()
-        .facts_for(&TypeSubject::Constant(constant_fqn.clone()))
-        .iter()
-        .filter(|fact| fact.ruby_type != RubyType::Unknown)
-        .max_by_key(|fact| {
-            (
-                fact.range.file_id,
-                fact.range.start_byte,
-                fact.range.end_byte,
-            )
-        })
-        .map(|fact| fact.ruby_type.clone())
-    {
+    if let Some(ty) = query.constant_value_type(constant_fqn) {
         return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
     }
 
@@ -353,44 +311,20 @@ fn constant_path_to_string(path: &[RubyConstant]) -> String {
         .join("::")
 }
 
-fn graph_node_kind_from_analysis(
-    context: &HoverContext,
-    namespace_fqn: &FullyQualifiedName,
-) -> Option<GraphNodeKind> {
-    let engine = context.analysis_engine?.lock();
-    engine
-        .graph_nodes_for(namespace_fqn)
-        .iter()
-        .max_by_key(|fact| {
-            (
-                fact.range.file_id,
-                fact.range.start_byte,
-                fact.range.end_byte,
-            )
-        })
-        .map(|fact| fact.kind)
-}
-
 fn namespace_type_from_analysis(
     context: &HoverContext,
     namespace_fqn: &FullyQualifiedName,
 ) -> Option<RubyType> {
-    match graph_node_kind_from_analysis(context, namespace_fqn)? {
-        GraphNodeKind::Class => Some(RubyType::Class(namespace_fqn.clone())),
-        GraphNodeKind::Module => Some(RubyType::Module(namespace_fqn.clone())),
-    }
+    let engine = context.analysis_engine?.lock();
+    AnalysisQuery::new(&engine).namespace_type(namespace_fqn)
 }
 
 fn constant_reference_type_from_analysis(
     context: &HoverContext,
     path: &[RubyConstant],
 ) -> Option<RubyType> {
-    let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
-    let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
-    match graph_node_kind_from_analysis(context, &namespace_fqn)? {
-        GraphNodeKind::Class => Some(RubyType::ClassReference(constant_fqn)),
-        GraphNodeKind::Module => Some(RubyType::ModuleReference(constant_fqn)),
-    }
+    let engine = context.analysis_engine?.lock();
+    AnalysisQuery::new(&engine).constant_reference_type(path)
 }
 
 fn method_call_return_type(
@@ -581,18 +515,7 @@ fn method_definition_hover_from_analysis(
     let byte_offset = position_to_byte_offset(context.content, position)?;
     let engine = context.analysis_engine?.lock();
     let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
-    let method_fact = query
-        .method_facts_in_file(file_id)
-        .into_iter()
-        .filter(|fact| fact.range.contains_offset(file_id, byte_offset))
-        .find(|fact| {
-            let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-                return false;
-            };
-            method.as_str() == method_name
-        })?;
-
-    let return_type = query.method_return_type(&method_fact)?;
+    let return_type = query.method_return_type_at(method_name, file_id, byte_offset)?;
     if return_type == RubyType::Unknown {
         return None;
     }
