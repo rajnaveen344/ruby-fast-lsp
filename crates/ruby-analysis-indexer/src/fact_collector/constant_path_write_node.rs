@@ -1,6 +1,6 @@
+use crate::collect_namespaces;
 use log::error;
 use ruby_analysis_core::{FullyQualifiedName, RubyConstant, TypeFact, TypeProvenance, TypeSubject};
-use ruby_analysis_indexer::collect_namespaces;
 use ruby_prism::ConstantPathWriteNode;
 
 use super::FactCollector;

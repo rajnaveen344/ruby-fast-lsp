@@ -8,7 +8,7 @@ impl FactCollector {
             return;
         }
 
-        let variable_name = ruby_analysis_indexer::utf8_str(node.name().as_slice());
+        let variable_name = crate::utf8_str(node.name().as_slice());
         let location = self.document.prism_location_to_text_range(&node.location());
 
         self.document

@@ -1,4 +1,4 @@
-use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
+use crate::LocalScopeKind as LVScopeKind;
 use ruby_prism::BlockNode;
 
 use super::FactCollector;

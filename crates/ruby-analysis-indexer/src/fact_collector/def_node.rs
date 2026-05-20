@@ -1,9 +1,9 @@
+use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
 use ruby_analysis_core::{
     FullyQualifiedName, MethodParamKind, NamespaceKind, RubyMethod, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use ruby_analysis_indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use ruby_prism::*;
 
 use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;

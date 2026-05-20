@@ -6,7 +6,7 @@ use super::FactCollector;
 
 impl FactCollector {
     pub fn process_constant_read_node_entry(&mut self, node: &ConstantReadNode) {
-        let name = ruby_analysis_indexer::utf8_str(node.name().as_slice());
+        let name = crate::utf8_str(node.name().as_slice());
         let constant = match RubyConstant::new(name) {
             Ok(c) => c,
             Err(_) => {

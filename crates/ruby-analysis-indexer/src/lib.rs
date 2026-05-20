@@ -3,6 +3,7 @@
 //! This crate is editor-agnostic. It parses Ruby source with Prism and emits
 //! facts consumed by `ruby-analysis-engine`.
 
+pub mod fact_collector;
 mod ruby_document;
 mod scope_tracker;
 mod source_document;

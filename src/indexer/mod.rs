@@ -18,8 +18,6 @@
 //! - **`version`**: Ruby version detection and management
 
 pub mod coordinator;
-#[path = "../../crates/ruby-analysis-indexer/src/fact_collector/mod.rs"]
-pub mod fact_collector;
 pub mod file_processor;
 pub mod indexer_gem;
 pub mod indexer_project;

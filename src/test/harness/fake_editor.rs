@@ -557,12 +557,13 @@ impl FakeEditor {
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
 
         {
-            use crate::indexer::fact_collector::FactCollector;
+            use ruby_analysis_indexer::fact_collector::FactCollector;
             use ruby_prism::Visit;
+            use std::sync::Arc;
 
             let mut visitor = FactCollector::analysis_only(
                 document.clone(),
-                self.server.extension_registry.clone(),
+                Arc::new(self.server.extension_registry.clone()),
                 self.server.analysis_engine.clone(),
             );
             visitor.visit(&parse_result.node());

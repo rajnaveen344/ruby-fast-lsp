@@ -4,18 +4,19 @@ use ruby_analysis_core::{
     ReferenceCandidate, RubyConstant, TextRange, TypeStore,
 };
 use ruby_analysis_engine::AnalysisEngine;
+use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
 use ruby_prism::*;
 
-use crate::extensions::ExtensionRegistryHandle;
-use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
+use crate::RubyDocument;
+use crate::{collect_namespaces, ScopeTracker};
 use parking_lot::Mutex;
-use ruby_analysis_indexer::{collect_namespaces, ScopeTracker};
 use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
 use ruby_analysis_inference::RubyType;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod bad_splat;
 mod block_node;
 mod call_node;
 mod class_node;
@@ -41,14 +42,38 @@ pub struct FactCollector {
     pub analysis_diagnostics: Vec<DiagnosticFact>,
     pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
-    pub extension_index_patches: Vec<ruby_fast_lsp_extension_api::IndexPatch>,
-    pub extension_registry: ExtensionRegistryHandle,
+    pub extension_index_patches: Vec<IndexPatch>,
+    pub extension_host: Arc<dyn FactCollectorExtensionHost>,
     pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
     pub include_local_vars: bool,
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub variable_types: OnceCell<HashMap<String, RubyType>>,
 }
+
+pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
+    fn process_call_node(&self, _visitor: &mut FactCollector, _node: &CallNode) {}
+
+    fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
+        let call_range = source_range(visitor, &node.location());
+        let message_range = node
+            .message_loc()
+            .map(|loc| source_range(visitor, &loc))
+            .unwrap_or(call_range.clone());
+        ResolvedCall {
+            method_name: String::from_utf8_lossy(node.name().as_slice()).to_string(),
+            receiver: Receiver::Expression,
+            resolved_callees: Vec::new(),
+            call_range,
+            message_range,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct NullFactCollectorExtensionHost;
+
+impl FactCollectorExtensionHost for NullFactCollectorExtensionHost {}
 
 impl FactCollector {
     pub fn push_warning_diagnostic(
@@ -105,7 +130,7 @@ impl FactCollector {
 
     pub fn analysis_only(
         document: RubyDocument,
-        extension_registry: ExtensionRegistryHandle,
+        extension_host: Arc<dyn FactCollectorExtensionHost>,
         analysis_engine: Arc<Mutex<AnalysisEngine>>,
     ) -> Self {
         let scope_tracker = ScopeTracker::new();
@@ -117,7 +142,7 @@ impl FactCollector {
             type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
             extension_index_patches: Vec::new(),
-            extension_registry,
+            extension_host,
             analysis_engine,
             include_local_vars: true,
             reference_candidates: Vec::new(),
@@ -349,6 +374,20 @@ impl FactCollector {
         } else {
             None
         }
+    }
+}
+
+fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
+    let range = visitor.document.prism_location_to_lsp_range(location);
+    SourceRange {
+        start: ruby_fast_lsp_extension_api::SourcePosition {
+            line: range.start.line,
+            character: range.start.character,
+        },
+        end: ruby_fast_lsp_extension_api::SourcePosition {
+            line: range.end.line,
+            character: range.end.character,
+        },
     }
 }
 

@@ -1,5 +1,5 @@
+use crate::collect_namespaces;
 use ruby_analysis_core::ReferenceCandidate;
-use ruby_analysis_indexer::collect_namespaces;
 use ruby_prism::ConstantPathNode;
 
 use super::FactCollector;

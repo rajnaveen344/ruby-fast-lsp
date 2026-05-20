@@ -8,9 +8,13 @@ license = "MIT"
 
 [dependencies]
 ruby-analysis-core = { path = "../ruby-analysis-core" }
+ruby-analysis-engine = { path = "../ruby-analysis-engine" }
 ruby-analysis-inference = { path = "../ruby-analysis-inference" }
+ruby-fast-lsp-extension-api = { path = "../extension-api" }
 ruby-prism = "1.4.0"
 log = "0.4.20"
+once_cell = "1.19"
+parking_lot = { version = "0.12.4", features = ["arc_lock"] }
 regex = "1.10"
 tower-lsp = "0.20.0"
 ustr = "1.0"

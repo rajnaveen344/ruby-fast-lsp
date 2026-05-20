@@ -21,12 +21,12 @@ use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, S
 use crate::analyzer_prism::utils;
 use crate::analyzer_prism::MethodReceiver as CoreMethodReceiver;
 use crate::config::RubyFastLspConfig;
-use crate::indexer::fact_collector::FactCollector;
 use crate::query::MethodCalleeResolution;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use ruby_analysis_core::NamespaceKind;
+use ruby_analysis_indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
@@ -252,6 +252,16 @@ impl ExtensionRegistryHandle {
 
     fn extensions(&self) -> Vec<Arc<LoadedWasmExtension>> {
         self.inner.read().extensions()
+    }
+}
+
+impl FactCollectorExtensionHost for ExtensionRegistryHandle {
+    fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
+        ExtensionRegistryHandle::process_call_node(self, visitor, node);
+    }
+
+    fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
+        resolved_call_for_stack(visitor, node)
     }
 }
 

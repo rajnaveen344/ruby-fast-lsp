@@ -16,7 +16,6 @@
 
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::indexer::fact_collector::FactCollector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -28,6 +27,7 @@ use ruby_analysis_core::{
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
 use ruby_analysis_engine::{AnalysisQuery, FileAnalysisFacts};
+use ruby_analysis_indexer::fact_collector::FactCollector;
 use ruby_analysis_indexer::AnalysisIndexer;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
@@ -147,7 +147,7 @@ impl FileProcessor {
 
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
-            self.extension_registry.clone(),
+            Arc::new(self.extension_registry.clone()),
             server.analysis_engine.clone(),
         );
         visitor.visit(&node);
@@ -251,7 +251,7 @@ impl FileProcessor {
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
-            self.extension_registry.clone(),
+            Arc::new(self.extension_registry.clone()),
             server.analysis_engine.clone(),
         );
         fact_collector.visit(&node);

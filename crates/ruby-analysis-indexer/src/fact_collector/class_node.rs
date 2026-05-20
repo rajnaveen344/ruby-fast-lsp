@@ -1,5 +1,5 @@
+use crate::LocalScopeKind as LVScopeKind;
 use log::error;
-use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::ClassNode;
 
 use super::FactCollector;

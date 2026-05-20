@@ -1,13 +1,13 @@
+use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use log::trace;
 use ruby_analysis_core::{
     DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, KeywordArgCandidate,
     MethodCallSignatureCandidate, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
     RubyConstant, RubyMethod,
 };
-use ruby_analysis_indexer::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use ruby_prism::{CallNode, Node};
 
-use crate::analyzer_prism::diagnostics::bad_splat::BadSplatCandidate;
+use super::bad_splat::BadSplatCandidate;
 use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
@@ -23,10 +23,10 @@ enum ReceiverInfo {
 
 impl FactCollector {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
-        let extension_registry = self.extension_registry.clone();
-        extension_registry.process_call_node(self, node);
+        let extension_host = self.extension_host.clone();
+        extension_host.process_call_node(self, node);
         self.extension_call_stack
-            .push(crate::extensions::resolved_call_for_stack(self, node));
+            .push(extension_host.resolved_call_for_stack(self, node));
 
         self.process_call_reference_candidate(node);
     }
@@ -100,7 +100,7 @@ impl FactCollector {
             }
         }
 
-        for entry in crate::analyzer_prism::diagnostics::bad_splat::check(node, &self.document) {
+        for entry in super::bad_splat::check(node, &self.document) {
             let candidate = self.bad_splat_candidate(entry);
             self.diagnostic_candidates.push(candidate);
         }
