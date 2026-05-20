@@ -183,6 +183,43 @@ pub fn collect_namespaces(node: &ConstantPathNode, acc: &mut Vec<RubyConstant>) 
     }
 }
 
+pub fn get_method_namespace_kind(
+    receiver: Option<Node>,
+    current_namespace: &[RubyConstant],
+    in_singleton: bool,
+) -> (NamespaceKind, bool) {
+    let mut namespace_kind = NamespaceKind::Instance;
+    let mut skip_method = false;
+
+    if let Some(receiver) = receiver {
+        if receiver.as_self_node().is_some() {
+            namespace_kind = NamespaceKind::Singleton;
+        } else if let Some(read_node) = receiver.as_constant_read_node() {
+            let recv_name = utf8_str(read_node.name().as_slice());
+            if current_namespace
+                .last()
+                .is_some_and(|last| last.as_str() == recv_name)
+            {
+                namespace_kind = NamespaceKind::Singleton;
+            } else {
+                skip_method = true;
+            }
+        } else if receiver.as_constant_path_node().is_some() {
+            namespace_kind = NamespaceKind::Singleton;
+        } else {
+            skip_method = true;
+        }
+    } else if in_singleton {
+        namespace_kind = NamespaceKind::Singleton;
+    }
+
+    (namespace_kind, skip_method)
+}
+
+pub fn utf8_str(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or("")
+}
+
 #[cfg(test)]
 mod tests {
     use ruby_analysis_core::RubyMethod;

@@ -3,10 +3,9 @@ use ruby_analysis_core::{
     FullyQualifiedName, MethodParamKind, NamespaceKind, RubyMethod, TypeFact, TypeProvenance,
     TypeSubject,
 };
-use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
+use ruby_analysis_indexer::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use ruby_prism::*;
 
-use crate::analyzer_prism::utils;
 use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
 use ruby_analysis_inference::type_tracker::TypeTracker;
 use ruby_analysis_inference::RubyType;
@@ -37,7 +36,7 @@ impl FactCollector {
         //   * `def self.foo`            (receiver: self)
         //   * `def Foo.foo` inside `class Foo`  (constant read matching current class/module)
         // Otherwise skip indexing.
-        let (namespace_kind, skip_method) = utils::get_method_namespace_kind(
+        let (namespace_kind, skip_method) = get_method_namespace_kind(
             node.receiver(),
             &self.scope_tracker.get_ns_stack(),
             self.scope_tracker.in_singleton(),
@@ -96,11 +95,7 @@ impl FactCollector {
         let _owner_fqn =
             FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
 
-        let body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
+        let body_loc = self.body_lsp_location(node.body().map(|b| b.location()), &node.location());
 
         let scope_kind = match namespace_kind {
             NamespaceKind::Singleton => LVScopeKind::ClassMethod,

@@ -79,6 +79,18 @@ impl FactCollector {
         TextRange::new(self.document.analysis_file_id(), start_byte, end_byte)
     }
 
+    pub fn body_lsp_location(
+        &self,
+        body_location: Option<ruby_prism::Location>,
+        node_location: &ruby_prism::Location,
+    ) -> tower_lsp::lsp_types::Location {
+        if let Some(body_location) = body_location {
+            self.document.prism_location_to_lsp_location(&body_location)
+        } else {
+            self.document.prism_location_to_lsp_location(node_location)
+        }
+    }
+
     pub fn analysis_only(
         document: RubyDocument,
         extension_registry: ExtensionRegistryHandle,

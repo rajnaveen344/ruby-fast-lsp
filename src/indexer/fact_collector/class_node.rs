@@ -2,17 +2,11 @@ use log::error;
 use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::ClassNode;
 
-use crate::analyzer_prism::utils;
-
 use super::FactCollector;
 
 impl FactCollector {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) {
-        let body_loc = utils::get_body_location(
-            node.body().map(|b| b.location()),
-            &node.location(),
-            &self.document,
-        );
+        let body_loc = self.body_lsp_location(node.body().map(|b| b.location()), &node.location());
 
         // Handle namespace setup
         if self

@@ -1,7 +1,5 @@
 use ruby_prism::LocalVariableReadNode;
 
-use crate::analyzer_prism::utils;
-
 use super::FactCollector;
 
 impl FactCollector {
@@ -10,7 +8,7 @@ impl FactCollector {
             return;
         }
 
-        let variable_name = utils::utf8_str(node.name().as_slice());
+        let variable_name = ruby_analysis_indexer::utf8_str(node.name().as_slice());
         let location = self
             .document
             .prism_location_to_lsp_location(&node.location());

@@ -35,7 +35,10 @@ use ruby_prism::{
     LocalVariableWriteNode, ModuleNode, Node, SingletonClassNode, Visit,
 };
 
-pub use scope_tracker::{collect_namespaces, LocalScopeKind, ScopeFrame, ScopeTracker};
+pub use scope_tracker::{
+    collect_namespaces, get_method_namespace_kind, utf8_str, LocalScopeKind, ScopeFrame,
+    ScopeTracker,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {
