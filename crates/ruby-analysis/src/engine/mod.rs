@@ -5,6 +5,7 @@
 //! dependency; those layers feed facts into this engine and query deterministic
 //! results back out.
 
+mod debug;
 mod engine;
 mod file_id_map;
 mod query;
