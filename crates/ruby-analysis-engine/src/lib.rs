@@ -11,4 +11,4 @@ mod query;
 
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
-pub use query::AnalysisQuery;
+pub use query::{AnalysisQuery, WorkspaceSymbolMatch};
