@@ -31,7 +31,7 @@ tests/
 
 ### 1. Indexer (`src/indexer/`)
 
-The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis-engine`.
+The Indexer is responsible for discovering Ruby files, parsing them, and feeding facts into `ruby-analysis::engine`.
 
 - **Primary Responsibility**: Workspace scanning and per-file fact collection
 - **Secondary Responsibility**: Coordinate gem, stdlib, and project indexing
@@ -46,7 +46,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 
 #### Design Decisions:
 
-- Storage is owned by `ruby-analysis-engine`
+- Storage is owned by `ruby-analysis::engine`
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass
 - File discovery and parsing stay separate from engine query logic
 
@@ -192,7 +192,7 @@ The Ruby Fast LSP follows a clear 3-layer architecture:
 
 1. **API Layer** (`server.rs`, `handlers/`): Handles LSP protocol, request validation, and routing.
 2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `EngineQuery` acts as the primary service interface for data lookups.
-3. **Data Layer** (`ruby-analysis-engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
+3. **Data Layer** (`ruby-analysis::engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 
 ### Analyzer, Query Engine, and Indexer Relationship
 

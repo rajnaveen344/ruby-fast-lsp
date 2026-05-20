@@ -255,7 +255,7 @@ impl EngineQuery {
         let file_id = doc.analysis_file_id();
         let byte_offset = u32::try_from(doc.position_to_offset(position)).expect(
             "INVARIANT VIOLATED: LSP position offset exceeded u32. \
-             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
              Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
         );
         drop(doc);

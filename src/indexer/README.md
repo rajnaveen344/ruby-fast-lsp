@@ -1,7 +1,7 @@
 # Indexer
 
 The indexer layer discovers Ruby files, parses them, and feeds analysis facts
-into `ruby-analysis-engine`.
+into `ruby-analysis::engine`.
 
 Storage is not owned here. The engine owns symbols, methods, types, graph facts,
 reference candidates, resolved references, and diagnostics.

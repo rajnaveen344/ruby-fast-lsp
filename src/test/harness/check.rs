@@ -682,7 +682,7 @@ async fn run_type_check(
                         if let Some(scope_id) = scope_id {
                             let scope_id = u32::try_from(scope_id).expect(
                                 "INVARIANT VIOLATED: local variable scope id exceeded u32. \
-                                 This is a bug because ruby-analysis-core TypeSubject::Local stores u32 scope ids. \
+                                 This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
                             let type_store = server.analysis_engine.lock().type_store().clone();

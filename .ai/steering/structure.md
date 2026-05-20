@@ -5,10 +5,7 @@
 ```
 ├── src/                    # Main LSP server source code
 ├── crates/                 # Additional workspace crates
-│   ├── ruby-analysis-core/  # Shared facts, graph, diagnostics, and type stores
-│   ├── ruby-analysis-engine/# Engine facade over indexed analysis facts
-│   ├── ruby-analysis-inference/ # Type inference, RBS, control-flow analysis
-│   ├── ruby-analysis-indexer/   # Parser-to-facts indexing primitives
+│   ├── ruby-analysis/      # Core facts, graph/query engine, inference, and indexing primitives
 │   ├── ast-visualizer/     # Web-based AST visualization tool
 │   ├── lsp-repl/           # LSP REPL debugger
 │   └── rbs-parser/         # RBS type signature parser
@@ -86,7 +83,7 @@ indexer/
 
 ## Query Adapter Module (`src/query/`)
 
-The adapter layer between handlers and `ruby-analysis-engine`. Domain queries
+The adapter layer between handlers and `ruby-analysis::engine`. Domain queries
 belong in engine; this layer keeps protocol mapping, cursor parsing, and
 `TextRange -> Location` conversion.
 
@@ -150,10 +147,10 @@ types/
 └── unresolved_index.rs       # Handling for unresolved constants
 ```
 
-## Type Inference Crate (`crates/ruby-analysis-inference/`)
+## Type Inference Module (`crates/ruby-analysis/src/inference/`)
 
 ```
-crates/ruby-analysis-inference/src/
+crates/ruby-analysis/src/inference/
 ├── lib.rs                  # Crate exports
 ├── control_flow.rs         # Structural reachability analysis
 ├── rbs.rs                  # RBS integration

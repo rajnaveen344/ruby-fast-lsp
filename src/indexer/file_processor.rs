@@ -601,7 +601,7 @@ fn byte_offset_u32(byte_offset: usize, message: &str) -> u32 {
     u32::try_from(byte_offset).unwrap_or_else(|_| {
         panic!(
             "INVARIANT VIOLATED: {message}. \
-             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
              Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes."
         )
     })

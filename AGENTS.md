@@ -91,9 +91,7 @@ cargo build --release         # Release build
 - `src/capabilities/` - Feature implementations
 - `src/indexer/` - LSP/workspace indexing orchestration
 - `src/analyzer_prism/` - AST analysis
-- `crates/ruby-analysis-engine/` - Analysis facts and graph/query engine
-- `crates/ruby-analysis-inference/` - Type inference, RBS lookup, control-flow analysis
-- `crates/ruby-analysis-indexer/` - Parser-to-facts indexing primitives
+- `crates/ruby-analysis/` - Shared facts, graph/query engine, inference, and parser-to-facts indexing primitives
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
@@ -101,29 +99,29 @@ Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusabl
 analysis crates. Editors are not the only consumers; agents and CLIs should be
 able to ask graph/type questions without speaking LSP.
 
-### Crate Responsibilities
+### Analysis Module Responsibilities
 
 ```text
-ruby-analysis-core
+ruby-analysis::core
   Shared data contracts only:
   FQN, RubyConstant, RubyMethod, RubyType, TextRange, SourceFileId,
   SymbolFact, MethodFact, GraphFact, ReferenceFact, DiagnosticFact, TypeFact.
 
-ruby-analysis-engine
+ruby-analysis::engine
   Owns indexed facts and deterministic graph/fact queries:
   symbols, methods, refs, graph, diagnostics, workspace symbols,
   definitions/references, ancestors, implementors, namespace tree, debug views.
   It stores type facts already computed, but should not do heavy expression inference.
 
-ruby-analysis-inference
+ruby-analysis::inference
   Owns type algorithms:
   literal/expression type inference, local flow/type tracking, narrowing,
   method return inference, RBS lookup/substitution.
-  It depends on ruby-analysis-core and ruby-analysis-engine, not on LSP.
+  It depends on core/engine contracts, not on LSP.
 
-ruby-analysis-indexer
+ruby-analysis::indexer
   Owns parsing/fact collection from Ruby source. FactCollector should eventually
-  live here, emitting facts/candidates into ruby-analysis-engine.
+  live here, emitting facts/candidates into ruby-analysis::engine.
 
 ruby-fast-lsp
   Thin wrapper:
@@ -136,15 +134,15 @@ ruby-fast-lsp
 Preferred:
 
 ```text
-ruby-analysis-engine -> ruby-analysis-core
-ruby-analysis-inference -> ruby-analysis-core
-ruby-fast-lsp -> engine + inference + indexer
+ruby-analysis::engine -> ruby-analysis::core
+ruby-analysis::inference -> ruby-analysis::core
+ruby-fast-lsp -> ruby-analysis::{engine, inference, indexer}
 ```
 
 Avoid:
 
 ```text
-ruby-analysis-engine -> ruby-analysis-inference
+ruby-analysis::engine -> ruby-analysis::inference
 ```
 
 Engine should remain stable fact DB + graph/query layer. Inference should be
@@ -160,7 +158,7 @@ pub trait InferenceQuery {
 }
 ```
 
-`ruby_analysis_engine::AnalysisQuery` should implement this trait when the
+`ruby_analysis::engine::AnalysisQuery` should implement this trait when the
 inference/query seam is formalized.
 
 ### Migration Backlog
@@ -180,12 +178,12 @@ Move remaining non-LSP logic out of `src/`:
 6. `src/query/completion.rs` and `src/capabilities/completion/*` -> engine
    candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
 7. `src/query/hover/*` -> split domain hover content from protocol hover.
-8. Done: `src/inferrer/*` -> `crates/ruby-analysis-inference`.
-9. Interim done: `FactCollector` moved under `src/indexer/fact_collector`.
+8. Done: `src/inferrer/*` -> `crates/ruby-analysis/src/inference`.
+9. Interim done: `FactCollector` moved under `crates/ruby-analysis/src/indexer/fact_collector`.
    Done seams: `ScopeTracker`, parser helper functions, and scope kind moved to
-   `ruby-analysis-indexer`; collector validation emits `DiagnosticFact` instead
+   `ruby-analysis::indexer`; collector validation emits `DiagnosticFact` instead
    of LSP diagnostics; `SourceDocument` owns source offsets/comments/TextRange
-   conversion in `ruby-analysis-indexer`. Remaining: extract pure core after
+   conversion in `ruby-analysis::indexer`. Remaining: extract pure core after
    adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
    parsing/type conversion.
 10. Partial done: `src/analyzer_prism/mod.rs` split into `analyzer.rs` and
@@ -345,8 +343,8 @@ For generic types (`Array`, `Hash`), user-defined method lookup is **skipped** a
 RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
 
 **Key files:**
-- `crates/ruby-analysis-inference/src/type_tracker/mod.rs` — local flow/type tracking
-- `crates/ruby-analysis-inference/src/rbs.rs` — RBS type lookup with generic substitution
+- `crates/ruby-analysis/src/inference/type_tracker/mod.rs` — local flow/type tracking
+- `crates/ruby-analysis/src/inference/rbs.rs` — RBS type lookup with generic substitution
 - `src/capabilities/completion/method.rs` — LSP completion item mapping for RBS methods
 
 ## Subagent Delegation

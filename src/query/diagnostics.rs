@@ -16,7 +16,7 @@ impl EngineQuery {
     pub fn get_unresolved_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         let analysis_engine = self.analysis_engine.as_ref().expect(
             "INVARIANT VIOLATED: unresolved diagnostics requested without analysis engine. \
-             This is a bug because diagnostics are owned by ruby-analysis-engine. \
+             This is a bug because diagnostics are owned by ruby-analysis::engine. \
              Fix: construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine.",
         );
         let engine = analysis_engine.lock();

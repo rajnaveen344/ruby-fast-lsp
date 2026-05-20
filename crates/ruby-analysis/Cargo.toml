@@ -7,7 +7,14 @@ description = "Unified Ruby analysis API for LSP and agent-facing tools"
 license = "MIT"
 
 [dependencies]
-ruby-analysis-core = { path = "../ruby-analysis-core" }
-ruby-analysis-engine = { path = "../ruby-analysis-engine" }
-ruby-analysis-inference = { path = "../ruby-analysis-inference" }
-ruby-analysis-indexer = { path = "../ruby-analysis-indexer" }
+unicode-ident = "1.0.18"
+ustr = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+once_cell = "1.19"
+log = "0.4.20"
+parking_lot = { version = "0.12.4", features = ["arc_lock"] }
+rbs-parser = { path = "../rbs-parser" }
+ruby-fast-lsp-extension-api = { path = "../extension-api" }
+ruby-prism = "1.4.0"
+regex = "1.10"
+tower-lsp = "0.20.0"
