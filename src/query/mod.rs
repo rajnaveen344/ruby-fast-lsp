@@ -30,14 +30,13 @@ mod method;
 pub mod namespace_tree;
 mod references;
 pub mod type_hierarchy;
-mod types;
 mod workspace_symbols;
 
 pub use code_lens::CodeLensData;
 pub use hover::HoverInfo;
 pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
-pub use types::TypeQuery;
+pub use ruby_analysis::inference::TypeQuery;
 
 use parking_lot::{Mutex, RwLock};
 use ruby_analysis::engine::AnalysisEngine;

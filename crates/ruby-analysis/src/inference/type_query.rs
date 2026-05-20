@@ -6,9 +6,9 @@
 //! Handlers (hover, inlay hints, completion) should use this API instead of
 //! directly interacting with inference internals.
 
-use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
-use ruby_analysis::inference::RubyType;
+use crate::core::FullyQualifiedName;
+use crate::core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
+use crate::inference::RubyType;
 use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Unified type query interface.
