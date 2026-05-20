@@ -18,8 +18,7 @@ use ruby_analysis_inference::RubyType;
 use super::EngineQuery;
 
 impl EngineQuery {
-    /// Find constant completions by locking the index and delegating
-    /// to the existing constant completion engine.
+    /// Find constant completions by locking the analysis engine.
     pub fn find_constant_completions(
         &self,
         analyzer: &RubyPrismAnalyzer,

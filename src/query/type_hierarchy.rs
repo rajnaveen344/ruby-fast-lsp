@@ -49,7 +49,7 @@ impl EngineQuery {
     /// Find the class/module at the cursor position and return a TypeHierarchyItem.
     ///
     /// Uses RubyPrismAnalyzer to find the identifier at position, then resolves
-    /// it to a fully qualified name via the index.
+    /// it to a fully qualified name via the analysis engine.
     pub fn prepare_type_hierarchy(
         &self,
         uri: &Url,
@@ -62,7 +62,7 @@ impl EngineQuery {
             position
         );
 
-        // Use analyzer to find identifier at position (before locking the index)
+        // Use analyzer to find identifier at position before locking analysis state.
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content);
         let (identifier, _, ancestors, _scope_id, _namespace_kind) =
             analyzer.get_identifier(position);

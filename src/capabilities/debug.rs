@@ -146,7 +146,7 @@ pub fn handle_list_commands() -> ListCommandsResponse {
     ListCommandsResponse { commands }
 }
 
-/// Handle `ruby-fast-lsp/debug/lookup` - query the index for an FQN.
+/// Handle `ruby-fast-lsp/debug/lookup` - query analysis state for an FQN.
 pub fn handle_lookup(server: &RubyLanguageServer, params: LookupParams) -> LookupResponse {
     debug!("[DEBUG] Looking up FQN: {}", params.fqn);
     let query = EngineQuery::with_engine(server.analysis_engine.clone());

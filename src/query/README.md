@@ -1,14 +1,16 @@
-# Query Engine
+# LSP Query Adapters
 
-The `query` module provides a unified interface for querying the `AnalysisEngine`. It consolidates complex business logic, abstracting away the low-level index details.
+The `query` module adapts editor requests to `ruby-analysis-engine`. It owns cursor
+parsing, document context, and protocol conversion. Reusable domain logic belongs
+in `crates/ruby-analysis-engine`.
 
 ```text
-server.rs (API) → query/ (Service) → ruby-analysis-engine (Data)
+server.rs (LSP) -> query/ (adapter) -> ruby-analysis-engine (domain)
 ```
 
 ## Public API
 
-The `EngineQuery` struct provides unified position-based APIs:
+The `EngineQuery` struct provides position-based LSP-facing APIs:
 
 | Feature         | Method                                                       | Returns         |
 | :-------------- | :----------------------------------------------------------- | :-------------- |
@@ -17,7 +19,8 @@ The `EngineQuery` struct provides unified position-based APIs:
 | **Hover**       | `get_hover_at_position(uri, pos, content, narrowing)`        | `HoverInfo`     |
 | **Types**       | `resolve_type_at_position(uri, pos, content, narrowing)`     | `RubyType`      |
 
-Each method handles all identifier types internally (constants, methods, local/instance/class/global variables, YARD types).
+Each method handles protocol context internally, then delegates fact/graph/type
+queries to `AnalysisQuery`.
 
 ## Usage
 
@@ -28,10 +31,10 @@ use crate::query::EngineQuery;
 let query = EngineQuery::with_doc_and_engine(document, analysis_engine);
 
 // Use the unified APIs
-let defs = query.find_definitions_at_position(&uri, pos, &content, Some(&narrowing));
+let defs = query.find_definitions_at_position(&uri, pos, &content);
 let refs = query.find_references_at_position(&uri, pos, &content);
-let hover = query.get_hover_at_position(&uri, pos, &content, Some(&narrowing));
-let ty = query.resolve_type_at_position(&uri, pos, &content, Some(&narrowing));
+let hover = query.get_hover_at_position(&uri, pos, &content);
+let ty = query.resolve_type_at_position(&uri, pos, &content);
 ```
 
 ## Shared Types
@@ -46,18 +49,21 @@ The split between `src/capabilities/` and `src/query/` is intentional. Keep it t
 | Layer | Owns | Imports `tower_lsp::lsp_types`? |
 | :--- | :--- | :--- |
 | `capabilities/*.rs` | LSP handler: URI -> doc lookup -> build `EngineQuery` -> format result as LSP types | **Yes** |
-| `query/*.rs` | Engine-backed read logic returning domain types (`FullyQualifiedName`, `RubyType`) | **No** (except `Location`/`Position` re-used directly) |
+| `query/*.rs` | LSP adapter over `AnalysisQuery`: cursor parsing, document context, `TextRange -> Location` | **Yes, only at adapter boundary** |
+| `crates/ruby-analysis-engine` | Reusable domain queries over facts, graph, references, types | **No** |
 
 **Rules:**
 
 1. `query/` must not depend on `RubyLanguageServer`, the `docs` map, or handler-specific plumbing. It takes `AnalysisEngine` + optional document context.
-2. `capabilities/` adapter files stay thin (~20–120 lines). If a capability file grows past ~150 lines while backed by the index, the extra logic probably belongs in `query/`.
-3. **Exception:** features that don't need the index live only in `capabilities/`. Current examples:
+2. `capabilities/` adapter files stay thin (~20–120 lines). If a capability file grows past ~150 lines while backed by analysis facts, the extra logic probably belongs in `query/` or, if editor-agnostic, `ruby-analysis-engine`.
+3. **Exception:** features that don't need analysis facts live only in `capabilities/`. Current examples:
    - `capabilities/formatting.rs` — runs an external formatter
    - `capabilities/folding_range.rs` — pure AST visitor
    - `capabilities/semantic_tokens.rs` — pure AST visitor
    - `capabilities/document_symbols.rs` — pure AST visitor
    No query counterpart is needed for these.
-4. New LSP feature that needs project facts -> create both `capabilities/foo.rs` (adapter) and `query/foo.rs` (logic). Do not put engine-backed logic in `capabilities/`.
+4. New LSP feature that needs project facts -> put domain query in `ruby-analysis-engine`, then add `query/foo.rs` for protocol conversion and `capabilities/foo.rs` for handler plumbing.
 
-**Why the split matters:** `query/` is reusable from tests, CLI binaries (`src/bin/profile_*`), and future non-LSP frontends. Leaking `tower_lsp` types into `query/` would couple it to the protocol.
+**Why the split matters:** engine is reusable from tests, CLI binaries, and future
+non-LSP frontends. `query/` is allowed to speak LSP because it is the editor
+adapter.

@@ -327,10 +327,10 @@ harness until core tests move to external integration crates.
 ### Type Inference Architecture
 
 **Two code paths for method return types:**
-1. **User index** (`MethodResolver` path 1) — searches user-defined methods in ancestor chain
+1. **Analysis engine** (`MethodResolver` path 1) — searches user-defined methods in ancestor chain
 2. **RBS fallback** (`MethodResolver` path 2) — built-in Ruby types from RBS definitions
 
-For generic types (`Array`, `Hash`), the user index is **skipped** and RBS is used directly.
+For generic types (`Array`, `Hash`), user-defined method lookup is **skipped** and RBS is used directly.
 RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
 
 **Key files:**

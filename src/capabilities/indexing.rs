@@ -50,7 +50,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     }
     debug!("Doc cache size: {}", server.docs.lock().len());
 
-    // Process file with unified FileProcessor::process_file. Route the index
+    // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
@@ -195,7 +195,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
 pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {
     let uri = params.text_document.uri.clone();
 
-    // Remove the document from in-memory cache but keep definitions/references in the index
+    // Remove the document from in-memory cache but keep analysis facts.
     server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", server.docs.lock().len());
 

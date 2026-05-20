@@ -55,7 +55,7 @@ impl FactCollector {
         // TODO: keywords, keyword_rest, block
     }
 
-    // Helper method to add a parameter to the index
+    // Helper method to add a parameter to collected facts/scopes.
     fn add_parameter_to_index(&mut self, param_name: &str, location: ruby_prism::Location) {
         // Validate parameter name (should be a valid local variable name)
         if param_name.is_empty() {
