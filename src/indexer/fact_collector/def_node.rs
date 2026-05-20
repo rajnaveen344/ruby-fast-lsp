@@ -1,5 +1,9 @@
 use log::warn;
-use ruby_analysis_core::{MethodParamKind, NamespaceKind, TypeFact, TypeProvenance, TypeSubject};
+use ruby_analysis_core::{
+    FullyQualifiedName, MethodParamKind, NamespaceKind, RubyMethod, TypeFact, TypeProvenance,
+    TypeSubject,
+};
+use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::*;
 use tower_lsp::lsp_types::Position;
 
@@ -8,8 +12,6 @@ use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
 use ruby_analysis_inference::type_tracker::TypeTracker;
 use ruby_analysis_inference::RubyType;
 
-use crate::types::scope::LVScopeKind;
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_method::RubyMethod};
 use crate::yard::{YardMethodDoc, YardTypeConverter};
 
 use super::FactCollector;

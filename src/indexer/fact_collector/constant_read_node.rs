@@ -1,9 +1,8 @@
 use log::trace;
-use ruby_analysis_core::{ReferenceCandidate, TextRange};
+use ruby_analysis_core::{ReferenceCandidate, RubyConstant, TextRange};
 use ruby_prism::ConstantReadNode;
 
 use crate::analyzer_prism::utils;
-use crate::types::ruby_namespace::RubyConstant;
 
 use super::FactCollector;
 

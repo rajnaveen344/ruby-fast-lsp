@@ -1,8 +1,6 @@
 use log::{error, trace};
-use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
+use ruby_analysis_core::{FullyQualifiedName, RubyConstant, TypeFact, TypeProvenance, TypeSubject};
 use ruby_prism::ConstantWriteNode;
-
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::FactCollector;
 

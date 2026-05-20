@@ -1,9 +1,7 @@
 use log::error;
-use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
+use ruby_analysis_core::{FullyQualifiedName, RubyConstant, TypeFact, TypeProvenance, TypeSubject};
+use ruby_analysis_indexer::collect_namespaces;
 use ruby_prism::ConstantPathWriteNode;
-
-use crate::analyzer_prism::utils;
-use crate::types::{fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant};
 
 use super::FactCollector;
 
@@ -32,7 +30,7 @@ impl FactCollector {
 
         // Extract the full constant path from the target.
         let mut namespace_parts = Vec::new();
-        utils::collect_namespaces(&constant_path, &mut namespace_parts);
+        collect_namespaces(&constant_path, &mut namespace_parts);
 
         // Get the current namespace and add the collected parts
         let mut fqn_parts = self.scope_tracker.get_ns_stack();

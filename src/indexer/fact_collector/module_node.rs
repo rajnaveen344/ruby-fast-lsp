@@ -1,8 +1,8 @@
 use log::error;
+use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::ModuleNode;
 
 use crate::analyzer_prism::utils;
-use crate::types::scope::LVScopeKind;
 
 use super::FactCollector;
 

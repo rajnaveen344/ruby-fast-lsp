@@ -1,17 +1,16 @@
 use once_cell::unsync::OnceCell;
 use ruby_analysis_core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, ReferenceCandidate, TextRange,
-    TypeStore,
+    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, FullyQualifiedName,
+    ReferenceCandidate, RubyConstant, TextRange, TypeStore,
 };
 use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::*;
 
-use crate::analyzer_prism::scope_tracker::ScopeTracker;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use parking_lot::Mutex;
+use ruby_analysis_indexer::{collect_namespaces, ScopeTracker};
 use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
 use ruby_analysis_inference::RubyType;
 use std::collections::HashMap;
@@ -213,8 +212,7 @@ impl FactCollector {
     /// Helper to flatten a ConstantPathNode into a string (e.g., "Module::Class")
     fn flatten_constant_path(node: &ConstantPathNode) -> Option<String> {
         let mut parts = Vec::new();
-        use crate::analyzer_prism::utils;
-        utils::collect_namespaces(node, &mut parts);
+        collect_namespaces(node, &mut parts);
 
         if parts.is_empty() {
             None
@@ -320,8 +318,6 @@ impl FactCollector {
 }
 
 fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
-    use crate::types::ruby_namespace::RubyConstant;
-
     let mut map: HashMap<String, RubyType> = HashMap::new();
     for line in content.lines() {
         let trimmed = line.trim();

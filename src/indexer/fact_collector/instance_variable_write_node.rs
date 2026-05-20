@@ -1,11 +1,10 @@
 use log::{error, trace};
-use ruby_analysis_core::{TypeFact, TypeProvenance, TypeSubject};
+use ruby_analysis_core::{FullyQualifiedName, TypeFact, TypeProvenance, TypeSubject};
 use ruby_prism::{
     InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
     InstanceVariableTargetNode, InstanceVariableWriteNode, Node,
 };
 
-use crate::types::fully_qualified_name::FullyQualifiedName;
 use ruby_analysis_inference::RubyType;
 
 use super::FactCollector;
