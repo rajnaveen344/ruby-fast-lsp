@@ -9,10 +9,11 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::capabilities::completion::method;
 use crate::inferrer::r#type::ruby::RubyType;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_namespace::RubyConstant;
 use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
+use ruby_analysis_engine::{
+    ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate,
+};
 
 use super::EngineQuery;
 
@@ -39,7 +40,8 @@ impl EngineQuery {
     ) -> Option<Vec<CompletionItem>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
-        if engine.all_symbol_facts().is_empty() {
+        let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+        if !query.has_symbols() {
             return None;
         }
 
@@ -51,25 +53,18 @@ impl EngineQuery {
                 partial.to_string(),
             );
 
-        let mut seen = std::collections::HashSet::new();
-        let mut items = engine
-            .all_symbol_facts()
-            .into_iter()
-            .filter(|fact| {
-                matches!(
-                    fact.kind,
-                    AnalysisSymbolKind::Class
-                        | AnalysisSymbolKind::Module
-                        | AnalysisSymbolKind::Constant
-                )
+        let mut items = query
+            .constant_completion_candidates(&ConstantCompletionRequest {
+                partial_name: context.partial_name,
+                namespace_prefix: context.namespace_prefix,
+                is_qualified: context.is_qualified,
+                limit: 50,
             })
-            .filter(|fact| seen.insert(fact.fqn.namespace_parts()))
-            .filter(|fact| constant_matches(&fact.fqn, &context))
-            .map(|fact| constant_completion_item(&fact.fqn, fact.kind))
+            .into_iter()
+            .map(constant_completion_item)
             .collect::<Vec<_>>();
 
         items.sort_by(|left, right| left.label.cmp(&right.label));
-        items.truncate(50);
         Some(items)
     }
 
@@ -103,14 +98,11 @@ impl EngineQuery {
         };
         let engine = engine.lock();
         let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
-        let mut items = Vec::new();
-        for namespace_fqn in receiver_type_to_namespaces(receiver_type, kind) {
-            for fact in query.method_completion_facts(&namespace_fqn, partial_method) {
-                let return_type = query.method_return_type(&fact);
-                items.push(method_completion_item_from_analysis(&fact, return_type));
-            }
-        }
-        items
+        query
+            .method_completion_candidates(receiver_type, partial_method, kind)
+            .into_iter()
+            .map(method_completion_item_from_analysis)
+            .collect()
     }
 
     pub fn find_top_level_method_completions(&self, partial_method: &str) -> Vec<CompletionItem> {
@@ -128,31 +120,16 @@ impl EngineQuery {
         let engine = engine.lock();
         let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
         query
-            .top_level_method_completion_facts(partial_method)
+            .top_level_method_completion_candidates(partial_method)
             .into_iter()
-            .map(|fact| {
-                let return_type = query.method_return_type(&fact);
-                method_completion_item_from_analysis(&fact, return_type)
-            })
+            .map(method_completion_item_from_analysis)
             .collect()
     }
 }
 
-fn method_completion_item_from_analysis(
-    fact: &ruby_analysis_core::MethodFact,
-    return_type: Option<RubyType>,
-) -> CompletionItem {
-    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
-        panic!(
-            "INVARIANT VIOLATED: analysis method completion fact has non-method FQN: {}. \
-             This is a bug because MethodStore must only contain method facts. \
-             Fix: reject non-method FQNs in MethodFact construction.",
-            fact.fqn
-        );
-    };
-
-    let name = method.get_name();
-    let params = fact
+fn method_completion_item_from_analysis(candidate: MethodCompletionCandidate) -> CompletionItem {
+    let name = candidate.name;
+    let params = candidate
         .params
         .iter()
         .filter(|param| !param.is_empty())
@@ -163,7 +140,8 @@ fn method_completion_item_from_analysis(
     } else {
         format!("({})", params.join(", "))
     };
-    let return_type = return_type
+    let return_type = candidate
+        .return_type
         .map(|ruby_type| format!(" -> {ruby_type}"))
         .unwrap_or_default();
     let detail = format!("{name}{params}{return_type}");
@@ -177,65 +155,9 @@ fn method_completion_item_from_analysis(
     }
 }
 
-fn receiver_type_to_namespaces(
-    ruby_type: &RubyType,
-    kind: NamespaceKind,
-) -> Vec<FullyQualifiedName> {
-    match ruby_type {
-        RubyType::Class(fqn)
-        | RubyType::ClassReference(fqn)
-        | RubyType::Module(fqn)
-        | RubyType::ModuleReference(fqn) => {
-            vec![FullyQualifiedName::namespace_with_kind(
-                fqn.namespace_parts(),
-                kind,
-            )]
-        }
-        RubyType::Array(_) => namespace_for_builtin("Array", kind),
-        RubyType::Hash(_, _) => namespace_for_builtin("Hash", kind),
-        RubyType::Union(types) => types
-            .iter()
-            .flat_map(|ty| receiver_type_to_namespaces(ty, kind))
-            .collect(),
-        RubyType::Unknown => Vec::new(),
-    }
-}
-
-fn namespace_for_builtin(name: &str, kind: NamespaceKind) -> Vec<FullyQualifiedName> {
-    let Ok(constant) = RubyConstant::new(name) else {
-        return Vec::new();
-    };
-    vec![FullyQualifiedName::namespace_with_kind(
-        vec![constant],
-        kind,
-    )]
-}
-
-fn constant_matches(
-    fqn: &FullyQualifiedName,
-    context: &crate::capabilities::completion::constant_completion::ConstantCompletionContext,
-) -> bool {
-    if context.is_qualified {
-        if let Some(namespace_prefix) = &context.namespace_prefix {
-            let fqn_parts = fqn.namespace_parts();
-            let namespace_parts = namespace_prefix.namespace_parts();
-            if fqn_parts.len() != namespace_parts.len() + 1 {
-                return false;
-            }
-            if !fqn_parts.starts_with(&namespace_parts) {
-                return false;
-            }
-        } else if fqn.namespace_parts().len() > 1 {
-            return false;
-        }
-    }
-
-    fqn.name()
-        .to_lowercase()
-        .starts_with(&context.partial_name.to_lowercase())
-}
-
-fn constant_completion_item(fqn: &FullyQualifiedName, kind: AnalysisSymbolKind) -> CompletionItem {
+fn constant_completion_item(candidate: ConstantCompletionCandidate) -> CompletionItem {
+    let fqn = candidate.fqn;
+    let kind = candidate.kind;
     let item_kind = match kind {
         AnalysisSymbolKind::Class => CompletionItemKind::CLASS,
         AnalysisSymbolKind::Module => CompletionItemKind::MODULE,
@@ -247,8 +169,8 @@ fn constant_completion_item(fqn: &FullyQualifiedName, kind: AnalysisSymbolKind) 
         | AnalysisSymbolKind::GlobalVariable => CompletionItemKind::VALUE,
     };
     let detail = match kind {
-        AnalysisSymbolKind::Class => format!("class {}", fqn),
-        AnalysisSymbolKind::Module => format!("module {}", fqn),
+        AnalysisSymbolKind::Class => format!("class {fqn}"),
+        AnalysisSymbolKind::Module => format!("module {fqn}"),
         AnalysisSymbolKind::Constant => fqn.to_string(),
         AnalysisSymbolKind::Method
         | AnalysisSymbolKind::LocalVariable

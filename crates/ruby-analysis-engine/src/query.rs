@@ -4,9 +4,9 @@ use std::path::Path;
 
 use ruby_analysis_core::{
     DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
-    MethodCalleeResolution, MethodFact, ReferenceFact, ResolvedMethodCallee, RubyConstant,
-    RubyMethod, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact, TypeResolution,
-    TypeSubject,
+    MethodCalleeResolution, MethodFact, NamespaceKind, ReferenceFact, ResolvedMethodCallee,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, SymbolFact, SymbolKind, TextRange, TypeFact,
+    TypeResolution, TypeSubject,
 };
 
 use crate::{AnalysisEngine, SourceFile};
@@ -63,6 +63,27 @@ pub struct TypeHierarchyEntry {
     pub range: TextRange,
     pub edge_file_id: Option<SourceFileId>,
     pub unresolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstantCompletionRequest {
+    pub partial_name: String,
+    pub namespace_prefix: Option<FullyQualifiedName>,
+    pub is_qualified: bool,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstantCompletionCandidate {
+    pub fqn: FullyQualifiedName,
+    pub kind: SymbolKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCompletionCandidate {
+    pub name: String,
+    pub params: Vec<String>,
+    pub return_type: Option<RubyType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -522,6 +543,59 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
+    pub fn constant_completion_candidates(
+        &self,
+        request: &ConstantCompletionRequest,
+    ) -> Vec<ConstantCompletionCandidate> {
+        let mut seen = HashSet::new();
+        let mut candidates = self
+            .engine
+            .all_symbol_facts()
+            .into_iter()
+            .filter(|fact| {
+                matches!(
+                    fact.kind,
+                    SymbolKind::Class | SymbolKind::Module | SymbolKind::Constant
+                )
+            })
+            .filter(|fact| seen.insert(fact.fqn.namespace_parts()))
+            .filter(|fact| constant_completion_matches(&fact.fqn, request))
+            .map(|fact| ConstantCompletionCandidate {
+                fqn: fact.fqn,
+                kind: fact.kind,
+            })
+            .collect::<Vec<_>>();
+
+        candidates.sort_by(|left, right| left.fqn.name().cmp(&right.fqn.name()));
+        candidates.truncate(request.limit);
+        candidates
+    }
+
+    pub fn method_completion_candidates(
+        &self,
+        receiver_type: &RubyType,
+        partial_method: &str,
+        kind: NamespaceKind,
+    ) -> Vec<MethodCompletionCandidate> {
+        let mut candidates = Vec::new();
+        for namespace_fqn in receiver_type_to_namespaces(receiver_type, kind) {
+            for fact in self.method_completion_facts(&namespace_fqn, partial_method) {
+                candidates.push(self.method_completion_candidate(&fact));
+            }
+        }
+        candidates
+    }
+
+    pub fn top_level_method_completion_candidates(
+        &self,
+        partial_method: &str,
+    ) -> Vec<MethodCompletionCandidate> {
+        self.top_level_method_completion_facts(partial_method)
+            .into_iter()
+            .map(|fact| self.method_completion_candidate(&fact))
+            .collect()
+    }
+
     pub fn method_fact_for_receiver(
         &self,
         namespace_fqn: &FullyQualifiedName,
@@ -644,6 +718,28 @@ impl<'a> AnalysisQuery<'a> {
 
         facts.sort_by_key(|fact| fact.fqn.to_string());
         facts
+    }
+
+    fn method_completion_candidate(&self, fact: &MethodFact) -> MethodCompletionCandidate {
+        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+            panic!(
+                "INVARIANT VIOLATED: analysis method completion fact has non-method FQN: {}. \
+                 This is a bug because MethodStore must only contain method facts. \
+                 Fix: reject non-method FQNs in MethodFact construction.",
+                fact.fqn
+            );
+        };
+
+        MethodCompletionCandidate {
+            name: method.get_name(),
+            params: fact
+                .params
+                .iter()
+                .filter(|param| !param.is_empty())
+                .cloned()
+                .collect(),
+            return_type: self.method_return_type(fact),
+        }
     }
 
     pub fn resolve_constant_receiver(
@@ -2094,6 +2190,64 @@ fn namespace_target_exists(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedN
     !engine.graph_nodes_for(&instance_fqn).is_empty()
         || !engine.graph_nodes_for(&singleton_fqn).is_empty()
         || !engine.symbol_facts_for(&constant_fqn).is_empty()
+}
+
+fn constant_completion_matches(
+    fqn: &FullyQualifiedName,
+    request: &ConstantCompletionRequest,
+) -> bool {
+    if request.is_qualified {
+        if let Some(namespace_prefix) = &request.namespace_prefix {
+            let fqn_parts = fqn.namespace_parts();
+            let namespace_parts = namespace_prefix.namespace_parts();
+            if fqn_parts.len() != namespace_parts.len() + 1 {
+                return false;
+            }
+            if !fqn_parts.starts_with(&namespace_parts) {
+                return false;
+            }
+        } else if fqn.namespace_parts().len() > 1 {
+            return false;
+        }
+    }
+
+    fqn.name()
+        .to_lowercase()
+        .starts_with(&request.partial_name.to_lowercase())
+}
+
+fn receiver_type_to_namespaces(
+    ruby_type: &RubyType,
+    kind: NamespaceKind,
+) -> Vec<FullyQualifiedName> {
+    match ruby_type {
+        RubyType::Class(fqn)
+        | RubyType::ClassReference(fqn)
+        | RubyType::Module(fqn)
+        | RubyType::ModuleReference(fqn) => {
+            vec![FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                kind,
+            )]
+        }
+        RubyType::Array(_) => namespace_for_builtin("Array", kind),
+        RubyType::Hash(_, _) => namespace_for_builtin("Hash", kind),
+        RubyType::Union(types) => types
+            .iter()
+            .flat_map(|ty| receiver_type_to_namespaces(ty, kind))
+            .collect(),
+        RubyType::Unknown => Vec::new(),
+    }
+}
+
+fn namespace_for_builtin(name: &str, kind: NamespaceKind) -> Vec<FullyQualifiedName> {
+    let Ok(constant) = RubyConstant::new(name) else {
+        return Vec::new();
+    };
+    vec![FullyQualifiedName::namespace_with_kind(
+        vec![constant],
+        kind,
+    )]
 }
 
 fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {

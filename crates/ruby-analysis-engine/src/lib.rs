@@ -12,9 +12,10 @@ mod query;
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
 pub use query::{
-    AnalysisQuery, AncestorEntry, AncestorsResponse, CallHierarchyMethod, ExportGraphResponse,
-    FileMethodCount, GraphNodeSnapshot, IncluderInfo, IncomingCall, InferenceStatsResponse,
-    LocationInfo, LookupEntry, LookupResponse, MethodEntry, MethodsResponse, MixinInfo,
-    NamespaceNode, NamespaceTreeResponse, OutgoingCall, StatsResponse, TypeHierarchyEntry,
-    TypeHierarchyRelation, ViaModuleInfo, WorkspaceSymbolMatch,
+    AnalysisQuery, AncestorEntry, AncestorsResponse, CallHierarchyMethod,
+    ConstantCompletionCandidate, ConstantCompletionRequest, ExportGraphResponse, FileMethodCount,
+    GraphNodeSnapshot, IncluderInfo, IncomingCall, InferenceStatsResponse, LocationInfo,
+    LookupEntry, LookupResponse, MethodCompletionCandidate, MethodEntry, MethodsResponse,
+    MixinInfo, NamespaceNode, NamespaceTreeResponse, OutgoingCall, StatsResponse,
+    TypeHierarchyEntry, TypeHierarchyRelation, ViaModuleInfo, WorkspaceSymbolMatch,
 };
