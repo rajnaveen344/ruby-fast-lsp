@@ -1,4 +1,3 @@
-
 use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     ReferenceCandidate, RubyConstant, RubyMethod, RubyType, SymbolFact, SymbolKind, TypeProvenance,
