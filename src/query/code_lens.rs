@@ -1,11 +1,10 @@
-//! Code Lens Query — Computes module code lens data from the index.
+//! Code Lens Query — adapts engine mixin data to LSP code lens data.
 //!
-//! For each `module` definition in the file, this queries the index for:
+//! For each `module` definition in the file, this queries the engine for:
 //! - Mixin usages (include, prepend, extend)
 //! - Class definitions that include the module
 //!
-//! All AST traversal and index access lives here; the capability handler
-//! is a thin adapter that converts `CodeLensData` → LSP `CodeLens`.
+//! The capability handler converts `CodeLensData` → LSP `CodeLens`.
 
 use std::collections::HashMap;
 

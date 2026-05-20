@@ -4,7 +4,7 @@
 //! the complexity of checking caches, triggering inference, and storing results.
 //!
 //! Handlers (hover, inlay hints, completion) should use this API instead of
-//! directly interacting with the inferrer or index.
+//! directly interacting with inference internals.
 
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use ruby_analysis_core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
