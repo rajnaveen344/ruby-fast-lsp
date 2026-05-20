@@ -1,6 +1,5 @@
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::file_processor::ProcessingOptions;
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
@@ -54,13 +53,11 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     // Process file with unified FileProcessor::process_file. Route the index
     // by URI so the file lands in its workspace's own index.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions::full_analysis();
 
-    let (affected_uris, mut diagnostics) =
-        match indexer.process_file(&uri, &content, server, options) {
-            Ok(result) => (result.affected_uris, result.diagnostics),
-            Err(_) => (std::collections::HashSet::new(), Vec::new()),
-        };
+    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &content, server) {
+        Ok(result) => (result.affected_uris, result.diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    };
 
     // Invalidate namespace tree cache with debouncing
     server.invalidate_namespace_tree_cache_debounced();
@@ -114,13 +111,12 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     // Full processing on every change - includes unresolved diagnostics.
     // Route by URI so the file's workspace index is the one updated.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions::full_analysis();
 
-    let (affected_uris, mut diagnostics) =
-        match indexer.process_file(&uri, &final_content, server, options) {
-            Ok(result) => (result.affected_uris, result.diagnostics),
-            Err(_) => (std::collections::HashSet::new(), Vec::new()),
-        };
+    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &final_content, server)
+    {
+        Ok(result) => (result.affected_uris, result.diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    };
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
     let query = EngineQuery::with_engine(server.analysis_engine.clone());
@@ -168,13 +164,11 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // On save: do full indexing with unresolved tracking (for cross-file
     // diagnostics). Route by URI for multi-workspace correctness.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-    let options = ProcessingOptions::full_analysis();
 
-    let (affected_uris, mut diagnostics) =
-        match indexer.process_file(&uri, &content, server, options) {
-            Ok(result) => (result.affected_uris, result.diagnostics),
-            Err(_) => (std::collections::HashSet::new(), Vec::new()),
-        };
+    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &content, server) {
+        Ok(result) => (result.affected_uris, result.diagnostics),
+        Err(_) => (std::collections::HashSet::new(), Vec::new()),
+    };
 
     // Invalidate namespace tree cache
     server.invalidate_namespace_tree_cache_debounced();

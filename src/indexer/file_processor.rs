@@ -6,7 +6,6 @@
 //! ## Key Components
 //!
 //! - **`FileProcessor`**: Core struct for processing individual files
-//! - **`ProcessingOptions`**: Configuration for what to process (definitions, references, etc.)
 //! - **`ProcessResult`**: Results of processing including diagnostics and affected URIs
 //! - **`get_unresolved_diagnostics`**: Generates diagnostics for unresolved constants/methods
 //!
@@ -37,35 +36,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::{Diagnostic, Url};
-
-// ============================================================================
-// Options Structs
-// ============================================================================
-
-/// Options for processing a file
-#[derive(Clone)]
-pub struct ProcessingOptions {
-    /// Whether to include local variables in reference facts
-    pub include_local_vars: bool,
-}
-
-impl Default for ProcessingOptions {
-    fn default() -> Self {
-        Self {
-            include_local_vars: true,
-        }
-    }
-}
-
-impl ProcessingOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn full_analysis() -> Self {
-        Self::default()
-    }
-}
 
 /// Result of processing a file
 pub struct ProcessResult {
@@ -103,7 +73,6 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         server: &RubyLanguageServer,
-        options: ProcessingOptions,
     ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
         let already_indexed = {
@@ -181,7 +150,6 @@ impl FileProcessor {
             self.extension_registry.clone(),
             server.analysis_engine.clone(),
         );
-        visitor.include_local_vars = options.include_local_vars;
         visitor.visit(&node);
         diagnostics.extend(visitor.diagnostics);
 

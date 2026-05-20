@@ -13,7 +13,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 use log::{info, LevelFilter};
 use parking_lot::RwLock;
 use ruby_fast_lsp::capabilities::indexing;
-use ruby_fast_lsp::indexer::file_processor::{FileProcessor, ProcessingOptions};
+use ruby_fast_lsp::indexer::file_processor::FileProcessor;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use ruby_fast_lsp::types::ruby_document::RubyDocument;
 use std::env;
@@ -134,8 +134,7 @@ fn main() {
 
             // Process file (collect facts/references)
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let options = ProcessingOptions::full_analysis();
-            let _ = indexer.process_file(&file_uri, &content, &server, options);
+            let _ = indexer.process_file(&file_uri, &content, &server);
         }
 
         let stats_after_open = dhat::HeapStats::get();
@@ -207,8 +206,7 @@ fn main() {
             drop(docs);
 
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let options = ProcessingOptions::full_analysis();
-            let _ = indexer.process_file(&file_uri, &content, &server, options);
+            let _ = indexer.process_file(&file_uri, &content, &server);
         }
 
         let stats_after_reopen = dhat::HeapStats::get();

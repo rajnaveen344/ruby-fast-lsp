@@ -158,8 +158,8 @@ Centrally defined types used throughout the system.
 3. Server asks the indexer to index all Ruby files in the workspace
 4. Indexer finds all Ruby files and processes each one:
    - Parse the file using Ruby Prism
-   - Traverse the AST to find symbols
-   - Add symbols to the index
+   - Traverse the AST once to collect facts and candidates
+   - Replace that file's facts in `AnalysisEngine`
 
 ### 2. Go to Definition
 
@@ -180,8 +180,9 @@ Centrally defined types used throughout the system.
    - Updates its document cache
    - Asks the indexer to reindex the file
 3. Indexer:
-   - Removes old entries for the file
-   - Parses and reindexes the updated content
+   - Parses the updated content
+   - Replaces that file's facts in `AnalysisEngine`
+   - Recomputes engine diagnostics
 
 ## Component Interactions
 
@@ -191,7 +192,7 @@ The Ruby Fast LSP follows a clear 3-layer architecture:
 
 1. **API Layer** (`server.rs`, `handlers/`): Handles LSP protocol, request validation, and routing.
 2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `AnalysisQuery` acts as the primary service interface for data lookups.
-3. **Data Layer** (`src/indexer/`): Manages the in-memory `AnalysisEngine`, providing raw access to symbol data.
+3. **Data Layer** (`ruby-analysis-engine`): Owns symbols, graph facts, references, diagnostics, and type facts.
 
 ### Analyzer, Query Engine, and Indexer Relationship
 
@@ -199,7 +200,7 @@ The separation between these components is crucial:
 
 - **Analyzer**: Focuses on "what is this piece of code?" (local context)
 - **Query Engine**: Focuses on "where is this in the project and how does it relate to other code?" (global context)
-- **Indexer**: Focuses on storing and retrieving raw symbol data efficiently.
+- **Indexer**: Focuses on file discovery, parsing, and feeding facts into the engine.
 
 This separation allows:
 
