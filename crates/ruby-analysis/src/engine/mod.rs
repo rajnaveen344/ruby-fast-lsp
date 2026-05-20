@@ -8,6 +8,7 @@
 mod debug;
 mod engine;
 mod file_id_map;
+mod namespace_tree;
 mod query;
 mod query_types;
 
