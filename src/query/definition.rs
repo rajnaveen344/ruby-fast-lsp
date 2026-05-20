@@ -2,7 +2,7 @@
 //!
 //! Consolidates definition logic from `capabilities/definitions/`.
 
-use crate::yard::YardParser;
+use ruby_analysis::indexer::yard::YardParser;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;

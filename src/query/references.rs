@@ -2,7 +2,7 @@
 //!
 //! Consolidates reference logic from `capabilities/references.rs`.
 
-use crate::yard::YardTypeConverter;
+use ruby_analysis::indexer::yard::YardTypeConverter;
 use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
