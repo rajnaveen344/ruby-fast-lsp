@@ -8,5 +8,9 @@ license = "MIT"
 
 [dependencies]
 ruby-analysis-core = { path = "../ruby-analysis-core" }
+ruby-analysis-inference = { path = "../ruby-analysis-inference" }
 ruby-prism = "1.4.0"
+log = "0.4.20"
+regex = "1.10"
+tower-lsp = "0.20.0"
 ustr = "1.0"

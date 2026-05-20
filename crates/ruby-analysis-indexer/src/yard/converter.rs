@@ -4,8 +4,7 @@
 //! This enables type inference to use YARD documentation for type checking.
 //!
 //! Type existence validation belongs in the analysis engine, not in this parser.
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_core::{FullyQualifiedName, RubyConstant};
 use ruby_analysis_inference::RubyType;
 use tower_lsp::lsp_types::Range;
 
