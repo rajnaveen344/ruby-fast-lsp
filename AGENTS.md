@@ -181,8 +181,11 @@ Move remaining non-LSP logic out of `src/`:
    candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
 7. `src/query/hover/*` -> split domain hover content from protocol hover.
 8. Done: `src/inferrer/*` -> `crates/ruby-analysis-inference`.
-9. Remaining: `src/analyzer_prism/visitors/fact_collector/*` -> `ruby-analysis-indexer`.
-10. Remaining: `src/analyzer_prism/mod.rs` -> split into smaller parser/identifier/source
+9. Interim done: `FactCollector` moved under `src/indexer/fact_collector`.
+   Remaining: extract its pure core to `ruby-analysis-indexer` after adding
+   seams for `RubyDocument`, extensions, YARD diagnostics, and LSP diagnostics.
+10. Partial done: `src/analyzer_prism/mod.rs` split into `analyzer.rs` and
+    `identifier.rs`. Remaining: move large test module and split parser/source
     utilities; keep LSP-specific position handling in adapter layer where possible.
 
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,

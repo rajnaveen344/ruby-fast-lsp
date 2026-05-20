@@ -8,15 +8,16 @@
 mod engine;
 mod file_id_map;
 mod query;
+mod query_types;
 
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
-pub use query::{
-    AnalysisQuery, AncestorEntry, AncestorsResponse, CallHierarchyMethod,
-    ConstantCompletionCandidate, ConstantCompletionRequest, ExportGraphResponse, FileMethodCount,
-    GraphNodeSnapshot, IncluderInfo, IncomingCall, InferenceStatsResponse, LocationInfo,
-    LookupEntry, LookupResponse, MethodCompletionCandidate, MethodEntry, MethodsResponse,
-    MixinInfo, MixinUsage, MixinUsageKind, NamespaceNode, NamespaceTreeResponse, OutgoingCall,
-    StatsResponse, TypeHierarchyEntry, TypeHierarchyRelation, VariableTypeKind, ViaModuleInfo,
-    WorkspaceSymbolMatch,
+pub use query::AnalysisQuery;
+pub use query_types::{
+    AncestorEntry, AncestorsResponse, CallHierarchyMethod, ConstantCompletionCandidate,
+    ConstantCompletionRequest, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
+    IncluderInfo, IncomingCall, InferenceStatsResponse, LocationInfo, LookupEntry, LookupResponse,
+    MethodCompletionCandidate, MethodEntry, MethodsResponse, MixinInfo, MixinUsage, MixinUsageKind,
+    NamespaceNode, NamespaceTreeResponse, OutgoingCall, StatsResponse, TypeHierarchyEntry,
+    TypeHierarchyRelation, VariableTypeKind, ViaModuleInfo, WorkspaceSymbolMatch,
 };

@@ -45,7 +45,9 @@
 
 ```
 analyzer_prism/
-├── mod.rs                  # Main analyzer interface, Identifier enum
+├── mod.rs                  # Module exports and tests
+├── analyzer.rs             # RubyPrismAnalyzer implementation
+├── identifier.rs           # Identifier and MethodReceiver types
 ├── scope_tracker.rs        # Scope and namespace tracking during traversal
 ├── utils.rs                # Analysis utilities
 └── visitors/               # AST visitor implementations
@@ -59,18 +61,6 @@ analyzer_prism/
     │   ├── def_node.rs
     │   ├── local_variable_read_node.rs
     │   └── ...
-    ├── fact_collector/              # Single-pass facts, references, diagnostics, scopes
-    │   ├── mod.rs
-    │   ├── class_node.rs
-    │   ├── module_node.rs
-    │   ├── def_node.rs
-    │   ├── call_node/
-    │   ├── constant_read_node.rs
-    │   ├── constant_write_node.rs
-    │   ├── local_variable_read_node.rs
-    │   ├── local_variable_write_node.rs
-    │   └── ...
-    └── token_visitor.rs             # Semantic token generation
 ```
 
 ## Indexer Module (`src/indexer/`)
@@ -79,26 +69,34 @@ analyzer_prism/
 indexer/
 ├── mod.rs                  # Module exports
 ├── coordinator.rs          # Orchestrates indexing operations
+├── file_processor.rs       # Individual file processing logic
+├── fact_collector/         # Single-pass refs, diagnostics, scopes, extension patches
+│   ├── mod.rs
+│   ├── class_node.rs
+│   ├── module_node.rs
+│   ├── def_node.rs
+│   ├── call_node/
+│   └── ...
 ├── indexer_project.rs      # Project file indexing
 ├── indexer_stdlib.rs       # Ruby stdlib stubs indexing
 ├── indexer_gem.rs          # Gem dependency indexing
-├── file_processor.rs       # Individual file processing logic
 ├── interner.rs             # String interning for memory efficiency
 └── version/                # Ruby version detection
 ```
 
-## Query Module (`src/query/`)
+## Query Adapter Module (`src/query/`)
 
-The unified query layer between handlers and the index. All index-heavy
-business logic lives here; capabilities are thin adapters.
+The adapter layer between handlers and `ruby-analysis-engine`. Domain queries
+belong in engine; this layer keeps protocol mapping, cursor parsing, and
+`TextRange -> Location` conversion.
 
 ```
 query/
-├── mod.rs                  # IndexQuery struct and module exports
-├── code_lens.rs            # Module mixin code lens queries
-├── completion.rs           # Constant and method completion queries
+├── mod.rs                  # EngineQuery wrapper and module exports
+├── code_lens.rs            # Code lens protocol adapter
+├── completion.rs           # Completion protocol adapter
 ├── debug.rs                # Debug/inspection queries (lookup, stats, ancestors, etc.)
-├── definition.rs           # Go-to-definition queries
+├── definition.rs           # Go-to-definition adapter
 ├── diagnostics.rs          # YARD and unresolved diagnostics queries
 ├── hover.rs                # Hover information queries
 ├── inference.rs            # Type inference resolvers
@@ -108,7 +106,7 @@ query/
 ├── references.rs           # Find-references queries
 ├── type_hierarchy.rs       # Supertype/subtype queries
 ├── types.rs                # Type inference utilities
-└── workspace_symbols.rs    # Workspace symbol search queries
+└── workspace_symbols.rs    # Workspace symbol protocol adapter
 ```
 
 ## Capabilities Module (`src/capabilities/`)
