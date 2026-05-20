@@ -14,9 +14,9 @@
 //! Each indexer (project, stdlib, gem) discovers files to process, then delegates
 //! the actual processing to `FileProcessor` with appropriate options.
 
-use crate::analyzer_prism::visitors::fact_collector::FactCollector;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
+use crate::indexer::fact_collector::FactCollector;
 use crate::server::RubyLanguageServer;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;

@@ -557,7 +557,7 @@ impl FakeEditor {
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
 
         {
-            use crate::analyzer_prism::visitors::fact_collector::FactCollector;
+            use crate::indexer::fact_collector::FactCollector;
             use ruby_prism::Visit;
 
             let mut visitor = FactCollector::analysis_only(

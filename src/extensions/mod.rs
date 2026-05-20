@@ -19,9 +19,9 @@ use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::analyzer_prism::utils;
-use crate::analyzer_prism::visitors::fact_collector::FactCollector;
 use crate::analyzer_prism::MethodReceiver as CoreMethodReceiver;
 use crate::config::RubyFastLspConfig;
+use crate::indexer::fact_collector::FactCollector;
 use crate::query::MethodCalleeResolution;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;

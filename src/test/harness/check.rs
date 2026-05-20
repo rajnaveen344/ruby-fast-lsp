@@ -1023,7 +1023,7 @@ async fn run_diagnostics_check(
     // Run FactCollector directly on the parsed AST to collect indexing-time diagnostics
     // (e.g., YARD checks and return type mismatches).
     {
-        use crate::analyzer_prism::visitors::fact_collector::FactCollector;
+        use crate::indexer::fact_collector::FactCollector;
         use ruby_prism::Visit;
         let mut visitor = FactCollector::analysis_only(
             document.clone(),

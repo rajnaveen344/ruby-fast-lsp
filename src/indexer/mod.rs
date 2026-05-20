@@ -18,6 +18,7 @@
 //! - **`version`**: Ruby version detection and management
 
 pub mod coordinator;
+pub mod fact_collector;
 pub mod file_processor;
 pub mod indexer_gem;
 pub mod indexer_project;
