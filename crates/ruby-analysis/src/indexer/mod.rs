@@ -4,6 +4,8 @@
 //! facts consumed by `ruby-analysis::engine`.
 
 pub mod analyzer;
+#[cfg(test)]
+mod analyzer_tests;
 pub mod analyzer_utils;
 pub mod document_symbols;
 pub mod fact_collector;

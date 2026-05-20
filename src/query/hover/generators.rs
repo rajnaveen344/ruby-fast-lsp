@@ -4,7 +4,7 @@
 //! and returns formatted hover information.
 
 use super::nodes::HoverNode;
-use crate::analyzer_prism::MethodReceiver;
+use ruby_analysis::indexer::MethodReceiver;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;

@@ -90,7 +90,7 @@ cargo build --release         # Release build
 - `src/handlers/` - Request/notification routing
 - `src/capabilities/` - Feature implementations
 - `src/indexer/` - LSP/workspace indexing orchestration
-- `src/analyzer_prism/` - AST analysis
+- `crates/ruby-analysis/src/indexer/` - AST analysis and parser-to-facts code
 - `crates/ruby-analysis/` - Shared facts, graph/query engine, inference, and parser-to-facts indexing primitives
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
@@ -186,9 +186,9 @@ Move remaining non-LSP logic out of `src/`:
    conversion in `ruby-analysis::indexer`. Remaining: extract pure core after
    adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
    parsing/type conversion.
-10. Partial done: `src/analyzer_prism/mod.rs` split into `analyzer.rs` and
-    `identifier.rs`. Remaining: move large test module and split parser/source
-    utilities; keep LSP-specific position handling in adapter layer where possible.
+10. Done: `src/analyzer_prism` compatibility facade removed. Analyzer,
+    identifier lookup, document symbols, semantic tokens, rename, and analyzer
+    tests now live under `crates/ruby-analysis/src/indexer`.
 
 ### Performance Backlog
 

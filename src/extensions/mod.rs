@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
 
-use crate::analyzer_prism::utils;
-use crate::analyzer_prism::MethodReceiver as CoreMethodReceiver;
+use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
+use ruby_analysis::indexer as utils;
 use crate::config::RubyFastLspConfig;
 use crate::query::MethodCalleeResolution;
 use crate::types::fully_qualified_name::FullyQualifiedName;

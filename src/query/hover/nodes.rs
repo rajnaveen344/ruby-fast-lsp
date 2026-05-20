@@ -4,7 +4,7 @@
 //! They are simpler than the `Identifier` enum and contain only the data needed
 //! for generating hover information.
 
-use crate::analyzer_prism::MethodReceiver;
+use ruby_analysis::indexer::MethodReceiver;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::types::scope::LVScopeId;
 use tower_lsp::lsp_types::Position;

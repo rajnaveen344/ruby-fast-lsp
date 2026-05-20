@@ -1,15 +1,8 @@
-pub mod control_flow;
-pub mod diagnostics;
-pub mod scope_tracker;
-pub mod utils;
-pub mod visitors;
-
-pub use ruby_analysis::indexer::{Identifier, IdentifierType, MethodReceiver, RubyPrismAnalyzer};
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::types::{ruby_namespace::RubyConstant, scope::LVScopeId};
+    use super::super::*;
+    use super::super::LVScopeId;
+    use crate::core::RubyConstant;
     use tower_lsp::lsp_types::{Position, Url};
 
     // Helper function to parse content and create an analyzer

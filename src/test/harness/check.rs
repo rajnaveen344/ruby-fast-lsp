@@ -647,7 +647,7 @@ async fn run_type_check(
     expected_types: &[&Tag],
     _all_file_contents: &[(Url, Vec<u8>)],
 ) {
-    use crate::analyzer_prism::RubyPrismAnalyzer;
+    use ruby_analysis::indexer::RubyPrismAnalyzer;
     use crate::query::TypeQuery;
     use ruby_analysis::inference::RubyType;
 
@@ -673,7 +673,7 @@ async fn run_type_check(
             identifier_opt
         {
             match &identifier {
-                crate::analyzer_prism::Identifier::RubyLocalVariable { name, .. } => {
+                ruby_analysis::indexer::Identifier::RubyLocalVariable { name, .. } => {
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let variable_type = if let Some(doc) = doc_snapshot {
                         let scope_id = doc
@@ -701,7 +701,7 @@ async fn run_type_check(
                     };
                     (variable_type, "var")
                 }
-                crate::analyzer_prism::Identifier::RubyConstant { iden, .. } => {
+                ruby_analysis::indexer::Identifier::RubyConstant { iden, .. } => {
                     let constant_fqn =
                         crate::types::fully_qualified_name::FullyQualifiedName::Constant(
                             iden.clone(),
@@ -728,7 +728,7 @@ async fn run_type_check(
                         "const",
                     )
                 }
-                crate::analyzer_prism::Identifier::RubyMethod {
+                ruby_analysis::indexer::Identifier::RubyMethod {
                     iden,
                     receiver,
                     namespace,
@@ -768,8 +768,8 @@ async fn run_type_check(
                         }
                     } else {
                         let receiver_type = match receiver {
-                            crate::analyzer_prism::MethodReceiver::None
-                            | crate::analyzer_prism::MethodReceiver::SelfReceiver => {
+                            ruby_analysis::indexer::MethodReceiver::None
+                            | ruby_analysis::indexer::MethodReceiver::SelfReceiver => {
                                 if namespace.is_empty() {
                                     RubyType::class("Object")
                                 } else {
@@ -779,14 +779,14 @@ async fn run_type_check(
                                     RubyType::Class(fqn)
                                 }
                             }
-                            crate::analyzer_prism::MethodReceiver::Constant(path) => {
+                            ruby_analysis::indexer::MethodReceiver::Constant(path) => {
                                 let fqn =
                                         crate::types::fully_qualified_name::FullyQualifiedName::Constant(
                                             path.clone().into(),
                                         );
                                 RubyType::ClassReference(fqn)
                             }
-                            crate::analyzer_prism::MethodReceiver::LocalVariable(name) => {
+                            ruby_analysis::indexer::MethodReceiver::LocalVariable(name) => {
                                 type_query
                                     .get_local_variable_type(name, position)
                                     .unwrap_or(RubyType::Unknown)
@@ -802,13 +802,13 @@ async fn run_type_check(
                     };
                     (ty, "return")
                 }
-                crate::analyzer_prism::Identifier::RubyInstanceVariable { name, .. } => {
+                ruby_analysis::indexer::Identifier::RubyInstanceVariable { name, .. } => {
                     (variable_type_from_analysis(server, name, "instance"), "var")
                 }
-                crate::analyzer_prism::Identifier::RubyClassVariable { name, .. } => {
+                ruby_analysis::indexer::Identifier::RubyClassVariable { name, .. } => {
                     (variable_type_from_analysis(server, name, "class"), "var")
                 }
-                crate::analyzer_prism::Identifier::RubyGlobalVariable { name, .. } => {
+                ruby_analysis::indexer::Identifier::RubyGlobalVariable { name, .. } => {
                     (variable_type_from_analysis(server, name, "global"), "var")
                 }
                 _ => (None, "unknown"),

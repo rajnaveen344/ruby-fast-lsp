@@ -28,7 +28,7 @@
 
 ### Core Modules
 
-- `analyzer_prism/` - Ruby code analysis using Prism parser
+- `crates/ruby-analysis/src/indexer/` - Ruby code analysis using Prism parser
 - `indexer/` - Symbol indexing and workspace tracking
 - `capabilities/` - LSP feature implementations
 - `handlers/` - Request and notification handlers
@@ -38,10 +38,10 @@
 - `utils/` - Shared utilities (file ops, parser utils)
 - `yard/` - YARD documentation processing
 
-## Analyzer Module (`src/analyzer_prism/`)
+## Analyzer Module (`crates/ruby-analysis/src/indexer/`)
 
 ```
-analyzer_prism/
+crates/ruby-analysis/src/indexer/
 ├── mod.rs                  # Module exports and tests
 ├── analyzer.rs             # RubyPrismAnalyzer implementation
 ├── identifier.rs           # Identifier and MethodReceiver types

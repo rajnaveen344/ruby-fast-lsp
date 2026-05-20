@@ -6,7 +6,7 @@
 use tower_lsp::lsp_types::{CompletionItem, Position};
 use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
-use crate::analyzer_prism::RubyPrismAnalyzer;
+use ruby_analysis::indexer::RubyPrismAnalyzer;
 use crate::capabilities::completion::method;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;

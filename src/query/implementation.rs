@@ -4,7 +4,7 @@
 //! - For a method: find all overrides in descendant classes and including classes
 //! - For a module/class: find all classes that include/prepend/extend it
 
-use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use log::info;

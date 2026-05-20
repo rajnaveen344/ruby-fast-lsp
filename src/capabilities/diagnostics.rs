@@ -3,7 +3,7 @@
 //! AST-only diagnostics (syntax errors/warnings) live here.
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
-use crate::analyzer_prism::control_flow;
+use ruby_analysis::inference::control_flow;
 use crate::types::ruby_document::RubyDocument;
 use log::debug;
 use ruby_analysis::inference::RubyType;

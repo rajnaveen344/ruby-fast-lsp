@@ -17,7 +17,7 @@ use generators::HoverContext;
 pub use generators::HoverInfo;
 use nodes::HoverNode;
 
-use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, IdentifierType, RubyPrismAnalyzer};
 use crate::query::EngineQuery;
 use tower_lsp::lsp_types::{Position, Url};
 

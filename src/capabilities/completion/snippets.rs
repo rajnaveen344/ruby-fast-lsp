@@ -1,4 +1,4 @@
-use crate::analyzer_prism::{Identifier, MethodReceiver};
+use ruby_analysis::indexer::{Identifier, MethodReceiver};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 
 /// Context for snippet completion to determine appropriate snippets
@@ -1106,7 +1106,7 @@ mod tests {
 
     #[test]
     fn test_determine_context_with_analyzer() {
-        use crate::analyzer_prism::RubyPrismAnalyzer;
+        use ruby_analysis::indexer::RubyPrismAnalyzer;
         use tower_lsp::lsp_types::{Position, Url};
 
         // Test method call context (a.each)
@@ -1147,7 +1147,7 @@ mod tests {
 
     #[test]
     fn test_full_completion_output_with_analyzer() {
-        use crate::analyzer_prism::RubyPrismAnalyzer;
+        use ruby_analysis::indexer::RubyPrismAnalyzer;
         use tower_lsp::lsp_types::{Position, Url};
 
         // Test method call context (a.each) - should NOT include collection placeholder

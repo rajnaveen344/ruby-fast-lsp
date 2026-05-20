@@ -2,7 +2,7 @@
 //!
 //! Consolidates reference logic from `capabilities/references.rs`.
 
-use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;

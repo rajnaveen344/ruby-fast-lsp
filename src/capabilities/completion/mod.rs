@@ -8,10 +8,10 @@ use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, Position, Url,
 };
 
+use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+
 use crate::{
-    analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer},
-    query::EngineQuery,
-    server::RubyLanguageServer,
+    query::EngineQuery, server::RubyLanguageServer,
     types::fully_qualified_name::FullyQualifiedName,
     utils::{ast::is_in_statement_position, position_to_offset},
 };

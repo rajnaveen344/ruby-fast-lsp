@@ -8,7 +8,7 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 
 ```
 src/
-├── analyzer_prism/ - Ruby AST analysis and visitors
+├── ruby-analysis/src/indexer/ - Ruby AST analysis and visitors
 ├── capabilities/   - LSP feature implementations (AST-only logic)
 ├── indexer/        - File discovery and fact collection orchestration
 ├── query/          - Service Layer: Unified AnalysisEngine query engine
@@ -50,7 +50,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass
 - File discovery and parsing stay separate from engine query logic
 
-### 2. Analyzer (`src/analyzer_prism/`)
+### 2. Analyzer (`src/ruby-analysis/src/indexer/`)
 
 The Analyzer is responsible for understanding Ruby code structure using the Prism parser.
 

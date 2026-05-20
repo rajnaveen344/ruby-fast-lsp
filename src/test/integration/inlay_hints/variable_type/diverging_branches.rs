@@ -3,7 +3,7 @@
 //! When a branch of `if`/`unless`/`case` always exits (return/raise/break/...),
 //! its result type is pruned from the union — the join point is never reached
 //! via that branch. Implemented in `inferrer/type_tracker` via
-//! `analyzer_prism::control_flow`.
+//! `ruby_analysis::inference::control_flow`.
 //!
 //! These assertions target the method return-type hint (the consumer that
 //! actually flows through TypeTracker's union).
