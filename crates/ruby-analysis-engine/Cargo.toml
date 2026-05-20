@@ -8,3 +8,4 @@ license = "MIT"
 
 [dependencies]
 ruby-analysis-core = { path = "../ruby-analysis-core" }
+serde = { version = "1.0", features = ["derive"] }

@@ -12,6 +12,7 @@ mod query;
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
 pub use query::{
-    AnalysisQuery, CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry,
-    TypeHierarchyRelation, WorkspaceSymbolMatch,
+    AnalysisQuery, CallHierarchyMethod, IncluderInfo, IncomingCall, LocationInfo, MixinInfo,
+    NamespaceNode, NamespaceTreeResponse, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
+    ViaModuleInfo, WorkspaceSymbolMatch,
 };
