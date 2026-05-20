@@ -5,7 +5,6 @@ use ruby_analysis_core::{
 };
 use ruby_analysis_indexer::LocalScopeKind as LVScopeKind;
 use ruby_prism::*;
-use tower_lsp::lsp_types::Position;
 
 use crate::analyzer_prism::utils;
 use ruby_analysis_inference::r#type::literal::LiteralAnalyzer;
@@ -19,17 +18,12 @@ use super::FactCollector;
 #[derive(Debug, Clone, PartialEq)]
 struct MethodParamInfo {
     name: String,
-    end_position: Position,
     kind: MethodParamKind,
 }
 
 impl MethodParamInfo {
-    fn new(name: String, end_position: Position, kind: MethodParamKind) -> Self {
-        Self {
-            name,
-            end_position,
-            kind,
-        }
+    fn new(name: String, kind: MethodParamKind) -> Self {
+        Self { name, kind }
     }
 }
 
@@ -271,14 +265,7 @@ impl FactCollector {
         for required in params_node.requireds().iter() {
             if let Some(param) = required.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
-                let end_pos = self
-                    .document
-                    .offset_to_position(param.location().end_offset());
-                params.push(MethodParamInfo::new(
-                    param_name,
-                    end_pos,
-                    MethodParamKind::Required,
-                ));
+                params.push(MethodParamInfo::new(param_name, MethodParamKind::Required));
             }
         }
 
@@ -287,14 +274,7 @@ impl FactCollector {
             if let Some(param) = optional.as_optional_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 // For optional params, position after the name, not after the default value
-                let end_pos = self
-                    .document
-                    .offset_to_position(param.name_loc().end_offset());
-                params.push(MethodParamInfo::new(
-                    param_name,
-                    end_pos,
-                    MethodParamKind::Optional,
-                ));
+                params.push(MethodParamInfo::new(param_name, MethodParamKind::Optional));
             }
         }
 
@@ -303,14 +283,7 @@ impl FactCollector {
             if let Some(param) = rest.as_rest_parameter_node() {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                    if let Some(name_loc) = param.name_loc() {
-                        let end_pos = self.document.offset_to_position(name_loc.end_offset());
-                        params.push(MethodParamInfo::new(
-                            param_name,
-                            end_pos,
-                            MethodParamKind::Rest,
-                        ));
-                    }
+                    params.push(MethodParamInfo::new(param_name, MethodParamKind::Rest));
                 }
             }
         }
@@ -322,24 +295,16 @@ impl FactCollector {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 // Remove trailing colon from keyword param name for matching with YARD
                 let param_name = param_name.trim_end_matches(':').to_string();
-                let end_pos = self
-                    .document
-                    .offset_to_position(param.name_loc().end_offset());
                 params.push(MethodParamInfo::new(
                     param_name,
-                    end_pos,
                     MethodParamKind::RequiredKeyword,
                 ));
             } else if let Some(param) = keyword.as_optional_keyword_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 // Remove trailing colon from keyword param name for matching with YARD
                 let param_name = param_name.trim_end_matches(':').to_string();
-                let end_pos = self
-                    .document
-                    .offset_to_position(param.name_loc().end_offset());
                 params.push(MethodParamInfo::new(
                     param_name,
-                    end_pos,
                     MethodParamKind::OptionalKeyword,
                 ));
             }
@@ -350,14 +315,10 @@ impl FactCollector {
             if let Some(param) = kwrest.as_keyword_rest_parameter_node() {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                    if let Some(name_loc) = param.name_loc() {
-                        let end_pos = self.document.offset_to_position(name_loc.end_offset());
-                        params.push(MethodParamInfo::new(
-                            param_name,
-                            end_pos,
-                            MethodParamKind::KeywordRest,
-                        ));
-                    }
+                    params.push(MethodParamInfo::new(
+                        param_name,
+                        MethodParamKind::KeywordRest,
+                    ));
                 }
             }
         }
@@ -366,14 +327,7 @@ impl FactCollector {
         if let Some(block) = params_node.block() {
             if let Some(name) = block.name() {
                 let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
-                if let Some(name_loc) = block.name_loc() {
-                    let end_pos = self.document.offset_to_position(name_loc.end_offset());
-                    params.push(MethodParamInfo::new(
-                        param_name,
-                        end_pos,
-                        MethodParamKind::Block,
-                    ));
-                }
+                params.push(MethodParamInfo::new(param_name, MethodParamKind::Block));
             }
         }
 
