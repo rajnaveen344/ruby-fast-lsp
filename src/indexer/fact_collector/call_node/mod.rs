@@ -38,13 +38,12 @@ impl FactCollector {
             return;
         }
 
-        let call_location = self
-            .document
-            .prism_location_to_lsp_location(&node.location());
-        let message_location = node
+        let call_range =
+            self.text_range_from_prism_location(&node.location(), "method reference candidate");
+        let message_range = node
             .message_loc()
-            .map(|loc| self.document.prism_location_to_lsp_location(&loc))
-            .unwrap_or_else(|| call_location.clone());
+            .map(|loc| self.text_range_from_prism_location(&loc, "method diagnostic candidate"))
+            .unwrap_or(call_range);
         let current_namespace = self.scope_tracker.get_ns_stack();
         let (target_namespace, namespace_kind, receiver_info, inferred_expr_type) =
             match node.receiver() {
@@ -83,15 +82,12 @@ impl FactCollector {
                 }
             };
             self.reference_candidates.push(ReferenceCandidate::method(
-                self.text_range_from_lsp_range(call_location.range, "method reference candidate"),
+                call_range,
                 target_namespace,
                 namespace_kind,
                 method,
                 self.scope_tracker.current_method_fqn().cloned(),
-                self.text_range_from_lsp_range(
-                    message_location.range,
-                    "method diagnostic candidate",
-                ),
+                message_range,
                 receiver_label,
                 !matches!(receiver_info, ReceiverInfo::SelfReceiver),
                 self.method_call_signature_candidate(node),

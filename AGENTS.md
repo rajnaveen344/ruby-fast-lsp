@@ -184,8 +184,10 @@ Move remaining non-LSP logic out of `src/`:
 9. Interim done: `FactCollector` moved under `src/indexer/fact_collector`.
    Done seams: `ScopeTracker`, parser helper functions, and scope kind moved to
    `ruby-analysis-indexer`; collector validation emits `DiagnosticFact` instead
-   of LSP diagnostics. Remaining: extract pure core after adding seams for
-   `RubyDocument`, extension hooks, and YARD parsing/type conversion.
+   of LSP diagnostics; `SourceDocument` owns source offsets/comments/TextRange
+   conversion in `ruby-analysis-indexer`. Remaining: extract pure core after
+   adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
+   parsing/type conversion.
 10. Partial done: `src/analyzer_prism/mod.rs` split into `analyzer.rs` and
     `identifier.rs`. Remaining: move large test module and split parser/source
     utilities; keep LSP-specific position handling in adapter layer where possible.
