@@ -55,7 +55,7 @@ pub struct TypeHierarchyEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConstantCompletionRequest {
+pub struct ConstantLookupRequest {
     pub partial_name: String,
     pub namespace_prefix: Option<FullyQualifiedName>,
     pub is_qualified: bool,
@@ -63,13 +63,13 @@ pub struct ConstantCompletionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConstantCompletionCandidate {
+pub struct ConstantMatch {
     pub fqn: FullyQualifiedName,
     pub kind: SymbolKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MethodCompletionCandidate {
+pub struct MethodMatch {
     pub name: String,
     pub params: Vec<String>,
     pub return_type: Option<RubyType>,

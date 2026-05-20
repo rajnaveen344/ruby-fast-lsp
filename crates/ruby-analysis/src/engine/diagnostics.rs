@@ -397,7 +397,7 @@ impl AnalysisEngine {
 
         let target_len = target.len();
         let mut best: Option<(String, usize)> = None;
-        for fact in AnalysisQuery::new(self).method_completion_facts(owner_fqn, "") {
+        for fact in AnalysisQuery::new(self).method_facts_matching(owner_fqn, "") {
             let FullyQualifiedName::Method(_, method) = &fact.fqn else {
                 continue;
             };

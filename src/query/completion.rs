@@ -9,9 +9,7 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 use crate::capabilities::completion::method;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
-use ruby_analysis::engine::{
-    ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate,
-};
+use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
 use ruby_analysis::indexer::RubyPrismAnalyzer;
 use ruby_analysis::inference::RubyType;
 
@@ -53,7 +51,7 @@ impl EngineQuery {
             );
 
         let mut items = query
-            .constant_completion_candidates(&ConstantCompletionRequest {
+            .constant_matches(&ConstantLookupRequest {
                 partial_name: context.partial_name,
                 namespace_prefix: context.namespace_prefix,
                 is_qualified: context.is_qualified,
@@ -98,7 +96,7 @@ impl EngineQuery {
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
-            .method_completion_candidates(receiver_type, partial_method, kind)
+            .method_matches_for_type(receiver_type, partial_method, kind)
             .into_iter()
             .map(method_completion_item_from_analysis)
             .collect()
@@ -119,14 +117,14 @@ impl EngineQuery {
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
-            .top_level_method_completion_candidates(partial_method)
+            .top_level_method_matches(partial_method)
             .into_iter()
             .map(method_completion_item_from_analysis)
             .collect()
     }
 }
 
-fn method_completion_item_from_analysis(candidate: MethodCompletionCandidate) -> CompletionItem {
+fn method_completion_item_from_analysis(candidate: MethodMatch) -> CompletionItem {
     let name = candidate.name;
     let params = candidate
         .params
@@ -154,7 +152,7 @@ fn method_completion_item_from_analysis(candidate: MethodCompletionCandidate) ->
     }
 }
 
-fn constant_completion_item(candidate: ConstantCompletionCandidate) -> CompletionItem {
+fn constant_completion_item(candidate: ConstantMatch) -> CompletionItem {
     let fqn = candidate.fqn;
     let kind = candidate.kind;
     let item_kind = match kind {

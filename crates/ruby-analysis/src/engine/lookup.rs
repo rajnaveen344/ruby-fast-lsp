@@ -6,13 +6,12 @@ use crate::core::{
 };
 use crate::engine::query::AnalysisQuery;
 use crate::engine::query_types::{
-    ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate, MixinUsage,
-    MixinUsageKind,
+    ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind,
 };
 use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
 
 impl<'a> AnalysisQuery<'a> {
-    pub fn method_completion_facts(
+    pub fn method_facts_matching(
         &self,
         namespace_fqn: &FullyQualifiedName,
         partial: &str,
@@ -46,10 +45,7 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
-    pub fn constant_completion_candidates(
-        &self,
-        request: &ConstantCompletionRequest,
-    ) -> Vec<ConstantCompletionCandidate> {
+    pub fn constant_matches(&self, request: &ConstantLookupRequest) -> Vec<ConstantMatch> {
         let mut seen = HashSet::new();
         let mut candidates = self
             .engine
@@ -62,8 +58,8 @@ impl<'a> AnalysisQuery<'a> {
                 )
             })
             .filter(|fact| seen.insert(fact.fqn.namespace_parts()))
-            .filter(|fact| Self::constant_completion_matches(&fact.fqn, request))
-            .map(|fact| ConstantCompletionCandidate {
+            .filter(|fact| Self::constant_matches_request(&fact.fqn, request))
+            .map(|fact| ConstantMatch {
                 fqn: fact.fqn,
                 kind: fact.kind,
             })
@@ -74,28 +70,25 @@ impl<'a> AnalysisQuery<'a> {
         candidates
     }
 
-    pub fn method_completion_candidates(
+    pub fn method_matches_for_type(
         &self,
         receiver_type: &RubyType,
         partial_method: &str,
         kind: NamespaceKind,
-    ) -> Vec<MethodCompletionCandidate> {
+    ) -> Vec<MethodMatch> {
         let mut candidates = Vec::new();
         for namespace_fqn in Self::receiver_type_to_namespaces(receiver_type, kind) {
-            for fact in self.method_completion_facts(&namespace_fqn, partial_method) {
-                candidates.push(self.method_completion_candidate(&fact));
+            for fact in self.method_facts_matching(&namespace_fqn, partial_method) {
+                candidates.push(self.method_match(&fact));
             }
         }
         candidates
     }
 
-    pub fn top_level_method_completion_candidates(
-        &self,
-        partial_method: &str,
-    ) -> Vec<MethodCompletionCandidate> {
-        self.top_level_method_completion_facts(partial_method)
+    pub fn top_level_method_matches(&self, partial_method: &str) -> Vec<MethodMatch> {
+        self.top_level_method_facts_matching(partial_method)
             .into_iter()
-            .map(|fact| self.method_completion_candidate(&fact))
+            .map(|fact| self.method_match(&fact))
             .collect()
     }
 
@@ -171,7 +164,7 @@ impl<'a> AnalysisQuery<'a> {
         result
     }
 
-    pub fn top_level_method_completion_facts(&self, partial: &str) -> Vec<MethodFact> {
+    pub fn top_level_method_facts_matching(&self, partial: &str) -> Vec<MethodFact> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -197,17 +190,17 @@ impl<'a> AnalysisQuery<'a> {
         facts
     }
 
-    fn method_completion_candidate(&self, fact: &MethodFact) -> MethodCompletionCandidate {
+    fn method_match(&self, fact: &MethodFact) -> MethodMatch {
         let FullyQualifiedName::Method(_, method) = &fact.fqn else {
             panic!(
-                "INVARIANT VIOLATED: analysis method completion fact has non-method FQN: {}. \
+                "INVARIANT VIOLATED: analysis method match fact has non-method FQN: {}. \
                  This is a bug because MethodStore must only contain method facts. \
                  Fix: reject non-method FQNs in MethodFact construction.",
                 fact.fqn
             );
         };
 
-        MethodCompletionCandidate {
+        MethodMatch {
             name: method.get_name(),
             params: fact
                 .params
@@ -219,10 +212,7 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
-    fn constant_completion_matches(
-        fqn: &FullyQualifiedName,
-        request: &ConstantCompletionRequest,
-    ) -> bool {
+    fn constant_matches_request(fqn: &FullyQualifiedName, request: &ConstantLookupRequest) -> bool {
         if request.is_qualified {
             if let Some(namespace_prefix) = &request.namespace_prefix {
                 let fqn_parts = fqn.namespace_parts();
