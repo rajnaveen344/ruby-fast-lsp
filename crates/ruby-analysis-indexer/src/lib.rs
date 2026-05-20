@@ -3,6 +3,8 @@
 //! This crate is editor-agnostic. It parses Ruby source with Prism and emits
 //! facts consumed by `ruby-analysis-engine`.
 
+mod scope_tracker;
+
 use std::collections::HashSet;
 
 use ruby_analysis_core::{
@@ -32,6 +34,8 @@ use ruby_prism::{
     LocalVariableOperatorWriteNode, LocalVariableOrWriteNode, LocalVariableTargetNode,
     LocalVariableWriteNode, ModuleNode, Node, SingletonClassNode, Visit,
 };
+
+pub use scope_tracker::{collect_namespaces, LocalScopeKind, ScopeFrame, ScopeTracker};
 
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {
