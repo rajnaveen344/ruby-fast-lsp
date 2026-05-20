@@ -6,12 +6,12 @@ use crate::core::{
 };
 use crate::engine::namespace_tree::analysis_location_info;
 use crate::engine::query::AnalysisQuery;
-use crate::engine::query::{method_lookup_chain, node_kind};
 use crate::engine::query_types::{
     AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,
 };
+use crate::engine::resolution::{method_lookup_chain, node_kind};
 use crate::AnalysisEngine;
 
 impl<'a> AnalysisQuery<'a> {

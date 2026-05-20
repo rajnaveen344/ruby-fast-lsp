@@ -4,8 +4,9 @@ use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, RubyConstant, RubyMethod, RubyType,
     SourceFileId, SymbolKind, TypeFact, TypeResolution, TypeSubject,
 };
-use crate::engine::query::{method_lookup_chain, namespace_target_exists, AnalysisQuery};
+use crate::engine::query::AnalysisQuery;
 use crate::engine::query_types::VariableTypeKind;
+use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
 
 impl<'a> AnalysisQuery<'a> {
     pub fn method_return_type_at(

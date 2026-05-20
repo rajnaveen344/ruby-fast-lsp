@@ -4,11 +4,12 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeKind, GraphNodeKind, MethodFact, NamespaceKind, RubyConstant,
     RubyType, SymbolKind, TextRange,
 };
-use crate::engine::query::{method_lookup_chain, namespace_target_exists, AnalysisQuery};
+use crate::engine::query::AnalysisQuery;
 use crate::engine::query_types::{
     ConstantCompletionCandidate, ConstantCompletionRequest, MethodCompletionCandidate, MixinUsage,
     MixinUsageKind,
 };
+use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
 
 impl<'a> AnalysisQuery<'a> {
     pub fn method_completion_facts(

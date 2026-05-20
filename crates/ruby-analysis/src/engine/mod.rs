@@ -13,6 +13,7 @@ mod hierarchy;
 mod namespace_tree;
 mod query;
 mod query_types;
+mod resolution;
 mod types;
 mod workspace_symbols;
 
