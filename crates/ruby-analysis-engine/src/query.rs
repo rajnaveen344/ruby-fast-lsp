@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use ruby_analysis_core::{
@@ -642,6 +643,43 @@ impl<'a> AnalysisQuery<'a> {
         );
         subtypes
     }
+
+    pub fn implementor_namespaces(
+        &self,
+        origin_fqn: &FullyQualifiedName,
+    ) -> Vec<FullyQualifiedName> {
+        collect_all_implementors(self.engine, origin_fqn)
+    }
+
+    pub fn method_implementation_ranges(
+        &self,
+        owner_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let namespaces_to_check = collect_all_implementors(self.engine, owner_fqn);
+        let mut ranges = Vec::new();
+
+        for ns_fqn in &namespaces_to_check {
+            let method_fqn = FullyQualifiedName::method(ns_fqn.namespace_parts(), *method);
+            for fact in self.engine.method_facts_for(&method_fqn) {
+                if fact.owner.namespace_parts() == ns_fqn.namespace_parts()
+                    && fact.owner.namespace_kind() == ns_fqn.namespace_kind()
+                {
+                    ranges.push(fact.range);
+                }
+            }
+        }
+
+        ranges
+    }
+
+    pub fn namespace_implementation_ranges(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
+        collect_all_implementors(self.engine, fqn)
+            .iter()
+            .filter_map(|impl_fqn| self.engine.graph_nodes_for(impl_fqn).first())
+            .map(|fact| fact.range)
+            .collect()
+    }
 }
 
 fn workspace_symbol_match(fact: SymbolFact, relevance: f64) -> Option<WorkspaceSymbolMatch> {
@@ -823,6 +861,59 @@ fn hierarchy_entry_for_node(
         edge_file_id,
         unresolved,
     })
+}
+
+fn collect_all_implementors(
+    engine: &crate::AnalysisEngine,
+    origin_fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = vec![origin_fqn.clone()];
+
+    visited.insert(origin_fqn.clone());
+
+    while let Some(current) = queue.pop() {
+        for descendant in descendants(engine, &current) {
+            if visited.insert(descendant.clone()) {
+                result.push(descendant);
+            }
+        }
+
+        for mixer in mixers(engine, &current) {
+            if visited.insert(mixer.clone()) {
+                result.push(mixer.clone());
+                queue.push(mixer);
+            }
+        }
+    }
+
+    result.sort_by_key(|fqn| fqn.to_string());
+    result
+}
+
+fn mixers(
+    engine: &crate::AnalysisEngine,
+    origin_fqn: &FullyQualifiedName,
+) -> Vec<FullyQualifiedName> {
+    let mut mixers = engine
+        .all_graph_edges()
+        .into_iter()
+        .filter(|edge| {
+            edge.target == *origin_fqn
+                && matches!(
+                    edge.kind,
+                    GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
+                )
+                && (matches!(edge.kind, GraphEdgeKind::Extend)
+                    || edge.source.namespace_kind()
+                        == Some(ruby_analysis_core::NamespaceKind::Instance))
+        })
+        .map(|edge| edge.source)
+        .collect::<Vec<_>>();
+    mixers.sort_by_key(|fqn| fqn.to_string());
+    mixers.dedup();
+    mixers
 }
 
 struct SymbolMatcher;

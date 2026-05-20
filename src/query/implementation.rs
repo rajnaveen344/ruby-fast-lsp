@@ -4,13 +4,11 @@
 //! - For a method: find all overrides in descendant classes and including classes
 //! - For a module/class: find all classes that include/prepend/extend it
 
-use std::collections::HashSet;
-
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use log::info;
-use ruby_analysis_core::{GraphEdgeKind, NamespaceKind as AnalysisNamespaceKind};
+use ruby_analysis_engine::AnalysisQuery;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
@@ -106,30 +104,18 @@ impl EngineQuery {
         owner_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine().expect(
+        let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: method implementation query requires an analysis engine. \
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_doc_and_engine().",
         );
-        let engine = engine.lock();
-        let namespaces_to_check = collect_all_implementors_from_analysis(&engine, owner_fqn);
-        if namespaces_to_check.is_empty() {
-            return None;
-        }
-
-        let mut locations = Vec::new();
-        for ns_fqn in &namespaces_to_check {
-            let method_fqn = FullyQualifiedName::method(ns_fqn.namespace_parts(), *method);
-            for fact in engine.method_facts_for(&method_fqn) {
-                if fact.owner.namespace_parts() == ns_fqn.namespace_parts()
-                    && fact.owner.namespace_kind() == ns_fqn.namespace_kind()
-                {
-                    if let Some(location) = location_for_range(&engine, fact.range) {
-                        locations.push(location);
-                    }
-                }
-            }
-        }
+        let engine = engine_ref.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .method_implementation_ranges(owner_fqn, method)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
+            .collect::<Vec<_>>();
 
         if locations.is_empty() {
             None
@@ -142,21 +128,17 @@ impl EngineQuery {
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
-        let engine = self.analysis_engine().expect(
+        let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: namespace implementation query requires an analysis engine. \
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_doc_and_engine().",
         );
-        let engine = engine.lock();
-        let implementors = collect_all_implementors_from_analysis(&engine, fqn);
-        if implementors.is_empty() {
-            return None;
-        }
-
-        let locations = implementors
-            .iter()
-            .filter_map(|impl_fqn| engine.graph_nodes_for(impl_fqn).first())
-            .filter_map(|fact| location_for_range(&engine, fact.range))
+        let engine = engine_ref.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .namespace_implementation_ranges(fqn)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
             .collect::<Vec<_>>();
 
         if locations.is_empty() {
@@ -165,92 +147,4 @@ impl EngineQuery {
             Some(locations)
         }
     }
-}
-
-/// Collect all namespaces that could implement/override something from `origin_fqn`.
-///
-/// Performs a BFS walk:
-/// 1. `descendants(origin)` — subclasses, sub-subclasses, etc.
-/// 2. `mixers(origin)` — direct includers/prependers (both modules and classes)
-/// 3. For each mixer: also collect its mixers AND its descendants
-///
-/// Uses a visited set to avoid cycles (e.g., circular includes) and duplicates.
-fn collect_all_implementors_from_analysis(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut result = Vec::new();
-    let mut visited = HashSet::new();
-    let mut queue = vec![origin_fqn.clone()];
-
-    visited.insert(origin_fqn.clone());
-
-    while let Some(current) = queue.pop() {
-        for descendant in descendants_from_analysis(engine, &current) {
-            if visited.insert(descendant.clone()) {
-                result.push(descendant);
-            }
-        }
-
-        for mixer in mixers_from_analysis(engine, &current) {
-            if visited.insert(mixer.clone()) {
-                result.push(mixer.clone());
-                queue.push(mixer);
-            }
-        }
-    }
-
-    result.sort_by_key(|fqn| fqn.to_string());
-    result
-}
-
-fn descendants_from_analysis(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut result = Vec::new();
-    let mut visited = HashSet::new();
-    collect_descendants_from_analysis(engine, origin_fqn, &mut result, &mut visited);
-    result
-}
-
-fn collect_descendants_from_analysis(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-    result: &mut Vec<FullyQualifiedName>,
-    visited: &mut HashSet<FullyQualifiedName>,
-) {
-    if !visited.insert(origin_fqn.clone()) {
-        return;
-    }
-
-    for edge in engine.all_graph_edges() {
-        if edge.kind == GraphEdgeKind::Superclass && edge.target == *origin_fqn {
-            result.push(edge.source.clone());
-            collect_descendants_from_analysis(engine, &edge.source, result, visited);
-        }
-    }
-}
-
-fn mixers_from_analysis(
-    engine: &ruby_analysis_engine::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut mixers = engine
-        .all_graph_edges()
-        .into_iter()
-        .filter(|edge| {
-            edge.target == *origin_fqn
-                && matches!(
-                    edge.kind,
-                    GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
-                )
-                && (matches!(edge.kind, GraphEdgeKind::Extend)
-                    || edge.source.namespace_kind() == Some(AnalysisNamespaceKind::Instance))
-        })
-        .map(|edge| edge.source)
-        .collect::<Vec<_>>();
-    mixers.sort_by_key(|fqn| fqn.to_string());
-    mixers.dedup();
-    mixers
 }
