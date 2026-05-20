@@ -16,6 +16,6 @@ pub use query::{
     ConstantCompletionCandidate, ConstantCompletionRequest, ExportGraphResponse, FileMethodCount,
     GraphNodeSnapshot, IncluderInfo, IncomingCall, InferenceStatsResponse, LocationInfo,
     LookupEntry, LookupResponse, MethodCompletionCandidate, MethodEntry, MethodsResponse,
-    MixinInfo, NamespaceNode, NamespaceTreeResponse, OutgoingCall, StatsResponse,
-    TypeHierarchyEntry, TypeHierarchyRelation, ViaModuleInfo, WorkspaceSymbolMatch,
+    MixinInfo, MixinUsage, MixinUsageKind, NamespaceNode, NamespaceTreeResponse, OutgoingCall,
+    StatsResponse, TypeHierarchyEntry, TypeHierarchyRelation, ViaModuleInfo, WorkspaceSymbolMatch,
 };

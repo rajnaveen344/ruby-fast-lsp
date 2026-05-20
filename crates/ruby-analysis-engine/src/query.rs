@@ -86,6 +86,19 @@ pub struct MethodCompletionCandidate {
     pub return_type: Option<RubyType>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MixinUsageKind {
+    Include,
+    Prepend,
+    Extend,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MixinUsage {
+    pub kind: MixinUsageKind,
+    pub range: TextRange,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamespaceNode {
     pub name: String,
@@ -594,6 +607,78 @@ impl<'a> AnalysisQuery<'a> {
             .into_iter()
             .map(|fact| self.method_completion_candidate(&fact))
             .collect()
+    }
+
+    pub fn module_mixin_usages(&self, module_fqn: &FullyQualifiedName) -> Vec<MixinUsage> {
+        let mut usages = Vec::new();
+        for edge in self.engine.all_graph_edges() {
+            if edge.target.namespace_parts() != module_fqn.namespace_parts() {
+                continue;
+            }
+            if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+                && edge.source.namespace_kind() != Some(NamespaceKind::Instance)
+            {
+                continue;
+            }
+            let Some(kind) = mixin_usage_kind_for_graph_edge(edge.kind) else {
+                continue;
+            };
+            usages.push(MixinUsage {
+                kind,
+                range: edge.range,
+            });
+        }
+        usages.sort_by_key(|usage| (usage.kind, usage.range.file_id, usage.range.start_byte));
+        usages
+    }
+
+    pub fn module_including_class_definition_ranges(
+        &self,
+        module_fqn: &FullyQualifiedName,
+    ) -> Vec<TextRange> {
+        let mut result = Vec::new();
+        let mut queue = vec![module_fqn.clone()];
+        let mut visited = Vec::new();
+
+        while let Some(target) = queue.pop() {
+            if visited.contains(&target) {
+                continue;
+            }
+            visited.push(target.clone());
+
+            for edge in self.engine.all_graph_edges() {
+                if !matches!(
+                    edge.kind,
+                    GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
+                ) {
+                    continue;
+                }
+                if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
+                    && edge.source.namespace_kind() != Some(NamespaceKind::Instance)
+                {
+                    continue;
+                }
+                if edge.target.namespace_parts() != target.namespace_parts() {
+                    continue;
+                }
+
+                let nodes = self.engine.graph_nodes_for(&edge.source);
+                if nodes.iter().any(|node| node.kind == GraphNodeKind::Class) {
+                    result.extend(
+                        nodes
+                            .into_iter()
+                            .filter(|node| node.kind == GraphNodeKind::Class)
+                            .map(|node| node.range),
+                    );
+                } else if nodes.iter().any(|node| node.kind == GraphNodeKind::Module) {
+                    queue.push(edge.source.clone());
+                }
+            }
+        }
+
+        result.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        result.dedup();
+        result
     }
 
     pub fn method_fact_for_receiver(
@@ -2248,6 +2333,15 @@ fn namespace_for_builtin(name: &str, kind: NamespaceKind) -> Vec<FullyQualifiedN
         vec![constant],
         kind,
     )]
+}
+
+fn mixin_usage_kind_for_graph_edge(kind: GraphEdgeKind) -> Option<MixinUsageKind> {
+    match kind {
+        GraphEdgeKind::Include => Some(MixinUsageKind::Include),
+        GraphEdgeKind::Prepend => Some(MixinUsageKind::Prepend),
+        GraphEdgeKind::Extend => Some(MixinUsageKind::Extend),
+        GraphEdgeKind::Superclass => None,
+    }
 }
 
 fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {

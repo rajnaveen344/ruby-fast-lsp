@@ -10,8 +10,7 @@
 use std::collections::HashMap;
 
 use log::debug;
-use ruby_analysis_core::{GraphEdgeKind, GraphNodeKind};
-use ruby_analysis_engine::AnalysisEngine;
+use ruby_analysis_engine::{AnalysisQuery, MixinUsageKind};
 use ruby_prism::{ModuleNode, Node, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -87,10 +86,9 @@ impl EngineQuery {
                  Fix: construct EngineQuery with with_doc_and_engine().",
             );
             let engine = engine_ref.lock();
-            let (usages, class_locations) = (
-                mixin_usages_from_analysis(&engine, fqn),
-                class_definition_locations_from_analysis(&engine, fqn),
-            );
+            let query = AnalysisQuery::new(&engine);
+            let usages = mixin_usages_from_analysis(&query, &engine, fqn);
+            let class_locations = class_definition_locations_from_analysis(&query, &engine, fqn);
 
             if usages.is_empty() && class_locations.is_empty() {
                 debug!("No usages or classes found for module: {:?}", fqn);
@@ -150,27 +148,19 @@ impl EngineQuery {
 }
 
 fn mixin_usages_from_analysis(
-    engine: &AnalysisEngine,
+    query: &AnalysisQuery<'_>,
+    engine: &ruby_analysis_engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<(MixinType, Location)> {
-    let mut usages = Vec::new();
-    for edge in engine.all_graph_edges() {
-        if edge.target.namespace_parts() != module_fqn.namespace_parts() {
-            continue;
-        }
-        if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-            && edge.source.namespace_kind() != Some(ruby_analysis_core::NamespaceKind::Instance)
-        {
-            continue;
-        }
-        let Some(mixin_type) = mixin_type_for_graph_edge(edge.kind) else {
-            continue;
-        };
-        let Some(location) = location_for_range(engine, edge.range) else {
-            continue;
-        };
-        usages.push((mixin_type, location));
-    }
+    let mut usages = query
+        .module_mixin_usages(module_fqn)
+        .into_iter()
+        .filter_map(|usage| {
+            let mixin_type = mixin_type_from_usage_kind(usage.kind);
+            let location = location_for_range(engine, usage.range)?;
+            Some((mixin_type, location))
+        })
+        .collect::<Vec<_>>();
     usages.sort_by_key(|(mixin_type, location)| {
         (
             mixin_type_sort_key(*mixin_type),
@@ -183,56 +173,15 @@ fn mixin_usages_from_analysis(
 }
 
 fn class_definition_locations_from_analysis(
-    engine: &AnalysisEngine,
+    query: &AnalysisQuery<'_>,
+    engine: &ruby_analysis_engine::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<Location> {
-    let mut result = Vec::new();
-    let mut queue = vec![module_fqn.clone()];
-    let mut visited = Vec::new();
-
-    while let Some(target) = queue.pop() {
-        if visited.contains(&target) {
-            continue;
-        }
-        visited.push(target.clone());
-
-        for edge in engine.all_graph_edges() {
-            if !matches!(
-                edge.kind,
-                GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
-            ) {
-                continue;
-            }
-            if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-                && edge.source.namespace_kind() != Some(ruby_analysis_core::NamespaceKind::Instance)
-            {
-                continue;
-            }
-            if edge.target.namespace_parts() != target.namespace_parts() {
-                continue;
-            }
-
-            let nodes = engine.graph_nodes_for(&edge.source);
-            if nodes
-                .iter()
-                .any(|node| matches!(node.kind, GraphNodeKind::Class))
-            {
-                for node in nodes {
-                    if matches!(node.kind, GraphNodeKind::Class) {
-                        if let Some(location) = location_for_range(engine, node.range) {
-                            result.push(location);
-                        }
-                    }
-                }
-            } else if nodes
-                .iter()
-                .any(|node| matches!(node.kind, GraphNodeKind::Module))
-            {
-                queue.push(edge.source.clone());
-            }
-        }
-    }
-
+    let mut result = query
+        .module_including_class_definition_ranges(module_fqn)
+        .into_iter()
+        .filter_map(|range| location_for_range(engine, range))
+        .collect::<Vec<_>>();
     result.sort_by_key(|location| {
         (
             location.uri.to_string(),
@@ -248,12 +197,11 @@ fn class_definition_locations_from_analysis(
     result
 }
 
-fn mixin_type_for_graph_edge(kind: GraphEdgeKind) -> Option<MixinType> {
+fn mixin_type_from_usage_kind(kind: MixinUsageKind) -> MixinType {
     match kind {
-        GraphEdgeKind::Include => Some(MixinType::Include),
-        GraphEdgeKind::Prepend => Some(MixinType::Prepend),
-        GraphEdgeKind::Extend => Some(MixinType::Extend),
-        GraphEdgeKind::Superclass => None,
+        MixinUsageKind::Include => MixinType::Include,
+        MixinUsageKind::Prepend => MixinType::Prepend,
+        MixinUsageKind::Extend => MixinType::Extend,
     }
 }
 
