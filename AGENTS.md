@@ -178,17 +178,22 @@ Move remaining non-LSP logic out of `src/`:
 6. `src/query/completion.rs` and `src/capabilities/completion/*` -> engine
    candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
 7. `src/query/hover/*` -> split domain hover content from protocol hover.
-8. Done: `src/inferrer/*` -> `crates/ruby-analysis/src/inference`.
-9. Interim done: `FactCollector` moved under `crates/ruby-analysis/src/indexer/fact_collector`.
+8. Done: analysis crates collapsed into one `crates/ruby-analysis` crate with
+   internal `core`, `engine`, `inference`, and `indexer` modules.
+9. Done: `src/inferrer/*` -> `crates/ruby-analysis/src/inference`.
+10. Interim done: `FactCollector` moved under `crates/ruby-analysis/src/indexer/fact_collector`.
    Done seams: `ScopeTracker`, parser helper functions, and scope kind moved to
    `ruby-analysis::indexer`; collector validation emits `DiagnosticFact` instead
    of LSP diagnostics; `SourceDocument` owns source offsets/comments/TextRange
    conversion in `ruby-analysis::indexer`. Remaining: extract pure core after
    adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
    parsing/type conversion.
-10. Done: `src/analyzer_prism` compatibility facade removed. Analyzer,
+11. Done: `src/analyzer_prism` compatibility facade removed. Analyzer,
     identifier lookup, document symbols, semantic tokens, rename, and analyzer
     tests now live under `crates/ruby-analysis/src/indexer`.
+12. Done: `src/types` compatibility facade removed. Shared domain types are
+    imported from `ruby_analysis::core` / `ruby_analysis::indexer`; Ruby version
+    detection owns `RubyVersion` under `src/indexer/version`.
 
 ### Performance Backlog
 
