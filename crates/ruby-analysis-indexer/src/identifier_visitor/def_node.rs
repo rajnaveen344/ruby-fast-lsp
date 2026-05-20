@@ -1,11 +1,8 @@
 use log::warn;
-use ruby_analysis_core::NamespaceKind;
+use ruby_analysis_core::{NamespaceKind, RubyMethod};
 use ruby_prism::DefNode;
 
-use crate::{
-    analyzer_prism::{utils, Identifier, MethodReceiver},
-    types::{ruby_method::RubyMethod, scope::LVScopeKind},
-};
+use crate::{analyzer_utils as utils, Identifier, LVScopeKind, MethodReceiver};
 
 use super::{IdentifierType, IdentifierVisitor};
 

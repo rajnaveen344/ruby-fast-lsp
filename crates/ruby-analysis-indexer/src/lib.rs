@@ -3,7 +3,11 @@
 //! This crate is editor-agnostic. It parses Ruby source with Prism and emits
 //! facts consumed by `ruby-analysis-engine`.
 
+pub mod analyzer;
+pub mod analyzer_utils;
 pub mod fact_collector;
+pub mod identifier;
+pub mod identifier_visitor;
 mod ruby_document;
 mod scope_tracker;
 mod source_document;
@@ -40,6 +44,9 @@ use ruby_prism::{
     LocalVariableWriteNode, ModuleNode, Node, SingletonClassNode, Visit,
 };
 
+pub use analyzer::RubyPrismAnalyzer;
+pub use identifier::{Identifier, MethodReceiver};
+pub use identifier_visitor::{IdentifierType, IdentifierVisitor};
 pub use ruby_document::RubyDocument;
 pub use scope_tracker::{
     build_constant_path_name, collect_namespaces, get_method_namespace_kind, mixin_ref_from_node,

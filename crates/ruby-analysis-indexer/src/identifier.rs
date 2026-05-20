@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_core::{FullyQualifiedName, RubyConstant, RubyMethod};
+use ustr::Ustr;
 
 /// Represents the receiver of a method call, combining type and data
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +130,36 @@ impl fmt::Display for Identifier {
             Identifier::RubyClassVariable { name, .. } => write!(f, "{}", name),
             Identifier::RubyGlobalVariable { name, .. } => write!(f, "{}", name),
             Identifier::YardType { type_name, .. } => write!(f, "{}", type_name),
+        }
+    }
+}
+
+impl From<Identifier> for FullyQualifiedName {
+    fn from(value: Identifier) -> Self {
+        match value {
+            Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::Constant(iden),
+            Identifier::RubyMethod {
+                namespace, iden, ..
+            } => FullyQualifiedName::Method(namespace, iden),
+            Identifier::RubyLocalVariable { name, .. } => {
+                FullyQualifiedName::LocalVariable(Ustr::from(&name))
+            }
+            Identifier::RubyInstanceVariable { name, .. } => {
+                FullyQualifiedName::InstanceVariable(Ustr::from(&name))
+            }
+            Identifier::RubyClassVariable { name, .. } => {
+                FullyQualifiedName::ClassVariable(Ustr::from(&name))
+            }
+            Identifier::RubyGlobalVariable { name, .. } => {
+                FullyQualifiedName::GlobalVariable(Ustr::from(&name))
+            }
+            Identifier::YardType { type_name, .. } => {
+                let namespace = type_name
+                    .split("::")
+                    .filter_map(|part| RubyConstant::try_from(part.trim()).ok())
+                    .collect();
+                FullyQualifiedName::Constant(namespace)
+            }
         }
     }
 }

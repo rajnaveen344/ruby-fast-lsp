@@ -1,14 +1,12 @@
-use ruby_prism::ClassNode;
+use ruby_prism::ModuleNode;
 
-use crate::{
-    analyzer_prism::{utils, Identifier},
-    types::{ruby_namespace::RubyConstant, scope::LVScopeKind},
-};
+use crate::{analyzer_utils as utils, Identifier, LVScopeKind};
+use ruby_analysis_core::RubyConstant;
 
 use super::{IdentifierType, IdentifierVisitor};
 
 impl IdentifierVisitor {
-    pub fn process_class_node_entry(&mut self, node: &ClassNode) {
+    pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }
@@ -17,7 +15,7 @@ impl IdentifierVisitor {
         let name_loc = constant_path.location();
 
         if self.is_position_in_location(&name_loc) {
-            // Handle constant path node for class definition
+            // Handle constant path node for module definition
             if let Some(constant_path_node) = constant_path.as_constant_path_node() {
                 let mut namespaces = Vec::new();
                 utils::collect_namespaces(&constant_path_node, &mut namespaces);
@@ -26,7 +24,7 @@ impl IdentifierVisitor {
                         namespace: self.scope_tracker.get_ns_stack(),
                         iden: namespaces,
                     }),
-                    Some(IdentifierType::ClassDef),
+                    Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
                     Some(0),
                 );
@@ -38,7 +36,7 @@ impl IdentifierVisitor {
                         namespace: self.scope_tracker.get_ns_stack(),
                         iden: vec![namespace],
                     }),
-                    Some(IdentifierType::ClassDef),
+                    Some(IdentifierType::ModuleDef),
                     self.scope_tracker.get_ns_stack(),
                     Some(0),
                 );
@@ -53,7 +51,7 @@ impl IdentifierVisitor {
             &self.document,
         );
 
-        // Add the class name to the namespace stack
+        // Add the module name to the namespace stack
         if self
             .scope_tracker
             .push_namespace_from_constant_path(&constant_path, node.name().as_slice())
@@ -63,7 +61,7 @@ impl IdentifierVisitor {
         }
     }
 
-    pub fn process_class_node_exit(&mut self, node: &ClassNode) {
+    pub fn process_module_node_exit(&mut self, node: &ModuleNode) {
         if self.is_result_set() || !self.is_position_in_location(&node.location()) {
             return;
         }

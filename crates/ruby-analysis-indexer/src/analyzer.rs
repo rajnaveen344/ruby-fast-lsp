@@ -1,10 +1,9 @@
-use crate::types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeId};
+use crate::{
+    analyzer_utils as utils, Identifier, IdentifierType, IdentifierVisitor, LVScopeId, RubyDocument,
+};
+use ruby_analysis_core::RubyConstant;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Position, Url};
-
-use super::identifier::Identifier;
-use super::utils;
-use super::visitors::identifier_visitor::{IdentifierType, IdentifierVisitor};
 
 /// Main analyzer for Ruby code using Prism
 pub struct RubyPrismAnalyzer {

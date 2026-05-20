@@ -1,6 +1,7 @@
 use ruby_prism::ConstantWriteNode;
 
-use crate::{analyzer_prism::Identifier, types::ruby_namespace::RubyConstant};
+use crate::Identifier;
+use ruby_analysis_core::RubyConstant;
 
 use super::{IdentifierType, IdentifierVisitor};
 

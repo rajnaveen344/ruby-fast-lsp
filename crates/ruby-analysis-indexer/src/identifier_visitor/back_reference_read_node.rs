@@ -1,6 +1,6 @@
 use ruby_prism::BackReferenceReadNode;
 
-use crate::analyzer_prism::Identifier;
+use crate::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

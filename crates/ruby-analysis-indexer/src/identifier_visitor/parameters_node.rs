@@ -1,6 +1,6 @@
 use ruby_prism::ParametersNode;
 
-use crate::analyzer_prism::Identifier;
+use crate::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

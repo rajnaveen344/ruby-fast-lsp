@@ -1,14 +1,10 @@
-pub mod analyzer;
 pub mod control_flow;
 pub mod diagnostics;
-pub mod identifier;
 pub mod scope_tracker;
 pub mod utils;
 pub mod visitors;
 
-pub use analyzer::RubyPrismAnalyzer;
-pub use identifier::{Identifier, MethodReceiver};
-pub use visitors::identifier_visitor::IdentifierType;
+pub use ruby_analysis_indexer::{Identifier, IdentifierType, MethodReceiver, RubyPrismAnalyzer};
 
 #[cfg(test)]
 mod tests {

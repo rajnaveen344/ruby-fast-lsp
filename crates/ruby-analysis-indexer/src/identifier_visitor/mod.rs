@@ -1,9 +1,6 @@
-use ruby_analysis_core::NamespaceKind;
+use ruby_analysis_core::{NamespaceKind, RubyConstant};
 
-use crate::{
-    analyzer_prism::{scope_tracker::ScopeTracker, Identifier},
-    types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeId},
-};
+use crate::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
 
 use ruby_prism::*;
 use tower_lsp::lsp_types::Position;
@@ -253,7 +250,7 @@ impl Visit<'_> for IdentifierVisitor {
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer_prism::MethodReceiver;
+    use crate::MethodReceiver;
 
     use super::*;
     use tower_lsp::lsp_types::{Position, Url};
