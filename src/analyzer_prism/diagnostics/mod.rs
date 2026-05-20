@@ -1,7 +1,5 @@
 //! Analyzer diagnostic helpers used by fact collection and engine diagnostics.
 
-pub mod bad_splat;
-
 /// Information about the receiver of a method call, used by the unresolved-method diagnostic.
 #[derive(Debug, Clone)]
 pub enum ReceiverInfo {
