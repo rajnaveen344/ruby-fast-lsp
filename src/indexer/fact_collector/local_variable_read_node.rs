@@ -9,9 +9,7 @@ impl FactCollector {
         }
 
         let variable_name = ruby_analysis_indexer::utf8_str(node.name().as_slice());
-        let location = self
-            .document
-            .prism_location_to_lsp_location(&node.location());
+        let location = self.document.prism_location_to_text_range(&node.location());
 
         self.document
             .variable_scopes_mut()

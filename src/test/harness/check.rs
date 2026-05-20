@@ -677,9 +677,8 @@ async fn run_type_check(
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let variable_type = if let Some(doc) = doc_snapshot {
                         let scope_id = doc
-                            .variable_scopes()
                             .find_scope_for_variable_at(name, position)
-                            .or_else(|| doc.variable_scopes().scope_at_position(position));
+                            .or_else(|| doc.scope_at_position(position));
                         if let Some(scope_id) = scope_id {
                             let scope_id = u32::try_from(scope_id).expect(
                                 "INVARIANT VIOLATED: local variable scope id exceeded u32. \

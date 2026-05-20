@@ -1,5 +1,5 @@
-use ruby_analysis_core::{SourceFileId, TextRange};
-use ruby_analysis_indexer::SourceDocument;
+use ruby_analysis_core::{RubyType, SourceFileId, TextRange};
+use ruby_analysis_indexer::{LVScopeId, SourceDocument};
 use ruby_prism::Location as PrismLocation;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
@@ -85,6 +85,14 @@ impl RubyDocument {
             .line_character_to_offset(position.line, position.character)
     }
 
+    pub fn position_to_analysis_offset(&self, position: Position) -> u32 {
+        u32::try_from(self.position_to_offset(position)).expect(
+            "INVARIANT VIOLATED: LSP position offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        )
+    }
+
     /// Converts a ruby_prism Location to an LSP Range
     pub fn prism_location_to_lsp_range(&self, location: &PrismLocation) -> Range {
         Range::new(
@@ -95,6 +103,61 @@ impl RubyDocument {
 
     pub fn prism_location_to_text_range(&self, location: &PrismLocation) -> TextRange {
         self.source.prism_location_to_text_range(location)
+    }
+
+    pub fn lsp_range_to_text_range(&self, range: Range) -> TextRange {
+        TextRange::new(
+            self.analysis_file_id(),
+            self.position_to_analysis_offset(range.start),
+            self.position_to_analysis_offset(range.end),
+        )
+    }
+
+    pub fn text_range_to_lsp_range(&self, range: TextRange) -> Range {
+        assert_eq!(
+            range.file_id,
+            self.analysis_file_id(),
+            "INVARIANT VIOLATED: text range belongs to a different source file. \
+             This is a bug because RubyDocument can only convert ranges from its own file. \
+             Fix: route cross-file ranges through the owning document."
+        );
+        Range::new(
+            self.offset_to_position(range.start_byte as usize),
+            self.offset_to_position(range.end_byte as usize),
+        )
+    }
+
+    pub fn text_range_to_lsp_location(&self, range: TextRange) -> LspLocation {
+        LspLocation::new(self.uri.clone(), self.text_range_to_lsp_range(range))
+    }
+
+    pub fn find_scope_for_variable_at(&self, name: &str, position: Position) -> Option<LVScopeId> {
+        self.variable_scopes.find_scope_for_variable_at(
+            name,
+            self.analysis_file_id(),
+            self.position_to_analysis_offset(position),
+        )
+    }
+
+    pub fn scope_at_position(&self, position: Position) -> Option<LVScopeId> {
+        self.variable_scopes.scope_at_position(
+            self.analysis_file_id(),
+            self.position_to_analysis_offset(position),
+        )
+    }
+
+    pub fn variable_type_at_position(
+        &self,
+        name: &str,
+        scope_id: LVScopeId,
+        position: Position,
+    ) -> Option<&RubyType> {
+        self.variable_scopes.get_type_at_position(
+            name,
+            scope_id,
+            self.analysis_file_id(),
+            self.position_to_analysis_offset(position),
+        )
     }
 
     pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {

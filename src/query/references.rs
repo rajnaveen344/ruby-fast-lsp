@@ -104,9 +104,7 @@ impl EngineQuery {
         let document = doc_arc.read();
 
         // Use position-based lookup to find the scope owning this variable
-        let scope_id = document
-            .variable_scopes()
-            .find_scope_for_variable_at(name, position)?;
+        let scope_id = document.find_scope_for_variable_at(name, position)?;
 
         // Use VariableScopes to find all references
         let targets = document
@@ -119,7 +117,7 @@ impl EngineQuery {
 
         let mut all_locations = Vec::new();
         for target in targets {
-            all_locations.push(target.location);
+            all_locations.push(document.text_range_to_lsp_location(target.location));
         }
 
         Some(all_locations)

@@ -95,7 +95,7 @@ impl FactCollector {
         let _owner_fqn =
             FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
 
-        let body_loc = self.body_lsp_location(node.body().map(|b| b.location()), &node.location());
+        let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         let scope_kind = match namespace_kind {
             NamespaceKind::Singleton => LVScopeKind::ClassMethod,
@@ -105,7 +105,7 @@ impl FactCollector {
 
         self.document.variable_scopes_mut().enter_scope(
             scope_kind,
-            body_loc.range,
+            body_range,
             Some(method_name_str.to_string()),
         );
 

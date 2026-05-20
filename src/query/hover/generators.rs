@@ -80,9 +80,8 @@ pub fn generate_local_variable_hover(
             let has_variable = context.document.and_then(|doc_arc| {
                 let doc = doc_arc.read();
                 let scope_id = doc
-                    .variable_scopes()
                     .find_scope_for_variable_at(name, *position)
-                    .or_else(|| doc.variable_scopes().scope_at_position(*position))?;
+                    .or_else(|| doc.scope_at_position(*position))?;
                 doc.variable_scopes()
                     .find_variable(name, scope_id)
                     .map(|_| ())
@@ -106,9 +105,8 @@ fn get_type_from_type_query(
     let doc = context.document?.read();
     let file_id = doc.analysis_file_id();
     let scope_id = doc
-        .variable_scopes()
         .find_scope_for_variable_at(name, position)
-        .or_else(|| doc.variable_scopes().scope_at_position(position))
+        .or_else(|| doc.scope_at_position(position))
         .unwrap_or(0);
     let scope_id = u32::try_from(scope_id).expect(
         "INVARIANT VIOLATED: local variable scope id exceeded u32. \
@@ -131,12 +129,9 @@ fn get_type_from_variable_scopes(
     let doc_arc = context.document?;
     let doc = doc_arc.read();
     let scope_id = doc
-        .variable_scopes()
         .find_scope_for_variable_at(name, position)
-        .or_else(|| doc.variable_scopes().scope_at_position(position))?;
-    let ty = doc
-        .variable_scopes()
-        .get_type_at_position(name, scope_id, position)?;
+        .or_else(|| doc.scope_at_position(position))?;
+    let ty = doc.variable_type_at_position(name, scope_id, position)?;
     if *ty != RubyType::Unknown {
         Some(ty.clone())
     } else {

@@ -67,12 +67,15 @@ impl<'a, 'pr> Visit<'pr> for NilCallVisitor<'a> {
                 let var_name = String::from_utf8_lossy(local.name().as_slice()).to_string();
                 let recv_loc = receiver.location();
                 let recv_pos = self.document.offset_to_position(recv_loc.start_offset());
-                let scopes = self.document.variable_scopes();
-                let scope_id = scopes
+                let scope_id = self
+                    .document
                     .find_scope_for_variable_at(&var_name, recv_pos)
-                    .or_else(|| scopes.scope_at_position(recv_pos));
+                    .or_else(|| self.document.scope_at_position(recv_pos));
                 if let Some(sid) = scope_id {
-                    if let Some(ty) = scopes.get_type_at_position(&var_name, sid, recv_pos) {
+                    if let Some(ty) = self
+                        .document
+                        .variable_type_at_position(&var_name, sid, recv_pos)
+                    {
                         if matches!(ty, RubyType::Class(fqn) if fqn.to_string() == "NilClass") {
                             // Flag the method-name location only, mirroring how
                             // other call diagnostics underline the message.

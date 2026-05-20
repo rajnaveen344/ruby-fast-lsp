@@ -5,17 +5,11 @@ use super::FactCollector;
 
 impl FactCollector {
     pub fn process_block_node_entry(&mut self, node: &BlockNode) {
-        let body_loc = if let Some(body) = node.body() {
-            self.document
-                .prism_location_to_lsp_location(&body.location())
-        } else {
-            self.document
-                .prism_location_to_lsp_location(&node.location())
-        };
+        let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
         self.scope_tracker.push_scope_kind(LVScopeKind::Block);
         self.document
             .variable_scopes_mut()
-            .enter_scope(LVScopeKind::Block, body_loc.range, None);
+            .enter_scope(LVScopeKind::Block, body_range, None);
     }
 
     pub fn process_block_node_exit(&mut self, _node: &BlockNode) {

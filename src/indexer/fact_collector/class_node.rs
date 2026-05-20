@@ -6,7 +6,7 @@ use super::FactCollector;
 
 impl FactCollector {
     pub fn process_class_node_entry(&mut self, node: &ClassNode) {
-        let body_loc = self.body_lsp_location(node.body().map(|b| b.location()), &node.location());
+        let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         // Handle namespace setup
         if self
@@ -25,7 +25,7 @@ impl FactCollector {
         let class_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         self.document.variable_scopes_mut().enter_scope(
             LVScopeKind::Constant,
-            body_loc.range,
+            body_range,
             Some(class_name),
         );
     }

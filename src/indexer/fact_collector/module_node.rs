@@ -6,7 +6,7 @@ use super::FactCollector;
 
 impl FactCollector {
     pub fn process_module_node_entry(&mut self, node: &ModuleNode) {
-        let body_loc = self.body_lsp_location(node.body().map(|b| b.location()), &node.location());
+        let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
         if self
             .scope_tracker
@@ -22,7 +22,7 @@ impl FactCollector {
         let module_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
         self.document.variable_scopes_mut().enter_scope(
             LVScopeKind::Constant,
-            body_loc.range,
+            body_range,
             Some(module_name),
         );
     }

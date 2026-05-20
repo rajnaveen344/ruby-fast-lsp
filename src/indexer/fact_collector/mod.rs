@@ -91,6 +91,18 @@ impl FactCollector {
         }
     }
 
+    pub fn body_text_range(
+        &self,
+        body_location: Option<ruby_prism::Location>,
+        node_location: &ruby_prism::Location,
+    ) -> TextRange {
+        if let Some(body_location) = body_location {
+            self.document.prism_location_to_text_range(&body_location)
+        } else {
+            self.document.prism_location_to_text_range(node_location)
+        }
+    }
+
     pub fn analysis_only(
         document: RubyDocument,
         extension_registry: ExtensionRegistryHandle,
@@ -200,19 +212,30 @@ impl FactCollector {
 
     /// Helper to get the type of a local variable by name at a given location.
     fn get_local_var_type(&self, var_name: &str, location: &Location) -> Option<RubyType> {
-        let position = self.document.prism_location_to_lsp_range(location).start;
+        let byte_offset = u32::try_from(location.start_offset()).expect(
+            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        let file_id = self.document.analysis_file_id();
 
         // Use VariableScopes tree for type lookup
         let scope_id = self
             .document
             .variable_scopes()
-            .find_scope_for_variable_at(var_name, position)
-            .or_else(|| self.document.variable_scopes().scope_at_position(position))?;
+            .find_scope_for_variable_at(var_name, file_id, byte_offset)
+            .or_else(|| {
+                self.document
+                    .variable_scopes()
+                    .scope_at_position(file_id, byte_offset)
+            })?;
 
-        let ty = self
-            .document
-            .variable_scopes()
-            .get_type_at_position(var_name, scope_id, position)?;
+        let ty = self.document.variable_scopes().get_type_at_position(
+            var_name,
+            scope_id,
+            file_id,
+            byte_offset,
+        )?;
 
         if *ty != RubyType::Unknown {
             Some(ty.clone())

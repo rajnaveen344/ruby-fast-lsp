@@ -416,15 +416,20 @@ impl FactCollector {
             RaiseArgCandidate::Constant(last_segment)
         } else if let Some(local) = first_arg.as_local_variable_read_node() {
             let var_name = utf8_str(local.name().as_slice());
-            let var_pos = self
-                .document
-                .offset_to_position(first_arg.location().start_offset());
+            let byte_offset = u32::try_from(first_arg.location().start_offset()).expect(
+                "INVARIANT VIOLATED: Prism location offset exceeded u32. \
+                 This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+                 Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+            );
+            let file_id = self.document.analysis_file_id();
             let scopes = self.document.variable_scopes();
             let scope_id = scopes
-                .find_scope_for_variable_at(var_name, var_pos)
-                .or_else(|| scopes.scope_at_position(var_pos));
+                .find_scope_for_variable_at(var_name, file_id, byte_offset)
+                .or_else(|| scopes.scope_at_position(file_id, byte_offset));
             if let Some(scope_id) = scope_id {
-                if let Some(ty) = scopes.get_type_at_position(var_name, scope_id, var_pos) {
+                if let Some(ty) =
+                    scopes.get_type_at_position(var_name, scope_id, file_id, byte_offset)
+                {
                     RaiseArgCandidate::Type(ty.clone())
                 } else {
                     RaiseArgCandidate::Unknown

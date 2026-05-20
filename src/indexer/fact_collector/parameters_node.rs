@@ -81,17 +81,17 @@ impl FactCollector {
             return;
         }
 
-        let lsp_location = self.document.prism_location_to_lsp_location(&location);
+        let text_range = self.document.prism_location_to_text_range(&location);
         self.document
             .variable_scopes_mut()
-            .define_variable(param_name, lsp_location.clone());
+            .define_variable(param_name, text_range);
 
         // Dual-write: also store type in VariableScopes (Unknown for params initially)
         if let Some(current_scope_id) = self.document.variable_scopes().current_scope() {
             self.document.variable_scopes_mut().add_type_assignment(
                 current_scope_id,
                 param_name,
-                lsp_location.range,
+                text_range,
                 RubyType::Unknown,
             );
         }

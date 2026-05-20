@@ -242,14 +242,10 @@ impl EngineQuery {
         let doc_arc = self.doc.as_ref()?;
         let doc = doc_arc.read();
         if let Some(scope_id) = doc
-            .variable_scopes()
             .find_scope_for_variable_at(var_name, position)
-            .or_else(|| doc.variable_scopes().scope_at_position(position))
+            .or_else(|| doc.scope_at_position(position))
         {
-            if let Some(ty) = doc
-                .variable_scopes()
-                .get_type_at_position(var_name, scope_id, position)
-            {
+            if let Some(ty) = doc.variable_type_at_position(var_name, scope_id, position) {
                 if *ty != RubyType::Unknown {
                     return Some(ty.clone());
                 }

@@ -467,15 +467,12 @@ fn get_receiver_type_from_snapshots(
         if let Some(doc_arc) = server.docs.lock().get(uri) {
             let doc = doc_arc.read();
             if let Some(scope_id) = doc
-                .variable_scopes()
                 .find_scope_for_variable_at(receiver_text, receiver_position)
-                .or_else(|| doc.variable_scopes().scope_at_position(receiver_position))
+                .or_else(|| doc.scope_at_position(receiver_position))
             {
-                if let Some(ty) = doc.variable_scopes().get_type_at_position(
-                    receiver_text,
-                    scope_id,
-                    receiver_position,
-                ) {
+                if let Some(ty) =
+                    doc.variable_type_at_position(receiver_text, scope_id, receiver_position)
+                {
                     if *ty != RubyType::Unknown {
                         return Some(ty.clone());
                     }
@@ -523,14 +520,10 @@ fn resolve_method_receiver_type(
             if let Some(doc_arc) = server.docs.lock().get(uri) {
                 let doc = doc_arc.read();
                 if let Some(scope_id) = doc
-                    .variable_scopes()
                     .find_scope_for_variable_at(name, position)
-                    .or_else(|| doc.variable_scopes().scope_at_position(position))
+                    .or_else(|| doc.scope_at_position(position))
                 {
-                    if let Some(ty) = doc
-                        .variable_scopes()
-                        .get_type_at_position(name, scope_id, position)
-                    {
+                    if let Some(ty) = doc.variable_type_at_position(name, scope_id, position) {
                         if *ty != RubyType::Unknown {
                             return Some(ty.clone());
                         }

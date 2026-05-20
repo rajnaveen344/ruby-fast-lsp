@@ -5,11 +5,11 @@ use crate::{FullyQualifiedName, RubyType};
 /// Stable file identifier owned by the analysis layer.
 ///
 /// Editor adapters can map this to URIs; agent adapters can map it to paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SourceFileId(pub u32);
 
 /// Byte range in a source file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct TextRange {
     pub file_id: SourceFileId,
     pub start_byte: u32,

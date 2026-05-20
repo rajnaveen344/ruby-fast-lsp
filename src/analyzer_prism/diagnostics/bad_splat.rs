@@ -83,13 +83,18 @@ fn is_definitely_non_array(expr: &Node, document: &RubyDocument) -> bool {
     }
     if let Some(local) = expr.as_local_variable_read_node() {
         let var_name = utils::utf8_str(local.name().as_slice());
-        let pos = document.offset_to_position(expr.location().start_offset());
+        let byte_offset = u32::try_from(expr.location().start_offset()).expect(
+            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        let file_id = document.analysis_file_id();
         let scopes = document.variable_scopes();
         let sid = scopes
-            .find_scope_for_variable_at(var_name, pos)
-            .or_else(|| scopes.scope_at_position(pos));
+            .find_scope_for_variable_at(var_name, file_id, byte_offset)
+            .or_else(|| scopes.scope_at_position(file_id, byte_offset));
         if let Some(sid) = sid {
-            if let Some(ty) = scopes.get_type_at_position(var_name, sid, pos) {
+            if let Some(ty) = scopes.get_type_at_position(var_name, sid, file_id, byte_offset) {
                 return is_type_definitely_non_array(ty);
             }
         }
@@ -119,13 +124,18 @@ fn is_definitely_non_hash(expr: &Node, document: &RubyDocument) -> bool {
     }
     if let Some(local) = expr.as_local_variable_read_node() {
         let var_name = utils::utf8_str(local.name().as_slice());
-        let pos = document.offset_to_position(expr.location().start_offset());
+        let byte_offset = u32::try_from(expr.location().start_offset()).expect(
+            "INVARIANT VIOLATED: Prism location offset exceeded u32. \
+             This is a bug because ruby-analysis-core TextRange currently stores u32 offsets. \
+             Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+        );
+        let file_id = document.analysis_file_id();
         let scopes = document.variable_scopes();
         let sid = scopes
-            .find_scope_for_variable_at(var_name, pos)
-            .or_else(|| scopes.scope_at_position(pos));
+            .find_scope_for_variable_at(var_name, file_id, byte_offset)
+            .or_else(|| scopes.scope_at_position(file_id, byte_offset));
         if let Some(sid) = sid {
-            if let Some(ty) = scopes.get_type_at_position(var_name, sid, pos) {
+            if let Some(ty) = scopes.get_type_at_position(var_name, sid, file_id, byte_offset) {
                 return is_type_definitely_non_hash(ty);
             }
         }

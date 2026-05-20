@@ -12,7 +12,7 @@ pub fn find_variable_completions(
     let mut completions = vec![];
     let mut seen_variables = HashSet::new();
 
-    let scope_id = match document.variable_scopes().scope_at_position(position) {
+    let scope_id = match document.scope_at_position(position) {
         Some(id) => id,
         None => return completions,
     };

@@ -5,6 +5,7 @@
 
 mod scope_tracker;
 mod source_document;
+mod variable_scopes;
 
 use std::collections::HashSet;
 
@@ -41,6 +42,10 @@ pub use scope_tracker::{
     utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
 };
 pub use source_document::SourceDocument;
+pub use variable_scopes::{
+    CaptureRef, LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
+    VariableNode, VariableScopes,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {

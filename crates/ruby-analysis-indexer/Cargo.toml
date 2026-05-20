@@ -9,3 +9,4 @@ license = "MIT"
 [dependencies]
 ruby-analysis-core = { path = "../ruby-analysis-core" }
 ruby-prism = "1.4.0"
+ustr = "1.0"

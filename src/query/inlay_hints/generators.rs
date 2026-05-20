@@ -212,11 +212,8 @@ fn infer_variable_type(
     match kind {
         VariableKind::Local => {
             // Try VariableScopes tree
-            if let Some(scope_id) = document.variable_scopes().scope_at_position(*position) {
-                if let Some(ty) = document
-                    .variable_scopes()
-                    .get_type_at_position(name, scope_id, *position)
-                {
+            if let Some(scope_id) = document.scope_at_position(*position) {
+                if let Some(ty) = document.variable_type_at_position(name, scope_id, *position) {
                     if *ty != RubyType::Unknown {
                         return Some(ty.clone());
                     }

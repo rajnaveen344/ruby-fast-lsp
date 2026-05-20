@@ -56,17 +56,17 @@ impl FactCollector {
         }
 
         // Get location for both index entry and VariableScopes
-        let location = self.document.prism_location_to_lsp_location(&name_loc);
+        let location = self.document.prism_location_to_text_range(&name_loc);
 
         self.document
             .variable_scopes_mut()
-            .define_variable(&variable_name, location.clone());
+            .define_variable(&variable_name, location);
 
         if let Some(current_scope_id) = self.document.variable_scopes().current_scope() {
             self.document.variable_scopes_mut().add_type_assignment(
                 current_scope_id,
                 &variable_name,
-                location.range,
+                location,
                 inferred_type.clone(),
             );
             let scope_id = u32::try_from(current_scope_id).expect(

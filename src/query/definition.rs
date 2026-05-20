@@ -71,16 +71,17 @@ impl EngineQuery {
 
         // Use position-based scope lookup in the VariableScopes tree
         let tree_scope_id = document
-            .variable_scopes()
             .find_scope_for_variable_at(name, position)
-            .or_else(|| document.variable_scopes().scope_at_position(position))?;
+            .or_else(|| document.scope_at_position(position))?;
 
         if let Some((_sid, var)) = document
             .variable_scopes()
             .find_variable(name, tree_scope_id)
         {
-            if var.definition_location.range.start < position {
-                return Some(vec![var.definition_location.clone()]);
+            if var.definition_location.start_byte < document.position_to_analysis_offset(position) {
+                return Some(vec![
+                    document.text_range_to_lsp_location(var.definition_location)
+                ]);
             }
         }
 
