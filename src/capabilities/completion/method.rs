@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
 };
 
-use crate::types::fully_qualified_name::FullyQualifiedName;
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::inference::rbs::{get_rbs_class_methods, RbsMethodInfo};
 use ruby_analysis::inference::RubyType;

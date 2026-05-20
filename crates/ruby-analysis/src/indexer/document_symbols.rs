@@ -7,8 +7,8 @@ use ruby_prism::{
 };
 use tower_lsp::lsp_types::{Range, SymbolKind};
 
-use crate::{LVScopeKind, RubyDocument, ScopeTracker};
 use crate::core::{NamespaceKind, RubyConstant};
+use crate::{LVScopeKind, RubyDocument, ScopeTracker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodVisibility {

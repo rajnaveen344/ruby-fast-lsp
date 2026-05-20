@@ -1,10 +1,10 @@
-use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
-use log::trace;
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, KeywordArgCandidate,
     MethodCallSignatureCandidate, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
     RubyConstant, RubyMethod,
 };
+use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
+use log::trace;
 use ruby_prism::{CallNode, Node};
 
 use super::bad_splat::BadSplatCandidate;

@@ -8,6 +8,5 @@ pub mod query;
 pub mod server;
 #[cfg(test)]
 pub mod test;
-pub mod types;
 pub mod utils;
 pub mod yard;

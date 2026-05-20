@@ -13,14 +13,14 @@
 
 mod analysis;
 
-use ruby_analysis::indexer::MethodReceiver;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::deduplicate_locations;
 use log::trace;
+use ruby_analysis::core::FullyQualifiedName;
 pub use ruby_analysis::core::MethodCalleeResolution;
 use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::RubyMethod;
+use ruby_analysis::indexer::MethodReceiver;
 use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
 

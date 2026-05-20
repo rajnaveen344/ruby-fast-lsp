@@ -3,8 +3,8 @@
 //! This crate is editor-agnostic. It parses Ruby source with Prism and emits
 //! facts consumed by `ruby-analysis::engine`.
 
-pub mod analyzer;
 mod analysis_indexer;
+pub mod analyzer;
 #[cfg(test)]
 mod analyzer_tests;
 pub mod analyzer_utils;

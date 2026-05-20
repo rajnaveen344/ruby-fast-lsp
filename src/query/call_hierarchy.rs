@@ -17,8 +17,8 @@ use tower_lsp::lsp_types::{
     SymbolTag, Url,
 };
 
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
-use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;

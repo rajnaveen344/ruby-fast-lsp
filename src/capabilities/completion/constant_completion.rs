@@ -1,6 +1,7 @@
 use tower_lsp::lsp_types::Position;
 
-use crate::types::{fully_qualified_name::FullyQualifiedName, scope::LVScopeId};
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::indexer::LVScopeId;
 
 /// Context information for constant completion.
 #[derive(Debug, Clone)]

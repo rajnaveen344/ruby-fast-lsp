@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::*;
     use super::super::LVScopeId;
+    use super::super::*;
     use crate::core::RubyConstant;
     use tower_lsp::lsp_types::{Position, Url};
 

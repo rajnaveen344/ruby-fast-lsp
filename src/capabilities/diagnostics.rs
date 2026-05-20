@@ -3,9 +3,9 @@
 //! AST-only diagnostics (syntax errors/warnings) live here.
 //! Index-dependent diagnostics (unresolved entries, YARD issues) are in the query layer.
 
-use ruby_analysis::inference::control_flow;
-use crate::types::ruby_document::RubyDocument;
 use log::debug;
+use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::inference::control_flow;
 use ruby_analysis::inference::RubyType;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};

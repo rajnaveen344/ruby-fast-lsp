@@ -1,7 +1,7 @@
 use ruby_prism::ModuleNode;
 
-use crate::{analyzer_utils as utils, Identifier, LVScopeKind};
 use crate::core::RubyConstant;
+use crate::{analyzer_utils as utils, Identifier, LVScopeKind};
 
 use super::{IdentifierType, IdentifierVisitor};
 

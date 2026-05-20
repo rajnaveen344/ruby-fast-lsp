@@ -39,9 +39,9 @@ pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use types::TypeQuery;
 
-use crate::types::ruby_document::RubyDocument;
 use parking_lot::{Mutex, RwLock};
 use ruby_analysis::engine::AnalysisEngine;
+use ruby_analysis::indexer::RubyDocument;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 

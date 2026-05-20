@@ -1,4 +1,4 @@
-use crate::types::ruby_version::RubyVersion;
+use crate::indexer::version::ruby_version::RubyVersion;
 use log::debug;
 
 // ============================================================================

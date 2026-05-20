@@ -9,8 +9,8 @@
 
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
+use crate::indexer::version::ruby_version::RubyVersion;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_version::RubyVersion;
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
 use anyhow::Result;

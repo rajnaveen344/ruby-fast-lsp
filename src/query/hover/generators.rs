@@ -4,13 +4,13 @@
 //! and returns formatted hover information.
 
 use super::nodes::HoverNode;
-use ruby_analysis::indexer::MethodReceiver;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_document::RubyDocument;
-use crate::types::ruby_namespace::RubyConstant;
-use crate::types::scope::LVScopeId;
 use parking_lot::Mutex;
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::core::RubyConstant;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis::indexer::LVScopeId;
+use ruby_analysis::indexer::MethodReceiver;
+use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
@@ -319,7 +319,7 @@ fn method_call_return_type(
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
-    use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis::core::RubyMethod;
 
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
@@ -448,7 +448,7 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
 }
 
 fn receiver_type_to_analysis_namespaces(receiver_type: &RubyType) -> Vec<FullyQualifiedName> {
-    use crate::types::fully_qualified_name::NamespaceKind;
+    use ruby_analysis::core::NamespaceKind;
 
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {

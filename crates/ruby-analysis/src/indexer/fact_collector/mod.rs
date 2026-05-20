@@ -1,18 +1,18 @@
-use once_cell::unsync::OnceCell;
 use crate::core::{
     DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, FullyQualifiedName,
     ReferenceCandidate, RubyConstant, TextRange, TypeStore,
 };
 use crate::engine::AnalysisEngine;
+use once_cell::unsync::OnceCell;
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
 use ruby_prism::*;
 
+use crate::inference::r#type::literal::LiteralAnalyzer;
+use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
 use crate::{collect_namespaces, ScopeTracker};
 use parking_lot::Mutex;
-use crate::inference::r#type::literal::LiteralAnalyzer;
-use crate::inference::RubyType;
 use std::collections::HashMap;
 use std::sync::Arc;
 

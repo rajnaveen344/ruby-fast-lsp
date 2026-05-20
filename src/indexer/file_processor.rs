@@ -17,7 +17,6 @@
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::debug;
 use ruby_analysis::core::{
@@ -29,6 +28,7 @@ use ruby_analysis::core::{
 use ruby_analysis::engine::{AnalysisQuery, FileAnalysisFacts};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
+use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;

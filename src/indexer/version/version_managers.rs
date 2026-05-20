@@ -6,7 +6,7 @@
 use log::{debug, warn};
 use std::collections::HashMap;
 
-use crate::types::ruby_version::RubyVersion;
+use crate::indexer::version::ruby_version::RubyVersion;
 
 // ============================================================================
 // VersionManager Enum

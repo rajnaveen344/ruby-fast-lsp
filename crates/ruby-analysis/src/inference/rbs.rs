@@ -7,9 +7,9 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use rbs_parser::{Loader, RbsType};
 
-use crate::r#type::ruby::RubyType;
 use crate::core::FullyQualifiedName;
 use crate::core::RubyConstant;
+use crate::r#type::ruby::RubyType;
 
 /// Global RBS loader with embedded core types
 static RBS_LOADER: Lazy<RwLock<Loader>> = Lazy::new(|| {

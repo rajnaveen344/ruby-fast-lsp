@@ -7,5 +7,6 @@
 //! - **`version_detector`**: Detects Ruby version from workspace files (.ruby-version, Gemfile, etc.)
 //! - **`version_managers`**: Interfaces with rbenv, rvm, chruby, and system Ruby
 
+pub mod ruby_version;
 pub mod version_detector;
 pub mod version_managers;

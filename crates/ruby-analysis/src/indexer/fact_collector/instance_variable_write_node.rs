@@ -1,5 +1,5 @@
-use log::{error, trace};
 use crate::core::{FullyQualifiedName, TypeFact, TypeProvenance, TypeSubject};
+use log::{error, trace};
 use ruby_prism::{
     InstanceVariableAndWriteNode, InstanceVariableOperatorWriteNode, InstanceVariableOrWriteNode,
     InstanceVariableTargetNode, InstanceVariableWriteNode, Node,

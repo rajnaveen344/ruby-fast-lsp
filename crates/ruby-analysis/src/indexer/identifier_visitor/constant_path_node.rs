@@ -1,7 +1,7 @@
 use ruby_prism::{ConstantPathNode, ConstantReadNode};
 
-use crate::{analyzer_utils as utils, Identifier};
 use crate::core::RubyConstant;
+use crate::{analyzer_utils as utils, Identifier};
 
 use super::{IdentifierType, IdentifierVisitor};
 

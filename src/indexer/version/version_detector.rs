@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::Url;
 
-use crate::types::ruby_version::RubyVersion;
+use crate::indexer::version::ruby_version::RubyVersion;
 
 // ============================================================================
 // RubyVersionDetector

@@ -1,7 +1,7 @@
+use crate::core::RubyConstant;
 use crate::{
     analyzer_utils as utils, Identifier, IdentifierType, IdentifierVisitor, LVScopeId, RubyDocument,
 };
-use crate::core::RubyConstant;
 use ruby_prism::Visit;
 use tower_lsp::lsp_types::{Position, Url};
 

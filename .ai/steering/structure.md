@@ -132,19 +132,14 @@ capabilities/
 └── indexing/               # Indexing-related capabilities
 ```
 
-## Types Module (`src/types/`)
+## Ruby Version Module (`src/indexer/version/`)
 
 ```
-types/
+version/
 ├── mod.rs                    # Module exports
-├── fully_qualified_name.rs   # FQN handling (Module::Class)
-├── ruby_document.rs          # Document representation
-├── ruby_method.rs            # Method metadata
-├── ruby_namespace.rs         # Namespace types
-├── ruby_version.rs           # Ruby version handling
-├── scope.rs                  # Scope stack management
-├── compact_location.rs       # Efficient location representation
-└── unresolved_index.rs       # Handling for unresolved constants
+├── ruby_version.rs           # Ruby version value type
+├── version_detector.rs       # Workspace Ruby version detection
+└── version_managers.rs       # rbenv/rvm/chruby/system lookup
 ```
 
 ## Type Inference Module (`crates/ruby-analysis/src/inference/`)

@@ -39,7 +39,7 @@ pub use generators::{
 };
 
 use crate::query::EngineQuery;
-use crate::types::ruby_document::RubyDocument;
+use ruby_analysis::indexer::RubyDocument;
 use tower_lsp::lsp_types::Range;
 
 impl EngineQuery {

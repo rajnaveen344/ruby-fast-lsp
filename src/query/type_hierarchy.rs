@@ -24,8 +24,8 @@ use ruby_analysis::engine::{AnalysisQuery, TypeHierarchyEntry, TypeHierarchyRela
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
-use crate::types::fully_qualified_name::FullyQualifiedName;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;

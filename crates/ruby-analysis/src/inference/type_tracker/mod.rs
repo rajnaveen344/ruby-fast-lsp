@@ -13,11 +13,11 @@
 mod narrow;
 
 use crate::control_flow;
+use crate::core::{FullyQualifiedName, RubyConstant};
+use crate::engine::{AnalysisEngine, AnalysisQuery};
 use crate::r#type::literal::LiteralAnalyzer;
 use crate::r#type::ruby::RubyType;
 use parking_lot::Mutex;
-use crate::core::{FullyQualifiedName, RubyConstant};
-use crate::engine::{AnalysisEngine, AnalysisQuery};
 use ruby_prism::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;

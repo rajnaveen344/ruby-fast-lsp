@@ -17,8 +17,8 @@ use generators::HoverContext;
 pub use generators::HoverInfo;
 use nodes::HoverNode;
 
-use ruby_analysis::indexer::{Identifier, IdentifierType, RubyPrismAnalyzer};
 use crate::query::EngineQuery;
+use ruby_analysis::indexer::{Identifier, IdentifierType, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Position, Url};
 
 impl EngineQuery {
@@ -77,8 +77,8 @@ impl EngineQuery {
 fn identifier_to_hover_node(
     identifier: Identifier,
     identifier_type: Option<IdentifierType>,
-    namespace: Vec<crate::types::ruby_namespace::RubyConstant>,
-    scope_id: crate::types::scope::LVScopeId,
+    namespace: Vec<ruby_analysis::core::RubyConstant>,
+    scope_id: ruby_analysis::indexer::LVScopeId,
     position: Position,
 ) -> Option<HoverNode> {
     match identifier {

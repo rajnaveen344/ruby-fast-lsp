@@ -2,14 +2,14 @@
 //!
 //! Consolidates reference logic from `capabilities/references.rs`.
 
-use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardTypeConverter;
 use log::info;
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::RubyMethod;
 use ruby_analysis::engine::AnalysisQuery;
+use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;

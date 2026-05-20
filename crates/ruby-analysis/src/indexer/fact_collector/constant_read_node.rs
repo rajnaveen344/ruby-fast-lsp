@@ -1,5 +1,5 @@
-use log::trace;
 use crate::core::{ReferenceCandidate, RubyConstant, TextRange};
+use log::trace;
 use ruby_prism::ConstantReadNode;
 
 use super::FactCollector;

@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::{RenameParams, TextEdit, WorkspaceEdit};
 
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_document::RubyDocument;
 use ruby_analysis::indexer::RenameVisitor;
+use ruby_analysis::indexer::RubyDocument;
 
 pub async fn handle_rename(
     server: &RubyLanguageServer,

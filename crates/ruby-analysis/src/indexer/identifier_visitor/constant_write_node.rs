@@ -1,7 +1,7 @@
 use ruby_prism::ConstantWriteNode;
 
-use crate::Identifier;
 use crate::core::RubyConstant;
+use crate::Identifier;
 
 use super::{IdentifierType, IdentifierVisitor};
 

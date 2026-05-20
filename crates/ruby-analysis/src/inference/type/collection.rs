@@ -1,5 +1,5 @@
-use crate::r#type::ruby::RubyType;
 use crate::core::FullyQualifiedName;
+use crate::r#type::ruby::RubyType;
 use ruby_prism::*;
 
 /// Analyzer for inferring types of collection elements (arrays, hashes)

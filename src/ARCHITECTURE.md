@@ -129,9 +129,9 @@ The Server coordinates between LSP clients and the internal components.
 - The server delegates actual implementation to capability modules
 - The server maintains minimal state (mostly for coordination)
 
-### 5. Inferrer (`src/inferrer/`)
+### 5. Inference (`crates/ruby-analysis/src/inference/`)
 
-The Inferrer handles type analysis and integration with RBS type signatures.
+Inference handles type analysis and integration with RBS type signatures.
 
 - **Primary Responsibility**: Infer types for Ruby expressions
 - **Secondary Responsibility**: Load and query RBS type information
@@ -143,11 +143,11 @@ Handlers manage the routing of LSP requests and notifications.
 - **Primary Responsibility**: Receive requests from the server and route them to capabilities
 - **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
 
-### 7. Types (`src/types/`)
+### 7. Ruby Version (`src/indexer/version/`)
 
-Centrally defined types used throughout the system.
+Ruby version detection and version-manager integration.
 
-- **Key Types**: `FullyQualifiedName`, `RubyDocument`, `RubyMethod`, `RubyVersion`
+- **Key Types**: `RubyVersion`
 
 ## Key Workflows
 

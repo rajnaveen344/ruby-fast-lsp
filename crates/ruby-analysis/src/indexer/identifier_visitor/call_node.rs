@@ -1,8 +1,8 @@
 use ruby_prism::{CallNode, Node};
 
-use crate::{analyzer_utils as utils, Identifier, MethodReceiver};
 use crate::core::{RubyConstant, RubyMethod};
 use crate::inference::RubyType;
+use crate::{analyzer_utils as utils, Identifier, MethodReceiver};
 
 use super::{IdentifierType, IdentifierVisitor};
 

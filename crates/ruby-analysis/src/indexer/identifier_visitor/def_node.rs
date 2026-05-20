@@ -1,5 +1,5 @@
-use log::warn;
 use crate::core::{NamespaceKind, RubyMethod};
+use log::warn;
 use ruby_prism::DefNode;
 
 use crate::{analyzer_utils as utils, Identifier, LVScopeKind, MethodReceiver};

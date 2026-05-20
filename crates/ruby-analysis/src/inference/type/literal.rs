@@ -1,5 +1,5 @@
-use crate::r#type::ruby::RubyType;
 use crate::core::FullyQualifiedName;
+use crate::r#type::ruby::RubyType;
 use ruby_prism::*;
 
 /// Analyzes Ruby literals and determines their types

@@ -1,6 +1,6 @@
 use crate::collect_namespaces;
-use log::error;
 use crate::core::{FullyQualifiedName, RubyConstant, TypeFact, TypeProvenance, TypeSubject};
+use log::error;
 use ruby_prism::ConstantPathWriteNode;
 
 use super::FactCollector;

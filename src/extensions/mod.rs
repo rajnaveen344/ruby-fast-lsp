@@ -18,15 +18,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
 
-use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
-use ruby_analysis::indexer as utils;
 use crate::config::RubyFastLspConfig;
 use crate::query::MethodCalleeResolution;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::RubyMethod;
+use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
+use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);

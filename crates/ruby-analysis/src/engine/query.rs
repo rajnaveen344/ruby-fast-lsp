@@ -2191,8 +2191,7 @@ fn mixers(
                     GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
                 )
                 && (matches!(edge.kind, GraphEdgeKind::Extend)
-                    || edge.source.namespace_kind()
-                        == Some(crate::core::NamespaceKind::Instance))
+                    || edge.source.namespace_kind() == Some(crate::core::NamespaceKind::Instance))
         })
         .map(|edge| edge.source)
         .collect::<Vec<_>>();
@@ -2610,10 +2609,8 @@ fn method_lookup_chain(
     let mut visited = std::collections::HashSet::new();
     build_mro(engine, fqn, &mut chain, &mut visited);
 
-    let root = FullyQualifiedName::namespace_with_kind(
-        Vec::new(),
-        crate::core::NamespaceKind::Instance,
-    );
+    let root =
+        FullyQualifiedName::namespace_with_kind(Vec::new(), crate::core::NamespaceKind::Instance);
     if !chain.contains(&root) && !fqn.namespace_parts().is_empty() {
         chain.push(root);
     }

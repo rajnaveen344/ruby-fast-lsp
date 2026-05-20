@@ -1,8 +1,8 @@
 use crate::query::analysis_location::location_for_range;
 use crate::query::EngineQuery;
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::RubyMethod;
 
 use super::ResolvedMethodCallee;
 

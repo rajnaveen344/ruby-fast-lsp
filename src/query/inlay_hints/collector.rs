@@ -10,7 +10,7 @@ use ruby_prism::{
 use tower_lsp::lsp_types::{Position, Range};
 
 use super::nodes::{BlockKind, InlayNode, ParamNode, VariableKind};
-use crate::types::ruby_document::RubyDocument;
+use ruby_analysis::indexer::RubyDocument;
 
 /// Visitor that collects AST nodes relevant for inlay hints.
 ///

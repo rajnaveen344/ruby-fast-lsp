@@ -1,5 +1,5 @@
-use log::error;
 use crate::core::{TypeFact, TypeProvenance, TypeSubject};
+use log::error;
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
     LocalVariableTargetNode, LocalVariableWriteNode, Location, Node,

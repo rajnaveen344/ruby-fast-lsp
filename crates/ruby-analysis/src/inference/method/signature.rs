@@ -135,9 +135,7 @@ impl Parameter {
     pub fn new_block(name: String) -> Self {
         Self {
             name,
-            param_type: RubyType::Class(
-                crate::core::FullyQualifiedName::try_from("Proc").unwrap(),
-            ),
+            param_type: RubyType::Class(crate::core::FullyQualifiedName::try_from("Proc").unwrap()),
             required: false,
             has_default: false,
             keyword: false,

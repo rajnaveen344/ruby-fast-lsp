@@ -647,8 +647,8 @@ async fn run_type_check(
     expected_types: &[&Tag],
     _all_file_contents: &[(Url, Vec<u8>)],
 ) {
-    use ruby_analysis::indexer::RubyPrismAnalyzer;
     use crate::query::TypeQuery;
+    use ruby_analysis::indexer::RubyPrismAnalyzer;
     use ruby_analysis::inference::RubyType;
 
     for expected in expected_types {
@@ -703,13 +703,9 @@ async fn run_type_check(
                 }
                 ruby_analysis::indexer::Identifier::RubyConstant { iden, .. } => {
                     let constant_fqn =
-                        crate::types::fully_qualified_name::FullyQualifiedName::Constant(
-                            iden.clone(),
-                        );
+                        ruby_analysis::core::FullyQualifiedName::Constant(iden.clone());
                     let namespace_fqn =
-                        crate::types::fully_qualified_name::FullyQualifiedName::namespace(
-                            iden.clone(),
-                        );
+                        ruby_analysis::core::FullyQualifiedName::namespace(iden.clone());
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
                         let type_store = server.analysis_engine.lock().type_store().clone();
@@ -740,15 +736,14 @@ async fn run_type_check(
                         find_def_node_at_position(&node, position, content)
                     {
                         // Build method FQN from namespace + method name
-                        let method_fqn =
-                            crate::types::ruby_method::RubyMethod::new(&iden.to_string())
-                                .ok()
-                                .map(|m| {
-                                    crate::types::fully_qualified_name::FullyQualifiedName::method(
-                                        namespace.clone(),
-                                        m,
-                                    )
-                                });
+                        let method_fqn = ruby_analysis::core::RubyMethod::new(&iden.to_string())
+                            .ok()
+                            .map(|m| {
+                                ruby_analysis::core::FullyQualifiedName::method(
+                                    namespace.clone(),
+                                    m,
+                                )
+                            });
 
                         if let Some(fqn) = method_fqn {
                             let engine = server.analysis_engine.lock();
@@ -773,17 +768,16 @@ async fn run_type_check(
                                 if namespace.is_empty() {
                                     RubyType::class("Object")
                                 } else {
-                                    let fqn = crate::types::fully_qualified_name::FullyQualifiedName::from(
-                                            namespace.clone(),
-                                        );
+                                    let fqn = ruby_analysis::core::FullyQualifiedName::from(
+                                        namespace.clone(),
+                                    );
                                     RubyType::Class(fqn)
                                 }
                             }
                             ruby_analysis::indexer::MethodReceiver::Constant(path) => {
-                                let fqn =
-                                        crate::types::fully_qualified_name::FullyQualifiedName::Constant(
-                                            path.clone().into(),
-                                        );
+                                let fqn = ruby_analysis::core::FullyQualifiedName::Constant(
+                                    path.clone().into(),
+                                );
                                 RubyType::ClassReference(fqn)
                             }
                             ruby_analysis::indexer::MethodReceiver::LocalVariable(name) => {
@@ -857,8 +851,8 @@ fn method_call_return_type_from_analysis(
     receiver_type: &ruby_analysis::inference::RubyType,
     method_name: &str,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::fully_qualified_name::FullyQualifiedName;
-    use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis::core::FullyQualifiedName;
+    use ruby_analysis::core::RubyMethod;
     use ruby_analysis::inference::RubyType;
 
     let method = RubyMethod::new(method_name).ok()?;

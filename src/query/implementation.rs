@@ -4,11 +4,11 @@
 //! - For a method: find all overrides in descendant classes and including classes
 //! - For a module/class: find all classes that include/prepend/extend it
 
-use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
-use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
 use log::info;
+use ruby_analysis::core::FullyQualifiedName;
+use ruby_analysis::core::RubyMethod;
 use ruby_analysis::engine::AnalysisQuery;
+use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;

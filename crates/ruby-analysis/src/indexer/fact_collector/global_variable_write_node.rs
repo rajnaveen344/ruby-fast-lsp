@@ -1,5 +1,5 @@
-use log::{error, trace};
 use crate::core::{TypeFact, TypeProvenance, TypeSubject};
+use log::{error, trace};
 use ruby_prism::{
     GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode, GlobalVariableOrWriteNode,
     GlobalVariableTargetNode, GlobalVariableWriteNode, Node,

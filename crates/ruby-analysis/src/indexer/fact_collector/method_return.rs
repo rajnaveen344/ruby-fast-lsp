@@ -1,6 +1,4 @@
-use crate::core::{
-    FullyQualifiedName, RubyConstant, RubyMethod, TypeResolution, TypeSubject,
-};
+use crate::core::{FullyQualifiedName, RubyConstant, RubyMethod, TypeResolution, TypeSubject};
 use crate::engine::AnalysisQuery;
 
 use crate::inference::rbs::{

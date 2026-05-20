@@ -3,7 +3,7 @@ pub mod method;
 pub mod snippets;
 pub mod variable;
 
-use ruby_analysis::core::NamespaceKind;
+use ruby_analysis::core::{FullyQualifiedName, NamespaceKind};
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, Position, Url,
 };
@@ -11,8 +11,8 @@ use tower_lsp::lsp_types::{
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 
 use crate::{
-    query::EngineQuery, server::RubyLanguageServer,
-    types::fully_qualified_name::FullyQualifiedName,
+    query::EngineQuery,
+    server::RubyLanguageServer,
     utils::{ast::is_in_statement_position, position_to_offset},
 };
 
@@ -321,8 +321,8 @@ fn get_receiver_type_from_snapshots(
     position: Position,
     identifier: &Option<Identifier>,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::fully_qualified_name::FullyQualifiedName;
-    use crate::types::ruby_namespace::RubyConstant;
+    use ruby_analysis::core::FullyQualifiedName;
+    use ruby_analysis::core::RubyConstant;
     use ruby_analysis::inference::RubyType;
 
     // If we have a method identifier with constant receiver, use it directly
@@ -507,7 +507,7 @@ fn resolve_method_receiver_type(
     position: Position,
     receiver: &MethodReceiver,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::fully_qualified_name::FullyQualifiedName;
+    use ruby_analysis::core::FullyQualifiedName;
     use ruby_analysis::inference::RubyType;
 
     match receiver {
@@ -566,7 +566,7 @@ fn infer_method_call_return_type_from_analysis(
     receiver_type: &ruby_analysis::inference::RubyType,
     method_name: &str,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis::core::RubyMethod;
     use ruby_analysis::inference::RubyType;
 
     if method_name == "new" {
@@ -713,7 +713,7 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
 fn receiver_type_to_analysis_namespaces(
     receiver_type: &ruby_analysis::inference::RubyType,
 ) -> Vec<FullyQualifiedName> {
-    use crate::types::fully_qualified_name::NamespaceKind;
+    use ruby_analysis::core::NamespaceKind;
     use ruby_analysis::inference::RubyType;
 
     match receiver_type {
@@ -742,8 +742,8 @@ fn infer_bare_method_return_type_from_analysis(
     method_name: &str,
     identifier: &Option<Identifier>,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::fully_qualified_name::NamespaceKind;
-    use crate::types::ruby_method::RubyMethod;
+    use ruby_analysis::core::NamespaceKind;
+    use ruby_analysis::core::RubyMethod;
 
     let method = RubyMethod::new(method_name).ok()?;
     let mut namespaces = Vec::new();
@@ -804,8 +804,8 @@ fn infer_type_from_constructor_assignment(
     content: &str,
     var_name: &str,
 ) -> Option<ruby_analysis::inference::RubyType> {
-    use crate::types::fully_qualified_name::FullyQualifiedName;
-    use crate::types::ruby_namespace::RubyConstant;
+    use ruby_analysis::core::FullyQualifiedName;
+    use ruby_analysis::core::RubyConstant;
     use ruby_analysis::inference::RubyType;
 
     // Pattern: `var_name = SomeClass.new` or `var_name = Some::Namespaced::Class.new`

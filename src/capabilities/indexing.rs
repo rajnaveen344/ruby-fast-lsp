@@ -2,7 +2,7 @@ use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_document::RubyDocument;
+use ruby_analysis::indexer::RubyDocument;
 
 use log::{debug, info};
 use parking_lot::RwLock;

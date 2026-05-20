@@ -5,9 +5,9 @@ use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
 
+use crate::indexer::version::ruby_version::RubyVersion;
 use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
-use crate::types::ruby_version::RubyVersion;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::path::{Path, PathBuf};

@@ -12,10 +12,10 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use log::{info, LevelFilter};
 use parking_lot::RwLock;
+use ruby_analysis::indexer::RubyDocument;
 use ruby_fast_lsp::capabilities::indexing;
 use ruby_fast_lsp::indexer::file_processor::FileProcessor;
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::types::ruby_document::RubyDocument;
 use std::env;
 use std::sync::Arc;
 use tokio::runtime::Runtime;

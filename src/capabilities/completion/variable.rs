@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, Position,
 };
 
-use crate::types::ruby_document::RubyDocument;
+use ruby_analysis::indexer::RubyDocument;
 
 pub fn find_variable_completions(
     document: &RubyDocument,

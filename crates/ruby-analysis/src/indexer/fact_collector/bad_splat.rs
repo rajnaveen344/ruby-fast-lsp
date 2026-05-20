@@ -1,8 +1,8 @@
 use ruby_prism::{CallNode, Node};
 use tower_lsp::lsp_types::Location;
 
-use crate::{utf8_str, RubyDocument};
 use crate::inference::RubyType;
+use crate::{utf8_str, RubyDocument};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadSplatCandidate {
