@@ -3,19 +3,19 @@
 //! Consolidates reference logic from `capabilities/references.rs`.
 
 use crate::analyzer_prism::{Identifier, MethodReceiver, RubyPrismAnalyzer};
-use crate::indexer::entry::NamespaceKind;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardTypeConverter;
 use log::info;
+use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::ReferenceFact;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find all references to the symbol at the given position.
     pub fn find_references_at_position(
         &self,
@@ -127,7 +127,7 @@ impl IndexQuery {
 }
 
 // Private helpers
-impl IndexQuery {
+impl EngineQuery {
     /// Find references for a given identifier.
     fn find_references_for_identifier(
         &self,

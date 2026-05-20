@@ -1,4 +1,4 @@
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::debug;
 
@@ -18,10 +18,7 @@ pub async fn handle_namespace_tree(
     );
     let start_time = std::time::Instant::now();
 
-    let query = IndexQuery::with_engine(
-        lang_server.primary_index(),
-        lang_server.analysis_engine.clone(),
-    );
+    let query = EngineQuery::with_engine(lang_server.analysis_engine.clone());
     let combined_hash = query.compute_namespace_tree_hash(params.show_external_types);
 
     // Check cache

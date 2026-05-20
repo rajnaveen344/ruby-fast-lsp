@@ -1,11 +1,6 @@
-//! Analyzer modules — each diagnostic is its own module consuming
-//! `&dyn SymbolTable` plus explicit context (document, namespace, …)
-//! instead of being fused into a god-class visitor.
+//! Analyzer diagnostic helpers used by fact collection and engine diagnostics.
 
 pub mod bad_splat;
-pub mod raise_non_exception;
-pub mod signature_mismatch;
-pub mod unresolved_method;
 
 /// Information about the receiver of a method call, used by the unresolved-method diagnostic.
 #[derive(Debug, Clone)]

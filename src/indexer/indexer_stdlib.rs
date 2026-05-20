@@ -10,7 +10,6 @@
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
-use crate::types::file_source::FileSource;
 use crate::types::ruby_version::RubyVersion;
 use crate::utils;
 use crate::utils::stub_loader::find_stubs_directory;
@@ -125,15 +124,12 @@ impl IndexerStdlib {
                 stub_files.par_iter().for_each(|path| {
                     if let Ok(content) = std::fs::read_to_string(path) {
                         if let Ok(uri) = Url::from_file_path(path) {
-                            // Register file as stub source before indexing
-                            processor
-                                .index()
-                                .lock()
-                                .register_file(&uri, FileSource::Stub);
-
-                            if let Err(e) =
-                                processor.index_definitions_with_analysis(&uri, &content, server)
-                            {
+                            if let Err(e) = processor.collect_file_facts_as(
+                                &uri,
+                                &content,
+                                server,
+                                ruby_analysis_core::SourceKind::Stub,
+                            ) {
                                 warn!("Failed to index stub {:?}: {}", path, e);
                             }
                         }
@@ -162,15 +158,12 @@ impl IndexerStdlib {
         stub_files.par_iter().for_each(|path| {
             if let Ok(content) = std::fs::read_to_string(path) {
                 if let Ok(uri) = Url::from_file_path(path) {
-                    // Register file as stub source before indexing
-                    processor
-                        .index()
-                        .lock()
-                        .register_file(&uri, FileSource::Stub);
-
-                    if let Err(e) =
-                        processor.index_definitions_with_analysis(&uri, &content, server)
-                    {
+                    if let Err(e) = processor.collect_file_facts_as(
+                        &uri,
+                        &content,
+                        server,
+                        ruby_analysis_core::SourceKind::Stub,
+                    ) {
                         warn!("Failed to index stub {:?}: {}", path, e);
                     }
                 }
@@ -217,15 +210,12 @@ impl IndexerStdlib {
             files.par_iter().for_each(|path| {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     if let Ok(uri) = Url::from_file_path(path) {
-                        // Register file as stdlib source (actual Ruby stdlib, not stubs)
-                        processor
-                            .index()
-                            .lock()
-                            .register_file(&uri, FileSource::Stdlib);
-
-                        if let Err(e) =
-                            processor.index_definitions_with_analysis(&uri, &content, server)
-                        {
+                        if let Err(e) = processor.collect_file_facts_as(
+                            &uri,
+                            &content,
+                            server,
+                            ruby_analysis_core::SourceKind::Stdlib,
+                        ) {
                             warn!("Failed to index stdlib file {:?}: {}", path, e);
                         }
                     }

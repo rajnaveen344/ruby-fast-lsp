@@ -3,10 +3,7 @@
 //! Converts YARD type annotation strings to RubyType enum values.
 //! This enables type inference to use YARD documentation for type checking.
 //!
-//! The converter can optionally validate types against the index to check
-//! if referenced classes/modules actually exist.
-
-use crate::indexer::index::RubyIndex;
+//! Type existence validation belongs in the analysis engine, not in this parser.
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
@@ -60,17 +57,11 @@ impl YardTypeConverter {
     /// - "Hash<Symbol, String>" -> RubyType::Hash([Symbol], [String])
     /// - "Hash{Symbol => String}" -> RubyType::Hash([Symbol], [String])
     pub fn convert(type_str: &str) -> RubyType {
-        Self::convert_with_validation(type_str, None).ruby_type
+        Self::convert_with_validation(type_str).ruby_type
     }
 
-    /// Convert a single YARD type string to RubyType with optional index validation
-    ///
-    /// If `index` is provided, validates that referenced types exist and collects
-    /// unresolved types for diagnostics.
-    pub fn convert_with_validation(
-        type_str: &str,
-        index: Option<&RubyIndex>,
-    ) -> TypeConversionResult {
+    /// Convert a single YARD type string to RubyType.
+    pub fn convert_with_validation(type_str: &str) -> TypeConversionResult {
         let trimmed = type_str.trim();
         let mut unresolved = Vec::new();
 
@@ -108,7 +99,7 @@ impl YardTypeConverter {
 
         // Handle Array<T> or Array<T, U, ...>
         if let Some(inner) = Self::extract_generic(trimmed, "Array") {
-            let result = Self::parse_type_list_with_validation(&inner, index);
+            let result = Self::parse_type_list_with_validation(&inner);
             unresolved.extend(result.1);
             let element_types = if result.0.is_empty() {
                 vec![RubyType::Unknown]
@@ -125,8 +116,8 @@ impl YardTypeConverter {
         if let Some(inner) = Self::extract_generic(trimmed, "Hash") {
             let parts = Self::split_hash_types(&inner);
             if parts.len() >= 2 {
-                let key_result = Self::parse_type_list_with_validation(&parts[0], index);
-                let value_result = Self::parse_type_list_with_validation(&parts[1], index);
+                let key_result = Self::parse_type_list_with_validation(&parts[0]);
+                let value_result = Self::parse_type_list_with_validation(&parts[1]);
                 unresolved.extend(key_result.1);
                 unresolved.extend(value_result.1);
                 return TypeConversionResult {
@@ -144,8 +135,8 @@ impl YardTypeConverter {
         if let Some(inner) = Self::extract_hash_brace(trimmed) {
             let parts: Vec<&str> = inner.split("=>").collect();
             if parts.len() == 2 {
-                let key_result = Self::parse_type_list_with_validation(parts[0].trim(), index);
-                let value_result = Self::parse_type_list_with_validation(parts[1].trim(), index);
+                let key_result = Self::parse_type_list_with_validation(parts[0].trim());
+                let value_result = Self::parse_type_list_with_validation(parts[1].trim());
                 unresolved.extend(key_result.1);
                 unresolved.extend(value_result.1);
                 return TypeConversionResult {
@@ -169,16 +160,10 @@ impl YardTypeConverter {
             "FalseClass" => RubyType::false_class(),
             "NilClass" => RubyType::nil_class(),
             "Object" | "BasicObject" => RubyType::Unknown,
-            // For any other type, try to look it up in the index
+            // For any other type, parse the constant path. Resolution happens
+            // in the analysis engine.
             _ => {
                 if let Some(fqn) = Self::parse_type_name_to_fqn(trimmed) {
-                    // Validate against index if provided
-                    if let Some(idx) = index {
-                        if idx.get(&fqn).is_none() {
-                            // Type not found in index
-                            unresolved.push(UnresolvedType::new(trimmed.to_string()));
-                        }
-                    }
                     RubyType::Class(fqn)
                 } else {
                     unresolved.push(UnresolvedType::new(trimmed.to_string()));
@@ -200,14 +185,11 @@ impl YardTypeConverter {
     /// - ["String", "nil"] -> RubyType::Union([String, NilClass])
     /// - ["String", "Integer", "nil"] -> RubyType::Union([String, Integer, NilClass])
     pub fn convert_multiple(types: &[String]) -> RubyType {
-        Self::convert_multiple_with_validation(types, None).ruby_type
+        Self::convert_multiple_with_validation(types).ruby_type
     }
 
-    /// Convert multiple YARD type strings with optional index validation
-    pub fn convert_multiple_with_validation(
-        types: &[String],
-        index: Option<&RubyIndex>,
-    ) -> TypeConversionResult {
+    /// Convert multiple YARD type strings.
+    pub fn convert_multiple_with_validation(types: &[String]) -> TypeConversionResult {
         if types.is_empty() {
             return TypeConversionResult {
                 ruby_type: RubyType::Unknown,
@@ -218,13 +200,13 @@ impl YardTypeConverter {
         let mut all_unresolved = Vec::new();
 
         if types.len() == 1 {
-            return Self::convert_with_validation(&types[0], index);
+            return Self::convert_with_validation(&types[0]);
         }
 
         let converted: Vec<RubyType> = types
             .iter()
             .map(|t| {
-                let result = Self::convert_with_validation(t, index);
+                let result = Self::convert_with_validation(t);
                 all_unresolved.extend(result.unresolved_types);
                 result.ruby_type
             })
@@ -310,61 +292,18 @@ impl YardTypeConverter {
     }
 
     /// Parse a type list like "String, Integer" into RubyTypes with validation
-    fn parse_type_list_with_validation(
-        types_str: &str,
-        index: Option<&RubyIndex>,
-    ) -> (Vec<RubyType>, Vec<UnresolvedType>) {
+    fn parse_type_list_with_validation(types_str: &str) -> (Vec<RubyType>, Vec<UnresolvedType>) {
         let parts = Self::split_hash_types(types_str);
         let mut types = Vec::new();
         let mut unresolved = Vec::new();
 
         for part in parts {
-            let result = Self::convert_with_validation(&part, index);
+            let result = Self::convert_with_validation(&part);
             types.push(result.ruby_type);
             unresolved.extend(result.unresolved_types);
         }
 
         (types, unresolved)
-    }
-
-    /// Check if a type name exists in the index
-    pub fn type_exists_in_index(type_name: &str, index: &RubyIndex) -> bool {
-        // Handle built-in types that always exist
-        let builtins = [
-            "String",
-            "Integer",
-            "Float",
-            "Symbol",
-            "TrueClass",
-            "FalseClass",
-            "NilClass",
-            "Array",
-            "Hash",
-            "Object",
-            "BasicObject",
-            "Kernel",
-            "Module",
-            "Class",
-            "Numeric",
-            "Fixnum",
-            "Bignum",
-            "Boolean",
-            "nil",
-            "true",
-            "false",
-            "void",
-        ];
-
-        if builtins.iter().any(|b| b.eq_ignore_ascii_case(type_name)) {
-            return true;
-        }
-
-        // Try to look up in index
-        if let Some(fqn) = Self::parse_type_name_to_fqn(type_name) {
-            index.get(&fqn).is_some()
-        } else {
-            false
-        }
     }
 
     /// Parse a type name string like "Foo::Bar" into a FullyQualifiedName (public version)
@@ -393,227 +332,6 @@ impl YardTypeConverter {
         } else {
             Some(FullyQualifiedName::Constant(namespace))
         }
-    }
-
-    /// Convert multiple YARD type strings with namespace resolution.
-    /// Uses the enclosing namespace context to resolve relative type names.
-    ///
-    /// For example, inside `module GoshPosh`, the type `Platform::PlatformServices`
-    /// will be resolved to `GoshPosh::Platform::PlatformServices` if it exists in the index.
-    pub fn convert_multiple_with_namespace(
-        types: &[String],
-        index: &RubyIndex,
-        enclosing_namespace: &[RubyConstant],
-    ) -> RubyType {
-        if types.is_empty() {
-            return RubyType::Unknown;
-        }
-
-        if types.len() == 1 {
-            return Self::convert_with_namespace(&types[0], index, enclosing_namespace);
-        }
-
-        let converted: Vec<RubyType> = types
-            .iter()
-            .map(|t| Self::convert_with_namespace(t, index, enclosing_namespace))
-            .collect();
-
-        // Flatten any nested unions and deduplicate
-        let mut flattened = Vec::new();
-        for t in converted {
-            match t {
-                RubyType::Union(inner) => flattened.extend(inner),
-                other => flattened.push(other),
-            }
-        }
-
-        // Remove duplicates while preserving order
-        let mut seen = Vec::new();
-        for t in flattened {
-            if !seen.contains(&t) {
-                seen.push(t);
-            }
-        }
-
-        if seen.len() == 1 {
-            seen.into_iter().next().unwrap()
-        } else {
-            RubyType::Union(seen)
-        }
-    }
-
-    /// Convert a single YARD type string with namespace resolution.
-    fn convert_with_namespace(
-        type_str: &str,
-        index: &RubyIndex,
-        enclosing_namespace: &[RubyConstant],
-    ) -> RubyType {
-        let trimmed = type_str.trim();
-
-        // Handle nil/void/true/false/boolean specially
-        if trimmed.eq_ignore_ascii_case("nil") || trimmed.eq_ignore_ascii_case("void") {
-            return RubyType::nil_class();
-        }
-        if trimmed.eq_ignore_ascii_case("true") {
-            return RubyType::true_class();
-        }
-        if trimmed.eq_ignore_ascii_case("false") {
-            return RubyType::false_class();
-        }
-        if trimmed.eq_ignore_ascii_case("boolean") || trimmed.eq_ignore_ascii_case("bool") {
-            return RubyType::boolean();
-        }
-
-        // Handle Array<T>
-        if let Some(inner) = Self::extract_generic(trimmed, "Array") {
-            let (element_types, _) = Self::parse_type_list_with_validation(&inner, Some(index));
-            let resolved_elements: Vec<RubyType> = element_types
-                .into_iter()
-                .map(|t| {
-                    if let RubyType::Class(fqn) = &t {
-                        // Try to resolve this type with namespace
-                        let type_name = fqn
-                            .namespace_parts()
-                            .iter()
-                            .map(|c| c.to_string())
-                            .collect::<Vec<_>>()
-                            .join("::");
-                        Self::convert_with_namespace(&type_name, index, enclosing_namespace)
-                    } else {
-                        t
-                    }
-                })
-                .collect();
-            return RubyType::Array(if resolved_elements.is_empty() {
-                vec![RubyType::Unknown]
-            } else {
-                resolved_elements
-            });
-        }
-
-        // Handle Hash<K, V> or Hash{K => V}
-        if let Some(inner) = Self::extract_generic(trimmed, "Hash") {
-            let hash_parts = Self::split_hash_types(&inner);
-            if hash_parts.len() >= 2 {
-                let key_type =
-                    Self::convert_with_namespace(&hash_parts[0], index, enclosing_namespace);
-                let value_types: Vec<RubyType> = hash_parts[1..]
-                    .iter()
-                    .map(|t| Self::convert_with_namespace(t, index, enclosing_namespace))
-                    .collect();
-                return RubyType::Hash(vec![key_type], value_types);
-            }
-        }
-        if let Some(inner) = Self::extract_hash_brace(trimmed) {
-            if let Some((key_part, value_part)) = inner.split_once("=>") {
-                let key_type =
-                    Self::convert_with_namespace(key_part.trim(), index, enclosing_namespace);
-                let value_types: Vec<RubyType> = value_part
-                    .split(',')
-                    .map(|t| Self::convert_with_namespace(t.trim(), index, enclosing_namespace))
-                    .collect();
-                return RubyType::Hash(vec![key_type], value_types);
-            }
-        }
-
-        // Handle standard types
-        match trimmed {
-            "String" => RubyType::string(),
-            "Integer" | "Fixnum" | "Bignum" => RubyType::integer(),
-            "Float" => RubyType::float(),
-            "Symbol" => RubyType::symbol(),
-            "TrueClass" => RubyType::true_class(),
-            "FalseClass" => RubyType::false_class(),
-            "NilClass" => RubyType::nil_class(),
-            "Object" | "BasicObject" => RubyType::Unknown,
-            // For any other type, resolve with namespace context
-            _ => {
-                if let Some(fqn) =
-                    Self::resolve_type_with_namespace(trimmed, index, enclosing_namespace)
-                {
-                    RubyType::Class(fqn)
-                } else {
-                    // Fallback to parsing without resolution
-                    if let Some(fqn) = Self::parse_type_name_to_fqn(trimmed) {
-                        RubyType::Class(fqn)
-                    } else {
-                        RubyType::Unknown
-                    }
-                }
-            }
-        }
-    }
-
-    /// Resolve a type name using namespace context.
-    /// Tries to find the type by walking up the namespace chain.
-    fn resolve_type_with_namespace(
-        type_name: &str,
-        index: &RubyIndex,
-        enclosing_namespace: &[RubyConstant],
-    ) -> Option<FullyQualifiedName> {
-        // Check if it's a root constant (starts with ::)
-        let is_root = type_name.starts_with("::");
-        let type_to_parse = if is_root { &type_name[2..] } else { type_name };
-
-        // Parse the type name into constant parts
-        let parts: Vec<&str> = type_to_parse.split("::").collect();
-        let mut constant_path = Vec::new();
-        for part in parts {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            match RubyConstant::try_from(trimmed) {
-                Ok(constant) => constant_path.push(constant),
-                Err(_) => return None,
-            }
-        }
-
-        if constant_path.is_empty() {
-            return None;
-        }
-
-        // For root constants, just use the path directly
-        if is_root {
-            let fqn = FullyQualifiedName::namespace(constant_path.clone());
-            if index.get(&fqn).is_some() {
-                return Some(fqn);
-            }
-            return Some(FullyQualifiedName::Constant(constant_path));
-        }
-
-        // Try to resolve using namespace chain (same logic as resolve_constant_fqn)
-        let mut current_context = enclosing_namespace.to_vec();
-
-        loop {
-            let mut probe_ns = current_context.clone();
-            probe_ns.extend(constant_path.iter().cloned());
-
-            // Try as Namespace first (for class/module definitions)
-            let probe_namespace_fqn = FullyQualifiedName::namespace(probe_ns.clone());
-            if index.get(&probe_namespace_fqn).is_some() {
-                return Some(probe_namespace_fqn);
-            }
-
-            // Then try as Constant
-            let probe_constant_fqn = FullyQualifiedName::Constant(probe_ns);
-            if index.get(&probe_constant_fqn).is_some() {
-                return Some(probe_constant_fqn);
-            }
-
-            if current_context.is_empty() {
-                break;
-            }
-            current_context.pop();
-        }
-
-        // Fallback to absolute path
-        let namespace_fqn = FullyQualifiedName::namespace(constant_path.clone());
-        if index.get(&namespace_fqn).is_some() {
-            return Some(namespace_fqn);
-        }
-
-        Some(FullyQualifiedName::Constant(constant_path))
     }
 }
 
@@ -707,31 +425,21 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_with_validation_unresolved() {
-        // Without index, custom types are accepted
-        let result = YardTypeConverter::convert_with_validation("UnknownClass", None);
+    fn test_convert_with_validation_custom_type() {
+        let result = YardTypeConverter::convert_with_validation("UnknownClass");
         assert!(matches!(result.ruby_type, RubyType::Class(_)));
         assert!(result.unresolved_types.is_empty());
-
-        // With empty index, custom types are marked as unresolved
-        let index = RubyIndex::new();
-        let result = YardTypeConverter::convert_with_validation("UnknownClass", Some(&index));
-        assert!(matches!(result.ruby_type, RubyType::Class(_)));
-        assert_eq!(result.unresolved_types.len(), 1);
-        assert_eq!(result.unresolved_types[0].type_name, "UnknownClass");
     }
 
     #[test]
     fn test_builtin_types_always_valid() {
-        let index = RubyIndex::new();
-        // Built-in types should not be marked as unresolved
-        let result = YardTypeConverter::convert_with_validation("String", Some(&index));
+        let result = YardTypeConverter::convert_with_validation("String");
         assert!(result.unresolved_types.is_empty());
 
-        let result = YardTypeConverter::convert_with_validation("Integer", Some(&index));
+        let result = YardTypeConverter::convert_with_validation("Integer");
         assert!(result.unresolved_types.is_empty());
 
-        let result = YardTypeConverter::convert_with_validation("nil", Some(&index));
+        let result = YardTypeConverter::convert_with_validation("nil");
         assert!(result.unresolved_types.is_empty());
     }
 }

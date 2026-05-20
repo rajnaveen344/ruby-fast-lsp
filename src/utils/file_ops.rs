@@ -84,11 +84,8 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 
 /// Check if a URI belongs to a project file (not stdlib, gem, or stubs)
 ///
-/// **DEPRECATED**: This function uses path-based heuristics which are unreliable.
-/// Use `RubyIndex::is_project_file(file_id)` instead, which uses the deterministic
-/// file source tracking set by the indexers.
-///
-/// This function is kept for backward compatibility but should be phased out.
+/// Uses path-based heuristics; callers with analysis-engine source metadata
+/// should prefer that instead.
 pub fn is_project_file(uri: &Url) -> bool {
     if let Ok(file_path) = uri.to_file_path() {
         let path_str = file_path.to_string_lossy();

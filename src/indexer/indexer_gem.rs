@@ -5,9 +5,7 @@
 
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
-use crate::types::file_source::FileSource;
 use crate::utils;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
@@ -60,8 +58,8 @@ impl IndexerGem {
     }
 
     /// Set the file processor for indexing
-    pub fn set_file_processor(&mut self, index: Index<Unlocked>) {
-        self.file_processor = Some(FileProcessor::new(index));
+    pub fn set_file_processor(&mut self) {
+        self.file_processor = Some(FileProcessor::new());
     }
 
     // ========================================================================
@@ -97,6 +95,11 @@ impl IndexerGem {
         server: &RubyLanguageServer,
     ) -> Result<Vec<Url>> {
         info!("Starting gem indexing (selective: {})", selective);
+
+        if selective && self.required_gems.is_empty() {
+            info!("No required gems discovered; skipping gem discovery/indexing");
+            return Ok(Vec::new());
+        }
 
         self.discover_gems().await?;
         info!("Discovered {} gems", self.discovered_gems.len());
@@ -186,15 +189,12 @@ impl IndexerGem {
                 ruby_files.par_iter().for_each(|file_path| {
                     if let Ok(content) = std::fs::read_to_string(file_path) {
                         if let Ok(uri) = Url::from_file_path(file_path) {
-                            // Register file as gem source before indexing
-                            processor
-                                .index()
-                                .lock()
-                                .register_file(&uri, FileSource::Gem);
-
-                            if let Err(e) =
-                                processor.index_definitions_with_analysis(&uri, &content, server)
-                            {
+                            if let Err(e) = processor.collect_file_facts_as(
+                                &uri,
+                                &content,
+                                server,
+                                ruby_analysis_core::SourceKind::Gem,
+                            ) {
                                 warn!("Failed to index gem file {:?}: {}", file_path, e);
                             }
                         }

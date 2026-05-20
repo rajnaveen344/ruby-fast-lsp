@@ -11,7 +11,7 @@ src/
 ├── analyzer_prism/ - Ruby AST analysis and visitors
 ├── capabilities/   - LSP feature implementations (AST-only logic)
 ├── indexer/        - Data Layer: Global symbol indexing and workspace tracking
-├── query/          - Service Layer: Unified RubyIndex query engine
+├── query/          - Service Layer: Unified AnalysisEngine query engine
 ├── inferrer/       - Type inference and RBS integration
 ├── handlers/       - LSP request/notification routing
 ├── types/          - Core data structures (FQN, Document, Method)
@@ -94,14 +94,14 @@ Capabilities implement specific LSP features by coordinating between the Analyze
 
 ### 4. Query Engine (`src/query/`)
 
-The Query Engine provides a unified service layer for querying the `RubyIndex`.
+The Query Engine provides a unified service layer for querying the `AnalysisEngine`.
 
 - **Primary Responsibility**: Consolidate business logic for index-based queries
 - **Secondary Responsibility**: Provide composable helpers for complex resolution (e.g., method return types)
 
 #### Key Files:
 
-- `mod.rs`: Defines `IndexQuery` struct and entry points
+- `mod.rs`: Defines `AnalysisQuery` struct and entry points
 - `definition.rs`: Unified definition lookups
 - `references.rs`: Unified reference lookups
 - `hover.rs`: Type and documentation lookups
@@ -168,7 +168,7 @@ Centrally defined types used throughout the system.
    - Uses the analyzer to identify the identifier and local scope at the position
    - If not a local variable, delegates to the **Query Engine** (`src/query/definition.rs`)
 4. Query Engine:
-   - Uses `IndexQuery` to perform project-wide lookups in `RubyIndex` (handling inheritance, mixins, etc.)
+   - Uses `AnalysisQuery` to perform project-wide lookups in `AnalysisEngine` (handling inheritance, mixins, etc.)
    - Returns resolved locations
 5. Capability returns the location(s) to the client
 
@@ -189,8 +189,8 @@ Centrally defined types used throughout the system.
 The Ruby Fast LSP follows a clear 3-layer architecture:
 
 1. **API Layer** (`server.rs`, `handlers/`): Handles LSP protocol, request validation, and routing.
-2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `IndexQuery` acts as the primary service interface for data lookups.
-3. **Data Layer** (`src/indexer/`): Manages the in-memory `RubyIndex`, providing raw access to symbol data.
+2. **Service Layer** (`src/query/`, `src/capabilities/`): Implements business logic for LSP features. `AnalysisQuery` acts as the primary service interface for data lookups.
+3. **Data Layer** (`src/indexer/`): Manages the in-memory `AnalysisEngine`, providing raw access to symbol data.
 
 ### Analyzer, Query Engine, and Indexer Relationship
 

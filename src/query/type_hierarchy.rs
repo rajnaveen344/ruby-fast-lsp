@@ -29,7 +29,7 @@ use crate::types::fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 use crate::types::ruby_namespace::RubyConstant;
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
 // ============================================================================
 // Data Structures
@@ -97,10 +97,10 @@ pub struct TypeHierarchyData {
 }
 
 // ============================================================================
-// IndexQuery entry points
+// EngineQuery entry points
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find the class/module at the cursor position and return a TypeHierarchyItem.
     ///
     /// Uses RubyPrismAnalyzer to find the identifier at position, then resolves
@@ -210,7 +210,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: subtype query requires an analysis engine. \
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine.lock();
         if engine.graph_nodes_for(fqn).is_empty() {
@@ -276,7 +276,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: supertype query requires an analysis engine. \
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine.lock();
         let primary_file_id = match engine.graph_nodes_for(fqn).first() {
@@ -333,7 +333,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: type hierarchy item query requires an analysis engine. \
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine.lock();
         let node = engine.graph_nodes_for(fqn).first()?;
@@ -382,7 +382,7 @@ fn parse_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
 }
 
 fn resolve_constant_fqn_from_analysis(
-    query: &IndexQuery,
+    query: &EngineQuery,
     constant_parts: &[RubyConstant],
     ancestors: &[RubyConstant],
 ) -> Option<FullyQualifiedName> {

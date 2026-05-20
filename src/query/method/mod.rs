@@ -14,7 +14,6 @@
 mod analysis;
 
 use crate::analyzer_prism::MethodReceiver;
-use crate::indexer::entry::NamespaceKind;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
@@ -22,10 +21,11 @@ use crate::types::ruby_namespace::RubyConstant;
 use crate::utils::deduplicate_locations;
 use log::trace;
 pub use ruby_analysis_core::MethodCalleeResolution;
+use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::TypeSubject;
 use tower_lsp::lsp_types::{Location, Position};
 
-use super::IndexQuery;
+use super::EngineQuery;
 
 // ============================================================================
 // Public API
@@ -48,7 +48,7 @@ pub struct ResolvedMethodCallee {
     pub definition_locations: Vec<Location>,
 }
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find definitions for a Ruby method call.
     ///
     /// Algorithm:
@@ -107,7 +107,7 @@ impl IndexQuery {
 // Receiver Resolution (Receiver → Namespace FQN)
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     /// Convert method receiver to namespace FQN.
     /// Used by both go-to-definition and find-references.
     pub(crate) fn resolve_receiver_to_namespace(

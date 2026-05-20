@@ -18,9 +18,9 @@ use ruby_analysis_core::{
 };
 use ruby_analysis_engine::{AnalysisEngine, AnalysisQuery};
 
-use super::IndexQuery;
+use super::EngineQuery;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Query the analysis engine for a fully qualified name.
     pub fn debug_lookup(&self, fqn_str: &str) -> LookupResponse {
         let engine = self.debug_engine();
@@ -267,7 +267,7 @@ impl IndexQuery {
             .expect(
                 "INVARIANT VIOLATED: debug query requested without analysis engine. \
                  This is a bug because debug LSP commands must inspect AnalysisEngine facts. \
-                 Fix: construct IndexQuery with with_engine().",
+                 Fix: construct EngineQuery with with_engine().",
             )
             .lock()
     }

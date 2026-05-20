@@ -18,10 +18,10 @@ pub use generators::HoverInfo;
 use nodes::HoverNode;
 
 use crate::analyzer_prism::{Identifier, IdentifierType, RubyPrismAnalyzer};
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use tower_lsp::lsp_types::{Position, Url};
 
-impl IndexQuery {
+impl EngineQuery {
     /// Get hover info for the symbol at position.
     ///
     /// This is the unified entry point for hover requests. It handles:

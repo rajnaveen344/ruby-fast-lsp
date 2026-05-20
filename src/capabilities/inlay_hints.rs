@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
     InlayHintParams, InlayHintServerCapabilities, InlayHintTooltip, WorkDoneProgressOptions,
 };
 
-use crate::query::{IndexQuery, InlayHintData, InlayHintKind};
+use crate::query::{EngineQuery, InlayHintData, InlayHintKind};
 use crate::server::RubyLanguageServer;
 
 /// Get the server capability for inlay hints.
@@ -26,7 +26,7 @@ pub fn get_inlay_hints_capability() -> InlayHintServerCapabilities {
 ///
 /// This is a thin handler that:
 /// 1. Gets the document
-/// 2. Delegates to IndexQuery::get_inlay_hints()
+/// 2. Delegates to EngineQuery::get_inlay_hints()
 /// 3. Converts InlayHintData to LSP InlayHint
 pub async fn handle_inlay_hints(
     server: &RubyLanguageServer,
@@ -47,12 +47,8 @@ pub async fn handle_inlay_hints(
         }
     };
 
-    // Create query context. Route by URI for multi-workspace isolation.
-    let query = IndexQuery::with_doc_and_engine(
-        server.index_for_uri(&uri),
-        doc_arc.clone(),
-        server.analysis_engine.clone(),
-    );
+    // Create query context.
+    let query = EngineQuery::with_doc_and_engine(doc_arc.clone(), server.analysis_engine.clone());
 
     // Get document for query
     let document = doc_arc.read();

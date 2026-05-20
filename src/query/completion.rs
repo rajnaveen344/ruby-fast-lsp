@@ -1,6 +1,6 @@
 //! Completion Query — Provides index-backed completion lookups.
 //!
-//! Wraps constant and method completion logic behind `IndexQuery`,
+//! Wraps constant and method completion logic behind `EngineQuery`,
 //! keeping lock management in one place.
 
 use tower_lsp::lsp_types::{CompletionItem, Position};
@@ -8,15 +8,15 @@ use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
 use crate::analyzer_prism::RubyPrismAnalyzer;
 use crate::capabilities::completion::method;
-use crate::indexer::entry::NamespaceKind;
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
 
-use super::IndexQuery;
+use super::EngineQuery;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find constant completions by locking the index and delegating
     /// to the existing constant completion engine.
     pub fn find_constant_completions(

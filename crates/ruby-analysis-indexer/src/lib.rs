@@ -455,9 +455,20 @@ impl Visit<'_> for AnalysisIndexer {
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
-        self.facts
-            .methods
-            .push(MethodFact::with_param_facts(fqn, owner, range, params));
+        self.facts.methods.push(MethodFact::with_param_facts(
+            fqn.clone(),
+            owner,
+            range,
+            params,
+        ));
+        if let Some(return_type) = method_body_literal_type(node) {
+            self.facts.types.push(TypeFact::new(
+                TypeSubject::MethodReturn(fqn.clone()),
+                return_type,
+                range,
+                TypeProvenance::Inferred,
+            ));
+        }
 
         visit_def_node(self, node);
     }
@@ -884,24 +895,67 @@ fn literal_type(node: &Node<'_>) -> Option<RubyType> {
         return Some(RubyType::nil_class());
     }
     if let Some(array) = node.as_array_node() {
-        let element_types = array
+        let mut element_types = array
             .elements()
             .iter()
             .filter_map(|element| literal_type(&element))
             .collect::<Vec<_>>();
+        dedup_types(&mut element_types);
         return Some(if element_types.is_empty() {
             RubyType::Array(vec![RubyType::Unknown])
         } else {
             RubyType::Array(element_types)
         });
     }
-    if node.as_hash_node().is_some() {
+    if let Some(hash) = node.as_hash_node() {
+        let mut key_types = Vec::new();
+        let mut value_types = Vec::new();
+        for element in hash.elements().iter() {
+            let Some(assoc) = element.as_assoc_node() else {
+                continue;
+            };
+            if let Some(key_type) = literal_type(&assoc.key()) {
+                key_types.push(key_type);
+            }
+            if let Some(value_type) = literal_type(&assoc.value()) {
+                value_types.push(value_type);
+            }
+        }
+        dedup_types(&mut key_types);
+        dedup_types(&mut value_types);
         return Some(RubyType::Hash(
-            vec![RubyType::Unknown],
-            vec![RubyType::Unknown],
+            if key_types.is_empty() {
+                vec![RubyType::Unknown]
+            } else {
+                key_types
+            },
+            if value_types.is_empty() {
+                vec![RubyType::Unknown]
+            } else {
+                value_types
+            },
         ));
     }
     None
+}
+
+fn dedup_types(types: &mut Vec<RubyType>) {
+    let mut unique = Vec::new();
+    for ty in types.drain(..) {
+        if !unique.contains(&ty) {
+            unique.push(ty);
+        }
+    }
+    *types = unique;
+}
+
+fn method_body_literal_type(node: &DefNode<'_>) -> Option<RubyType> {
+    let body = node.body()?;
+    if let Some(statements) = body.as_statements_node() {
+        let last = statements.body().iter().last()?;
+        return literal_type(&last);
+    }
+    literal_type(&body)
 }
 
 fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> TextRange {

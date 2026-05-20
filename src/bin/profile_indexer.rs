@@ -51,9 +51,6 @@ fn main() -> anyhow::Result<()> {
         // Trigger indexing directly
         info!("Taking snapshot of heap before indexing...");
 
-        // `indexing::init_workspace` runs the coordinator against the
-        // workspace's own index (routed via `server.index_for_uri`).
-
         info!("Starting workspace initialization...");
         let start_time = std::time::Instant::now();
 
@@ -61,11 +58,8 @@ fn main() -> anyhow::Result<()> {
             Ok(_) => {
                 info!("Indexing completed successfully!");
                 info!(
-                    "Total definitions: {}",
-                    server
-                        .index_for_uri(&workspace_uri)
-                        .lock()
-                        .definitions_len()
+                    "Total method facts: {}",
+                    server.analysis_engine.lock().all_method_facts().len()
                 );
             }
             Err(e) => info!("Indexing failed: {}", e),

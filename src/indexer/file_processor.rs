@@ -1,8 +1,7 @@
 //! File Processing Module
 //!
-//! This module provides the shared file processing logic used across all indexing phases.
-//! It handles parsing, definition indexing (Phase 1), reference indexing (Phase 2),
-//! and diagnostic generation.
+//! This module provides shared file processing logic. It handles parsing,
+//! fact collection, reference candidates, and diagnostic generation.
 //!
 //! ## Key Components
 //!
@@ -16,15 +15,10 @@
 //! Each indexer (project, stdlib, gem) discovers files to process, then delegates
 //! the actual processing to `FileProcessor` with appropriate options.
 
-use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
-use crate::analyzer_prism::visitors::reference_visitor::ReferenceVisitor;
+use crate::analyzer_prism::visitors::fact_collector::FactCollector;
 use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
-use crate::indexer::analysis_facts::collect_reference_facts_from_locations;
-use crate::indexer::diagnostic_facts::replace_unresolved_diagnostic_facts_for_document;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::server::RubyLanguageServer;
-use crate::types::file_source::FileSource;
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
 use log::{debug, warn};
@@ -34,10 +28,12 @@ use ruby_analysis_core::{
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
+use ruby_analysis_engine::FileAnalysisFacts;
 use ruby_analysis_indexer::AnalysisIndexer;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::{Diagnostic, Url};
@@ -49,13 +45,14 @@ use tower_lsp::lsp_types::{Diagnostic, Url};
 /// Options for processing a file
 #[derive(Clone, Default)]
 pub struct ProcessingOptions {
-    /// Whether to index definitions (Phase 1)
-    pub index_definitions: bool,
-    /// Whether to index references and track unresolved (Phase 2)
+    /// Whether to collect symbols, methods, graph facts, references, and diagnostics.
+    pub collect_facts: bool,
+    /// Kept for compatibility with callers that still pass phase-style options.
+    /// References are emitted by FactCollector when definitions are collected.
     pub index_references: bool,
     /// Whether to resolve mixins immediately (can be slow)
     pub resolve_mixins: bool,
-    /// Whether to include local variables in reference indexing
+    /// Whether to include local variables in reference facts
     pub include_local_vars: bool,
 }
 
@@ -66,7 +63,7 @@ impl ProcessingOptions {
 
     pub fn full_analysis() -> Self {
         Self {
-            index_definitions: true,
+            collect_facts: true,
             index_references: true,
             resolve_mixins: true,
             include_local_vars: true,
@@ -75,7 +72,7 @@ impl ProcessingOptions {
 
     pub fn fast_analysis() -> Self {
         Self {
-            index_definitions: true,
+            collect_facts: true,
             index_references: true,
             resolve_mixins: false,
             include_local_vars: true,
@@ -98,34 +95,21 @@ pub struct ProcessResult {
 /// File processor for handling parsing, indexing, and diagnostic generation
 #[derive(Debug, Clone)]
 pub struct FileProcessor {
-    index: Index<Unlocked>,
     extension_registry: ExtensionRegistryHandle,
 }
 
 impl FileProcessor {
-    pub fn new(index: Index<Unlocked>) -> Self {
+    pub fn new() -> Self {
         Self {
-            index,
             extension_registry: ExtensionRegistryHandle::from_environment(),
         }
     }
 
-    pub fn with_extension_registry(
-        index: Index<Unlocked>,
-        extension_registry: ExtensionRegistryHandle,
-    ) -> Self {
-        Self {
-            index,
-            extension_registry,
-        }
+    pub fn with_extension_registry(extension_registry: ExtensionRegistryHandle) -> Self {
+        Self { extension_registry }
     }
 
-    /// Get the index handle for creating visitors
-    pub fn index(&self) -> &Index<Unlocked> {
-        &self.index
-    }
-
-    /// Process a file: parse, index definitions, index references, and return diagnostics.
+    /// Process a file: parse, collect facts, index references, and return diagnostics.
     /// This prevents double-parsing and centralizes the logic.
     pub fn process_file(
         &self,
@@ -152,7 +136,7 @@ impl FileProcessor {
             );
             // Still parse for syntax diagnostics
             let parse_result = ruby_prism::parse(content.as_bytes());
-            let source_kind = self.analysis_source_kind_for_uri(uri);
+            let source_kind = self.analysis_source_kind_for_uri(server, uri);
             let analysis_file_id = server.open_or_update_analysis_file_with_kind(
                 uri,
                 content.to_string(),
@@ -174,7 +158,7 @@ impl FileProcessor {
         // 1. Parse ONLY ONCE
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
-        let source_kind = self.analysis_source_kind_for_uri(uri);
+        let source_kind = self.analysis_source_kind_for_uri(server, uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
@@ -192,28 +176,7 @@ impl FileProcessor {
             server
                 .analysis_engine
                 .lock()
-                .replace_type_facts_for_file(analysis_file_id, std::iter::empty());
-            server
-                .analysis_engine
-                .lock()
-                .replace_symbol_facts_for_file(analysis_file_id, std::iter::empty());
-            server
-                .analysis_engine
-                .lock()
-                .replace_method_facts_for_file(analysis_file_id, std::iter::empty());
-            server.analysis_engine.lock().replace_graph_facts_for_file(
-                analysis_file_id,
-                std::iter::empty(),
-                std::iter::empty(),
-            );
-            server
-                .analysis_engine
-                .lock()
-                .replace_reference_facts_for_file(analysis_file_id, std::iter::empty());
-            server
-                .analysis_engine
-                .lock()
-                .replace_diagnostic_facts_for_file(analysis_file_id, std::iter::empty());
+                .replace_file_analysis(analysis_file_id, FileAnalysisFacts::default());
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -222,10 +185,8 @@ impl FileProcessor {
 
         let affected_uris = HashSet::new();
 
-        // 3. Index Definitions (Phase 1)
-        if options.index_definitions {
-            self.index.lock().remove_entries_for_uri(uri);
-
+        // 3. Collect facts.
+        if options.collect_facts {
             // The `document` variable from above is already initialized with content and parse_result
             // We just need to ensure it's mutable for the visitor.
             // Clone document because parse_result borrows from the original
@@ -237,12 +198,12 @@ impl FileProcessor {
                 &direct_facts_seed,
             );
 
-            let mut visitor = IndexVisitor::with_extension_registry_and_analysis_engine(
-                self.index.clone(),
+            let mut visitor = FactCollector::analysis_only(
                 document.clone(),
                 self.extension_registry.clone(),
-                Some(server.analysis_engine.clone()),
+                server.analysis_engine.clone(),
             );
+            visitor.include_local_vars = options.include_local_vars;
             visitor.visit(&node);
             diagnostics.extend(visitor.diagnostics);
 
@@ -259,22 +220,34 @@ impl FileProcessor {
             let symbol_facts = direct_facts.symbols;
             let method_facts = direct_facts.methods;
             let mut type_facts = direct_facts.types;
-            type_facts.extend(visitor.type_store.all_facts());
-            server
-                .analysis_engine
-                .lock()
-                .replace_type_facts_for_file(updated_document.analysis_file_id(), type_facts);
-            server
-                .analysis_engine
-                .lock()
-                .replace_symbol_facts_for_file(updated_document.analysis_file_id(), symbol_facts);
-            server
-                .analysis_engine
-                .lock()
-                .replace_method_facts_for_file(updated_document.analysis_file_id(), method_facts);
-            // NOTE: Method return types are ONLY derived from YARD/RBS signatures.
-            // We do NOT infer return types from method bodies to keep the system simple and fast.
-            // Methods without YARD/RBS annotations will have Unknown return type.
+            let existing_type_subjects = type_facts
+                .iter()
+                .map(|fact| fact.subject.clone())
+                .collect::<HashSet<_>>();
+            type_facts.extend(
+                visitor
+                    .type_store
+                    .all_facts()
+                    .into_iter()
+                    .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
+            );
+            server.analysis_engine.lock().replace_file_analysis(
+                updated_document.analysis_file_id(),
+                FileAnalysisFacts {
+                    symbols: symbol_facts,
+                    methods: method_facts,
+                    types: type_facts,
+                    graph_nodes: direct_facts.graph_nodes,
+                    graph_edges: direct_facts.graph_edges,
+                    unresolved_graph_edges: direct_facts.unresolved_graph_edges,
+                    reference_candidates: visitor.reference_candidates,
+                    diagnostic_candidates: visitor.diagnostic_candidates,
+                    diagnostics: Vec::new(),
+                },
+            );
+            // Direct facts own simple method return seeds. Visitor facts fill
+            // gaps for YARD/RBS and legacy-compatible inference without
+            // overriding direct analysis-indexer subjects.
 
             // Update document with visitor's state (includes lvars for LocalVariable lookup)
             {
@@ -285,68 +258,19 @@ impl FileProcessor {
                 );
             }
 
-            server.analysis_engine.lock().replace_graph_update_for_file(
-                updated_document.analysis_file_id(),
-                direct_facts.graph_nodes,
-                direct_facts.graph_edges,
-                direct_facts.unresolved_graph_edges,
-            );
-
             // NOTE: Return type inference is now done lazily when inlay hints are requested
             // This avoids expensive CFG analysis during indexing and handles method dependencies naturally
 
-            // Cross-file unresolved diagnostics are now analysis-engine facts
-            // produced when each referencing file is indexed. The old RubyIndex
-            // unresolved store is not updated on the analysis path.
+            // Cross-file unresolved diagnostics are analysis-engine facts
+            // produced when each referencing file is indexed.
         }
 
-        // 4. Index References (Phase 2)
-        if options.index_references {
-            // Retrieve document from cache (it was inserted in step 3)
-            let document = {
-                let docs = server.docs.lock();
-                docs.get(uri).and_then(|d| Some(d.read().clone()))
-            };
-
-            if let Some(document) = document {
-                let mut visitor = ReferenceVisitor::with_unresolved_tracking(
-                    self.index.clone(),
-                    document,
-                    options.include_local_vars,
-                )
-                .with_analysis_engine(server.analysis_engine.clone());
-                visitor.visit(&node);
-
-                let reference_facts = collect_reference_facts_from_locations(
-                    &visitor.document,
-                    visitor.document.analysis_file_id(),
-                    visitor.staged.references.iter(),
-                );
-                server
-                    .analysis_engine
-                    .lock()
-                    .replace_reference_facts_for_file(
-                        visitor.document.analysis_file_id(),
-                        reference_facts,
-                    );
-                replace_unresolved_diagnostic_facts_for_document(
-                    server,
-                    &visitor.document,
-                    visitor.staged.unresolved.iter().map(|(_, entry)| entry),
-                );
-                // Update the document with VariableScopes from visitor (includes references)
-                let docs = server.docs.lock();
-                if let Some(doc_arc) = docs.get(uri) {
-                    let mut doc = doc_arc.write();
-                    doc.variable_scopes = visitor.document.variable_scopes;
-                }
-            } else {
-                warn!("Document not found for reference indexing: {}", uri);
-                server
-                    .analysis_engine
-                    .lock()
-                    .replace_diagnostic_facts_for_file(analysis_file_id, std::iter::empty());
-            }
+        if !options.collect_facts && options.index_references {
+            warn!(
+                "Reference-only indexing requested for {}. Running full fact collection because references now depend on FactCollector scopes.",
+                uri
+            );
+            self.collect_file_facts_as(uri, content, server, source_kind)?;
         }
 
         // Mark as indexed
@@ -367,18 +291,25 @@ impl FileProcessor {
     // Content-based Indexing (in-memory content)
     // ========================================================================
 
-    pub fn index_definitions_with_analysis(
+    pub fn collect_file_facts(
         &self,
         uri: &Url,
         content: &str,
         server: &RubyLanguageServer,
     ) -> Result<()> {
+        self.collect_file_facts_as(uri, content, server, SourceKind::Project)
+    }
+
+    pub fn collect_file_facts_as(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        source_kind: SourceKind,
+    ) -> Result<()> {
         let start = Instant::now();
-        debug!("Indexing definitions for: {:?}", uri);
+        debug!("Collecting facts for: {:?}", uri);
 
-        self.index.lock().remove_entries_for_uri(uri);
-
-        let source_kind = self.analysis_source_kind_for_uri(uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
@@ -393,98 +324,48 @@ impl FileProcessor {
         let direct_facts_seed = collect_direct_facts(server, content, analysis_file_id);
         replace_analysis_facts_for_file(server, analysis_file_id, &direct_facts_seed);
 
-        let mut index_visitor = IndexVisitor::with_extension_registry_and_analysis_engine(
-            self.index.clone(),
+        let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
             self.extension_registry.clone(),
-            Some(server.analysis_engine.clone()),
+            server.analysis_engine.clone(),
         );
-        index_visitor.visit(&node);
+        fact_collector.visit(&node);
 
         let mut direct_facts = direct_facts_seed;
         add_extension_analysis_facts(
             server,
             &document,
-            &index_visitor.extension_index_patches,
+            &fact_collector.extension_index_patches,
             &mut direct_facts,
         );
-        server
-            .analysis_engine
-            .lock()
-            .replace_symbol_facts_for_file(analysis_file_id, direct_facts.symbols);
-        server
-            .analysis_engine
-            .lock()
-            .replace_method_facts_for_file(analysis_file_id, direct_facts.methods);
-        server
-            .analysis_engine
-            .lock()
-            .replace_type_facts_for_file(analysis_file_id, direct_facts.types);
-        server.analysis_engine.lock().replace_graph_update_for_file(
+        server.analysis_engine.lock().replace_file_analysis(
             analysis_file_id,
-            direct_facts.graph_nodes,
-            direct_facts.graph_edges,
-            direct_facts.unresolved_graph_edges,
+            FileAnalysisFacts {
+                symbols: direct_facts.symbols,
+                methods: direct_facts.methods,
+                types: direct_facts.types,
+                graph_nodes: direct_facts.graph_nodes,
+                graph_edges: direct_facts.graph_edges,
+                unresolved_graph_edges: direct_facts.unresolved_graph_edges,
+                reference_candidates: fact_collector.reference_candidates,
+                diagnostic_candidates: fact_collector.diagnostic_candidates,
+                diagnostics: Vec::new(),
+            },
         );
-        debug!("Indexed definitions for {:?} in {:?}", uri, start.elapsed());
+        debug!("Collected facts for {:?} in {:?}", uri, start.elapsed());
         Ok(())
     }
 
-    fn analysis_source_kind_for_uri(&self, uri: &Url) -> SourceKind {
-        let index = self.index.lock();
-        index
-            .get_file_id(uri)
-            .and_then(|file_id| index.get_file_source(file_id))
-            .map(analysis_source_kind)
+    fn analysis_source_kind_for_uri(&self, server: &RubyLanguageServer, uri: &Url) -> SourceKind {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
+        let engine = server.analysis_engine.lock();
+        engine
+            .file_id(&path)
+            .and_then(|file_id| engine.file(file_id))
+            .map(|file| file.kind)
             .unwrap_or(SourceKind::Project)
-    }
-
-    pub fn index_references_with_analysis(
-        &self,
-        uri: &Url,
-        content: &str,
-        server: &RubyLanguageServer,
-    ) -> Result<()> {
-        let start = Instant::now();
-        debug!(
-            "Indexing references for: {:?} (track_unresolved: true)",
-            uri
-        );
-
-        let source_kind = self.analysis_source_kind_for_uri(uri);
-        let analysis_file_id =
-            server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
-        let document = RubyDocument::with_analysis_file_id(
-            uri.clone(),
-            content.to_string(),
-            0,
-            analysis_file_id,
-        );
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let node = parse_result.node();
-
-        let mut visitor =
-            ReferenceVisitor::with_unresolved_tracking(self.index.clone(), document, true)
-                .with_analysis_engine(server.analysis_engine.clone());
-        visitor.visit(&node);
-
-        let reference_facts = collect_reference_facts_from_locations(
-            &visitor.document,
-            analysis_file_id,
-            visitor.staged.references.iter(),
-        );
-        server
-            .analysis_engine
-            .lock()
-            .replace_reference_facts_for_file(analysis_file_id, reference_facts);
-        replace_unresolved_diagnostic_facts_for_document(
-            server,
-            &visitor.document,
-            visitor.staged.unresolved.iter().map(|(_, entry)| entry),
-        );
-
-        debug!("Indexed references for {:?} in {:?}", uri, start.elapsed());
-        Ok(())
     }
 }
 
@@ -505,21 +386,23 @@ fn replace_analysis_facts_for_file(
     server
         .analysis_engine
         .lock()
-        .replace_symbol_facts_for_file(file_id, facts.symbols.clone());
-    server
-        .analysis_engine
-        .lock()
-        .replace_method_facts_for_file(file_id, facts.methods.clone());
-    server
-        .analysis_engine
-        .lock()
-        .replace_type_facts_for_file(file_id, facts.types.clone());
-    server.analysis_engine.lock().replace_graph_update_for_file(
-        file_id,
-        facts.graph_nodes.clone(),
-        facts.graph_edges.clone(),
-        facts.unresolved_graph_edges.clone(),
-    );
+        .replace_file_analysis(file_id, file_analysis_facts_from_index(facts));
+}
+
+fn file_analysis_facts_from_index(
+    facts: &ruby_analysis_indexer::AnalysisIndex,
+) -> FileAnalysisFacts {
+    FileAnalysisFacts {
+        symbols: facts.symbols.clone(),
+        methods: facts.methods.clone(),
+        types: facts.types.clone(),
+        graph_nodes: facts.graph_nodes.clone(),
+        graph_edges: facts.graph_edges.clone(),
+        unresolved_graph_edges: facts.unresolved_graph_edges.clone(),
+        reference_candidates: Vec::new(),
+        diagnostic_candidates: Vec::new(),
+        diagnostics: Vec::new(),
+    }
 }
 
 fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
@@ -780,15 +663,6 @@ fn analysis_method_param_kind(
             AnalysisMethodParamKind::KeywordRest
         }
         ruby_fast_lsp_extension_api::MethodParamKind::Block => AnalysisMethodParamKind::Block,
-    }
-}
-
-fn analysis_source_kind(source: FileSource) -> SourceKind {
-    match source {
-        FileSource::Project => SourceKind::Project,
-        FileSource::Stub => SourceKind::Stub,
-        FileSource::Stdlib => SourceKind::Stdlib,
-        FileSource::Gem => SourceKind::Gem,
     }
 }
 

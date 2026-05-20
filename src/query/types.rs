@@ -6,7 +6,6 @@
 //! Handlers (hover, inlay hints, completion) should use this API instead of
 //! directly interacting with the inferrer or index.
 
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::inferrer::r#type::ruby::RubyType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use ruby_analysis_core::{SourceFileId, TypeResolution, TypeStore, TypeSubject};
@@ -24,7 +23,7 @@ pub struct TypeQuery<'a> {
 
 impl<'a> TypeQuery<'a> {
     /// Create a new TypeQuery for a specific file.
-    pub fn new(_index: Index<Unlocked>, _uri: &'a Url, content: &'a [u8]) -> Self {
+    pub fn new(_uri: &'a Url, content: &'a [u8]) -> Self {
         Self {
             content,
             type_store: None,
@@ -32,17 +31,11 @@ impl<'a> TypeQuery<'a> {
         }
     }
 
-    pub fn with_type_store(
-        index: Index<Unlocked>,
-        uri: &'a Url,
-        content: &'a [u8],
-        type_store: &'a TypeStore,
-    ) -> Self {
-        Self::with_type_store_for_file(index, uri, content, type_store, SourceFileId(0))
+    pub fn with_type_store(uri: &'a Url, content: &'a [u8], type_store: &'a TypeStore) -> Self {
+        Self::with_type_store_for_file(uri, content, type_store, SourceFileId(0))
     }
 
     pub fn with_type_store_for_file(
-        _index: Index<Unlocked>,
         _uri: &'a Url,
         content: &'a [u8],
         type_store: &'a TypeStore,

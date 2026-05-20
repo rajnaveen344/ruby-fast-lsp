@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{
     Hover, HoverContents, HoverParams, HoverProviderCapability, MarkupContent, MarkupKind,
 };
 
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 
 /// Return the hover capability.
@@ -20,7 +20,7 @@ pub fn get_hover_capability() -> HoverProviderCapability {
     HoverProviderCapability::Simple(true)
 }
 
-/// Handle hover request using the unified IndexQuery layer.
+/// Handle hover request using the unified EngineQuery layer.
 pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> Option<Hover> {
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
@@ -33,13 +33,8 @@ pub async fn handle_hover(server: &RubyLanguageServer, params: HoverParams) -> O
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // Create unified query with document context. Route by URI so each
-    // workspace's hover info comes from its own index.
-    let query = IndexQuery::with_doc_and_engine(
-        server.index_for_uri(&uri),
-        doc_arc,
-        server.analysis_engine.clone(),
-    );
+    // Create unified query with document context.
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
 
     // Get hover info from query layer
     let hover_info = query.get_hover_at_position(&uri, position, &content)?;

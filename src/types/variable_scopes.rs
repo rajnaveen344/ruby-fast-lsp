@@ -100,7 +100,7 @@ impl VariableScopes {
     }
 
     /// Navigate into an existing child scope matching the given range.
-    /// Used by the ReferenceVisitor to track scope context for variable references.
+    /// Used by the FactCollector to track scope context for variable references.
     pub fn enter_child_scope(&mut self, range: Range) {
         if let Some(current) = self.current {
             if let Some(child_id) = self.find_child_scope_by_range(current, range) {

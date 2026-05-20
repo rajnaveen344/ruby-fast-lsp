@@ -1,13 +1,13 @@
 # Ruby Fast LSP Extensions
 
-Extensions convert Ruby DSL/meta-programming calls into validated index patches.
-They never mutate `RubyIndex` directly.
+Extensions convert Ruby DSL/meta-programming calls into validated analysis patches.
+They never mutate the analysis engine directly.
 
 ```mermaid
 flowchart TD
     RubySource[Ruby source file] --> Prism[Prism parser]
-    Prism --> IndexVisitor[IndexVisitor]
-    IndexVisitor --> CallNode[CallNode hook]
+    Prism --> FactCollector[FactCollector]
+    FactCollector --> CallNode[CallNode hook]
 
     CallNode --> Filter{method name in extension\nindexed_call_names?}
     Filter -- no --> Builtins[Built-in indexing\ninclude/extend/attr/etc.]
@@ -22,21 +22,20 @@ flowchart TD
     WasmHost --> Patches
 
     Patches --> Validate[Core validates patch\nnamespaces, method names, ABI version]
-    Validate --> Apply[Core applies via EntryBuilder]
-    Apply --> Origin[MethodOrigin::Generated]
-    Origin --> RubyIndex[RubyIndex]
+    Validate --> Apply[Core applies to analysis facts]
+    Apply --> Engine[AnalysisEngine]
 
-    RubyIndex --> Query[IndexQuery]
+    Engine --> Query[AnalysisQuery]
     Query --> LspFeatures[LSP features\ngoto, refs, hover, completion,\ndiagnostics]
 ```
 
 ```mermaid
 sequenceDiagram
-    participant V as IndexVisitor
+    participant V as FactCollector
     participant H as Extension Host
     participant A as crates/extension-api
     participant R as Extension
-    participant I as RubyIndex
+    participant I as AnalysisEngine
 
     V->>H: process_call_node(CallNode)
     H->>R: indexed_call_names()
@@ -47,7 +46,7 @@ sequenceDiagram
         H->>R: index_call(CallContext)
         R-->>H: Vec<IndexPatch>
         H->>H: validate ABI + patch invariants
-        H->>I: EntryBuilder + add_entry
+        H->>I: validated facts
     end
 ```
 
@@ -185,7 +184,7 @@ guest exports it, then applies the returned `index_patches`. Response and
 command patches are ABI-defined so request/command hooks can be wired without a
 second guest contract change.
 
-`CallContext.resolved_callees` is produced by the core `IndexQuery` method
+`CallContext.resolved_callees` is produced by the core analysis query path
 resolver. A callee can be:
 
 - `Exact`: method definition was found through Ruby method lookup / ancestor
@@ -226,7 +225,7 @@ Rules:
 - Core index stores normalized Ruby facts: classes, modules, methods, constants,
   references, generated DSL declarations, signatures, includes, and extends.
 - Extension state stores private runtime/config/cache data only.
-- Extensions never mutate `RubyIndex` directly.
+- Extensions never mutate the analysis engine directly.
 - Extensions emit patches; server validates and applies patches.
 - Request hooks may use extension state to add responses, but durable facts still
   flow through the core index.

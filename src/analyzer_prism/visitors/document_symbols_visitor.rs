@@ -9,10 +9,10 @@ use tower_lsp::lsp_types::SymbolKind;
 
 use crate::{
     analyzer_prism::scope_tracker::ScopeTracker,
-    capabilities::document_symbols::RubySymbolContext,
-    indexer::entry::{MethodVisibility, NamespaceKind},
+    capabilities::document_symbols::{MethodVisibility, RubySymbolContext},
     types::ruby_document::RubyDocument,
 };
+use ruby_analysis_core::NamespaceKind;
 
 pub struct DocumentSymbolsVisitor<'a> {
     flat_symbols: Vec<(RubySymbolContext, Option<usize>)>, // (symbol, parent_index)
@@ -169,7 +169,7 @@ impl<'a> DocumentSymbolsVisitor<'a> {
         let symbol = self.create_symbol(name.clone(), SymbolKind::CLASS, &node.location(), None);
         let symbol_index = self.add_symbol_to_flat_list(symbol);
 
-        // Handle scope tracking similar to IndexVisitor
+        // Handle scope tracking similar to FactCollector
         let _body_loc = if let Some(body) = node.body() {
             self.document
                 .prism_location_to_lsp_location(&body.location())

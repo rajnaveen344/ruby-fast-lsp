@@ -41,7 +41,7 @@ fn extract_nil_call_diagnostics(
     parse_result: &ruby_prism::ParseResult<'_>,
     document: &RubyDocument,
 ) -> Vec<Diagnostic> {
-    // VariableScopes are populated by IndexVisitor at file_processor time. Bail
+    // VariableScopes are populated by FactCollector at file_processor time. Bail
     // when no scopes exist (e.g. tests using bare `generate_diagnostics` before
     // indexing has run).
     if document.variable_scopes().scope_count() == 0 {

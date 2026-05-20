@@ -1,12 +1,18 @@
-use ruby_prism::{ConstantPathNode, ConstantReadNode, Location as PrismLocation, Node};
+use ruby_analysis_core::NamespaceKind;
+use ruby_prism::{ConstantPathNode, Location as PrismLocation, Node};
 use tower_lsp::lsp_types::Location as LspLocation;
 
-use crate::indexer::entry::{MixinRef, NamespaceKind};
-use crate::indexer::index::RubyIndex;
 use crate::types::compact_location::CompactLocation;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_document::RubyDocument;
 use crate::types::ruby_namespace::RubyConstant;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MixinRef {
+    pub parts: Vec<RubyConstant>,
+    pub absolute: bool,
+    pub location: CompactLocation,
+}
 
 /// Recursively collect all namespaces from a ConstantPathNode
 /// Eg: `Core::Platform::API::Users` will return
@@ -101,102 +107,6 @@ pub fn fqn_from_node(
     }
 }
 
-/// Resolve a constant (ConstantReadNode or ConstantPathNode) to a FullyQualifiedName
-/// by searching the index according to Ruby's constant lookup rules.
-/// This centralizes the constant resolution logic used throughout the codebase.
-pub fn resolve_constant_fqn(
-    index: &RubyIndex,
-    node: &Node,
-    current_fqn: &FullyQualifiedName,
-) -> Option<FullyQualifiedName> {
-    if let Some(constant_read) = node.as_constant_read_node() {
-        resolve_constant_read_fqn(index, &constant_read, current_fqn)
-    } else if let Some(constant_path) = node.as_constant_path_node() {
-        resolve_constant_path_fqn(index, &constant_path, current_fqn)
-    } else {
-        None
-    }
-}
-
-/// Resolve a ConstantReadNode to a FullyQualifiedName using Ruby's constant lookup rules.
-fn resolve_constant_read_fqn(
-    index: &RubyIndex,
-    node: &ConstantReadNode,
-    current_fqn: &FullyQualifiedName,
-) -> Option<FullyQualifiedName> {
-    let name = utf8_str(node.name().as_slice());
-    let constant = RubyConstant::new(name).ok()?;
-
-    resolve_constant_fqn_from_parts(index, &[constant], false, current_fqn)
-}
-
-/// Resolve a ConstantPathNode to a FullyQualifiedName using Ruby's constant lookup rules.
-fn resolve_constant_path_fqn(
-    index: &RubyIndex,
-    node: &ConstantPathNode,
-    current_fqn: &FullyQualifiedName,
-) -> Option<FullyQualifiedName> {
-    let mut parts = vec![];
-    collect_namespaces(node, &mut parts);
-
-    // A ConstantPathNode is absolute if its parent is None (starts with ::)
-    let absolute = node.parent().is_none();
-
-    resolve_constant_fqn_from_parts(index, &parts, absolute, current_fqn)
-}
-
-/// Core constant resolution logic that follows Ruby's constant lookup rules.
-/// For absolute constants (::Foo::Bar), searches from root.
-/// For relative constants (Foo::Bar), searches through lexical scope hierarchy.
-pub fn resolve_constant_fqn_from_parts(
-    index: &RubyIndex,
-    parts: &[RubyConstant],
-    absolute: bool,
-    current_fqn: &FullyQualifiedName,
-) -> Option<FullyQualifiedName> {
-    let mut search_paths: Vec<Vec<RubyConstant>> = vec![];
-
-    if absolute {
-        // For `::Foo::Bar`, we check `Foo::Bar`, then `Bar`
-        let mut remaining_parts = parts.to_vec();
-        while !remaining_parts.is_empty() {
-            search_paths.push(remaining_parts.clone());
-            remaining_parts.remove(0);
-        }
-    } else {
-        // For relative paths like `C` inside `module A; module B;`,
-        // search order is `A::B::C`, `A::C`, `C`.
-        let mut lexical_scope = current_fqn.namespace_parts().to_vec();
-        loop {
-            let mut candidate_parts = lexical_scope.clone();
-            candidate_parts.extend(parts.iter().cloned());
-            search_paths.push(candidate_parts);
-
-            if lexical_scope.is_empty() {
-                break;
-            }
-            lexical_scope.pop();
-        }
-    }
-
-    // Search through all candidate paths and return the first match
-    for candidate_parts in search_paths {
-        // Try as Namespace first (for class/module definitions)
-        let namespace_fqn = FullyQualifiedName::namespace(candidate_parts.clone());
-        if index.contains_fqn(&namespace_fqn) {
-            return Some(namespace_fqn);
-        }
-
-        // Then try as Constant (for value constants like A = 1)
-        let constant_fqn = FullyQualifiedName::Constant(candidate_parts);
-        if index.contains_fqn(&constant_fqn) {
-            return Some(constant_fqn);
-        }
-    }
-
-    None
-}
-
 /// Get the body location for a node that has an optional body.
 /// If the body exists, returns the body's location; otherwise returns the node's location.
 /// This pattern is used consistently across ClassNode, ModuleNode, and DefNode visitors.
@@ -267,7 +177,7 @@ pub fn get_method_namespace_kind(
 }
 
 /// Simplified version of get_method_namespace_kind for visitors that don't need
-/// to validate constant receivers (reference_visitor, identifier_visitor).
+/// to validate constant receivers (fact_collector, identifier_visitor).
 /// Returns NamespaceKind based on presence of receiver.
 pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKind {
     if let Some(receiver) = receiver {
@@ -288,31 +198,6 @@ pub fn get_method_namespace_kind_simple(receiver: Option<&Node>) -> NamespaceKin
 /// expected to be valid UTF-8; any invalid bytes yield "".
 pub(crate) fn utf8_str(bytes: &[u8]) -> &str {
     std::str::from_utf8(bytes).unwrap_or("")
-}
-
-/// Compute Levenshtein edit distance between two ASCII byte strings.
-pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
-    let m = a.len();
-    let n = b.len();
-    if m == 0 {
-        return n;
-    }
-    if n == 0 {
-        return m;
-    }
-    let a = a.as_bytes();
-    let b = b.as_bytes();
-    let mut prev: Vec<usize> = (0..=n).collect();
-    let mut curr = vec![0usize; n + 1];
-    for i in 1..=m {
-        curr[0] = i;
-        for j in 1..=n {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[n]
 }
 
 /// Build the full constant path name as a string (e.g., "Foo::Bar::Baz")

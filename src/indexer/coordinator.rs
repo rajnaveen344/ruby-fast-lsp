@@ -1,7 +1,6 @@
 use crate::config::RubyFastLspConfig;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::file_processor::FileProcessor;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::indexer::indexer_gem::IndexerGem;
 use crate::indexer::indexer_project::IndexerProject;
 use crate::indexer::indexer_stdlib::IndexerStdlib;
@@ -19,13 +18,13 @@ use std::time::{Duration, Instant};
 /// [`IndexingCoordinator::run_complete_indexing`] call. Consumed by the
 /// perf bench binary and perf regression tests.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct PhaseTimings {
-    /// Phase 1 — definitions (gems + stdlib + project) + mixin resolution.
-    pub phase1: Duration,
-    /// Phase 2 — reference indexing + diagnostics collection.
-    pub phase2: Duration,
-    /// Phase 3 — publish diagnostics to the client.
-    pub phase3: Duration,
+pub struct IndexingTimings {
+    /// Fact collection (gems + stdlib + project) + mixin/reference resolution.
+    pub facts: Duration,
+    /// Reserved for old perf consumers. References now emit during fact collection.
+    pub reserved: Duration,
+    /// Publish diagnostics to the client.
+    pub publish: Duration,
     pub total: Duration,
 }
 
@@ -45,10 +44,6 @@ pub struct IndexingCoordinator {
     // Basic setup
     workspace_root: PathBuf,
     config: RubyFastLspConfig,
-
-    /// Index this coordinator writes into. One per workspace, so multiple
-    /// workspaces can index concurrently into separate `RubyIndex` instances.
-    index: Index<Unlocked>,
 
     extension_registry: ExtensionRegistryHandle,
 
@@ -72,25 +67,20 @@ pub struct IndexingCoordinator {
     ruby_library_paths: Vec<PathBuf>,
 
     /// Timings from the most recent `run_complete_indexing` call.
-    last_timings: PhaseTimings,
+    last_timings: IndexingTimings,
 }
 
 impl IndexingCoordinator {
     /// Creates a new IndexingCoordinator for the given workspace.
     ///
-    /// `index` is the workspace's own `Index<Unlocked>` handle. The coordinator
-    /// writes all definitions/references into this index, so multiple
-    /// workspaces can be indexed concurrently into separate `RubyIndex`s.
-    ///
     /// Call `run_complete_indexing()` to actually start the indexing process.
-    pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig, index: Index<Unlocked>) -> Self {
+    pub fn new(workspace_root: PathBuf, config: RubyFastLspConfig) -> Self {
         let version_detector = RubyVersionDetector::from_path(workspace_root.clone());
         let extension_registry = ExtensionRegistryHandle::from_config(&config);
 
         Self {
             workspace_root,
             config,
-            index,
             extension_registry,
             version_detector,
             detected_ruby_version: None,
@@ -99,13 +89,13 @@ impl IndexingCoordinator {
             stdlib_indexer: None,
             gem_indexer: None,
             ruby_library_paths: Vec::new(),
-            last_timings: PhaseTimings::default(),
+            last_timings: IndexingTimings::default(),
         }
     }
 
     /// Returns the timings captured by the most recent call to
     /// `run_complete_indexing`. All-zero before the first call.
-    pub fn last_timings(&self) -> PhaseTimings {
+    pub fn last_timings(&self) -> IndexingTimings {
         self.last_timings
     }
 
@@ -113,21 +103,16 @@ impl IndexingCoordinator {
         self.extension_registry = extension_registry;
     }
 
-    /// Runs the complete indexing process from start to finish using two-phase approach.
+    /// Runs the complete indexing process from start to finish.
     ///
-    /// This method implements two-phase indexing to avoid race conditions:
-    /// Phase 1 - Index all definitions:
     /// 1. Figure out which Ruby version we're using
     /// 2. Find where Ruby libraries are installed on this system
     /// 3. Set up the main indexing engine
-    /// 4. Index definitions from project files
-    /// 5. Index definitions from Ruby standard library
-    /// 6. Index definitions from gems
-    ///
-    /// Phase 2 - Index all references:
-    /// 7. Index references from project files (now that all definitions are available)
+    /// 4. Scan project dependencies
+    /// 5. Collect facts from gems, stdlib, then project files
+    /// 6. Publish diagnostics
     pub async fn run_complete_indexing(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        info!("Starting complete two-phase indexing process");
+        info!("Starting complete indexing process");
         let start_time = Instant::now();
 
         // Step 1: Figure out which Ruby version we're using
@@ -140,55 +125,41 @@ impl IndexingCoordinator {
         // Step 3: Set up the main indexing engine
         self.setup_file_processor(server);
 
-        // PHASE 1: Index all definitions first
-        // Order: scan deps → gems → stdlib → project (which skips already-indexed files)
-        info!("Phase 1: Indexing all definitions");
-        let phase1_start = Instant::now();
+        // Fact collection order: scan deps → gems → stdlib → project
+        // (project skips files already indexed as Gem/Stdlib).
+        info!("Collecting analysis facts");
+        let facts_start = Instant::now();
 
         // Step 4: Quick scan project files for dependencies (no indexing yet)
         self.scan_project_dependencies();
 
-        // Step 5: Index definitions from gems (uses discovered required gems)
+        // Step 5: Collect facts from gems (uses discovered required gems)
         self.index_gems(server).await?;
 
-        // Step 6: Index definitions from Ruby standard library
+        // Step 6: Collect facts from Ruby standard library
         self.index_standard_library(server, &ruby_version).await?;
 
-        // Step 7: Index definitions from project files (skips files already indexed as Gem/Stdlib)
-        self.index_project_definitions(server).await?;
+        // Step 7: Collect facts from project files (skips files already indexed as Gem/Stdlib)
+        self.collect_project_facts(server).await?;
 
-        // Step 7: Resolve all mixin references across all indexed files
-        Self::send_progress_report(server, "Resolving mixins...".to_string(), 0, 0).await;
-        info!("Resolving all mixin references across project, stdlib, and gems");
-        self.index.lock().resolve_all_mixins();
+        let facts_dur = facts_start.elapsed();
+        let reserved_dur = Duration::default();
+        info!("Facts collection completed in {:?}", facts_dur);
 
-        let phase1_dur = phase1_start.elapsed();
-        info!("Phase 1 completed in {:?}", phase1_dur);
-
-        // PHASE 2: Index all references (now that definitions are available)
-        info!("Phase 2: Indexing all references");
-        let phase2_start = Instant::now();
-
-        // Step 7: Index references from project files
-        self.index_project_references(server).await?;
-
-        let phase2_dur = phase2_start.elapsed();
-        info!("Phase 2 completed in {:?}", phase2_dur);
-
-        // PHASE 3: Publish diagnostics to the client.
-        info!("Phase 3: Publishing diagnostics");
-        let phase3_start = Instant::now();
+        // Publish diagnostics to the client.
+        info!("Publishing diagnostics");
+        let publish_start = Instant::now();
         Self::send_progress_report(server, "Publishing diagnostics...".to_string(), 0, 0).await;
         self.publish_unresolved_diagnostics(server).await;
-        let phase3_dur = phase3_start.elapsed();
+        let publish_dur = publish_start.elapsed();
 
         let total_dur = start_time.elapsed();
-        info!("Complete two-phase indexing finished in {:?}", total_dur);
+        info!("Complete indexing finished in {:?}", total_dur);
 
-        self.last_timings = PhaseTimings {
-            phase1: phase1_dur,
-            phase2: phase2_dur,
-            phase3: phase3_dur,
+        self.last_timings = IndexingTimings {
+            facts: facts_dur,
+            reserved: reserved_dur,
+            publish: publish_dur,
             total: total_dur,
         };
         Ok(())
@@ -243,7 +214,6 @@ impl IndexingCoordinator {
     /// Step 3: Set up the main indexing engine
     fn setup_file_processor(&mut self, _server: &RubyLanguageServer) {
         self.file_processor = Some(FileProcessor::with_extension_registry(
-            self.index.clone(),
             self.extension_registry.clone(),
         ));
     }
@@ -261,34 +231,24 @@ impl IndexingCoordinator {
         self.project_indexer = Some(temp_indexer);
     }
 
-    /// Phase 1: Index definitions from project files (skips already-indexed files)
-    async fn index_project_definitions(&mut self, server: &RubyLanguageServer) -> Result<()> {
+    /// Collect facts from project files (skips already-indexed files)
+    async fn collect_project_facts(&mut self, server: &RubyLanguageServer) -> Result<()> {
         if let Some(ref mut project_indexer) = self.project_indexer {
-            project_indexer.index_project_definitions(server).await?;
+            project_indexer.collect_project_facts(server).await?;
         } else {
             let mut project_indexer = IndexerProject::new(
                 self.workspace_root.clone(),
                 self.file_processor.as_ref().unwrap().clone(),
             );
-            project_indexer.index_project_definitions(server).await?;
+            project_indexer.collect_project_facts(server).await?;
             self.project_indexer = Some(project_indexer);
         }
         Ok(())
     }
 
-    /// Phase 2 Step 7: Index references from project files
-    async fn index_project_references(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        if let Some(ref mut project_indexer) = self.project_indexer {
-            project_indexer.index_project_references(server).await?;
-        } else {
-            warn!("Project indexer not initialized, cannot index references");
-        }
-        Ok(())
-    }
-
-    /// Phase 3: Publish diagnostics for unresolved entries across all indexed files
+    /// Publish diagnostics for unresolved entries across all indexed files.
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::query::{analysis_location::location_for_range, IndexQuery};
+        use crate::query::{analysis_location::location_for_range, EngineQuery};
 
         let uris: Vec<_> = {
             let engine = server.analysis_engine.lock();
@@ -306,7 +266,7 @@ impl IndexingCoordinator {
             uris
         };
 
-        let query = IndexQuery::with_engine(self.index.clone(), server.analysis_engine.clone());
+        let query = EngineQuery::with_engine(server.analysis_engine.clone());
         for uri in uris {
             let diagnostics = query.get_unresolved_diagnostics(&uri);
             if !diagnostics.is_empty() {
@@ -347,7 +307,7 @@ impl IndexingCoordinator {
         let required_gems = self.get_required_gems();
 
         let mut gem_indexer = IndexerGem::new(Some(self.workspace_root.clone()));
-        gem_indexer.set_file_processor(self.index.clone());
+        gem_indexer.set_file_processor();
         gem_indexer.set_required_gems(required_gems.into_iter().collect());
         gem_indexer.index_gems(true, server).await?; // selective = true
         self.gem_indexer = Some(gem_indexer);
@@ -787,24 +747,13 @@ end
         RubyLanguageServer::default()
     }
 
-    /// Create a fresh, empty `Index<Unlocked>` for tests that construct a
-    /// `IndexingCoordinator` without going through a server. Each call returns
-    /// a brand-new index — no shared state across tests.
-    fn fresh_test_index() -> Index<Unlocked> {
-        use crate::indexer::index::RubyIndex;
-        use parking_lot::RwLock;
-        use std::sync::Arc;
-        Index::new(Arc::new(RwLock::new(RubyIndex::new())))
-    }
-
     #[tokio::test]
     async fn test_coordinator_complete_indexing_workflow() {
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Execute the complete indexing process
@@ -825,8 +774,7 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test Ruby file collection
         let mut files = Vec::new();
@@ -851,8 +799,7 @@ end
     async fn test_coordinator_ruby_file_detection() {
         let fixture = TestProjectFixture::new();
         let config = RubyFastLspConfig::default();
-        let coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test various Ruby file extensions
         assert!(coordinator.is_ruby_file(&PathBuf::from("test.rb")));
@@ -875,8 +822,7 @@ end
         fixture.create_core_stubs();
 
         let config = RubyFastLspConfig::default();
-        let coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test core stubs path resolution
         let stubs_path = coordinator.find_core_stubs_for_version((3, 0));
@@ -900,7 +846,7 @@ end
         let project_root = temp_dir.path().to_path_buf();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator = IndexingCoordinator::new(project_root, config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(project_root, config);
         let server = create_test_server();
 
         // Test indexing with missing directories (should not panic)
@@ -915,8 +861,7 @@ end
     async fn test_coordinator_lib_directory_discovery() {
         let fixture = TestProjectFixture::new();
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Test lib directory discovery
         coordinator.discover_ruby_library_paths();
@@ -963,8 +908,7 @@ end
         }
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Measure indexing time
@@ -995,8 +939,7 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Execute indexing which should include gem discovery
@@ -1041,8 +984,7 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Test that gem indexing doesn't break the overall indexing process
@@ -1082,8 +1024,7 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Even if gem discovery fails, the overall indexing should still succeed
@@ -1118,8 +1059,7 @@ end
         fixture.setup_complete_project();
 
         let config = RubyFastLspConfig::default();
-        let mut coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let mut coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
         let server = create_test_server();
 
         // Measure time for indexing including gem discovery
@@ -1175,8 +1115,7 @@ end
             .expect("Failed to write vendor/bundle Ruby file");
 
         let config = RubyFastLspConfig::default();
-        let coordinator =
-            IndexingCoordinator::new(fixture.project_root().clone(), config, fresh_test_index());
+        let coordinator = IndexingCoordinator::new(fixture.project_root().clone(), config);
 
         // Collect Ruby files from the project
         let mut collected_files: Vec<PathBuf> = Vec::new();

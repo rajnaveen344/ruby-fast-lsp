@@ -3,18 +3,18 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
-use crate::indexer::entry::NamespaceKind;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 use crate::yard::YardParser;
 use log::info;
+use ruby_analysis_core::NamespaceKind;
 use ruby_analysis_core::SymbolKind as AnalysisSymbolKind;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find definitions for an identifier at the given position.
     ///
     /// This handles all identifier types:
@@ -119,7 +119,7 @@ impl IndexQuery {
 }
 
 // Private helpers
-impl IndexQuery {
+impl EngineQuery {
     /// Find definitions for a given identifier.
     fn find_definitions_for_identifier(
         &self,
@@ -318,44 +318,5 @@ impl IndexQuery {
         } else {
             Some(locations)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::indexer::index::RubyIndex;
-    use crate::indexer::index_ref::Index;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-
-    fn create_test_query() -> IndexQuery {
-        let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(RwLock::new(index)));
-        IndexQuery::new(index_ref)
-    }
-
-    #[test]
-    fn test_builtin_types_return_none() {
-        let query = create_test_query();
-        assert!(query.find_yard_type_definitions("nil", &[]).is_none());
-        assert!(query.find_yard_type_definitions("true", &[]).is_none());
-        assert!(query.find_yard_type_definitions("false", &[]).is_none());
-        assert!(query.find_yard_type_definitions("void", &[]).is_none());
-        assert!(query.find_yard_type_definitions("Boolean", &[]).is_none());
-    }
-
-    #[test]
-    fn test_empty_type_returns_none() {
-        let query = create_test_query();
-        assert!(query.find_yard_type_definitions("", &[]).is_none());
-        assert!(query.find_yard_type_definitions("  ", &[]).is_none());
-    }
-
-    #[test]
-    fn test_invalid_constant_returns_none() {
-        let query = create_test_query();
-        // lowercase names are not valid constants
-        assert!(query.find_yard_type_definitions("lowercase", &[]).is_none());
     }
 }

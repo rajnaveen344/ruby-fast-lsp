@@ -1,5 +1,5 @@
 use crate::query::analysis_location::location_for_range;
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
@@ -7,7 +7,7 @@ use crate::types::ruby_namespace::RubyConstant;
 use super::ResolvedMethodCallee;
 
 pub(super) fn resolve_method_callees(
-    query: &IndexQuery,
+    query: &EngineQuery,
     namespace_fqn: &FullyQualifiedName,
     method: &RubyMethod,
 ) -> Option<Vec<ResolvedMethodCallee>> {
@@ -34,7 +34,7 @@ pub(super) fn resolve_method_callees(
 }
 
 pub(super) fn resolve_constant_receiver(
-    query: &IndexQuery,
+    query: &EngineQuery,
     path: &[RubyConstant],
     current_namespace: &[RubyConstant],
 ) -> Option<FullyQualifiedName> {

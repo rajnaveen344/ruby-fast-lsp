@@ -11,7 +11,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-use super::IndexQuery;
+use super::EngineQuery;
 
 // ============================================================================
 // Public types
@@ -102,16 +102,16 @@ pub struct NamespaceTreeResponse {
 }
 
 // ============================================================================
-// IndexQuery entry points
+// EngineQuery entry points
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     /// Compute a hash of the index state for cache invalidation.
     pub fn compute_namespace_tree_hash(&self, show_external_types: bool) -> u64 {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: namespace tree query requires analysis engine. \
              This is a bug because namespace tree is derived from graph facts. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine.lock();
         compute_analysis_tree_hash(&engine, show_external_types)
@@ -125,7 +125,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: namespace tree query requires analysis engine. \
              This is a bug because namespace tree is derived from graph facts. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine.lock();
         compute_namespace_tree_from_analysis(&engine, show_external_types)
@@ -196,7 +196,7 @@ fn compute_namespace_tree_from_analysis(
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
     for node in engine.graph_store().all_nodes() {
-        if node.fqn.namespace_kind() == Some(crate::indexer::entry::NamespaceKind::Singleton) {
+        if node.fqn.namespace_kind() == Some(ruby_analysis_core::NamespaceKind::Singleton) {
             continue;
         }
         if !show_external_types && !analysis_range_is_project(engine, node.range) {
@@ -555,17 +555,12 @@ fn build_children_iterative(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::index::RubyIndex;
-    use crate::indexer::index_ref::Index;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::Mutex;
     use ruby_analysis_core::{RubyConstant, SourceKind, TextRange};
     use std::sync::Arc;
 
-    fn empty_query(engine: AnalysisEngine) -> IndexQuery {
-        IndexQuery::with_engine(
-            Index::new(Arc::new(RwLock::new(RubyIndex::new()))),
-            Arc::new(Mutex::new(engine)),
-        )
+    fn empty_query(engine: AnalysisEngine) -> EngineQuery {
+        EngineQuery::with_engine(Arc::new(Mutex::new(engine)))
     }
 
     fn constant(name: &str) -> RubyConstant {

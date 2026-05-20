@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::index::{FileId, FqnId};
+use super::ids::{FileId, FqnId};
 
 // ============================================================================
 // Types
@@ -61,7 +61,7 @@ pub struct EdgeRecord {
 pub struct GraphNode {
     pub kind: NodeKind,
 
-    // Forward edges (resolved FqnIds - no locations, those are in MixinRef)
+    // Forward edges (resolved FqnIds).
     pub superclass: Option<FqnId>,
     pub includes: Vec<FqnId>,
     pub prepends: Vec<FqnId>,

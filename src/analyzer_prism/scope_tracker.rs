@@ -1,8 +1,8 @@
+use ruby_analysis_core::NamespaceKind;
 use ruby_prism::Node;
 
 use crate::{
     analyzer_prism::utils,
-    indexer::entry::NamespaceKind,
     types::{
         fully_qualified_name::FullyQualifiedName, ruby_namespace::RubyConstant, scope::LVScopeKind,
     },

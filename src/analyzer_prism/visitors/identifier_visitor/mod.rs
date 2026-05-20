@@ -1,6 +1,7 @@
+use ruby_analysis_core::NamespaceKind;
+
 use crate::{
     analyzer_prism::{scope_tracker::ScopeTracker, Identifier},
-    indexer::entry::NamespaceKind,
     types::{ruby_document::RubyDocument, ruby_namespace::RubyConstant, scope::LVScopeId},
 };
 

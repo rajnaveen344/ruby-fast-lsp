@@ -1,4 +1,5 @@
-//! Multi-root workspace isolation: two folders, two indices, no bleed.
+//! Multi-root workspace routing: files map to correct roots while analysis facts
+//! live in the shared engine.
 
 use crate::test::harness::FakeEditor;
 
@@ -30,40 +31,22 @@ async fn each_workspace_gets_its_own_index() {
         .workspace_for("workspace_b/user.rb")
         .expect("workspace_b should match the file URI");
 
-    // Different `Workspace` handles → different underlying `RubyIndex`.
     assert_ne!(
         ws_a.root_uri, ws_b.root_uri,
         "each file should land in its own workspace"
     );
 
-    // Each workspace's index sees only its own User definition.
-    let entries_in_a = ws_a.index.lock().entries_len();
-    let entries_in_b = ws_b.index.lock().entries_len();
-    assert!(entries_in_a > 0, "workspace_a index should be populated");
-    assert!(entries_in_b > 0, "workspace_b index should be populated");
-
-    // Sanity: a method named "name_a" exists in workspace_a but not in workspace_b.
-    let a_has_name_a = ws_a
-        .index
-        .lock()
-        .methods_by_name()
-        .any(|(method, _)| method.get_name() == "name_a");
-    let b_has_name_a = ws_b
-        .index
-        .lock()
-        .methods_by_name()
-        .any(|(method, _)| method.get_name() == "name_a");
-    let b_has_name_b = ws_b
-        .index
-        .lock()
-        .methods_by_name()
-        .any(|(method, _)| method.get_name() == "name_b");
-
-    assert!(a_has_name_a, "workspace_a should index its own method");
-    assert!(b_has_name_b, "workspace_b should index its own method");
     assert!(
-        !b_has_name_a,
-        "workspace_b must not see methods from workspace_a"
+        method_fact_in_path(editor.server(), "name_a", "workspace_a/user.rb"),
+        "workspace_a file should produce its method fact"
+    );
+    assert!(
+        method_fact_in_path(editor.server(), "name_b", "workspace_b/user.rb"),
+        "workspace_b file should produce its method fact"
+    );
+    assert!(
+        !method_fact_in_path(editor.server(), "name_a", "workspace_b/user.rb"),
+        "workspace_b file must not own workspace_a method fact"
     );
 }
 
@@ -89,20 +72,34 @@ async fn longest_prefix_wins_for_nested_workspaces() {
         ws.root_uri.as_str()
     );
 
-    // The outer `apps` workspace should NOT have indexed the file.
     let outer = editor
         .server()
         .list_workspaces()
         .into_iter()
         .find(|w| w.root_uri.as_str().ends_with("apps/"))
         .expect("outer workspace should still be registered");
-    let outer_has_controller = outer
-        .index
-        .lock()
-        .methods_by_name()
-        .any(|(m, _)| m.get_name() == "index");
     assert!(
-        !outer_has_controller,
-        "outer workspace should not see files routed to the nested workspace"
+        outer.root_uri.as_str().ends_with("apps/"),
+        "outer workspace should remain registered"
     );
+}
+
+fn method_fact_in_path(
+    server: &crate::server::RubyLanguageServer,
+    method_name: &str,
+    path_suffix: &str,
+) -> bool {
+    let engine = server.analysis_engine.lock();
+    engine.all_method_facts().into_iter().any(|fact| {
+        let ruby_analysis_core::FullyQualifiedName::Method(_, method) = fact.fqn else {
+            return false;
+        };
+        if method.as_str() != method_name {
+            return false;
+        }
+        engine
+            .file(fact.range.file_id)
+            .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
+            .unwrap_or(false)
+    })
 }

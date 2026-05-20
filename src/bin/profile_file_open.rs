@@ -79,7 +79,7 @@ fn main() {
         let server = RubyLanguageServer::default();
         server.add_workspace(workspace_uri.clone());
 
-        // Phase 1: Index workspace
+        // Phase 1: index workspace
         info!("\n=== PHASE 1: Indexing Workspace ===");
         let start = std::time::Instant::now();
         if let Err(e) = indexing::init_workspace(&server, workspace_uri.clone()).await {
@@ -102,10 +102,7 @@ fn main() {
             "  Total allocations: {} blocks",
             stats_after_index.total_blocks
         );
-        info!(
-            "  Index entries: {}",
-            server.index_for_uri(&workspace_uri).lock().entries_len()
-        );
+        info!("  Analysis facts: {}", analysis_fact_count(&server));
 
         // Phase 2: Simulate file open
         info!("\n=== PHASE 2: Opening File ===");
@@ -124,7 +121,7 @@ fn main() {
         );
 
         let stats_before_open = dhat::HeapStats::get();
-        let entries_before = server.index_for_uri(&file_uri).lock().entries_len();
+        let facts_before = analysis_fact_count(&server);
 
         // Simulate handle_did_open
         {
@@ -135,13 +132,10 @@ fn main() {
                 .lock()
                 .insert(file_uri.clone(), Arc::new(RwLock::new(document)));
 
-            // Process file (index definitions/references)
-            let indexer = FileProcessor::with_extension_registry(
-                server.index_for_uri(&file_uri),
-                server.extension_registry.clone(),
-            );
+            // Process file (collect facts/references)
+            let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
             let options = ProcessingOptions {
-                index_definitions: true,
+                collect_facts: true,
                 index_references: true,
                 resolve_mixins: true,
                 include_local_vars: true,
@@ -150,7 +144,7 @@ fn main() {
         }
 
         let stats_after_open = dhat::HeapStats::get();
-        let entries_after_open = server.index_for_uri(&file_uri).lock().entries_len();
+        let facts_after_open = analysis_fact_count(&server);
 
         info!("\n=== RESULTS ===");
         info!("Before file open:");
@@ -158,40 +152,40 @@ fn main() {
             "  Current memory: {:.1} MB",
             stats_before_open.curr_bytes as f64 / 1_000_000.0
         );
-        info!("  Index entries: {}", entries_before);
+        info!("  Analysis facts: {}", facts_before);
         info!("After file open:");
         info!(
             "  Current memory: {:.1} MB",
             stats_after_open.curr_bytes as f64 / 1_000_000.0
         );
-        info!("  Index entries: {}", entries_after_open);
+        info!("  Analysis facts: {}", facts_after_open);
 
         let memory_jump = stats_after_open.curr_bytes as i64 - stats_before_open.curr_bytes as i64;
-        let entries_added = entries_after_open as i64 - entries_before as i64;
+        let facts_added = facts_after_open as i64 - facts_before as i64;
         info!(
             "Memory jump: {:.2} MB ({} bytes)",
             memory_jump as f64 / 1_000_000.0,
             memory_jump
         );
-        info!("Entries added: {}", entries_added);
+        info!("Facts added: {}", facts_added);
 
         // Phase 3: Simulate file close
         info!("\n=== PHASE 3: Closing File ===");
         {
             server.docs.lock().remove(&file_uri);
-            // Note: Index entries are NOT removed (intentional for cross-file navigation)
+            // Note: Analysis facts are NOT removed (intentional for cross-file navigation)
         }
 
         let stats_after_close = dhat::HeapStats::get();
-        let entries_after_close = server.index_for_uri(&file_uri).lock().entries_len();
+        let facts_after_close = analysis_fact_count(&server);
         info!("After file close:");
         info!(
             "  Current memory: {:.1} MB",
             stats_after_close.curr_bytes as f64 / 1_000_000.0
         );
         info!(
-            "  Index entries: {} (should be same as after open)",
-            entries_after_close
+            "  Analysis facts: {} (should be same as after open)",
+            facts_after_close
         );
 
         let memory_after_close =
@@ -217,12 +211,9 @@ fn main() {
             }
             drop(docs);
 
-            let indexer = FileProcessor::with_extension_registry(
-                server.index_for_uri(&file_uri),
-                server.extension_registry.clone(),
-            );
+            let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
             let options = ProcessingOptions {
-                index_definitions: true,
+                collect_facts: true,
                 index_references: true,
                 resolve_mixins: true,
                 include_local_vars: true,
@@ -231,14 +222,14 @@ fn main() {
         }
 
         let stats_after_reopen = dhat::HeapStats::get();
-        let entries_after_reopen = server.index_for_uri(&file_uri).lock().entries_len();
+        let facts_after_reopen = analysis_fact_count(&server);
         let reopen_jump =
             stats_after_reopen.curr_bytes as i64 - stats_before_reopen.curr_bytes as i64;
         info!(
             "Memory jump on reopen: {:.2} MB",
             reopen_jump as f64 / 1_000_000.0
         );
-        info!("Entries after reopen: {}", entries_after_reopen);
+        info!("Facts after reopen: {}", facts_after_reopen);
 
         info!("\n=== SUMMARY ===");
         info!(
@@ -253,10 +244,18 @@ fn main() {
             "Reopen memory jump: {:.2} MB",
             reopen_jump as f64 / 1_000_000.0
         );
-        info!("Entries added on first open: {}", entries_added);
+        info!("Facts added on first open: {}", facts_added);
         info!(
-            "Entries after reopen (should be same): {}",
-            entries_after_reopen
+            "Facts after reopen (should be same): {}",
+            facts_after_reopen
         );
     });
+}
+
+fn analysis_fact_count(server: &RubyLanguageServer) -> usize {
+    let engine = server.analysis_engine.lock();
+    engine.all_symbol_facts().len()
+        + engine.all_method_facts().len()
+        + engine.reference_store().all_facts().len()
+        + engine.type_store().all_facts().len()
 }

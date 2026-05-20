@@ -2,7 +2,7 @@
 //!
 //! Extracts LSP parameters and delegates to the query layer.
 
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::info;
 use tower_lsp::lsp_types::{
@@ -21,7 +21,7 @@ pub async fn handle_prepare_type_hierarchy(
     let position = params.text_document_position_params.position;
     let doc = server.get_doc(&uri)?;
     let content = doc.content.clone();
-    let query = IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.prepare_type_hierarchy(&uri, position, content)
 }
 
@@ -30,17 +30,13 @@ pub async fn handle_supertypes(
     server: &RubyLanguageServer,
     params: TypeHierarchySupertypesParams,
 ) -> Option<Vec<TypeHierarchyItem>> {
-    let item_uri = params.item.uri.clone();
     let data: TypeHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Supertypes request for: {}", data.fqn);
-    let query = IndexQuery::with_engine(
-        server.index_for_uri(&item_uri),
-        server.analysis_engine.clone(),
-    );
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.get_supertypes(&data)
 }
 
@@ -49,16 +45,12 @@ pub async fn handle_subtypes(
     server: &RubyLanguageServer,
     params: TypeHierarchySubtypesParams,
 ) -> Option<Vec<TypeHierarchyItem>> {
-    let item_uri = params.item.uri.clone();
     let data: TypeHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Subtypes request for: {}", data.fqn);
-    let query = IndexQuery::with_engine(
-        server.index_for_uri(&item_uri),
-        server.analysis_engine.clone(),
-    );
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.get_subtypes(&data)
 }

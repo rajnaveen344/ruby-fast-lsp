@@ -5,8 +5,6 @@ use crate::capabilities::debug::{
 use crate::config::RubyFastLspConfig;
 use crate::extensions::{ExtensionRegistryHandle, ExtensionStatusParams, ExtensionStatusResponse};
 use crate::handlers::{notification, request};
-use crate::indexer::index::RubyIndex;
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::query::namespace_tree::{NamespaceTreeParams, NamespaceTreeResponse};
 use crate::types::ruby_document::RubyDocument;
 use anyhow::Result;
@@ -77,15 +75,13 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// One indexed Ruby project. Each LSP workspace folder gets its own `Workspace`
-/// with its own `RubyIndex`, gem set, and Ruby version. Files are routed to the
-/// workspace whose `root_path` is the longest prefix of the file's path. Files
-/// outside any workspace fall through to `RubyLanguageServer::orphan_index`.
+/// One Ruby project root. Files are routed to the workspace whose `root_path`
+/// is the longest prefix of the file's path. Analysis facts live in
+/// `RubyLanguageServer::analysis_engine`.
 #[derive(Clone)]
 pub struct Workspace {
     pub root_uri: Url,
     pub root_path: PathBuf,
-    pub index: Index<Unlocked>,
     pub indexing_complete: Arc<AtomicBool>,
 }
 
@@ -97,7 +93,6 @@ impl Workspace {
         Self {
             root_uri,
             root_path,
-            index: Index::new(Arc::new(RwLock::new(RubyIndex::new()))),
             indexing_complete: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -106,13 +101,9 @@ impl Workspace {
 #[derive(Clone)]
 pub struct RubyLanguageServer {
     pub client: Option<Client>,
-    /// Registered workspace folders, each with its own index. Routed by
-    /// longest-prefix path match in `workspace_for_uri`.
+    /// Registered workspace folders. Routed by longest-prefix path match in
+    /// `workspace_for_uri`.
     pub workspaces: Arc<RwLock<Vec<Workspace>>>,
-    /// Fallback index for files that do not belong to any registered workspace
-    /// (e.g. opened ad-hoc, gem sources, files outside the project tree).
-    /// Tests use this when no workspace is configured.
-    pub orphan_index: Index<Unlocked>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
     /// Editor-agnostic analysis state shared by LSP and future agent APIs.
     pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
@@ -129,13 +120,11 @@ pub struct RubyLanguageServer {
 
 impl RubyLanguageServer {
     pub fn new(client: Client) -> Result<Self> {
-        let orphan_index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         let config = RubyFastLspConfig::default();
         let extension_registry = ExtensionRegistryHandle::from_config(&config);
         Ok(Self {
             client: Some(client),
             workspaces: Arc::new(RwLock::new(Vec::new())),
-            orphan_index,
             docs: Arc::new(Mutex::new(HashMap::new())),
             analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(config)),
@@ -196,8 +185,7 @@ impl RubyLanguageServer {
 
     /// Find the registered workspace whose `root_path` is the longest prefix
     /// of the given URI's filesystem path. Returns `None` if the URI does not
-    /// belong to any registered workspace, in which case callers should use
-    /// `orphan_index` (or call `index_for_uri`, which handles the fallback).
+    /// belong to any registered workspace.
     pub fn workspace_for_uri(&self, uri: &Url) -> Option<Workspace> {
         let file_path = uri.to_file_path().ok()?;
         let workspaces = self.workspaces.read();
@@ -213,16 +201,6 @@ impl RubyLanguageServer {
             }
         }
         best.cloned()
-    }
-
-    /// Returns the `Index<Unlocked>` handle that owns symbols for the given
-    /// URI: the matching workspace's index, or `orphan_index` as fallback.
-    /// Never panics; never returns None.
-    pub fn index_for_uri(&self, uri: &Url) -> Index<Unlocked> {
-        match self.workspace_for_uri(uri) {
-            Some(ws) => ws.index,
-            None => self.orphan_index.clone(),
-        }
     }
 
     pub fn open_or_update_analysis_file(
@@ -247,25 +225,6 @@ impl RubyLanguageServer {
             .open_or_update_file_with_kind(path, source, kind)
     }
 
-    /// Returns handles to every index, including the orphan fallback.
-    /// Used by cross-workspace queries (e.g. `workspace/symbol`) which have
-    /// no URI to anchor on.
-    pub fn all_indices(&self) -> Vec<Index<Unlocked>> {
-        let workspaces = self.workspaces.read();
-        let mut out: Vec<Index<Unlocked>> = workspaces.iter().map(|w| w.index.clone()).collect();
-        out.push(self.orphan_index.clone());
-        out
-    }
-
-    /// Returns handles to registered workspace indices only (no orphan).
-    pub fn workspace_indices(&self) -> Vec<Index<Unlocked>> {
-        self.workspaces
-            .read()
-            .iter()
-            .map(|w| w.index.clone())
-            .collect()
-    }
-
     /// Register a new workspace. If a workspace with the same root URI is
     /// already registered, returns the existing one without creating a new
     /// index. Returns the (existing or newly created) `Workspace`.
@@ -281,8 +240,6 @@ impl RubyLanguageServer {
         ws
     }
 
-    /// Remove a workspace by root URI. The workspace's index is dropped when
-    /// the last `Index<Unlocked>` handle goes out of scope.
     pub fn remove_workspace(&self, root_uri: &Url) {
         self.workspaces.write().retain(|w| w.root_uri != *root_uri);
     }
@@ -290,18 +247,6 @@ impl RubyLanguageServer {
     /// Snapshot of all currently registered workspaces.
     pub fn list_workspaces(&self) -> Vec<Workspace> {
         self.workspaces.read().clone()
-    }
-
-    /// Returns the "primary" workspace index for cross-workspace operations
-    /// that need a single anchor (e.g. debug commands). Falls back to the
-    /// orphan index when no workspaces are registered. Most callers should
-    /// prefer `index_for_uri` or `all_indices` instead.
-    pub fn primary_index(&self) -> Index<Unlocked> {
-        self.workspaces
-            .read()
-            .first()
-            .map(|w| w.index.clone())
-            .unwrap_or_else(|| self.orphan_index.clone())
     }
 
     pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
@@ -427,11 +372,9 @@ impl RubyLanguageServer {
 
 impl Default for RubyLanguageServer {
     fn default() -> Self {
-        let orphan_index = Index::new(Arc::new(RwLock::new(RubyIndex::new())));
         Self {
             client: None,
             workspaces: Arc::new(RwLock::new(Vec::new())),
-            orphan_index,
             docs: Arc::new(Mutex::new(HashMap::new())),
             analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),

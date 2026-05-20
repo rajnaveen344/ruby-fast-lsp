@@ -557,20 +557,30 @@ impl FakeEditor {
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);
 
         {
-            use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+            use crate::analyzer_prism::visitors::fact_collector::FactCollector;
             use ruby_prism::Visit;
 
-            let mut visitor = IndexVisitor::new(self.server.index_for_uri(&uri), document.clone());
+            let mut visitor = FactCollector::analysis_only(
+                document.clone(),
+                self.server.extension_registry.clone(),
+                self.server.analysis_engine.clone(),
+            );
             visitor.visit(&parse_result.node());
             diagnostics.extend(visitor.diagnostics);
+            self.server
+                .analysis_engine
+                .lock()
+                .replace_file_reference_analysis(
+                    visitor.document.analysis_file_id(),
+                    visitor.reference_candidates,
+                    visitor.diagnostic_candidates,
+                    Vec::new(),
+                );
         }
 
         // Add unresolved entry diagnostics
         {
-            let query = crate::query::IndexQuery::with_engine(
-                self.server.index_for_uri(&uri),
-                self.server.analysis_engine.clone(),
-            );
+            let query = crate::query::EngineQuery::with_engine(self.server.analysis_engine.clone());
             diagnostics.extend(query.get_unresolved_diagnostics(&uri));
         }
 

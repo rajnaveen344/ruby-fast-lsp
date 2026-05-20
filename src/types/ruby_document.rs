@@ -176,7 +176,7 @@ impl RubyDocument {
 
     /// Computes inlay hints for the document (now only clears old hints)
     pub fn compute_inlay_hints(&mut self) {
-        // Clear previous structural hints - type hints are managed separately by IndexVisitor
+        // Clear previous structural hints - type hints are managed separately by FactCollector
         self.inlay_hints.clear();
     }
 

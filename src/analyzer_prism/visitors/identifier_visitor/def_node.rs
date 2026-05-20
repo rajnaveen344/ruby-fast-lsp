@@ -1,9 +1,9 @@
 use log::warn;
+use ruby_analysis_core::NamespaceKind;
 use ruby_prism::DefNode;
 
 use crate::{
     analyzer_prism::{utils, Identifier, MethodReceiver},
-    indexer::entry::NamespaceKind,
     types::{ruby_method::RubyMethod, scope::LVScopeKind},
 };
 

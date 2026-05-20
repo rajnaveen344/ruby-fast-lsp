@@ -9,6 +9,6 @@ mod engine;
 mod file_id_map;
 mod query;
 
-pub use engine::{AnalysisEngine, SourceFile};
+pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
 pub use query::AnalysisQuery;

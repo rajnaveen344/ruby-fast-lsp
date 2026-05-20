@@ -1,8 +1,8 @@
-//! bench_references — targeted perf harness for Phase 2 (reference indexing).
+//! bench_references — targeted perf harness for reference/fact indexing.
 //!
-//! Loads a named corpus (via `src/perf/corpus.rs`), runs full two-phase
-//! indexing, and reports wall-time breakdown — Phase 1 (definitions), Phase 2
-//! (references), Phase 3 (diagnostics), and total. Optionally repeats the full
+//! Loads a named corpus (via `src/perf/corpus.rs`), runs full indexing, and
+//! reports wall-time breakdown — fact collection, reserved/legacy reserved,
+//! diagnostics publishing, and total. Optionally repeats the full
 //! pass K times on a fresh index each iteration to measure variance.
 //!
 //! Usage:
@@ -16,7 +16,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use log::{info, LevelFilter};
-use ruby_fast_lsp::indexer::coordinator::{IndexingCoordinator, PhaseTimings};
+use ruby_fast_lsp::indexer::coordinator::{IndexingCoordinator, IndexingTimings};
 use ruby_fast_lsp::perf::corpus;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
@@ -85,7 +85,7 @@ fn parse_args() -> Result<Config> {
 
 fn print_help() {
     println!(
-        r#"bench_references — Phase 2 (reference-indexing) perf harness
+        r#"bench_references — reference/fact-indexing perf harness
 
 USAGE:
     bench_references --corpus <NAME> [--repeats N] [--workers N]
@@ -151,16 +151,15 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_once(workspace_path: &PathBuf) -> Result<PhaseTimings> {
+async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     let workspace_uri = Url::from_file_path(workspace_path)
         .map_err(|_| anyhow!("invalid workspace path: {}", workspace_path.display()))?;
 
     let server = RubyLanguageServer::default();
     server.add_workspace(workspace_uri.clone());
 
-    let index = server.index_for_uri(&workspace_uri);
     let config = server.config.lock().clone();
-    let mut coordinator = IndexingCoordinator::new(workspace_path.clone(), config, index);
+    let mut coordinator = IndexingCoordinator::new(workspace_path.clone(), config);
 
     let wall_start = Instant::now();
     coordinator
@@ -175,15 +174,13 @@ async fn run_once(workspace_path: &PathBuf) -> Result<PhaseTimings> {
     // observation.
     t.total = wall;
 
-    let index = server.index_for_uri(&workspace_uri);
-    let idx = index.lock();
+    let engine = server.analysis_engine.lock();
     info!(
-        "index after pass: {} entries, {} files, {} definitions",
-        idx.entries_len(),
-        idx.files_count(),
-        idx.definitions_len()
+        "analysis after pass: {} symbols, {} methods, {} refs",
+        engine.all_symbol_facts().len(),
+        engine.all_method_facts().len(),
+        engine.reference_store().all_facts().len()
     );
-    drop(idx);
 
     Ok(t)
 }
@@ -209,21 +206,21 @@ fn log_corpus_shape(dir: &PathBuf) {
     );
 }
 
-fn print_timings(iter: usize, t: &PhaseTimings) {
-    let p1_pct = pct(t.phase1, t.total);
-    let p2_pct = pct(t.phase2, t.total);
-    let p3_pct = pct(t.phase3, t.total);
+fn print_timings(iter: usize, t: &IndexingTimings) {
+    let p1_pct = pct(t.facts, t.total);
+    let p2_pct = pct(t.reserved, t.total);
+    let p3_pct = pct(t.publish, t.total);
     println!(
-        "\n  run {iter}: total {:>8.2?} | p1 defs {:>8.2?} ({:>4.1}%) | p2 refs+diag {:>8.2?} ({:>4.1}%) | p3 publish {:>8.2?} ({:>4.1}%)\n",
-        t.total, t.phase1, p1_pct, t.phase2, p2_pct, t.phase3, p3_pct
+        "\n  run {iter}: total {:>8.2?} | facts {:>8.2?} ({:>4.1}%) | reserved {:>8.2?} ({:>4.1}%) | publish {:>8.2?} ({:>4.1}%)\n",
+        t.total, t.facts, p1_pct, t.reserved, p2_pct, t.publish, p3_pct
     );
 }
 
-fn print_summary(runs: &[PhaseTimings]) {
+fn print_summary(runs: &[IndexingTimings]) {
     println!("\n=== SUMMARY over {} runs ===", runs.len());
-    print_stat("p1 defs      ", runs.iter().map(|t| t.phase1));
-    print_stat("p2 refs+diag ", runs.iter().map(|t| t.phase2));
-    print_stat("p3 publish   ", runs.iter().map(|t| t.phase3));
+    print_stat("facts        ", runs.iter().map(|t| t.facts));
+    print_stat("reserved     ", runs.iter().map(|t| t.reserved));
+    print_stat("publish      ", runs.iter().map(|t| t.publish));
     print_stat("total        ", runs.iter().map(|t| t.total));
 }
 

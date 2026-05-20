@@ -1,4 +1,4 @@
-//! Query Engine - Unified query layer for RubyIndex
+//! Query Engine - Unified query layer for analysis facts
 //!
 //! This module provides a single entry point for all index queries, consolidating
 //! business logic that was previously scattered across capabilities.
@@ -6,13 +6,13 @@
 //! # Architecture
 //!
 //! ```text
-//! server.rs (API) → query/ (Service) → indexer/ (Data)
+//! server.rs (API) → query/ (Service) → analysis-engine/ (Data)
 //! ```
 //!
 //! # Usage
 //!
 //! ```rust,ignore
-//! let query = IndexQuery::new(server.index_for_uri(&uri));
+//! let query = EngineQuery::with_engine(server.analysis_engine.clone());
 //! let definitions = query.find_definitions(&uri, position, &content, None);
 //! ```
 
@@ -39,93 +39,72 @@ pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use types::TypeQuery;
 
-use crate::indexer::index_ref::{Index, Unlocked};
 use crate::types::ruby_document::RubyDocument;
 use parking_lot::{Mutex, RwLock};
 use ruby_analysis_engine::AnalysisEngine;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
-/// Unified query interface for RubyIndex.
+/// Unified query interface for analysis-backed LSP features.
 ///
 /// Provides high-level, domain-focused query methods that abstract away
-/// the low-level index details. All index-heavy capability logic should
-/// use this interface.
-///
-/// Uses `Index<Unlocked>` internally so methods can lock/unlock as needed,
-/// avoiding deadlocks when calling other methods that need index access.
-pub struct IndexQuery {
-    index: Index<Unlocked>,
+/// analysis-engine details.
+pub struct EngineQuery {
     doc: Option<Arc<RwLock<RubyDocument>>>,
     uri: Option<Url>,
     analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
-impl IndexQuery {
-    /// Create a new IndexQuery for index-wide queries.
-    pub fn new(index: Index<Unlocked>) -> Self {
+impl EngineQuery {
+    /// Create a new EngineQuery for index-wide queries.
+    pub fn new<_Index>(_index: _Index) -> Self {
         Self {
-            index,
             doc: None,
             uri: None,
             analysis_engine: None,
         }
     }
 
-    /// Create an IndexQuery with full document context.
+    /// Create an EngineQuery with full document context.
     /// This enables access to local variables and AST-based queries.
-    pub fn with_doc(index: Index<Unlocked>, doc: Arc<RwLock<RubyDocument>>) -> Self {
+    pub fn with_doc<_Index>(_index: _Index, doc: Arc<RwLock<RubyDocument>>) -> Self {
         let uri = doc.read().uri.clone();
         Self {
-            index,
             doc: Some(doc),
             uri: Some(uri),
             analysis_engine: None,
         }
     }
 
-    /// Create an IndexQuery with document context and analysis engine access.
+    /// Create an EngineQuery with document context and analysis engine access.
     pub fn with_doc_and_engine(
-        index: Index<Unlocked>,
         doc: Arc<RwLock<RubyDocument>>,
         analysis_engine: Arc<Mutex<AnalysisEngine>>,
     ) -> Self {
         let uri = doc.read().uri.clone();
         Self {
-            index,
             doc: Some(doc),
             uri: Some(uri),
             analysis_engine: Some(analysis_engine),
         }
     }
 
-    /// Create an IndexQuery with analysis engine access and no document context.
-    pub fn with_engine(
-        index: Index<Unlocked>,
-        analysis_engine: Arc<Mutex<AnalysisEngine>>,
-    ) -> Self {
+    /// Create an EngineQuery with analysis engine access and no document context.
+    pub fn with_engine(analysis_engine: Arc<Mutex<AnalysisEngine>>) -> Self {
         Self {
-            index,
             doc: None,
             uri: None,
             analysis_engine: Some(analysis_engine),
         }
     }
 
-    /// Create an IndexQuery with just a URI (no document).
-    pub fn with_uri(index: Index<Unlocked>, uri: Url) -> Self {
+    /// Create an EngineQuery with just a URI (no document).
+    pub fn with_uri<_Index>(_index: _Index, uri: Url) -> Self {
         Self {
-            index,
             doc: None,
             uri: Some(uri),
             analysis_engine: None,
         }
-    }
-
-    /// Get a clone of the index handle.
-    #[inline]
-    pub fn index_ref(&self) -> Index<Unlocked> {
-        self.index.clone()
     }
 
     /// Get the current file URI if set.
@@ -147,10 +126,9 @@ impl IndexQuery {
     }
 }
 
-impl Clone for IndexQuery {
+impl Clone for EngineQuery {
     fn clone(&self) -> Self {
         Self {
-            index: self.index.clone(),
             doc: self.doc.clone(),
             uri: self.uri.clone(),
             analysis_engine: self.analysis_engine.clone(),
@@ -161,23 +139,18 @@ impl Clone for IndexQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::index::RubyIndex;
 
     #[test]
     fn test_index_query_creation() {
-        let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(RwLock::new(index)));
-        let query = IndexQuery::new(index_ref);
+        let query = EngineQuery::new(());
         assert!(query.uri().is_none());
         assert!(query.doc().is_none());
     }
 
     #[test]
     fn test_index_query_with_uri() {
-        let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(RwLock::new(index)));
         let uri = Url::parse("file:///test.rb").unwrap();
-        let query = IndexQuery::with_uri(index_ref, uri.clone());
+        let query = EngineQuery::with_uri((), uri.clone());
         assert_eq!(query.uri(), Some(&uri));
     }
 }

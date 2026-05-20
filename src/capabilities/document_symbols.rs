@@ -7,9 +7,17 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     analyzer_prism::visitors::document_symbols_visitor::DocumentSymbolsVisitor,
-    indexer::entry::{MethodVisibility, NamespaceKind},
     server::RubyLanguageServer,
 };
+
+use ruby_analysis_core::NamespaceKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodVisibility {
+    Public,
+    Protected,
+    Private,
+}
 
 /// Handle document symbols request for a Ruby file
 pub async fn handle_document_symbols(

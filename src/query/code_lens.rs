@@ -15,12 +15,18 @@ use ruby_analysis_engine::AnalysisEngine;
 use ruby_prism::{ModuleNode, Node, Visit};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-use crate::indexer::entry::MixinType;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_namespace::RubyConstant;
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MixinType {
+    Include,
+    Prepend,
+    Extend,
+}
 
 // ============================================================================
 // Public data type
@@ -46,10 +52,10 @@ pub struct CodeLensData {
 }
 
 // ============================================================================
-// IndexQuery entry point
+// EngineQuery entry point
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     /// Compute code lenses for every `module` definition in the file.
     ///
     /// Returns one `CodeLensData` per mixin-type bucket and one for classes,
@@ -69,7 +75,7 @@ impl IndexQuery {
         // 2. We need offset→position conversion. Use attached document.
         let doc_arc = self
             .doc()
-            .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc(). Fix: call IndexQuery::with_doc() before get_code_lenses()");
+            .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc(). Fix: call EngineQuery::with_doc() before get_code_lenses()");
         let document = doc_arc.read();
 
         let mut results = Vec::new();
@@ -78,7 +84,7 @@ impl IndexQuery {
             let engine_ref = self.analysis_engine().expect(
                 "INVARIANT VIOLATED: code lens query requires analysis engine. \
                  This is a bug because module usage lenses are derived from graph facts. \
-                 Fix: construct IndexQuery with with_doc_and_engine().",
+                 Fix: construct EngineQuery with with_doc_and_engine().",
             );
             let engine = engine_ref.lock();
             let (usages, class_locations) = (
@@ -153,7 +159,7 @@ fn mixin_usages_from_analysis(
             continue;
         }
         if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-            && edge.source.namespace_kind() != Some(crate::indexer::entry::NamespaceKind::Instance)
+            && edge.source.namespace_kind() != Some(ruby_analysis_core::NamespaceKind::Instance)
         {
             continue;
         }
@@ -198,8 +204,7 @@ fn class_definition_locations_from_analysis(
                 continue;
             }
             if matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend)
-                && edge.source.namespace_kind()
-                    != Some(crate::indexer::entry::NamespaceKind::Instance)
+                && edge.source.namespace_kind() != Some(ruby_analysis_core::NamespaceKind::Instance)
             {
                 continue;
             }

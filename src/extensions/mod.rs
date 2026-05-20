@@ -8,10 +8,9 @@ use log::warn;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use ruby_fast_lsp_extension_api::{
-    ApplyMixinPatch, Argument, ArgumentValue, CallContext, DefineMethodPatch, DocumentContext,
-    Extension, ExtensionEvent, IndexPatch, MethodVisibility, NamespaceKind as AbiNamespaceKind,
-    Receiver, ResolvedCall, ResolvedCallee, ResponsePatch, RubyType as AbiRubyType, SourcePosition,
-    SourceRange,
+    Argument, ArgumentValue, CallContext, DocumentContext, Extension, ExtensionEvent, IndexPatch,
+    NamespaceKind as AbiNamespaceKind, Receiver, ResolvedCall, ResolvedCallee, ResponsePatch,
+    SourcePosition, SourceRange,
 };
 use ruby_prism::{CallNode, Node};
 use semver::{Version, VersionReq};
@@ -20,20 +19,14 @@ use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::analyzer_prism::utils;
-use crate::analyzer_prism::visitors::index_visitor::IndexVisitor;
+use crate::analyzer_prism::visitors::fact_collector::FactCollector;
 use crate::analyzer_prism::MethodReceiver as CoreMethodReceiver;
 use crate::config::RubyFastLspConfig;
-use crate::indexer::entry::NamespaceKind;
-use crate::indexer::entry::{
-    entry_kind::{MethodParamInfo, ParamKind},
-    EntryBuilder, EntryKind, MethodOrigin, MethodVisibility as CoreVisibility, MixinRef,
-};
-use crate::inferrer::r#type::ruby::RubyType;
-use crate::query::{IndexQuery, MethodCalleeResolution};
-use crate::types::compact_location::CompactLocation;
+use crate::query::MethodCalleeResolution;
 use crate::types::fully_qualified_name::FullyQualifiedName;
 use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
+use ruby_analysis_core::NamespaceKind;
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
@@ -245,7 +238,7 @@ impl ExtensionRegistryHandle {
         self.inner.read().status_reports()
     }
 
-    pub fn process_call_node(&self, visitor: &mut IndexVisitor, node: &CallNode) {
+    pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
         process_call_node_with_registry(self, visitor, node);
     }
 
@@ -379,13 +372,13 @@ pub fn validate_extension_package(path: &Path) -> Result<ExtensionStatusReport, 
     Ok(extension.status_report())
 }
 
-pub fn process_call_node(visitor: &mut IndexVisitor, node: &CallNode) {
+pub fn process_call_node(visitor: &mut FactCollector, node: &CallNode) {
     process_call_node_with_registry(&EXTENSION_REGISTRY, visitor, node);
 }
 
 fn process_call_node_with_registry(
     registry: &ExtensionRegistryHandle,
-    visitor: &mut IndexVisitor,
+    visitor: &mut FactCollector,
     node: &CallNode,
 ) {
     if process_wasm_call_node(registry, visitor, node) {
@@ -513,7 +506,7 @@ fn handle_response_event(
 
 fn process_wasm_call_node(
     registry: &ExtensionRegistryHandle,
-    visitor: &mut IndexVisitor,
+    visitor: &mut FactCollector,
     node: &CallNode,
 ) -> bool {
     let method_name = utils::utf8_str(node.name().as_slice());
@@ -1009,7 +1002,7 @@ fn wasm_file_stem(path: &Path) -> String {
         .to_string()
 }
 
-fn call_context(visitor: &IndexVisitor, node: &CallNode) -> CallContext {
+fn call_context(visitor: &FactCollector, node: &CallNode) -> CallContext {
     let receiver = node
         .receiver()
         .map(|receiver| receiver_from_node(&receiver))
@@ -1043,7 +1036,7 @@ fn call_context(visitor: &IndexVisitor, node: &CallNode) -> CallContext {
     }
 }
 
-pub fn resolved_call_for_stack(visitor: &IndexVisitor, node: &CallNode) -> ResolvedCall {
+pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
     let receiver = node
         .receiver()
         .map(|receiver| receiver_from_node(&receiver))
@@ -1060,7 +1053,7 @@ pub fn resolved_call_for_stack(visitor: &IndexVisitor, node: &CallNode) -> Resol
     }
 }
 
-fn resolved_callees_for_call(visitor: &IndexVisitor, node: &CallNode) -> Vec<ResolvedCallee> {
+fn resolved_callees_for_call(visitor: &FactCollector, node: &CallNode) -> Vec<ResolvedCallee> {
     let method_name = utils::utf8_str(node.name().as_slice());
     let Ok(method) = RubyMethod::new(method_name) else {
         return Vec::new();
@@ -1069,28 +1062,53 @@ fn resolved_callees_for_call(visitor: &IndexVisitor, node: &CallNode) -> Vec<Res
         .receiver()
         .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
         .unwrap_or(CoreMethodReceiver::None);
-    let document = Arc::new(RwLock::new(visitor.document.clone()));
-    let query = if let Some(engine) = &visitor.analysis_engine {
-        IndexQuery::with_doc_and_engine(visitor.index.clone(), document, engine.clone())
-    } else {
-        IndexQuery::with_doc(visitor.index.clone(), document)
+
+    resolved_callees_for_call_analysis(
+        &visitor.analysis_engine,
+        &core_receiver,
+        &method,
+        &visitor.scope_tracker.get_ns_stack(),
+        visitor.scope_tracker.current_method_context(),
+    )
+}
+
+fn resolved_callees_for_call_analysis(
+    engine: &Arc<Mutex<ruby_analysis_engine::AnalysisEngine>>,
+    receiver: &CoreMethodReceiver,
+    method: &RubyMethod,
+    current_namespace: &[RubyConstant],
+    namespace_kind: NamespaceKind,
+) -> Vec<ResolvedCallee> {
+    let engine = engine.lock();
+    let query = ruby_analysis_engine::AnalysisQuery::new(&engine);
+    let namespace_fqn = match receiver {
+        CoreMethodReceiver::Constant(path) => {
+            query.resolve_constant_receiver(path, current_namespace)
+        }
+        CoreMethodReceiver::None | CoreMethodReceiver::SelfReceiver => {
+            FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
+        }
+        CoreMethodReceiver::LocalVariable(_)
+        | CoreMethodReceiver::InstanceVariable(_)
+        | CoreMethodReceiver::ClassVariable(_)
+        | CoreMethodReceiver::GlobalVariable(_)
+        | CoreMethodReceiver::Expression
+        | CoreMethodReceiver::MethodCall { .. }
+        | CoreMethodReceiver::Literal(_) => return Vec::new(),
     };
 
-    query
-        .resolve_method_callees(
-            &core_receiver,
-            &method,
-            &visitor.scope_tracker.get_ns_stack(),
-            visitor.scope_tracker.current_method_context(),
-            position_from_source(source_range(visitor, &node.location()).start),
-        )
+    let Some(callees) = query.resolve_method_callees(&namespace_fqn, method) else {
+        return Vec::new();
+    };
+
+    callees
         .into_iter()
         .map(|callee| {
             let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
                 panic!(
-                    "INVARIANT VIOLATED: resolved method callee owner `{}` is not a namespace. \
-                     This is a bug because methods must resolve to namespace owners. \
-                     Fix: ensure IndexQuery::resolve_method_callees only returns namespace FQNs.",
+                    "INVARIANT VIOLATED: analysis resolved extension callee owner `{}` is not a namespace. \
+                     This is a bug because extension callee owners must be namespaces. \
+                     Fix: keep AnalysisQuery::resolve_method_callees returning namespace owners.",
                     callee.owner
                 )
             });
@@ -1109,7 +1127,7 @@ fn resolved_callees_for_call(visitor: &IndexVisitor, node: &CallNode) -> Vec<Res
         .collect()
 }
 
-fn core_method_receiver_from_node(visitor: &IndexVisitor, node: &Node) -> CoreMethodReceiver {
+fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreMethodReceiver {
     if node.as_self_node().is_some() {
         CoreMethodReceiver::SelfReceiver
     } else if let Some(constant) = node.as_constant_read_node() {
@@ -1188,7 +1206,7 @@ fn receiver_from_node(node: &Node) -> Receiver {
     }
 }
 
-fn argument_from_node(visitor: &IndexVisitor, node: &Node) -> Argument {
+fn argument_from_node(visitor: &FactCollector, node: &Node) -> Argument {
     if let Some(symbol) = node.as_symbol_node() {
         return Argument {
             value: ArgumentValue::Symbol(String::from_utf8_lossy(symbol.unescaped()).to_string()),
@@ -1237,167 +1255,8 @@ fn argument_from_node(visitor: &IndexVisitor, node: &Node) -> Argument {
     }
 }
 
-fn apply_patch(visitor: &mut IndexVisitor, patch: IndexPatch) {
-    visitor.extension_index_patches.push(patch.clone());
-    match patch {
-        IndexPatch::DefineMethod(method) => apply_define_method(visitor, method),
-        IndexPatch::ApplyMixin(mixin) => apply_mixin(visitor, mixin),
-    }
-}
-
-fn apply_define_method(visitor: &mut IndexVisitor, patch: DefineMethodPatch) {
-    assert!(
-        RubyMethod::is_valid_ruby_method_name(&patch.name),
-        "INVARIANT VIOLATED: extension emitted invalid method name `{}`. \
-         This is a bug because RubyIndex only accepts valid Ruby method identifiers. \
-         Fix: validate method names inside extension before emitting DefineMethod.",
-        patch.name
-    );
-
-    let method = RubyMethod::new(&patch.name).expect(
-        "INVARIANT VIOLATED: RubyMethod validation diverged. \
-         This is a bug because is_valid_ruby_method_name accepted a name that RubyMethod::new rejected. \
-         Fix: keep RubyMethod validators consistent.",
-    );
-    let namespace = ruby_constants(&patch.namespace);
-    let owner_kind = namespace_kind_from_abi(patch.owner_kind);
-    let fqn = FullyQualifiedName::method(namespace.clone(), method.clone());
-    let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
-    let location = compact_location(visitor, patch.location);
-    let params = method_params_from_abi(&patch.params, patch.location.end);
-    let return_type = patch.return_type.map(ruby_type_from_abi);
-    let visibility = visibility_from_abi(patch.visibility);
-
-    let entry = {
-        let mut index = visitor.index.lock();
-        EntryBuilder::new()
-            .fqn(fqn)
-            .compact_location(location)
-            .kind(EntryKind::new_method(
-                method,
-                params,
-                owner,
-                visibility,
-                MethodOrigin::Generated {
-                    extension_id: patch.source.extension_id,
-                    macro_name: patch.source.macro_name,
-                },
-                None,
-                None,
-                None,
-                return_type,
-                Vec::new(),
-            ))
-            .build(&mut index)
-            .expect(
-                "INVARIANT VIOLATED: extension DefineMethod patch could not build index entry. \
-                 This is a bug because validated extension patches must map to EntryBuilder inputs. \
-                 Fix: inspect DefineMethod patch conversion.",
-            )
-    };
-
-    visitor.add_entry(entry);
-}
-
-fn method_params_from_abi(
-    params: &[ruby_fast_lsp_extension_api::MethodParamPatch],
-    end_position: SourcePosition,
-) -> Vec<MethodParamInfo> {
-    params
-        .iter()
-        .map(|param| {
-            assert!(
-                !param.name.is_empty(),
-                "INVARIANT VIOLATED: extension emitted method parameter with empty name. \
-                 This is a bug because index MethodParamInfo requires a stable parameter identifier. \
-                 Fix: validate extension DefineMethod params before emitting patches."
-            );
-            MethodParamInfo::new(
-                param.name.clone(),
-                Position {
-                    line: end_position.line,
-                    character: end_position.character,
-                },
-                param_kind_from_abi(param.kind),
-            )
-        })
-        .collect()
-}
-
-fn param_kind_from_abi(kind: ruby_fast_lsp_extension_api::MethodParamKind) -> ParamKind {
-    match kind {
-        ruby_fast_lsp_extension_api::MethodParamKind::Required => ParamKind::Required,
-        ruby_fast_lsp_extension_api::MethodParamKind::Optional => ParamKind::Optional,
-        ruby_fast_lsp_extension_api::MethodParamKind::Rest => ParamKind::Rest,
-        ruby_fast_lsp_extension_api::MethodParamKind::RequiredKeyword => ParamKind::RequiredKeyword,
-        ruby_fast_lsp_extension_api::MethodParamKind::OptionalKeyword => ParamKind::OptionalKeyword,
-        ruby_fast_lsp_extension_api::MethodParamKind::KeywordRest => ParamKind::KeywordRest,
-        ruby_fast_lsp_extension_api::MethodParamKind::Block => ParamKind::Block,
-    }
-}
-
-fn apply_mixin(visitor: &mut IndexVisitor, patch: ApplyMixinPatch) {
-    let namespace = ruby_constants(&patch.namespace);
-    let target_kind = namespace_kind_from_abi(patch.target_kind);
-    let target_fqn = FullyQualifiedName::namespace_with_kind(namespace, target_kind);
-    let location = compact_location(visitor, patch.location);
-    let mixin_ref = MixinRef {
-        parts: ruby_constants(&patch.mixin),
-        absolute: patch.absolute,
-        location,
-    };
-
-    let mut index = visitor.index.lock();
-    ensure_root_mixin_target_exists(&mut index, visitor, &target_fqn);
-    let Some(entry) = index.get_last_definition_mut(&target_fqn) else {
-        return;
-    };
-    if !matches!(entry.kind, EntryKind::Class(_) | EntryKind::Module(_)) {
-        return;
-    }
-
-    match patch.kind {
-        ruby_fast_lsp_extension_api::MixinKind::Include => entry.add_includes(vec![mixin_ref]),
-        ruby_fast_lsp_extension_api::MixinKind::Prepend => entry.add_prepends(vec![mixin_ref]),
-        ruby_fast_lsp_extension_api::MixinKind::Extend => entry.add_extends(vec![mixin_ref]),
-    }
-}
-
-fn ensure_root_mixin_target_exists(
-    index: &mut crate::indexer::index::RubyIndex,
-    visitor: &IndexVisitor,
-    target_fqn: &FullyQualifiedName,
-) {
-    if index.get(target_fqn).is_some() {
-        return;
-    }
-    if !target_fqn.namespace_parts().is_empty() {
-        return;
-    }
-
-    let file_id = index.get_or_insert_file(&visitor.document.uri);
-    let location = CompactLocation::new(
-        file_id,
-        tower_lsp::lsp_types::Range::new(Position::new(0, 0), Position::new(0, 0)),
-    );
-    let entry = EntryBuilder::new()
-        .fqn(target_fqn.clone())
-        .compact_location(location)
-        .kind(EntryKind::Class(Box::new(
-            crate::indexer::entry::entry_kind::ClassData {
-                superclass: None,
-                includes: Vec::new(),
-                prepends: Vec::new(),
-                extends: Vec::new(),
-            },
-        )))
-        .build(index)
-        .expect(
-            "INVARIANT VIOLATED: failed to create Object entry for extension mixin patch. \
-             This is a bug because Object target data is validated locally. \
-             Fix: keep EntryBuilder requirements in sync with extension mixin target creation.",
-        );
-    index.add_entry(entry);
+fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
+    visitor.extension_index_patches.push(patch);
 }
 
 fn response_patch_to_document_symbol(
@@ -1481,37 +1340,7 @@ fn symbol_kind_from_extension(kind: &str) -> Result<SymbolKind, String> {
     Ok(symbol_kind)
 }
 
-fn ruby_constants(parts: &[String]) -> Vec<RubyConstant> {
-    parts
-        .iter()
-        .map(|part| {
-            RubyConstant::new(part).unwrap_or_else(|err| {
-                panic!(
-                    "INVARIANT VIOLATED: extension emitted invalid namespace part `{}`: {}. \
-                     This is a bug because namespace parts must be Ruby constants. \
-                     Fix: validate namespace parts inside extension before emitting patches.",
-                    part, err
-                )
-            })
-        })
-        .collect()
-}
-
-fn compact_location(visitor: &IndexVisitor, range: SourceRange) -> CompactLocation {
-    let file_id = visitor
-        .index
-        .lock()
-        .get_or_insert_file(&visitor.document.uri);
-    CompactLocation::new(
-        file_id,
-        Range::new(
-            position_from_source(range.start),
-            position_from_source(range.end),
-        ),
-    )
-}
-
-fn source_range(visitor: &IndexVisitor, location: &ruby_prism::Location) -> SourceRange {
+fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> SourceRange {
     let range = visitor.document.prism_location_to_lsp_range(location);
     SourceRange {
         start: source_position(range.start),
@@ -1526,41 +1355,10 @@ fn source_position(position: Position) -> SourcePosition {
     }
 }
 
-fn position_from_source(position: SourcePosition) -> Position {
-    Position {
-        line: position.line,
-        character: position.character,
-    }
-}
-
 fn namespace_kind_to_abi(kind: NamespaceKind) -> AbiNamespaceKind {
     match kind {
         NamespaceKind::Instance => AbiNamespaceKind::Instance,
         NamespaceKind::Singleton => AbiNamespaceKind::Singleton,
-    }
-}
-
-fn namespace_kind_from_abi(kind: AbiNamespaceKind) -> NamespaceKind {
-    match kind {
-        AbiNamespaceKind::Instance => NamespaceKind::Instance,
-        AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
-    }
-}
-
-fn visibility_from_abi(visibility: MethodVisibility) -> CoreVisibility {
-    match visibility {
-        MethodVisibility::Public => CoreVisibility::Public,
-        MethodVisibility::Protected => CoreVisibility::Protected,
-        MethodVisibility::Private => CoreVisibility::Private,
-    }
-}
-
-fn ruby_type_from_abi(ruby_type: AbiRubyType) -> RubyType {
-    match ruby_type {
-        AbiRubyType::Named(name) => FullyQualifiedName::try_from(name.as_str())
-            .map(RubyType::Class)
-            .unwrap_or(RubyType::Unknown),
-        AbiRubyType::Unknown => RubyType::Unknown,
     }
 }
 

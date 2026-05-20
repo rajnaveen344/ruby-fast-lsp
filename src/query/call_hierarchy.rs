@@ -23,7 +23,7 @@ use crate::types::ruby_method::RubyMethod;
 use crate::types::ruby_namespace::RubyConstant;
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
 // ============================================================================
 // Data Structures
@@ -37,10 +37,10 @@ pub struct CallHierarchyData {
 }
 
 // ============================================================================
-// IndexQuery entry points
+// EngineQuery entry points
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find the method at the cursor position and return a CallHierarchyItem.
     pub fn prepare_call_hierarchy(
         &self,
@@ -78,7 +78,7 @@ impl IndexQuery {
                 let engine_ref = self.analysis_engine().expect(
                     "INVARIANT VIOLATED: call hierarchy prepare requires an analysis engine. \
                      This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-                     Fix: construct IndexQuery with with_engine().",
+                     Fix: construct EngineQuery with with_engine().",
                 );
                 let engine = engine_ref.lock();
                 if let Some(item) = build_call_hierarchy_item_from_analysis(&engine, &method_fqn) {
@@ -106,7 +106,7 @@ impl IndexQuery {
         let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: incoming call hierarchy requires an analysis engine. \
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine_ref.lock();
         Some(incoming_calls_from_analysis(&engine, &method_fqn))
@@ -122,7 +122,7 @@ impl IndexQuery {
         let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: outgoing call hierarchy requires an analysis engine. \
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_engine().",
+             Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine_ref.lock();
         Some(outgoing_calls_from_analysis(&engine, &method_fqn))

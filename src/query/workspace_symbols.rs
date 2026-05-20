@@ -8,13 +8,13 @@ use ruby_analysis_core::{SymbolFact, SymbolKind as AnalysisSymbolKind};
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
 // ============================================================================
-// IndexQuery entry points
+// EngineQuery entry points
 // ============================================================================
 
-impl IndexQuery {
+impl EngineQuery {
     pub fn has_analysis_symbols(&self) -> bool {
         let Some(engine) = self.analysis_engine() else {
             return false;
@@ -25,7 +25,7 @@ impl IndexQuery {
     /// Return a limited set of top-level symbols (for empty queries).
     pub fn get_top_level_symbols(&self) -> Vec<SymbolInformation> {
         self.top_level_symbols_from_analysis()
-            .expect("INVARIANT VIOLATED: workspace symbols query requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct IndexQuery with with_engine().")
+            .expect("INVARIANT VIOLATED: workspace symbols query requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct EngineQuery with with_engine().")
     }
 
     /// Search the index for symbols matching the given query string.
@@ -34,7 +34,7 @@ impl IndexQuery {
     /// Results are ranked by relevance and limited to 100.
     pub fn search_workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
         self.search_workspace_symbols_from_analysis(query)
-            .expect("INVARIANT VIOLATED: workspace symbol search requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct IndexQuery with with_engine().")
+            .expect("INVARIANT VIOLATED: workspace symbol search requires an analysis engine. This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. Fix: construct EngineQuery with with_engine().")
     }
 
     fn top_level_symbols_from_analysis(&self) -> Option<Vec<SymbolInformation>> {
@@ -354,7 +354,7 @@ impl SymbolMatcher {
 mod tests {
     use std::sync::Arc;
 
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::Mutex;
     use ruby_analysis_core::{
         FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolFact,
         SymbolKind as AnalysisSymbolKind, TextRange,
@@ -362,10 +362,7 @@ mod tests {
     use ruby_analysis_engine::AnalysisEngine;
 
     use super::*;
-    use crate::indexer::index::RubyIndex;
-    use crate::indexer::index_ref::Index;
-
-    fn query_with_analysis_symbols() -> IndexQuery {
+    fn query_with_analysis_symbols() -> EngineQuery {
         let source = "class User\n  def name\n  end\nend";
         let mut engine = AnalysisEngine::new();
         let file_id = engine.open_or_update_file("/tmp/user.rb", source);
@@ -392,10 +389,7 @@ mod tests {
             TextRange::new(file_id, 17, 21),
         ));
 
-        IndexQuery::with_engine(
-            Index::new(Arc::new(RwLock::new(RubyIndex::new()))),
-            Arc::new(Mutex::new(engine)),
-        )
+        EngineQuery::with_engine(Arc::new(Mutex::new(engine)))
     }
 
     #[test]

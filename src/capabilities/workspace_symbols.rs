@@ -1,8 +1,8 @@
 //! Workspace Symbols capability — thin adapter over the query layer.
 //!
-//! Delegates symbol search and top-level listing to `IndexQuery`.
+//! Delegates symbol search and top-level listing to `EngineQuery`.
 
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::info;
 use std::time::Instant;
@@ -22,10 +22,7 @@ pub async fn handle_workspace_symbols(
     info!("Workspace symbols request for query: '{}'", query_text);
 
     let start_time = Instant::now();
-    let engine_query = IndexQuery::with_engine(
-        lang_server.orphan_index.clone(),
-        lang_server.analysis_engine.clone(),
-    );
+    let engine_query = EngineQuery::with_engine(lang_server.analysis_engine.clone());
     let symbols = if query_text.is_empty() {
         engine_query.get_top_level_symbols()
     } else {

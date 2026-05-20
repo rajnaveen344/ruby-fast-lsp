@@ -9,15 +9,15 @@ use ruby_analysis_core::{DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosti
 use std::path::PathBuf;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Url};
 
-use super::{analysis_location::location_for_range, IndexQuery};
+use super::{analysis_location::location_for_range, EngineQuery};
 
-impl IndexQuery {
+impl EngineQuery {
     /// Get diagnostics for unresolved entries from the analysis engine.
     pub fn get_unresolved_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         let analysis_engine = self.analysis_engine.as_ref().expect(
             "INVARIANT VIOLATED: unresolved diagnostics requested without analysis engine. \
              This is a bug because diagnostics are owned by ruby-analysis-engine. \
-             Fix: construct IndexQuery with IndexQuery::with_engine or with_doc_and_engine.",
+             Fix: construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine.",
         );
         let engine = analysis_engine.lock();
         let path = uri

@@ -1,15 +1,23 @@
 use ruby_prism::{CallNode, Node};
+use tower_lsp::lsp_types::Location;
 
 use crate::{
     analyzer_prism::utils, inferrer::r#type::ruby::RubyType, types::ruby_document::RubyDocument,
-    types::unresolved_index::UnresolvedEntry,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BadSplatCandidate {
+    pub operator: String,
+    pub arg_repr: String,
+    pub expected: String,
+    pub location: Location,
+}
 
 /// Check *splat and **splat arguments at a callsite for type mismatches.
 ///
 /// *expr must be Array-like; **expr must be Hash-like.
 /// Conservative: silent on Union/Unknown/user-defined classes.
-pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<UnresolvedEntry> {
+pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<BadSplatCandidate> {
     let mut entries = Vec::new();
     let args = match node.arguments() {
         Some(a) => a,
@@ -22,12 +30,12 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<UnresolvedEntry> {
                 if is_definitely_non_array(&expr, document) {
                     let arg_repr = String::from_utf8_lossy(expr.location().as_slice()).to_string();
                     let loc = document.prism_location_to_lsp_location(&splat.location());
-                    entries.push(UnresolvedEntry::bad_splat(
-                        "*".to_string(),
+                    entries.push(BadSplatCandidate {
+                        operator: "*".to_string(),
                         arg_repr,
-                        "Array".to_string(),
-                        loc,
-                    ));
+                        expected: "Array".to_string(),
+                        location: loc,
+                    });
                 }
             }
         }
@@ -41,12 +49,12 @@ pub fn check(node: &CallNode, document: &RubyDocument) -> Vec<UnresolvedEntry> {
                                 String::from_utf8_lossy(expr.location().as_slice()).to_string();
                             let loc =
                                 document.prism_location_to_lsp_location(&assoc_splat.location());
-                            entries.push(UnresolvedEntry::bad_splat(
-                                "**".to_string(),
+                            entries.push(BadSplatCandidate {
+                                operator: "**".to_string(),
                                 arg_repr,
-                                "Hash".to_string(),
-                                loc,
-                            ));
+                                expected: "Hash".to_string(),
+                                location: loc,
+                            });
                         }
                     }
                 }

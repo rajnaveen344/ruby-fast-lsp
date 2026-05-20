@@ -9,5 +9,4 @@ The SDK intentionally exposes only pure transform helpers:
 CallContext -> IndexPatch[]
 ```
 
-No extension gets direct access to `RubyIndex`.
-
+No extension gets direct access to the analysis engine.

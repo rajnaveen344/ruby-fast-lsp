@@ -1,9 +1,8 @@
 //! Incremental mixin re-resolution: mixin graph edges wire up correctly
 //! regardless of the order in which files are opened / edited / closed.
 //!
-//! Mechanism: `RubyIndex::retry_unresolved_mixin_edges`, called after every
-//! `resolve_mixins_for_uri`. Refs that fail to resolve at index time are
-//! recorded as `UnresolvedMixinEdge`s and retried on each subsequent file update.
+//! Mechanism: unresolved analysis graph edges are retried on subsequent file
+//! updates.
 
 use crate::test::harness::FakeEditor;
 use tower_lsp::lsp_types::Location;

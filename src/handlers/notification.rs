@@ -56,8 +56,8 @@ pub async fn handle_initialize(
             .configure_from_config(&RubyFastLspConfig::default());
     }
 
-    // Register every workspace folder. Each folder gets its own RubyIndex
-    // and is indexed independently in handle_initialized. Multi-root VS Code
+    // Register every workspace folder. Each folder is indexed independently
+    // in handle_initialized. Multi-root VS Code
     // workspaces, Solargraph-style — folders do not bleed into one another.
     let folders: Vec<WorkspaceFolder> = workspace_folders.unwrap_or_default();
     if !folders.is_empty() {
@@ -183,9 +183,8 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
 
     info!("Using Ruby version: {}.{}", ruby_version.0, ruby_version.1);
 
-    // Spawn one coordinator per registered workspace. Each coordinator owns
-    // a per-workspace `Index<Unlocked>` (created in `add_workspace`) and runs
-    // independently. They share the server only for client notifications,
+    // Spawn one coordinator per registered workspace. Coordinators feed the
+    // shared analysis engine and only share the server for client notifications,
     // config, and document state.
     let workspaces = server.list_workspaces();
     if workspaces.is_empty() {
@@ -297,10 +296,8 @@ pub async fn handle_did_change_watched_files(
 }
 
 /// Add or remove workspace folders at runtime in response to
-/// `workspace/didChangeWorkspaceFolders`. Each added folder gets its own
-/// `RubyIndex` and a freshly spawned indexing coordinator. Removed folders
-/// have their index dropped (any outstanding `Index<Unlocked>` clones keep
-/// the underlying `Arc` alive until they go out of scope).
+/// `workspace/didChangeWorkspaceFolders`. Each added folder gets a freshly
+/// spawned indexing coordinator.
 pub async fn handle_did_change_workspace_folders(
     server: &RubyLanguageServer,
     params: DidChangeWorkspaceFoldersParams,

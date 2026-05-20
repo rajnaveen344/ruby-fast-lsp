@@ -4,6 +4,7 @@
 //! dependencies. It is the shared contract for future editor and agent
 //! consumers.
 
+pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
 pub mod fully_qualified_name;
 pub mod graph_store;
@@ -17,6 +18,9 @@ pub mod source_file;
 pub mod symbol_store;
 pub mod type_store;
 
+pub use diagnostic_candidate_store::{
+    DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
+};
 pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
@@ -24,7 +28,10 @@ pub use graph_store::{
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{MethodFact, MethodParamFact, MethodParamKind, MethodStore};
-pub use reference_store::{ReferenceFact, ReferenceStore};
+pub use reference_store::{
+    KeywordArgCandidate, MethodCallSignatureCandidate, ReferenceCandidate, ReferenceCandidateKind,
+    ReferenceCandidateStore, ReferenceFact, ReferenceStore,
+};
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;
 pub use ruby_type::RubyType;

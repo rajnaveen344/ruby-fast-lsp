@@ -42,7 +42,7 @@ end
 class DataService
   include Fetchable
 
-  def process<hint label=" -> ?">
+  def process<hint label=" -> Hash">
     data<hint label=": Hash"> = fetch_data
     data
   end
@@ -65,7 +65,7 @@ class BaseService
 end
 
 class UserService < BaseService
-  def get_users<hint label=" -> ?">
+  def get_users<hint label=" -> Array">
     users<hint label=": Array"> = fetch_all
     users
   end

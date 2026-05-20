@@ -14,9 +14,9 @@ use ruby_analysis_core::{GraphEdgeKind, NamespaceKind as AnalysisNamespaceKind};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::location_for_range;
-use super::IndexQuery;
+use super::EngineQuery;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Find implementations for the identifier at the given position.
     ///
     /// - Cursor on a method definition → find all overrides in descendants/includers
@@ -109,7 +109,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: method implementation query requires an analysis engine. \
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_doc_and_engine().",
+             Fix: construct EngineQuery with with_doc_and_engine().",
         );
         let engine = engine.lock();
         let namespaces_to_check = collect_all_implementors_from_analysis(&engine, owner_fqn);
@@ -145,7 +145,7 @@ impl IndexQuery {
         let engine = self.analysis_engine().expect(
             "INVARIANT VIOLATED: namespace implementation query requires an analysis engine. \
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
-             Fix: construct IndexQuery with with_doc_and_engine().",
+             Fix: construct EngineQuery with with_doc_and_engine().",
         );
         let engine = engine.lock();
         let implementors = collect_all_implementors_from_analysis(&engine, fqn);

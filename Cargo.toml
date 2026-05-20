@@ -27,10 +27,6 @@ name = "profile_indexer"
 path = "src/bin/profile_indexer.rs"
 
 [[bin]]
-name = "check_size"
-path = "src/bin/check_size.rs"
-
-[[bin]]
 name = "profiler"
 path = "src/bin/profiler/main.rs"
 

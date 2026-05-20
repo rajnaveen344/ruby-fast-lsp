@@ -3,7 +3,7 @@
 //! Extracts LSP parameters and delegates to the query layer.
 
 use crate::query::call_hierarchy::CallHierarchyData;
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use log::info;
 use tower_lsp::lsp_types::{
@@ -20,7 +20,7 @@ pub async fn handle_prepare_call_hierarchy(
     let position = params.text_document_position_params.position;
     let doc = server.get_doc(&uri)?;
     let content = doc.content.clone();
-    let query = IndexQuery::with_engine(server.index_for_uri(&uri), server.analysis_engine.clone());
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.prepare_call_hierarchy(&uri, position, content)
 }
 
@@ -29,17 +29,13 @@ pub async fn handle_incoming_calls(
     server: &RubyLanguageServer,
     params: CallHierarchyIncomingCallsParams,
 ) -> Option<Vec<CallHierarchyIncomingCall>> {
-    let item_uri = params.item.uri.clone();
     let data: CallHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Incoming calls request for: {}", data.fqn);
-    let query = IndexQuery::with_engine(
-        server.index_for_uri(&item_uri),
-        server.analysis_engine.clone(),
-    );
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.get_incoming_calls(&data)
 }
 
@@ -48,16 +44,12 @@ pub async fn handle_outgoing_calls(
     server: &RubyLanguageServer,
     params: CallHierarchyOutgoingCallsParams,
 ) -> Option<Vec<CallHierarchyOutgoingCall>> {
-    let item_uri = params.item.uri.clone();
     let data: CallHierarchyData = params
         .item
         .data
         .as_ref()
         .and_then(|d| serde_json::from_value(d.clone()).ok())?;
     info!("Outgoing calls request for: {}", data.fqn);
-    let query = IndexQuery::with_engine(
-        server.index_for_uri(&item_uri),
-        server.analysis_engine.clone(),
-    );
+    let query = EngineQuery::with_engine(server.analysis_engine.clone());
     query.get_outgoing_calls(&data)
 }

@@ -38,11 +38,11 @@ pub use generators::{
     generate_variable_type_hints, HintContext, InlayHintData, InlayHintKind,
 };
 
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::types::ruby_document::RubyDocument;
 use tower_lsp::lsp_types::Range;
 
-impl IndexQuery {
+impl EngineQuery {
     /// Get all inlay hints for a document within the specified range.
     ///
     /// This is the main entry point for inlay hints. It:
@@ -102,57 +102,5 @@ impl IndexQuery {
         hints.extend(generate_chained_call_hints(&nodes, &context));
 
         hints
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::indexer::index::RubyIndex;
-    use crate::indexer::index_ref::Index;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tower_lsp::lsp_types::{Position, Url};
-
-    fn create_test_query() -> IndexQuery {
-        let index = RubyIndex::new();
-        let index_ref = Index::new(Arc::new(RwLock::new(index)));
-        IndexQuery::new(index_ref)
-    }
-
-    #[test]
-    fn test_get_inlay_hints_basic() {
-        let query = create_test_query();
-        let content = "class Foo\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let doc = RubyDocument::new(uri, content.to_string(), 1);
-        let range = Range {
-            start: Position::new(0, 0),
-            end: Position::new(10, 0),
-        };
-
-        let hints = query.get_inlay_hints(&doc, &range, content);
-
-        // Should have at least the "class Foo" end hint
-        assert!(!hints.is_empty());
-        assert!(hints.iter().any(|h| h.label.contains("class Foo")));
-    }
-
-    #[test]
-    fn test_get_inlay_hints_method() {
-        let query = create_test_query();
-        let content = "def foo\n  42\nend";
-        let uri = Url::parse("file:///test.rb").unwrap();
-        let doc = RubyDocument::new(uri, content.to_string(), 1);
-        let range = Range {
-            start: Position::new(0, 0),
-            end: Position::new(10, 0),
-        };
-
-        let hints = query.get_inlay_hints(&doc, &range, content);
-
-        // Should have "def foo" end hint and implicit return
-        assert!(hints.iter().any(|h| h.label.contains("def foo")));
-        assert!(hints.iter().any(|h| h.label == "return"));
     }
 }

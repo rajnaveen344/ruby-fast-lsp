@@ -1,4 +1,4 @@
-//! Orphan-index fallback: files outside any workspace land in `orphan_index`.
+//! Orphan fallback: files outside any workspace still enter shared analysis.
 
 use crate::test::harness::FakeEditor;
 
@@ -18,15 +18,9 @@ async fn file_outside_any_workspace_falls_through_to_orphan() {
         "stray file must not match any registered workspace"
     );
 
-    // The orphan index should contain the file's definitions.
-    let orphan = &editor.server().orphan_index;
-    let has_loose_method = orphan
-        .lock()
-        .methods_by_name()
-        .any(|(m, _)| m.get_name() == "hello");
     assert!(
-        has_loose_method,
-        "orphan index should hold definitions for files outside any workspace"
+        method_fact_in_path(editor.server(), "hello", "stray/loose.rb"),
+        "orphan file should produce analysis method facts"
     );
 
     // The registered workspace must NOT see the orphan file.
@@ -36,14 +30,9 @@ async fn file_outside_any_workspace_falls_through_to_orphan() {
         .into_iter()
         .next()
         .unwrap();
-    let ws_has_loose = ws_a
-        .index
-        .lock()
-        .methods_by_name()
-        .any(|(m, _)| m.get_name() == "hello");
     assert!(
-        !ws_has_loose,
-        "registered workspace must not contain orphan file definitions"
+        !ws_a.root_uri.as_str().contains("stray"),
+        "registered workspace must not claim orphan path"
     );
 }
 
@@ -56,14 +45,28 @@ async fn no_registered_workspace_means_everything_is_orphan() {
         .open("anywhere.rb", "class Anywhere\n  def ping; end\nend\n")
         .await;
 
-    let orphan_has_ping = editor
-        .server()
-        .orphan_index
-        .lock()
-        .methods_by_name()
-        .any(|(m, _)| m.get_name() == "ping");
     assert!(
-        orphan_has_ping,
-        "with no workspaces registered, every file must land in the orphan index"
+        method_fact_in_path(editor.server(), "ping", "anywhere.rb"),
+        "with no workspaces registered, file should still produce analysis facts"
     );
+}
+
+fn method_fact_in_path(
+    server: &crate::server::RubyLanguageServer,
+    method_name: &str,
+    path_suffix: &str,
+) -> bool {
+    let engine = server.analysis_engine.lock();
+    engine.all_method_facts().into_iter().any(|fact| {
+        let ruby_analysis_core::FullyQualifiedName::Method(_, method) = fact.fqn else {
+            return false;
+        };
+        if method.as_str() != method_name {
+            return false;
+        }
+        engine
+            .file(fact.range.file_id)
+            .map(|file| file.path.to_string_lossy().ends_with(path_suffix))
+            .unwrap_or(false)
+    })
 }

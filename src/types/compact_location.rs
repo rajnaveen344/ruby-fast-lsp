@@ -5,7 +5,7 @@
 
 use tower_lsp::lsp_types::Range;
 
-use crate::indexer::index::FileId;
+use crate::indexer::ids::FileId;
 
 // ============================================================================
 // CompactLocation
@@ -17,7 +17,7 @@ use crate::indexer::index::FileId;
 /// We keep the standard LSP Range for compatibility with existing code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CompactLocation {
-    /// SlotMap key to look up the URL in RubyIndex.files
+    /// SlotMap key used by legacy compact entry locations.
     pub file_id: FileId,
     /// Standard LSP Range (start/end positions)
     pub range: Range,

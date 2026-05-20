@@ -1,6 +1,6 @@
 # Query Engine
 
-The `query` module provides a unified interface for querying the `RubyIndex`. It consolidates complex business logic, abstracting away the low-level index details.
+The `query` module provides a unified interface for querying the `AnalysisEngine`. It consolidates complex business logic, abstracting away the low-level index details.
 
 ```text
 server.rs (API) → query/ (Service) → indexer/ (Data)
@@ -8,7 +8,7 @@ server.rs (API) → query/ (Service) → indexer/ (Data)
 
 ## Public API
 
-The `IndexQuery` struct provides **4 unified position-based APIs**:
+The `AnalysisQuery` struct provides **4 unified position-based APIs**:
 
 | Feature         | Method                                                       | Returns         |
 | :-------------- | :----------------------------------------------------------- | :-------------- |
@@ -22,10 +22,10 @@ Each method handles all identifier types internally (constants, methods, local/i
 ## Usage
 
 ```rust
-use crate::query::IndexQuery;
+use crate::query::AnalysisQuery;
 
 // Create query with document context
-let query = IndexQuery::with_doc(&index, &document);
+let query = AnalysisQuery::with_doc(&index, &document);
 
 // Use the unified APIs
 let defs = query.find_definitions_at_position(&uri, pos, &content, Some(&narrowing));
@@ -45,7 +45,7 @@ The split between `src/capabilities/` and `src/query/` is intentional. Keep it t
 
 | Layer | Owns | Imports `tower_lsp::lsp_types`? |
 | :--- | :--- | :--- |
-| `capabilities/*.rs` | LSP handler: URI → doc lookup → build `IndexQuery` → format result as LSP types | **Yes** |
+| `capabilities/*.rs` | LSP handler: URI → doc lookup → build `AnalysisQuery` → format result as LSP types | **Yes** |
 | `query/*.rs` | Index-backed read logic returning domain types (`FullyQualifiedName`, `RubyType`) | **No** (except `Location`/`Position` re-used directly) |
 
 **Rules:**

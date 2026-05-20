@@ -23,12 +23,9 @@
 mod sample_project;
 
 use log::{info, LevelFilter};
+use ruby_analysis_core::TypeSubject;
 use ruby_fast_lsp::capabilities::indexing;
-use ruby_fast_lsp::inferrer::return_type::infer_return_type_for_node;
-use ruby_fast_lsp::inferrer::RubyType;
 use ruby_fast_lsp::server::RubyLanguageServer;
-use ruby_fast_lsp::utils::ast::find_def_node_at_line;
-use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -258,85 +255,33 @@ async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) {
 
 async fn run_type_inference_only(server: &RubyLanguageServer) {
     let start = Instant::now();
-
-    // Get all methods needing inference, grouped by file
-    let methods_by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> = {
-        let index = server.primary_index().lock_arc();
-        let methods = index.get_methods_needing_inference();
-        let total = methods.len();
-        info!("Found {} methods needing return type inference", total);
-
-        let mut by_file: HashMap<Url, Vec<(ruby_fast_lsp::indexer::index::EntryId, u32)>> =
-            HashMap::new();
-        for (entry_id, file_id, line) in methods {
-            if let Some(url) = index.get_file_url(file_id) {
-                by_file
-                    .entry(url.clone())
-                    .or_default()
-                    .push((entry_id, line));
-            }
-        }
-        by_file
-    };
-
-    let total_files = methods_by_file.len();
-    info!("Inferring types across {} files", total_files);
-
-    let mut inferred_count = 0;
-
-    // Process each file
-    for (current, (file_url, methods)) in methods_by_file.into_iter().enumerate() {
-        if current % 50 == 0 {
-            info!("Progress: {}/{} files", current, total_files);
-        }
-
-        // Load file content
-        let file_content = match file_url.to_file_path() {
-            Ok(path) => match std::fs::read(&path) {
-                Ok(content) => content,
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-
-        // Parse file once
-        let parse_result = ruby_prism::parse(&file_content);
-        let node = parse_result.node();
-        let file_content_str = std::str::from_utf8(&file_content).unwrap();
-
-        // Infer each method in this file
-        for (entry_id, line) in methods {
-            if let Some(def_node) = find_def_node_at_line(&node, line, file_content_str) {
-                let mut index = server.index_for_uri(&file_url).lock_arc();
-                if let Some(inferred_ty) =
-                    infer_return_type_for_node(&mut index, &file_content, &def_node, None, None)
-                {
-                    if inferred_ty != RubyType::Unknown {
-                        index.update_method_return_type(entry_id, inferred_ty);
-                        inferred_count += 1;
-                    }
-                }
-            }
-        }
-    }
-
+    let inferred_count = server
+        .analysis_engine
+        .lock()
+        .type_store()
+        .all_facts()
+        .into_iter()
+        .filter(|fact| matches!(fact.subject, TypeSubject::MethodReturn(_)))
+        .count();
     info!("Type inference completed in {:?}", start.elapsed());
     info!(
-        "Successfully inferred {} method return types",
+        "Analysis engine has {} method return type facts",
         inferred_count
     );
 }
 
 fn print_stats(server: &RubyLanguageServer) {
-    let index = server.primary_index().lock_arc();
+    let engine = server.analysis_engine.lock();
 
-    info!("=== INDEX STATS ===");
-    info!("Total entries: {}", index.entries_len());
-    info!("Total definitions: {}", index.definitions_len());
-    info!("Total files: {}", index.files_count());
-
-    let counts = index.count_entries_by_type();
-    for (type_name, count) in counts {
-        info!("  {}: {}", type_name, count);
-    }
+    info!("=== ANALYSIS STATS ===");
+    info!("Total symbols: {}", engine.all_symbol_facts().len());
+    info!("Total methods: {}", engine.all_method_facts().len());
+    info!(
+        "Total references: {}",
+        engine.reference_store().all_facts().len()
+    );
+    info!(
+        "Total type facts: {}",
+        engine.type_store().all_facts().len()
+    );
 }

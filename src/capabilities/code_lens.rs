@@ -6,7 +6,7 @@
 use log::debug;
 use tower_lsp::lsp_types::*;
 
-use crate::query::{CodeLensData, IndexQuery};
+use crate::query::{CodeLensData, EngineQuery};
 use crate::server::RubyLanguageServer;
 
 /// Handle CodeLens request for a document.
@@ -37,12 +37,8 @@ pub async fn handle_code_lens(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // 3. Create query with document context. Route by URI for multi-workspace.
-    let query = IndexQuery::with_doc_and_engine(
-        lang_server.index_for_uri(uri),
-        doc_arc,
-        lang_server.analysis_engine.clone(),
-    );
+    // 3. Create query with document context.
+    let query = EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine.clone());
 
     // 4. Delegate to query layer.
     let lens_data = query.get_code_lenses(uri, &content);

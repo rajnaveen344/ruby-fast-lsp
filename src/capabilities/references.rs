@@ -4,7 +4,7 @@
 
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use crate::query::IndexQuery;
+use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 
 /// Find all references to a symbol at the given position.
@@ -21,13 +21,8 @@ pub async fn find_references_at_position(
         (doc.content.clone(), doc_arc.clone())
     };
 
-    // Create unified query with document context. Route by URI so references
-    // are scoped to the file's workspace, not all workspaces.
-    let query = IndexQuery::with_doc_and_engine(
-        server.index_for_uri(uri),
-        doc_arc,
-        server.analysis_engine.clone(),
-    );
+    // Create unified query with document context.
+    let query = EngineQuery::with_doc_and_engine(doc_arc, server.analysis_engine.clone());
 
     query.find_references_at_position(uri, position, &content)
 }
