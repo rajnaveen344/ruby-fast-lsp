@@ -22,7 +22,6 @@ use crate::utils::deduplicate_locations;
 use log::trace;
 pub use ruby_analysis_core::MethodCalleeResolution;
 use ruby_analysis_core::NamespaceKind;
-use ruby_analysis_core::TypeSubject;
 use tower_lsp::lsp_types::{Location, Position};
 
 use super::EngineQuery;
@@ -266,28 +265,11 @@ impl EngineQuery {
         drop(doc);
 
         let engine = self.analysis_engine()?.lock();
-        engine
-            .type_store()
-            .facts_in_file(file_id)
-            .into_iter()
-            .filter(|fact| fact.range.start_byte <= byte_offset)
-            .filter_map(|fact| match &fact.subject {
-                TypeSubject::Local { name, .. } if name == var_name => Some(fact),
-                TypeSubject::InstanceVariable { name, .. } if name == var_name => Some(fact),
-                TypeSubject::ClassVariable { name, .. } if name == var_name => Some(fact),
-                TypeSubject::GlobalVariable(name) if name == var_name => Some(fact),
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_) => None,
-            })
-            .filter(|fact| fact.ruby_type != RubyType::Unknown)
-            .max_by_key(|fact| fact.range.start_byte)
-            .map(|fact| fact.ruby_type)
+        ruby_analysis_engine::AnalysisQuery::new(&engine).variable_type_any_before(
+            var_name,
+            file_id,
+            byte_offset,
+        )
     }
 
     fn method_call_receiver_type_from_analysis(

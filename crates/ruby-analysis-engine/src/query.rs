@@ -832,6 +832,46 @@ impl<'a> AnalysisQuery<'a> {
             .map(|fact| fact.ruby_type)
     }
 
+    pub fn variable_type_any_before(
+        &self,
+        name: &str,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.engine
+            .type_store()
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.range.start_byte <= byte_offset)
+            .filter_map(|fact| match &fact.subject {
+                TypeSubject::Local {
+                    scope_id: _,
+                    name: fact_name,
+                }
+                | TypeSubject::InstanceVariable {
+                    name: fact_name, ..
+                }
+                | TypeSubject::ClassVariable {
+                    name: fact_name, ..
+                } if fact_name == name && fact.ruby_type != RubyType::Unknown => Some(fact),
+                TypeSubject::GlobalVariable(fact_name)
+                    if fact_name == name && fact.ruby_type != RubyType::Unknown =>
+                {
+                    Some(fact)
+                }
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.ruby_type)
+    }
+
     pub fn variable_type_in_file(
         &self,
         kind: VariableTypeKind,

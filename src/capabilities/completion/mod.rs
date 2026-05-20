@@ -780,7 +780,7 @@ fn lookup_variable_type_from_engine(
     name: &str,
     receiver: &MethodReceiver,
 ) -> Option<crate::inferrer::r#type::ruby::RubyType> {
-    use ruby_analysis_core::TypeSubject;
+    use ruby_analysis_engine::VariableTypeKind;
 
     let file_id = {
         let docs = server.docs.lock();
@@ -788,42 +788,21 @@ fn lookup_variable_type_from_engine(
         file_id
     };
 
+    let kind = match receiver {
+        MethodReceiver::InstanceVariable(_) => VariableTypeKind::Instance,
+        MethodReceiver::ClassVariable(_) => VariableTypeKind::Class,
+        MethodReceiver::GlobalVariable(_) => VariableTypeKind::Global,
+        MethodReceiver::None
+        | MethodReceiver::SelfReceiver
+        | MethodReceiver::Constant(_)
+        | MethodReceiver::LocalVariable(_)
+        | MethodReceiver::MethodCall { .. }
+        | MethodReceiver::Literal(_)
+        | MethodReceiver::Expression => return None,
+    };
+
     let engine = server.analysis_engine.lock();
-    engine
-        .type_store()
-        .facts_in_file(file_id)
-        .into_iter()
-        .rev()
-        .find_map(|fact| match (&fact.subject, receiver) {
-            (
-                TypeSubject::InstanceVariable {
-                    name: fact_name, ..
-                },
-                MethodReceiver::InstanceVariable(_),
-            ) if fact_name == name => Some(fact.ruby_type),
-            (
-                TypeSubject::ClassVariable {
-                    name: fact_name, ..
-                },
-                MethodReceiver::ClassVariable(_),
-            ) if fact_name == name => Some(fact.ruby_type),
-            (TypeSubject::GlobalVariable(fact_name), MethodReceiver::GlobalVariable(_))
-                if fact_name == name =>
-            {
-                Some(fact.ruby_type)
-            }
-            (
-                TypeSubject::Constant(_)
-                | TypeSubject::Local { .. }
-                | TypeSubject::InstanceVariable { .. }
-                | TypeSubject::ClassVariable { .. }
-                | TypeSubject::GlobalVariable(_)
-                | TypeSubject::MethodReturn(_)
-                | TypeSubject::Parameter { .. }
-                | TypeSubject::Expression(_),
-                _,
-            ) => None,
-        })
+    ruby_analysis_engine::AnalysisQuery::new(&engine).variable_type_in_file(kind, name, file_id)
 }
 
 fn infer_type_from_constructor_assignment(
