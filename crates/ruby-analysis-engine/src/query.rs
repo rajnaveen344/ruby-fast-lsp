@@ -22,6 +22,24 @@ pub struct WorkspaceSymbolMatch {
     pub relevance: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallHierarchyMethod {
+    pub fqn: FullyQualifiedName,
+    pub range: TextRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingCall {
+    pub from: CallHierarchyMethod,
+    pub from_ranges: Vec<TextRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutgoingCall {
+    pub to: CallHierarchyMethod,
+    pub from_ranges: Vec<TextRange>,
+}
+
 impl<'a> AnalysisQuery<'a> {
     pub fn new(engine: &'a AnalysisEngine) -> Self {
         Self { engine }
@@ -217,6 +235,63 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         Some(callees)
+    }
+
+    pub fn parse_method_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {
+        parse_method_fqn_string(fqn)
+    }
+
+    pub fn call_hierarchy_method(
+        &self,
+        method_fqn: &FullyQualifiedName,
+    ) -> Option<CallHierarchyMethod> {
+        let fact = self.engine.method_facts_for(method_fqn).first()?;
+        Some(CallHierarchyMethod {
+            fqn: method_fqn.clone(),
+            range: fact.range,
+        })
+    }
+
+    pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
+        let mut grouped: Vec<(FullyQualifiedName, Vec<TextRange>)> = Vec::new();
+        for fact in self.engine.reference_facts_for(method_fqn) {
+            let Some(caller) = &fact.caller else {
+                continue;
+            };
+            push_grouped_text_range(&mut grouped, caller.clone(), fact.range);
+        }
+
+        grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
+        grouped
+            .into_iter()
+            .filter_map(|(caller_fqn, from_ranges)| {
+                Some(IncomingCall {
+                    from: self.call_hierarchy_method(&caller_fqn)?,
+                    from_ranges,
+                })
+            })
+            .collect()
+    }
+
+    pub fn outgoing_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<OutgoingCall> {
+        let mut grouped: Vec<(FullyQualifiedName, Vec<TextRange>)> = Vec::new();
+        for fact in self.engine.reference_store().all_facts() {
+            if fact.caller.as_ref() != Some(method_fqn) {
+                continue;
+            }
+            push_grouped_text_range(&mut grouped, fact.target, fact.range);
+        }
+
+        grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
+        grouped
+            .into_iter()
+            .filter_map(|(callee_fqn, from_ranges)| {
+                Some(OutgoingCall {
+                    to: self.call_hierarchy_method(&callee_fqn)?,
+                    from_ranges,
+                })
+            })
+            .collect()
     }
 
     pub fn method_reference_targets(
@@ -477,6 +552,33 @@ fn container_name(fqn: &FullyQualifiedName) -> Option<String> {
         | FullyQualifiedName::ClassVariable(_)
         | FullyQualifiedName::GlobalVariable(_) => None,
     }
+}
+
+fn parse_method_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
+    let (namespace_str, method_str) = fqn_str.rsplit_once('#')?;
+    let method = RubyMethod::new(method_str).ok()?;
+    let namespace = if namespace_str.is_empty() {
+        Vec::new()
+    } else {
+        namespace_str
+            .split("::")
+            .map(RubyConstant::new)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?
+    };
+    Some(FullyQualifiedName::method(namespace, method))
+}
+
+fn push_grouped_text_range(
+    grouped: &mut Vec<(FullyQualifiedName, Vec<TextRange>)>,
+    fqn: FullyQualifiedName,
+    range: TextRange,
+) {
+    if let Some((_, ranges)) = grouped.iter_mut().find(|(existing, _)| *existing == fqn) {
+        ranges.push(range);
+        return;
+    }
+    grouped.push((fqn, vec![range]));
 }
 
 struct SymbolMatcher;
@@ -999,5 +1101,22 @@ mod tests {
         let early = matcher.fuzzy_match("abcxyz", "abc").unwrap();
         let late = matcher.fuzzy_match("xyzabc", "abc").unwrap();
         assert!(early > late);
+    }
+
+    #[test]
+    fn parse_method_fqn_strings() {
+        let (engine, _) = query_with_symbols();
+        let query = AnalysisQuery::new(&engine);
+
+        assert_eq!(
+            query.parse_method_fqn("Foo#bar").unwrap().to_string(),
+            "Foo#bar"
+        );
+        assert_eq!(
+            query.parse_method_fqn("Foo::Bar#baz").unwrap().to_string(),
+            "Foo::Bar#baz"
+        );
+        assert_eq!(query.parse_method_fqn("#foo").unwrap().to_string(), "#foo");
+        assert!(query.parse_method_fqn("Foo::bar").is_none());
     }
 }

@@ -10,17 +10,15 @@
 //! calls simple grouping operations on existing analysis data.
 
 use log::info;
-use ruby_analysis_engine::AnalysisEngine;
+use ruby_analysis_engine::{AnalysisQuery, CallHierarchyMethod};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{
-    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range,
-    SymbolKind, SymbolTag, Url,
+    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, SymbolKind,
+    SymbolTag, Url,
 };
 
 use crate::analyzer_prism::{Identifier, RubyPrismAnalyzer};
 use crate::types::fully_qualified_name::FullyQualifiedName;
-use crate::types::ruby_method::RubyMethod;
-use crate::types::ruby_namespace::RubyConstant;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;
@@ -81,7 +79,11 @@ impl EngineQuery {
                      Fix: construct EngineQuery with with_engine().",
                 );
                 let engine = engine_ref.lock();
-                if let Some(item) = build_call_hierarchy_item_from_analysis(&engine, &method_fqn) {
+                let query = AnalysisQuery::new(&engine);
+                if let Some(item) = query
+                    .call_hierarchy_method(&method_fqn)
+                    .and_then(|method| call_hierarchy_item_from_engine_method(&engine, method))
+                {
                     return Some(vec![item]);
                 }
                 None
@@ -101,15 +103,30 @@ impl EngineQuery {
         &self,
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
-        let method_fqn = parse_method_fqn_string(&data.fqn)?;
-
         let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: incoming call hierarchy requires an analysis engine. \
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine_ref.lock();
-        Some(incoming_calls_from_analysis(&engine, &method_fqn))
+        let query = AnalysisQuery::new(&engine);
+        let method_fqn = query.parse_method_fqn(&data.fqn)?;
+        Some(
+            query
+                .incoming_calls(&method_fqn)
+                .into_iter()
+                .filter_map(|call| {
+                    Some(CallHierarchyIncomingCall {
+                        from: call_hierarchy_item_from_engine_method(&engine, call.from)?,
+                        from_ranges: call
+                            .from_ranges
+                            .into_iter()
+                            .filter_map(|range| location_for_range(&engine, range).map(|l| l.range))
+                            .collect(),
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// Get all methods called by the given method.
@@ -117,15 +134,30 @@ impl EngineQuery {
         &self,
         data: &CallHierarchyData,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
-        let method_fqn = parse_method_fqn_string(&data.fqn)?;
-
         let engine_ref = self.analysis_engine().expect(
             "INVARIANT VIOLATED: outgoing call hierarchy requires an analysis engine. \
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
         let engine = engine_ref.lock();
-        Some(outgoing_calls_from_analysis(&engine, &method_fqn))
+        let query = AnalysisQuery::new(&engine);
+        let method_fqn = query.parse_method_fqn(&data.fqn)?;
+        Some(
+            query
+                .outgoing_calls(&method_fqn)
+                .into_iter()
+                .filter_map(|call| {
+                    Some(CallHierarchyOutgoingCall {
+                        to: call_hierarchy_item_from_engine_method(&engine, call.to)?,
+                        from_ranges: call
+                            .from_ranges
+                            .into_iter()
+                            .filter_map(|range| location_for_range(&engine, range).map(|l| l.range))
+                            .collect(),
+                    })
+                })
+                .collect(),
+        )
     }
 }
 
@@ -133,154 +165,24 @@ impl EngineQuery {
 // Helpers
 // ============================================================================
 
-fn build_call_hierarchy_item_from_analysis(
-    engine: &AnalysisEngine,
-    method_fqn: &FullyQualifiedName,
+fn call_hierarchy_item_from_engine_method(
+    engine: &ruby_analysis_engine::AnalysisEngine,
+    method: CallHierarchyMethod,
 ) -> Option<CallHierarchyItem> {
-    let fact = engine.method_facts_for(method_fqn).first()?;
-    let location = location_for_range(engine, fact.range)?;
-    Some(call_hierarchy_item(
-        method_fqn,
-        location.uri,
-        location.range,
-    )?)
-}
-
-fn call_hierarchy_item(
-    method_fqn: &FullyQualifiedName,
-    uri: Url,
-    range: Range,
-) -> Option<CallHierarchyItem> {
+    let location = location_for_range(engine, method.range)?;
     Some(CallHierarchyItem {
-        name: method_fqn.name(),
+        name: method.fqn.name(),
         kind: SymbolKind::METHOD,
         tags: Some(Vec::<SymbolTag>::new()),
-        detail: Some(method_fqn.to_string()),
-        uri,
-        range,
-        selection_range: range,
+        detail: Some(method.fqn.to_string()),
+        uri: location.uri,
+        range: location.range,
+        selection_range: location.range,
         data: Some(
             serde_json::to_value(CallHierarchyData {
-                fqn: method_fqn.to_string(),
+                fqn: method.fqn.to_string(),
             })
             .ok()?,
         ),
     })
-}
-
-fn incoming_calls_from_analysis(
-    engine: &AnalysisEngine,
-    method_fqn: &FullyQualifiedName,
-) -> Vec<CallHierarchyIncomingCall> {
-    let mut grouped: Vec<(FullyQualifiedName, Vec<Range>)> = Vec::new();
-    for fact in engine.reference_facts_for(method_fqn) {
-        let Some(caller) = &fact.caller else {
-            continue;
-        };
-        let Some(location) = location_for_range(engine, fact.range) else {
-            continue;
-        };
-        push_grouped_range(&mut grouped, caller.clone(), location.range);
-    }
-
-    grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
-    grouped
-        .into_iter()
-        .filter_map(|(caller_fqn, from_ranges)| {
-            Some(CallHierarchyIncomingCall {
-                from: build_call_hierarchy_item_from_analysis(engine, &caller_fqn)?,
-                from_ranges,
-            })
-        })
-        .collect()
-}
-
-fn outgoing_calls_from_analysis(
-    engine: &AnalysisEngine,
-    method_fqn: &FullyQualifiedName,
-) -> Vec<CallHierarchyOutgoingCall> {
-    let mut grouped: Vec<(FullyQualifiedName, Vec<Range>)> = Vec::new();
-    for fact in engine.reference_store().all_facts() {
-        if fact.caller.as_ref() != Some(method_fqn) {
-            continue;
-        }
-        let Some(location) = location_for_range(engine, fact.range) else {
-            continue;
-        };
-        push_grouped_range(&mut grouped, fact.target, location.range);
-    }
-
-    grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
-    grouped
-        .into_iter()
-        .filter_map(|(callee_fqn, from_ranges)| {
-            Some(CallHierarchyOutgoingCall {
-                to: build_call_hierarchy_item_from_analysis(engine, &callee_fqn)?,
-                from_ranges,
-            })
-        })
-        .collect()
-}
-
-fn push_grouped_range(
-    grouped: &mut Vec<(FullyQualifiedName, Vec<Range>)>,
-    fqn: FullyQualifiedName,
-    range: Range,
-) {
-    if let Some((_, ranges)) = grouped.iter_mut().find(|(existing, _)| *existing == fqn) {
-        ranges.push(range);
-        return;
-    }
-    grouped.push((fqn, vec![range]));
-}
-
-/// Parse a method FQN string like "Foo::Bar#method_name" back into a FullyQualifiedName.
-///
-/// Method FQNs are formatted as `Namespace::Path#method_name` by the Display impl.
-/// This reverses that format.
-fn parse_method_fqn_string(fqn_str: &str) -> Option<FullyQualifiedName> {
-    // Split on '#' — left side is namespace, right side is method name
-    let (namespace_str, method_str) = fqn_str.rsplit_once('#')?;
-
-    let method = RubyMethod::new(method_str).ok()?;
-
-    let namespace: Vec<RubyConstant> = if namespace_str.is_empty() {
-        Vec::new()
-    } else {
-        namespace_str
-            .split("::")
-            .map(|p| RubyConstant::new(p))
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?
-    };
-
-    Some(FullyQualifiedName::method(namespace, method))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_simple_method_fqn() {
-        let fqn = parse_method_fqn_string("Foo#bar").unwrap();
-        assert_eq!(fqn.to_string(), "Foo#bar");
-    }
-
-    #[test]
-    fn parse_namespaced_method_fqn() {
-        let fqn = parse_method_fqn_string("Foo::Bar#baz").unwrap();
-        assert_eq!(fqn.to_string(), "Foo::Bar#baz");
-    }
-
-    #[test]
-    fn parse_top_level_method_fqn() {
-        let fqn = parse_method_fqn_string("#foo").unwrap();
-        assert_eq!(fqn.to_string(), "#foo");
-    }
-
-    #[test]
-    fn parse_invalid_no_hash() {
-        assert!(parse_method_fqn_string("Foo::bar").is_none());
-    }
 }
