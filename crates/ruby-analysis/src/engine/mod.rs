@@ -12,6 +12,7 @@ mod hierarchy;
 mod namespace_tree;
 mod query;
 mod query_types;
+mod types;
 mod workspace_symbols;
 
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
