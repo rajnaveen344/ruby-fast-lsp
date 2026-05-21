@@ -99,6 +99,41 @@ Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusabl
 analysis crates. Editors are not the only consumers; agents and CLIs should be
 able to ask graph/type questions without speaking LSP.
 
+### Mandatory Layer Boundaries
+
+When moving code, classify it by what it owns:
+
+| Layer | Owns | Must Not Own |
+| ----- | ---- | ------------ |
+| `ruby-analysis::core` | Immutable contracts: FQNs, Ruby names, ranges, source IDs, facts, stores, Ruby types | AST traversal, query policy, LSP/editor protocol |
+| `ruby-analysis::engine` | Long-lived workspace semantic state, fact ingestion, cross-file graph/reference/diagnostic resolution, deterministic semantic queries | `tower_lsp` types, editor triggers, snippets, protocol response shaping |
+| `ruby-analysis::indexer` | Ruby source parsing and AST traversal that emits facts/candidates | Global semantic truth, LSP protocol, workspace lifecycle |
+| `ruby-analysis::inference` | Type derivation rules, flow/local type tracking, RBS lookup/substitution | LSP protocol, editor UX, persistent workspace ownership |
+| `ruby-fast-lsp src/*` | Server lifecycle, document cache, LSP handlers/capabilities, editor-specific behavior, protocol conversion | Semantic truth, reusable type/graph algorithms |
+| `extensions/*` | External DSL/library knowledge that emits facts/patches | Global source of truth; engine owns final graph/index state |
+
+Decision rule:
+
+- If an API consumes/returns `tower_lsp::lsp_types::*`, `Url`, editor commands,
+  snippets, trigger chars, or publish diagnostics, keep it in `ruby-fast-lsp`.
+- If an API consumes/returns `TextRange`, FQNs, facts, graph relations, or
+  `RubyType`, it belongs in `ruby-analysis`.
+- Do not rename just because a term appears in LSP. Rename only when the name
+  encodes an editor/client-specific projection. Examples:
+  - Bad in engine: `CompletionCandidate` (completion is editor projection)
+  - Good in engine: `MethodMatch`, `ConstantMatch`
+  - Fine in engine: `CallHierarchy`, `TypeHierarchy` (domain/tooling concepts)
+
+Current clobber to reduce:
+
+- `src/query/*` mixes semantic lookup with LSP conversion. Move semantic parts
+  into `ruby-analysis`; leave protocol mapping in `src/query/*`.
+- `crates/ruby-analysis/src/engine/query_types.rs` must stay split by ownership
+  (`lookup`, `hierarchy`, `namespace_tree`, `debug`, workspace symbol search).
+- `src/capabilities/completion/mod.rs` mixes trigger routing, type probing, and
+  LSP item building. Keep `CompletionItem`/snippets/triggers there, but move
+  reusable semantic candidate discovery to `ruby-analysis`.
+
 ### Analysis Module Responsibilities
 
 ```text

@@ -4,10 +4,10 @@ use std::hash::{Hash, Hasher};
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, TextRange,
 };
-use crate::engine::query::AnalysisQuery;
-use crate::engine::query_types::{
+use crate::engine::namespace_tree_types::{
     IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
+use crate::engine::query::AnalysisQuery;
 use crate::AnalysisEngine;
 
 struct NamespaceTreeResult {

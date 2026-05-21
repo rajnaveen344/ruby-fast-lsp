@@ -4,10 +4,10 @@ use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, RubyConstant, RubyMethod,
     SourceFileId, TextRange,
 };
-use crate::engine::query::AnalysisQuery;
-use crate::engine::query_types::{
+use crate::engine::hierarchy_types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
 };
+use crate::engine::query::AnalysisQuery;
 
 impl<'a> AnalysisQuery<'a> {
     pub fn parse_method_fqn(&self, fqn: &str) -> Option<FullyQualifiedName> {

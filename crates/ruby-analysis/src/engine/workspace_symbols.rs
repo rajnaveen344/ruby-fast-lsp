@@ -1,6 +1,6 @@
 use crate::core::{FullyQualifiedName, SymbolFact, SymbolKind};
 use crate::engine::query::AnalysisQuery;
-use crate::engine::query_types::WorkspaceSymbolMatch;
+use crate::engine::workspace_symbol_types::WorkspaceSymbolMatch;
 
 impl<'a> AnalysisQuery<'a> {
     pub fn top_level_symbols(&self, limit: usize) -> Vec<WorkspaceSymbolMatch> {

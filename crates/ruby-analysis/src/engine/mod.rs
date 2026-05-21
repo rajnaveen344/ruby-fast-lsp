@@ -6,27 +6,38 @@
 //! results back out.
 
 mod debug;
+mod debug_types;
 mod diagnostic_helpers;
 mod diagnostics;
 mod engine;
 mod file_id_map;
 mod hierarchy;
+mod hierarchy_types;
 mod lookup;
+mod lookup_types;
 mod namespace_tree;
+mod namespace_tree_types;
 mod query;
-mod query_types;
 mod resolution;
 mod types;
+mod workspace_symbol_types;
 mod workspace_symbols;
 
+pub use debug_types::{
+    AncestorEntry, AncestorsResponse, ExportGraphResponse, FileMethodCount, GraphNodeSnapshot,
+    InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
+    StatsResponse,
+};
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
-pub use query::AnalysisQuery;
-pub use query_types::{
-    AncestorEntry, AncestorsResponse, CallHierarchyMethod, ConstantLookupRequest, ConstantMatch,
-    ExportGraphResponse, FileMethodCount, GraphNodeSnapshot, IncluderInfo, IncomingCall,
-    InferenceStatsResponse, LocationInfo, LookupEntry, LookupResponse, MethodEntry, MethodMatch,
-    MethodsResponse, MixinInfo, MixinUsage, MixinUsageKind, NamespaceNode, NamespaceTreeResponse,
-    OutgoingCall, StatsResponse, TypeHierarchyEntry, TypeHierarchyRelation, VariableTypeKind,
-    ViaModuleInfo, WorkspaceSymbolMatch,
+pub use hierarchy_types::{
+    CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
 };
+pub use lookup_types::{
+    ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind, VariableTypeKind,
+};
+pub use namespace_tree_types::{
+    IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
+};
+pub use query::AnalysisQuery;
+pub use workspace_symbol_types::WorkspaceSymbolMatch;
