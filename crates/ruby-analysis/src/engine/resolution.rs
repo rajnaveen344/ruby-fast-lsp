@@ -104,6 +104,72 @@ impl<'a> AnalysisQuery<'a> {
         resolve_constant_fqn(self.engine, parts, false, &context_fqn)
     }
 
+    pub fn constant_definition_ranges(
+        &self,
+        parts: &[RubyConstant],
+        context: &[RubyConstant],
+    ) -> Vec<TextRange> {
+        let fqn = self
+            .resolve_constant_in_context(parts, context)
+            .unwrap_or_else(|| FullyQualifiedName::constant(parts.to_vec()));
+        self.symbol_definition_ranges(
+            &fqn,
+            &[SymbolKind::Class, SymbolKind::Module, SymbolKind::Constant],
+        )
+    }
+
+    pub fn yard_type_definition_ranges(
+        &self,
+        type_name: &str,
+        context: &[RubyConstant],
+    ) -> Vec<TextRange> {
+        let builtins = ["nil", "true", "false", "void", "Boolean", "bool"];
+        if builtins
+            .iter()
+            .any(|builtin| builtin.eq_ignore_ascii_case(type_name))
+        {
+            return Vec::new();
+        }
+
+        let is_root_constant = type_name.starts_with("::");
+        let type_to_parse = if is_root_constant {
+            &type_name[2..]
+        } else {
+            type_name
+        };
+
+        let mut parts = Vec::new();
+        for part in type_to_parse.split("::") {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(constant) = RubyConstant::try_from(trimmed) else {
+                return Vec::new();
+            };
+            parts.push(constant);
+        }
+
+        if parts.is_empty() {
+            return Vec::new();
+        }
+
+        let context = if is_root_constant { &[][..] } else { context };
+        self.constant_definition_ranges(&parts, context)
+    }
+
+    pub fn variable_definition_ranges(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
+        self.symbol_definition_ranges(
+            fqn,
+            &[
+                SymbolKind::LocalVariable,
+                SymbolKind::InstanceVariable,
+                SymbolKind::ClassVariable,
+                SymbolKind::GlobalVariable,
+            ],
+        )
+    }
+
     pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
         self.engine
             .reference_facts_for(fqn)

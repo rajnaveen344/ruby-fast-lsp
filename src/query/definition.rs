@@ -6,7 +6,6 @@ use log::info;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
-use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
@@ -104,19 +103,7 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let fqn = self.resolve_constant_fqn(constant_path, ancestors);
         info!("Resolved constant FQN: {}", fqn);
-
-        if let Some(locations) = self.symbol_locations_from_analysis(
-            &fqn,
-            &[
-                AnalysisSymbolKind::Class,
-                AnalysisSymbolKind::Module,
-                AnalysisSymbolKind::Constant,
-            ],
-        ) {
-            return Some(locations);
-        }
-
-        None
+        self.constant_definition_locations_from_analysis(constant_path, ancestors)
     }
 }
 
@@ -167,54 +154,14 @@ impl EngineQuery {
         type_name: &str,
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
-        // Handle built-in types
-        let builtins = ["nil", "true", "false", "void", "Boolean", "bool"];
-        if builtins.iter().any(|b| b.eq_ignore_ascii_case(type_name)) {
-            return None;
-        }
-
-        // Check if it's a root constant (starts with ::)
-        let is_root_constant = type_name.starts_with("::");
-        let type_to_parse = if is_root_constant {
-            &type_name[2..] // Strip leading ::
-        } else {
-            type_name
-        };
-
-        // Parse path into constant parts
-        let parts: Vec<&str> = type_to_parse.split("::").collect();
-        let mut constant_path = Vec::new();
-        for part in parts {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if let Ok(constant) = RubyConstant::try_from(trimmed) {
-                constant_path.push(constant);
-            } else {
-                return None;
-            }
-        }
-
-        if constant_path.is_empty() {
-            return None;
-        }
-
-        // Use namespace resolution (same as code constant resolution)
-        // For root constants (::Foo), use empty ancestors
-        let effective_ancestors = if is_root_constant { &[][..] } else { ancestors };
-
-        // Reuse the same resolution logic as code constants
-        self.find_constant_definitions_by_path(&constant_path, effective_ancestors)
+        self.yard_type_definition_locations_from_analysis(type_name, ancestors)
     }
 
     /// Find instance variable definitions.
     fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Instance variables are stored with just their name (e.g., "@foo")
         if let Ok(fqn) = FullyQualifiedName::instance_variable(name.to_string()) {
-            if let Some(locations) =
-                self.symbol_locations_from_analysis(&fqn, &[AnalysisSymbolKind::InstanceVariable])
-            {
+            if let Some(locations) = self.variable_definition_locations_from_analysis(&fqn) {
                 return Some(locations);
             }
         }
@@ -225,9 +172,7 @@ impl EngineQuery {
     fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
         // Class variables are stored with just their name (e.g., "@@foo")
         if let Ok(fqn) = FullyQualifiedName::class_variable(name.to_string()) {
-            if let Some(locations) =
-                self.symbol_locations_from_analysis(&fqn, &[AnalysisSymbolKind::ClassVariable])
-            {
+            if let Some(locations) = self.variable_definition_locations_from_analysis(&fqn) {
                 return Some(locations);
             }
         }
@@ -249,19 +194,7 @@ impl EngineQuery {
 
     /// Find variable definitions by FQN.
     fn find_variable_definitions(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        if let Some(locations) = self.symbol_locations_from_analysis(
-            fqn,
-            &[
-                AnalysisSymbolKind::LocalVariable,
-                AnalysisSymbolKind::InstanceVariable,
-                AnalysisSymbolKind::ClassVariable,
-                AnalysisSymbolKind::GlobalVariable,
-            ],
-        ) {
-            return Some(locations);
-        }
-
-        None
+        self.variable_definition_locations_from_analysis(fqn)
     }
 
     fn resolve_constant_fqn_from_analysis(
@@ -274,16 +207,57 @@ impl EngineQuery {
         AnalysisQuery::new(&engine).resolve_constant_in_context(constant_path, ancestors)
     }
 
-    fn symbol_locations_from_analysis(
+    fn constant_definition_locations_from_analysis(
         &self,
-        fqn: &FullyQualifiedName,
-        allowed_kinds: &[AnalysisSymbolKind],
+        constant_path: &[RubyConstant],
+        ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
         let locations = query
-            .symbol_definition_ranges(fqn, allowed_kinds)
+            .constant_definition_ranges(constant_path, ancestors)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+
+    fn yard_type_definition_locations_from_analysis(
+        &self,
+        type_name: &str,
+        ancestors: &[RubyConstant],
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .yard_type_definition_ranges(type_name, ancestors)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+
+    fn variable_definition_locations_from_analysis(
+        &self,
+        fqn: &FullyQualifiedName,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .variable_definition_ranges(fqn)
             .into_iter()
             .filter_map(|range| location_for_range(&engine, range))
             .collect::<Vec<_>>();
