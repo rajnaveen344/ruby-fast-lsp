@@ -1,0 +1,127 @@
+name: Publish Open VSX
+
+on:
+  workflow_dispatch:
+    inputs:
+      vsix_version:
+        description: "VSIX version to publish to Open VSX, e.g. 2026.21.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            vsix-platform: darwin-arm64
+            bin: ruby-fast-lsp
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            vsix-platform: darwin-x64
+            bin: ruby-fast-lsp
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            vsix-platform: linux-x64
+            bin: ruby-fast-lsp
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            vsix-platform: win32-x64
+            bin: ruby-fast-lsp.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER: clang
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+
+      - name: Copy binary to VSIX
+        shell: bash
+        run: |
+          mkdir -p vsix/bin/${{ matrix.vsix-platform }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
+          chmod +x vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
+
+      - name: Upload VSIX binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-bin-${{ matrix.vsix-platform }}
+          path: vsix/bin/${{ matrix.vsix-platform }}
+
+  publish-open-vsx:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download all VSIX binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-bin-*
+          path: vsix/bin-artifacts
+
+      - name: Prepare VSIX
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            mkdir -p vsix/bin/${platform}
+            cp -r vsix/bin-artifacts/vsix-bin-${platform}/* vsix/bin/${platform}/
+          done
+          rm -rf vsix/bin-artifacts
+
+          sed -i "s/\"version\": \".*\"/\"version\": \"${{ inputs.vsix_version }}\"/" vsix/package.json
+
+          if [ -f "./scripts/zip_stubs.sh" ]; then
+            ./scripts/zip_stubs.sh
+          fi
+
+      - name: Install VSIX dependencies
+        run: |
+          cd vsix
+          npm install
+
+      - name: Package VSIX
+        run: |
+          cd vsix
+          npx @vscode/vsce package
+
+      - name: Publish to Open VSX
+        run: |
+          cd vsix
+          for attempt in 1 2 3 4 5; do
+            if npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}; then
+              exit 0
+            fi
+            if [ "$attempt" = "5" ]; then
+              exit 1
+            fi
+            echo "Open VSX publish failed; retrying in 120 seconds..."
+            sleep 120
+          done
