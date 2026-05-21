@@ -159,6 +159,44 @@ impl RubyDocument {
         )
     }
 
+    pub fn local_variable_definition_range_before(
+        &self,
+        name: &str,
+        byte_offset: u32,
+    ) -> Option<TextRange> {
+        let file_id = self.analysis_file_id();
+        let scope_id = self
+            .variable_scopes
+            .find_scope_for_variable_at(name, file_id, byte_offset)
+            .or_else(|| self.variable_scopes.scope_at_position(file_id, byte_offset))?;
+        let (_sid, variable) = self.variable_scopes.find_variable(name, scope_id)?;
+        if variable.definition_location.start_byte < byte_offset {
+            Some(variable.definition_location)
+        } else {
+            None
+        }
+    }
+
+    pub fn local_variable_reference_ranges_at(
+        &self,
+        name: &str,
+        byte_offset: u32,
+    ) -> Vec<TextRange> {
+        let file_id = self.analysis_file_id();
+        let Some(scope_id) =
+            self.variable_scopes
+                .find_scope_for_variable_at(name, file_id, byte_offset)
+        else {
+            return Vec::new();
+        };
+
+        self.variable_scopes
+            .find_rename_targets(name, scope_id)
+            .into_iter()
+            .map(|target| target.location)
+            .collect()
+    }
+
     pub fn prism_location_to_lsp_location(&self, location: &PrismLocation) -> LspLocation {
         LspLocation::new(self.uri.clone(), self.prism_location_to_lsp_range(location))
     }

@@ -5,7 +5,8 @@ use crate::core::{
     SourceFileId, TextRange,
 };
 use crate::engine::hierarchy_types::{
-    CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
+    CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
+    TypeHierarchyRelation,
 };
 use crate::engine::query::AnalysisQuery;
 
@@ -23,6 +24,15 @@ impl<'a> AnalysisQuery<'a> {
             fqn: method_fqn.clone(),
             range: fact.range,
         })
+    }
+
+    pub fn call_hierarchy_method_for_owner(
+        &self,
+        owner_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<CallHierarchyMethod> {
+        let method_fqn = FullyQualifiedName::method(owner_fqn.namespace_parts(), *method);
+        self.call_hierarchy_method(&method_fqn)
     }
 
     pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
@@ -77,6 +87,20 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Option<(GraphNodeKind, TextRange)> {
         let node = self.engine.graph_nodes_for(fqn).first()?;
         Some((node.kind, node.range))
+    }
+
+    pub fn type_hierarchy_node_for_constant(
+        &self,
+        constant_parts: &[RubyConstant],
+        ancestors: &[RubyConstant],
+    ) -> Option<TypeHierarchyNode> {
+        let fqn = self.resolve_constant_in_context(constant_parts, ancestors)?;
+        let node = self.engine.graph_nodes_for(&fqn).first()?;
+        Some(TypeHierarchyNode {
+            fqn,
+            node_kind: node.kind,
+            range: node.range,
+        })
     }
 
     pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {

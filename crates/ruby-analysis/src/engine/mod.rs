@@ -31,7 +31,8 @@ pub use debug_types::{
 pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
 pub use hierarchy_types::{
-    CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
+    CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
+    TypeHierarchyRelation,
 };
 pub use lookup_types::{
     ConstantHover, ConstantHoverKind, ConstantLookupRequest, ConstantMatch, MethodMatch,

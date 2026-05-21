@@ -109,24 +109,18 @@ impl EngineQuery {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
 
-        // Use position-based lookup to find the scope owning this variable
-        let scope_id = document.find_scope_for_variable_at(name, position)?;
-
-        // Use VariableScopes to find all references
-        let targets = document
-            .variable_scopes()
-            .find_rename_targets(name, scope_id);
-
-        if targets.is_empty() {
+        let byte_offset = document.position_to_analysis_offset(position);
+        let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
+        if ranges.is_empty() {
             return None;
         }
 
-        let mut all_locations = Vec::new();
-        for target in targets {
-            all_locations.push(document.text_range_to_lsp_location(target.location));
-        }
-
-        Some(all_locations)
+        Some(
+            ranges
+                .into_iter()
+                .map(|range| document.text_range_to_lsp_location(range))
+                .collect(),
+        )
     }
 }
 

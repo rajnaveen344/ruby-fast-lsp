@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::{
     SymbolTag, Url,
 };
 
-use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 
 use super::analysis_location::location_for_range;
@@ -70,9 +69,6 @@ impl EngineQuery {
                     namespace_kind,
                     position,
                 )?;
-                let method_fqn =
-                    FullyQualifiedName::method(owner_fqn.namespace_parts().to_vec(), *iden);
-
                 let engine_ref = self.analysis_engine().expect(
                     "INVARIANT VIOLATED: call hierarchy prepare requires an analysis engine. \
                      This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
@@ -81,7 +77,7 @@ impl EngineQuery {
                 let engine = engine_ref.lock();
                 let query = AnalysisQuery::new(&engine);
                 if let Some(item) = query
-                    .call_hierarchy_method(&method_fqn)
+                    .call_hierarchy_method_for_owner(&owner_fqn, iden)
                     .and_then(|method| call_hierarchy_item_from_engine_method(&engine, method))
                 {
                     return Some(vec![item]);

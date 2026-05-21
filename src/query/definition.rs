@@ -68,23 +68,10 @@ impl EngineQuery {
         let doc_arc = self.doc.as_ref()?;
         let document = doc_arc.read();
 
-        // Use position-based scope lookup in the VariableScopes tree
-        let tree_scope_id = document
-            .find_scope_for_variable_at(name, position)
-            .or_else(|| document.scope_at_position(position))?;
-
-        if let Some((_sid, var)) = document
-            .variable_scopes()
-            .find_variable(name, tree_scope_id)
-        {
-            if var.definition_location.start_byte < document.position_to_analysis_offset(position) {
-                return Some(vec![
-                    document.text_range_to_lsp_location(var.definition_location)
-                ]);
-            }
-        }
-
-        None
+        let byte_offset = document.position_to_analysis_offset(position);
+        document
+            .local_variable_definition_range_before(name, byte_offset)
+            .map(|range| vec![document.text_range_to_lsp_location(range)])
     }
 
     /// Find definitions for a global variable.

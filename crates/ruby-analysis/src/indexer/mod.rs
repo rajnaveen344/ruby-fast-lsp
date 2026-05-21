@@ -11,9 +11,11 @@ pub mod analyzer_utils;
 pub mod code_lens;
 pub mod document_symbols;
 pub mod fact_collector;
+pub mod hover;
 pub mod identifier;
 pub mod identifier_visitor;
 pub mod inlay_hints;
+pub mod receiver_resolution;
 pub mod rename;
 mod ruby_document;
 mod scope_tracker;
@@ -26,8 +28,12 @@ pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
 pub use analyzer::RubyPrismAnalyzer;
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
+pub use hover::{identifier_to_hover_target, HoverTarget};
 pub use identifier::{Identifier, MethodReceiver};
 pub use identifier_visitor::{IdentifierType, IdentifierVisitor};
+pub use receiver_resolution::{
+    resolve_receiver_to_namespace, resolve_receiver_type, ReceiverResolutionContext,
+};
 pub use rename::RenameVisitor;
 pub use ruby_document::RubyDocument;
 pub use scope_tracker::{

@@ -3,16 +3,16 @@
 //! Each generator function is a pure function that takes a node and context,
 //! and returns formatted hover information.
 
-use super::nodes::HoverNode;
 use parking_lot::Mutex;
-use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod};
+use ruby_analysis::core::{NamespaceKind, RubyConstant};
 use ruby_analysis::engine::{
     AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind, VariableTypeKind,
 };
-use ruby_analysis::indexer::LVScopeId;
-use ruby_analysis::indexer::MethodReceiver;
 use ruby_analysis::indexer::RubyDocument;
-use ruby_analysis::inference::method::method_call_return_type as infer_method_call_return_type;
+use ruby_analysis::indexer::{
+    resolve_receiver_type, HoverTarget, MethodReceiver, ReceiverResolutionContext,
+};
+use ruby_analysis::inference::method::method_call_return_type;
 use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
@@ -56,11 +56,11 @@ impl HoverInfo {
 
 /// Generate hover info for a local variable.
 pub fn generate_local_variable_hover(
-    node: &HoverNode,
+    node: &HoverTarget,
     context: &HoverContext,
 ) -> Option<HoverInfo> {
     let (name, position, _scope_id) = match node {
-        HoverNode::LocalVariable {
+        HoverTarget::LocalVariable {
             name,
             position,
             scope_id,
@@ -141,9 +141,9 @@ fn get_type_from_variable_scopes(
 }
 
 /// Generate hover info for a constant (class/module).
-pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
+pub fn generate_constant_hover(node: &HoverTarget, context: &HoverContext) -> Option<HoverInfo> {
     let path = match node {
-        HoverNode::Constant { path } => path,
+        HoverTarget::Constant { path } => path,
         _ => return None,
     };
 
@@ -157,16 +157,15 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
 }
 
 /// Generate hover info for a method (call or definition).
-pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
-    let (name, position, receiver, namespace, scope_id, is_definition) = match node {
-        HoverNode::Method {
+pub fn generate_method_hover(node: &HoverTarget, context: &HoverContext) -> Option<HoverInfo> {
+    let (name, position, receiver, namespace, is_definition) = match node {
+        HoverTarget::Method {
             name,
             position,
             receiver,
             namespace,
-            scope_id,
             is_definition,
-        } => (name, position, receiver, namespace, scope_id, is_definition),
+        } => (name, position, receiver, namespace, is_definition),
         _ => return None,
     };
 
@@ -188,9 +187,8 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
     }
 
     // For method calls, resolve receiver type and infer return type
-    let receiver_type = resolve_receiver_type(receiver, namespace, *scope_id, *position, context);
-
-    let return_type = method_call_return_type_from_analysis(context, &receiver_type, name);
+    let return_type =
+        method_call_return_type_from_receiver(context, receiver, name, namespace, *position);
 
     match return_type {
         Some(t) if t != RubyType::Unknown => Some(HoverInfo::ruby_code(t.to_string())),
@@ -199,11 +197,11 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
 }
 
 /// Generate hover info for a variable (instance, class, or global).
-pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Option<HoverInfo> {
+pub fn generate_variable_hover(node: &HoverTarget, context: &HoverContext) -> Option<HoverInfo> {
     let (name, variable_kind): (&str, VariableHoverKind) = match node {
-        HoverNode::InstanceVariable { name } => (name.as_str(), VariableHoverKind::Instance),
-        HoverNode::ClassVariable { name } => (name.as_str(), VariableHoverKind::Class),
-        HoverNode::GlobalVariable { name } => (name.as_str(), VariableHoverKind::Global),
+        HoverTarget::InstanceVariable { name } => (name.as_str(), VariableHoverKind::Instance),
+        HoverTarget::ClassVariable { name } => (name.as_str(), VariableHoverKind::Class),
+        HoverTarget::GlobalVariable { name } => (name.as_str(), VariableHoverKind::Global),
         _ => return None,
     };
 
@@ -217,9 +215,9 @@ pub fn generate_variable_hover(node: &HoverNode, context: &HoverContext) -> Opti
 }
 
 /// Generate hover info for a YARD type reference.
-pub fn generate_yard_type_hover(node: &HoverNode) -> Option<HoverInfo> {
+pub fn generate_yard_type_hover(node: &HoverTarget) -> Option<HoverInfo> {
     match node {
-        HoverNode::YardType { type_name } => Some(HoverInfo::text(type_name.clone())),
+        HoverTarget::YardType { type_name } => Some(HoverInfo::text(type_name.clone())),
         _ => None,
     }
 }
@@ -286,35 +284,36 @@ fn constant_path_to_string(path: &[RubyConstant]) -> String {
         .join("::")
 }
 
-fn namespace_type_from_analysis(
+fn method_call_return_type_from_receiver(
     context: &HoverContext,
-    namespace_fqn: &FullyQualifiedName,
-) -> Option<RubyType> {
-    let engine = context.analysis_engine?.lock();
-    AnalysisQuery::new(&engine).namespace_type(namespace_fqn)
-}
-
-fn constant_reference_type_from_analysis(
-    context: &HoverContext,
-    path: &[RubyConstant],
-) -> Option<RubyType> {
-    let engine = context.analysis_engine?.lock();
-    AnalysisQuery::new(&engine).constant_reference_type(path)
-}
-
-fn method_call_return_type_from_analysis(
-    context: &HoverContext,
-    receiver_type: &RubyType,
+    receiver: &MethodReceiver,
     method_name: &str,
+    namespace: &[RubyConstant],
+    position: Position,
 ) -> Option<RubyType> {
-    let method = RubyMethod::new(method_name).ok()?;
-    if let Some(engine) = context.analysis_engine {
-        let engine = engine.lock();
-        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        return infer_method_call_return_type(Some(&query), receiver_type, method.as_str());
-    }
+    let doc_guard = context.document.map(|document| document.read());
+    let byte_offset = doc_guard
+        .as_ref()
+        .map(|document| document.position_to_analysis_offset(position))
+        .unwrap_or(0);
+    let engine_guard = context.analysis_engine.map(|engine| engine.lock());
+    let analysis_query = engine_guard
+        .as_ref()
+        .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
 
-    infer_method_call_return_type(None, receiver_type, method_name)
+    let resolution_context = ReceiverResolutionContext {
+        query: analysis_query.as_ref(),
+        document: doc_guard.as_deref(),
+        current_namespace: namespace,
+        namespace_kind: NamespaceKind::Instance,
+        byte_offset,
+    };
+    let ruby_type = resolve_receiver_type(receiver, &resolution_context);
+    if ruby_type == RubyType::Unknown {
+        None
+    } else {
+        method_call_return_type(analysis_query.as_ref(), &ruby_type, method_name)
+    }
 }
 
 fn generate_method_definition_hover(
@@ -352,97 +351,4 @@ fn method_definition_hover_from_analysis(
         "def {} -> {}",
         method_name, return_type
     )))
-}
-
-fn resolve_receiver_type(
-    receiver: &MethodReceiver,
-    namespace: &[RubyConstant],
-    scope_id: LVScopeId,
-    position: Position,
-    context: &HoverContext,
-) -> RubyType {
-    match receiver {
-        MethodReceiver::None | MethodReceiver::SelfReceiver => {
-            if namespace.is_empty() {
-                RubyType::class("Object")
-            } else {
-                let fqn = FullyQualifiedName::from(namespace.to_vec());
-                if let Some(ruby_type) = namespace_type_from_analysis(context, &fqn) {
-                    return ruby_type;
-                }
-                if context.analysis_engine.is_some() {
-                    return RubyType::Class(fqn);
-                }
-                RubyType::Class(fqn)
-            }
-        }
-        MethodReceiver::Constant(path) => {
-            if let Some(ruby_type) = constant_reference_type_from_analysis(context, path) {
-                return ruby_type;
-            }
-            let fqn = FullyQualifiedName::Constant(path.clone());
-            RubyType::ClassReference(fqn)
-        }
-        MethodReceiver::LocalVariable(name) => {
-            // Try VariableScopes tree first
-            if let Some(t) = get_type_from_variable_scopes(context, name, position) {
-                return t;
-            }
-
-            // Fall back to analysis facts.
-            if let Some(t) = get_type_from_type_query(context, name, position) {
-                return t;
-            }
-
-            RubyType::Unknown
-        }
-        MethodReceiver::InstanceVariable(name) => {
-            if let Some(ruby_type) =
-                variable_type_from_analysis(context, name, VariableHoverKind::Instance)
-            {
-                return ruby_type;
-            }
-            RubyType::Unknown
-        }
-        MethodReceiver::ClassVariable(name) => {
-            if let Some(ruby_type) =
-                variable_type_from_analysis(context, name, VariableHoverKind::Class)
-            {
-                return ruby_type;
-            }
-            RubyType::Unknown
-        }
-        MethodReceiver::GlobalVariable(name) => {
-            if let Some(ruby_type) =
-                variable_type_from_analysis(context, name, VariableHoverKind::Global)
-            {
-                return ruby_type;
-            }
-            RubyType::Unknown
-        }
-        MethodReceiver::MethodCall {
-            inner_receiver,
-            method_name,
-        } => {
-            // Special handling for .new on constants
-            if method_name == "new" {
-                if let MethodReceiver::Constant(path) = inner_receiver.as_ref() {
-                    let fqn = FullyQualifiedName::Constant(path.clone());
-                    return RubyType::Class(fqn);
-                }
-            }
-
-            let inner_type =
-                resolve_receiver_type(inner_receiver, namespace, scope_id, position, context);
-
-            if inner_type == RubyType::Unknown {
-                return RubyType::Unknown;
-            }
-
-            method_call_return_type_from_analysis(context, &inner_type, method_name)
-                .unwrap_or(RubyType::Unknown)
-        }
-        MethodReceiver::Literal(t) => t.clone(),
-        MethodReceiver::Expression => RubyType::Unknown,
-    }
 }

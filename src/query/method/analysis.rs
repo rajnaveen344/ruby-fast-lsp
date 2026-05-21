@@ -1,7 +1,6 @@
 use crate::query::analysis_location::location_for_range;
 use crate::query::EngineQuery;
 use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 
 use super::ResolvedMethodCallee;
@@ -31,15 +30,4 @@ pub(super) fn resolve_method_callees(
             })
             .collect(),
     )
-}
-
-pub(super) fn resolve_constant_receiver(
-    query: &EngineQuery,
-    path: &[RubyConstant],
-    current_namespace: &[RubyConstant],
-) -> Option<FullyQualifiedName> {
-    let engine = query.analysis_engine()?;
-    let engine = engine.lock();
-    let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    Some(analysis_query.resolve_constant_receiver(path, current_namespace))
 }

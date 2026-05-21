@@ -7,6 +7,13 @@ pub struct CallHierarchyMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeHierarchyNode {
+    pub fqn: FullyQualifiedName,
+    pub node_kind: GraphNodeKind,
+    pub range: TextRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingCall {
     pub from: CallHierarchyMethod,
     pub from_ranges: Vec<TextRange>,

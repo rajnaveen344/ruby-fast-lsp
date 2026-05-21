@@ -20,11 +20,12 @@
 //! The supertypes list follows this exact order (excluding self).
 
 use log::{debug, info};
-use ruby_analysis::engine::{AnalysisQuery, TypeHierarchyEntry, TypeHierarchyRelation};
+use ruby_analysis::engine::{
+    AnalysisQuery, TypeHierarchyEntry, TypeHierarchyNode, TypeHierarchyRelation,
+};
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
-use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 
 use super::analysis_location::location_for_range;
@@ -85,18 +86,11 @@ impl EngineQuery {
         );
         let engine = engine_ref.lock();
         let query = AnalysisQuery::new(&engine);
-        let fqn = query.resolve_constant_in_context(&constant_parts, &ancestors)?;
-
-        if let Some(item) = query.type_hierarchy_node(&fqn).and_then(|(kind, range)| {
-            type_hierarchy_item_from_parts(
-                &engine,
-                &fqn,
-                graph_node_kind_to_symbol_kind(kind),
-                range,
-                None,
-            )
-        }) {
-            info!("Found type hierarchy item: {}", fqn);
+        if let Some(item) = query
+            .type_hierarchy_node_for_constant(&constant_parts, &ancestors)
+            .and_then(|node| type_hierarchy_item_from_engine_node(&engine, node))
+        {
+            info!("Found type hierarchy item: {}", item.name);
             return Some(vec![item]);
         }
         None
@@ -215,9 +209,22 @@ fn type_hierarchy_item_from_engine_entry(
     type_hierarchy_item_from_parts(engine, &entry.fqn, kind, entry.range, Some(detail))
 }
 
+fn type_hierarchy_item_from_engine_node(
+    engine: &ruby_analysis::engine::AnalysisEngine,
+    node: TypeHierarchyNode,
+) -> Option<TypeHierarchyItem> {
+    type_hierarchy_item_from_parts(
+        engine,
+        &node.fqn,
+        graph_node_kind_to_symbol_kind(node.node_kind),
+        node.range,
+        None,
+    )
+}
+
 fn type_hierarchy_item_from_parts(
     engine: &ruby_analysis::engine::AnalysisEngine,
-    fqn: &FullyQualifiedName,
+    fqn: &ruby_analysis::core::FullyQualifiedName,
     kind: SymbolKind,
     range: ruby_analysis::core::TextRange,
     detail: Option<String>,

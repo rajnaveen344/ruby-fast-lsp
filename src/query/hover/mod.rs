@@ -2,23 +2,16 @@
 //!
 //! This module provides hover information using a clean architecture:
 //! 1. Get identifier at position (via RubyPrismAnalyzer)
-//! 2. Convert Identifier → HoverNode (simpler representation)
+//! 2. Convert Identifier → HoverTarget (analysis-domain representation)
 //! 3. Generate hover content (via generator functions)
-//!
-//! Architecture:
-//! - `nodes.rs`: HoverNode data structures
-//! - `generators.rs`: Pure functions that generate hover content
-//! - `mod.rs` (this file): Orchestration layer
 
 pub mod generators;
-pub mod nodes;
 
 use generators::HoverContext;
 pub use generators::HoverInfo;
-use nodes::HoverNode;
 
 use crate::query::EngineQuery;
-use ruby_analysis::indexer::{Identifier, IdentifierType, RubyPrismAnalyzer};
+use ruby_analysis::indexer::{identifier_to_hover_target, HoverTarget, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Position, Url};
 
 impl EngineQuery {
@@ -43,9 +36,9 @@ impl EngineQuery {
 
         let identifier = identifier_opt?;
 
-        // Step 2: Convert Identifier to HoverNode (simpler representation)
-        let node =
-            identifier_to_hover_node(identifier, identifier_type, namespace, scope_id, position)?;
+        // Step 2: Convert Identifier to HoverTarget (analysis-domain representation)
+        let target =
+            identifier_to_hover_target(identifier, identifier_type, namespace, scope_id, position);
 
         // Step 3: Create context for generators
         let context = HoverContext {
@@ -54,72 +47,18 @@ impl EngineQuery {
         };
 
         // Step 4: Generate hover content based on node type
-        match node {
-            HoverNode::LocalVariable { .. } => {
-                generators::generate_local_variable_hover(&node, &context)
+        match target {
+            HoverTarget::LocalVariable { .. } => {
+                generators::generate_local_variable_hover(&target, &context)
             }
-            HoverNode::Constant { .. } => generators::generate_constant_hover(&node, &context),
-            HoverNode::Method { .. } => generators::generate_method_hover(&node, &context),
-            HoverNode::InstanceVariable { .. }
-            | HoverNode::ClassVariable { .. }
-            | HoverNode::GlobalVariable { .. } => {
-                generators::generate_variable_hover(&node, &context)
+            HoverTarget::Constant { .. } => generators::generate_constant_hover(&target, &context),
+            HoverTarget::Method { .. } => generators::generate_method_hover(&target, &context),
+            HoverTarget::InstanceVariable { .. }
+            | HoverTarget::ClassVariable { .. }
+            | HoverTarget::GlobalVariable { .. } => {
+                generators::generate_variable_hover(&target, &context)
             }
-            HoverNode::YardType { .. } => generators::generate_yard_type_hover(&node),
+            HoverTarget::YardType { .. } => generators::generate_yard_type_hover(&target),
         }
-    }
-}
-
-/// Convert an Identifier to a HoverNode.
-///
-/// This simplifies the identifier representation to only what's needed for hover generation.
-fn identifier_to_hover_node(
-    identifier: Identifier,
-    identifier_type: Option<IdentifierType>,
-    namespace: Vec<ruby_analysis::core::RubyConstant>,
-    scope_id: ruby_analysis::indexer::LVScopeId,
-    position: Position,
-) -> Option<HoverNode> {
-    match identifier {
-        Identifier::RubyLocalVariable { name, .. } => Some(HoverNode::LocalVariable {
-            name,
-            position,
-            scope_id,
-        }),
-
-        Identifier::RubyConstant { iden, .. } => Some(HoverNode::Constant { path: iden }),
-
-        Identifier::RubyMethod {
-            iden,
-            receiver,
-            namespace: method_ns,
-        } => {
-            let method_name = iden.to_string();
-            let is_method_definition = identifier_type == Some(IdentifierType::MethodDef);
-
-            // Use method_ns if available, otherwise fall back to namespace from analyzer
-            let ns = if method_ns.is_empty() {
-                namespace
-            } else {
-                method_ns
-            };
-
-            Some(HoverNode::Method {
-                name: method_name,
-                position,
-                receiver,
-                namespace: ns,
-                scope_id,
-                is_definition: is_method_definition,
-            })
-        }
-
-        Identifier::RubyInstanceVariable { name, .. } => Some(HoverNode::InstanceVariable { name }),
-
-        Identifier::RubyClassVariable { name, .. } => Some(HoverNode::ClassVariable { name }),
-
-        Identifier::RubyGlobalVariable { name, .. } => Some(HoverNode::GlobalVariable { name }),
-
-        Identifier::YardType { type_name, .. } => Some(HoverNode::YardType { type_name }),
     }
 }
