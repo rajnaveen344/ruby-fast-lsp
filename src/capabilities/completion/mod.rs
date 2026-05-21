@@ -1,4 +1,3 @@
-pub mod constant_completion;
 pub mod method;
 pub mod snippets;
 pub mod variable;
@@ -16,7 +15,6 @@ use crate::{
     utils::{ast::is_in_statement_position, position_to_offset},
 };
 
-pub use constant_completion::ConstantCompletionContext;
 pub use snippets::RubySnippets;
 
 pub async fn find_completion_at_position(

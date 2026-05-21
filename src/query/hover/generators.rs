@@ -7,7 +7,9 @@ use super::nodes::HoverNode;
 use parking_lot::Mutex;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyConstant;
-use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
+use ruby_analysis::engine::{
+    AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind, VariableTypeKind,
+};
 use ruby_analysis::indexer::LVScopeId;
 use ruby_analysis::indexer::MethodReceiver;
 use ruby_analysis::indexer::RubyDocument;
@@ -146,10 +148,7 @@ pub fn generate_constant_hover(node: &HoverNode, context: &HoverContext) -> Opti
         _ => return None,
     };
 
-    let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
-    let fqn = FullyQualifiedName::namespace(path.to_vec());
-
-    if let Some(hover) = constant_hover_from_analysis(context, path, &constant_fqn, &fqn) {
+    if let Some(hover) = constant_hover_from_analysis(context, path) {
         return Some(hover);
     }
     if context.analysis_engine.is_some() {
@@ -265,30 +264,20 @@ fn variable_type_from_analysis(
 fn constant_hover_from_analysis(
     context: &HoverContext,
     path: &[RubyConstant],
-    constant_fqn: &FullyQualifiedName,
-    namespace_fqn: &FullyQualifiedName,
 ) -> Option<HoverInfo> {
     let engine = context.analysis_engine?.lock();
     let query = AnalysisQuery::new(&engine);
-    let fqn_str = constant_path_to_string(path);
+    query.constant_hover(path).map(format_constant_hover)
+}
 
-    let node_kind = query.namespace_node_kind(namespace_fqn);
-
-    match node_kind {
-        Some(ruby_analysis::core::GraphNodeKind::Class) => {
-            return Some(HoverInfo::text(format!("class {}", fqn_str)));
+fn format_constant_hover(hover: ConstantHover) -> HoverInfo {
+    match hover.kind {
+        ConstantHoverKind::Class => HoverInfo::text(format!("class {}", hover.name)),
+        ConstantHoverKind::Module => HoverInfo::text(format!("module {}", hover.name)),
+        ConstantHoverKind::Value(ruby_type) => {
+            HoverInfo::text(format!("{}: {}", hover.name, ruby_type))
         }
-        Some(ruby_analysis::core::GraphNodeKind::Module) => {
-            return Some(HoverInfo::text(format!("module {}", fqn_str)));
-        }
-        None => {}
     }
-
-    if let Some(ty) = query.constant_value_type(constant_fqn) {
-        return Some(HoverInfo::text(format!("{}: {}", fqn_str, ty)));
-    }
-
-    None
 }
 
 fn constant_path_to_string(path: &[RubyConstant]) -> String {
@@ -335,7 +324,7 @@ fn method_call_return_type(
     if let Some(engine) = context.analysis_engine {
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        for namespace in receiver_type_to_analysis_namespaces(receiver_type) {
+        for namespace in query.receiver_type_to_method_namespaces(receiver_type) {
             if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
                 return Some(return_type);
             }
@@ -445,37 +434,6 @@ fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
         }
     }
     names
-}
-
-fn receiver_type_to_analysis_namespaces(receiver_type: &RubyType) -> Vec<FullyQualifiedName> {
-    use ruby_analysis::core::NamespaceKind;
-
-    match receiver_type {
-        RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
-                fqn.namespace_parts(),
-                NamespaceKind::Instance,
-            )];
-            if fqn.name() == "Object" {
-                namespaces.push(FullyQualifiedName::namespace_with_kind(
-                    Vec::new(),
-                    NamespaceKind::Instance,
-                ));
-            }
-            namespaces
-        }
-        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            vec![FullyQualifiedName::namespace_with_kind(
-                fqn.namespace_parts(),
-                NamespaceKind::Singleton,
-            )]
-        }
-        RubyType::Union(types) => types
-            .iter()
-            .flat_map(receiver_type_to_analysis_namespaces)
-            .collect(),
-        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
-    }
 }
 
 fn generate_method_definition_hover(

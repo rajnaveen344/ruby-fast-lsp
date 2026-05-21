@@ -170,12 +170,61 @@ impl<'a> AnalysisQuery<'a> {
         )
     }
 
+    pub fn instance_variable_definition_ranges(&self, name: &str) -> Vec<TextRange> {
+        match FullyQualifiedName::instance_variable(name.to_string()) {
+            Ok(fqn) => self.variable_definition_ranges(&fqn),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    pub fn class_variable_definition_ranges(&self, name: &str) -> Vec<TextRange> {
+        match FullyQualifiedName::class_variable(name.to_string()) {
+            Ok(fqn) => self.variable_definition_ranges(&fqn),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    pub fn global_variable_definition_ranges(&self, name: &str) -> Vec<TextRange> {
+        match FullyQualifiedName::global_variable(name.to_string()) {
+            Ok(fqn) => self.variable_definition_ranges(&fqn),
+            Err(_) => Vec::new(),
+        }
+    }
+
     pub fn reference_ranges_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
         self.engine
             .reference_facts_for(fqn)
             .iter()
             .map(|fact| fact.range)
             .collect()
+    }
+
+    pub fn constant_reference_ranges(
+        &self,
+        parts: &[RubyConstant],
+        context: &[RubyConstant],
+    ) -> Vec<TextRange> {
+        if let Some(target) = self.resolve_constant_reference_target(parts, context) {
+            let ranges = self.reference_ranges_for_fqn(&target);
+            if !ranges.is_empty() {
+                return ranges;
+            }
+        }
+
+        let mut fallback = context.to_vec();
+        fallback.extend(parts.iter().cloned());
+
+        let namespace_fqn = FullyQualifiedName::namespace(fallback.clone());
+        let namespace_ranges = self.reference_ranges_for_fqn(&namespace_fqn);
+        if !namespace_ranges.is_empty() {
+            return namespace_ranges;
+        }
+
+        self.reference_ranges_for_fqn(&FullyQualifiedName::constant(fallback))
+    }
+
+    pub fn variable_reference_ranges(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
+        self.reference_ranges_for_fqn(fqn)
     }
 
     pub fn method_reference_ranges(
@@ -195,6 +244,28 @@ impl<'a> AnalysisQuery<'a> {
         ranges
     }
 
+    pub fn method_reference_ranges_for_constant_receiver(
+        &self,
+        receiver_path: &[RubyConstant],
+        context: &[RubyConstant],
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let namespace_fqn = self.resolve_constant_receiver(receiver_path, context);
+        self.method_reference_ranges(&namespace_fqn, method)
+    }
+
+    pub fn method_reference_ranges_for_current_scope(
+        &self,
+        context: &[RubyConstant],
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let namespace_fqn = FullyQualifiedName::namespace_with_kind(
+            context.to_vec(),
+            crate::core::NamespaceKind::Instance,
+        );
+        self.method_reference_ranges(&namespace_fqn, method)
+    }
+
     pub fn symbol_definition_ranges(
         &self,
         fqn: &FullyQualifiedName,
@@ -206,6 +277,38 @@ impl<'a> AnalysisQuery<'a> {
             .filter(|fact| allowed_kinds.contains(&fact.kind))
             .map(|fact| fact.range)
             .collect()
+    }
+
+    fn resolve_constant_reference_target(
+        &self,
+        parts: &[RubyConstant],
+        current_namespace: &[RubyConstant],
+    ) -> Option<FullyQualifiedName> {
+        let mut search = current_namespace.to_vec();
+
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+
+            let namespace_fqn = FullyQualifiedName::namespace(probe.clone());
+            if !self.engine.graph_nodes_for(&namespace_fqn).is_empty()
+                || !self.engine.symbol_facts_for(&namespace_fqn).is_empty()
+            {
+                return Some(namespace_fqn);
+            }
+
+            let constant_fqn = FullyQualifiedName::constant(probe);
+            if !self.engine.symbol_facts_for(&constant_fqn).is_empty() {
+                return Some(constant_fqn);
+            }
+
+            if search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+
+        None
     }
 }
 

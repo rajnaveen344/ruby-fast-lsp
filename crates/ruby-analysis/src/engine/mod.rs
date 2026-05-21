@@ -34,7 +34,8 @@ pub use hierarchy_types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyRelation,
 };
 pub use lookup_types::{
-    ConstantLookupRequest, ConstantMatch, MethodMatch, MixinUsage, MixinUsageKind, VariableTypeKind,
+    ConstantHover, ConstantHoverKind, ConstantLookupRequest, ConstantMatch, MethodMatch,
+    MixinUsage, MixinUsageKind, VariableTypeKind,
 };
 pub use namespace_tree_types::{
     IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,

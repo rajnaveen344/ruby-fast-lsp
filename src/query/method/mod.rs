@@ -304,33 +304,35 @@ impl EngineQuery {
 
     /// Convert RubyType to namespace FQN
     fn convert_type_to_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
-        match ruby_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) => {
-                Some(FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Instance,
-                ))
-            }
-
-            RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-                Some(FullyQualifiedName::namespace_with_kind(
-                    fqn.namespace_parts(),
-                    NamespaceKind::Singleton,
-                ))
-            }
-
-            RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Array").ok()?],
-                NamespaceKind::Instance,
-            )),
-
-            RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
-                vec![RubyConstant::new("Hash").ok()?],
-                NamespaceKind::Instance,
-            )),
-
-            RubyType::Union(_) | RubyType::Unknown => None,
+        if let Some(engine) = self.analysis_engine() {
+            let engine = engine.lock();
+            return ruby_analysis::engine::AnalysisQuery::new(&engine).type_to_namespace(ruby_type);
         }
+
+        fallback_type_to_namespace(ruby_type)
+    }
+}
+
+fn fallback_type_to_namespace(ruby_type: &RubyType) -> Option<FullyQualifiedName> {
+    match ruby_type {
+        RubyType::Class(fqn) | RubyType::Module(fqn) => Some(
+            FullyQualifiedName::namespace_with_kind(fqn.namespace_parts(), NamespaceKind::Instance),
+        ),
+        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+            Some(FullyQualifiedName::namespace_with_kind(
+                fqn.namespace_parts(),
+                NamespaceKind::Singleton,
+            ))
+        }
+        RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::new("Array").ok()?],
+            NamespaceKind::Instance,
+        )),
+        RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
+            vec![RubyConstant::new("Hash").ok()?],
+            NamespaceKind::Instance,
+        )),
+        RubyType::Union(_) | RubyType::Unknown => None,
     }
 }
 

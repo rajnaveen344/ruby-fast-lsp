@@ -4,7 +4,7 @@ use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, RubyConstant, RubyMethod, RubyType,
     SourceFileId, SymbolKind, TypeFact, TypeResolution, TypeSubject,
 };
-use crate::engine::lookup_types::VariableTypeKind;
+use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
 
@@ -279,6 +279,53 @@ impl<'a> AnalysisQuery<'a> {
         }
     }
 
+    pub fn type_to_namespace(&self, ruby_type: &RubyType) -> Option<FullyQualifiedName> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::Module(fqn) => {
+                Some(FullyQualifiedName::namespace_with_kind(
+                    fqn.namespace_parts(),
+                    crate::core::NamespaceKind::Instance,
+                ))
+            }
+            RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+                Some(FullyQualifiedName::namespace_with_kind(
+                    fqn.namespace_parts(),
+                    crate::core::NamespaceKind::Singleton,
+                ))
+            }
+            RubyType::Array(_) => Some(FullyQualifiedName::namespace_with_kind(
+                vec![RubyConstant::new("Array").expect(
+                    "INVARIANT VIOLATED: built-in constant `Array` is invalid. \
+                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
+                     Fix: correct the hard-coded built-in constant name.",
+                )],
+                crate::core::NamespaceKind::Instance,
+            )),
+            RubyType::Hash(_, _) => Some(FullyQualifiedName::namespace_with_kind(
+                vec![RubyConstant::new("Hash").expect(
+                    "INVARIANT VIOLATED: built-in constant `Hash` is invalid. \
+                     This is a bug because Ruby built-in constants must be valid Ruby constants. \
+                     Fix: correct the hard-coded built-in constant name.",
+                )],
+                crate::core::NamespaceKind::Instance,
+            )),
+            RubyType::Union(_) | RubyType::Unknown => None,
+        }
+    }
+
+    pub fn constructor_return_type_for_namespace(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+    ) -> Option<RubyType> {
+        if namespace_fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
+            return None;
+        }
+
+        Some(RubyType::Class(FullyQualifiedName::Constant(
+            namespace_fqn.namespace_parts(),
+        )))
+    }
+
     pub fn constant_value_type(&self, constant_fqn: &FullyQualifiedName) -> Option<RubyType> {
         self.engine
             .type_store()
@@ -293,6 +340,38 @@ impl<'a> AnalysisQuery<'a> {
                 )
             })
             .map(|fact| fact.ruby_type.clone())
+    }
+
+    pub fn constant_hover(&self, path: &[RubyConstant]) -> Option<ConstantHover> {
+        let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
+        let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
+        let name = path
+            .iter()
+            .map(|constant| constant.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+
+        match self.namespace_node_kind(&namespace_fqn) {
+            Some(GraphNodeKind::Class) => {
+                return Some(ConstantHover {
+                    name,
+                    kind: ConstantHoverKind::Class,
+                });
+            }
+            Some(GraphNodeKind::Module) => {
+                return Some(ConstantHover {
+                    name,
+                    kind: ConstantHoverKind::Module,
+                });
+            }
+            None => {}
+        }
+
+        self.constant_value_type(&constant_fqn)
+            .map(|ruby_type| ConstantHover {
+                name,
+                kind: ConstantHoverKind::Value(ruby_type),
+            })
     }
 
     pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {

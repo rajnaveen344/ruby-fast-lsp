@@ -8,6 +8,7 @@ pub mod analyzer;
 #[cfg(test)]
 mod analyzer_tests;
 pub mod analyzer_utils;
+pub mod code_lens;
 pub mod document_symbols;
 pub mod fact_collector;
 pub mod identifier;
@@ -22,6 +23,7 @@ pub mod yard;
 
 pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
 pub use analyzer::RubyPrismAnalyzer;
+pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
 pub use identifier::{Identifier, MethodReceiver};
 pub use identifier_visitor::{IdentifierType, IdentifierVisitor};

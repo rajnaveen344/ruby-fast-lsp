@@ -89,10 +89,7 @@ impl EngineQuery {
 
     /// Find definitions for a global variable.
     fn find_global_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
-        if let Ok(fqn) = FullyQualifiedName::global_variable(name.to_string()) {
-            return self.find_variable_definitions(&fqn);
-        }
-        None
+        self.global_variable_definition_locations_from_analysis(name)
     }
 
     /// Find definitions for a constant (class or module) by path.
@@ -159,24 +156,12 @@ impl EngineQuery {
 
     /// Find instance variable definitions.
     fn find_instance_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
-        // Instance variables are stored with just their name (e.g., "@foo")
-        if let Ok(fqn) = FullyQualifiedName::instance_variable(name.to_string()) {
-            if let Some(locations) = self.variable_definition_locations_from_analysis(&fqn) {
-                return Some(locations);
-            }
-        }
-        None
+        self.instance_variable_definition_locations_from_analysis(name)
     }
 
     /// Find class variable definitions.
     fn find_class_variable_definitions(&self, name: &str) -> Option<Vec<Location>> {
-        // Class variables are stored with just their name (e.g., "@@foo")
-        if let Ok(fqn) = FullyQualifiedName::class_variable(name.to_string()) {
-            if let Some(locations) = self.variable_definition_locations_from_analysis(&fqn) {
-                return Some(locations);
-            }
-        }
-        None
+        self.class_variable_definition_locations_from_analysis(name)
     }
 
     /// Resolve constant FQN from path.
@@ -190,11 +175,6 @@ impl EngineQuery {
         }
 
         FullyQualifiedName::Constant(constant_path.to_vec())
-    }
-
-    /// Find variable definitions by FQN.
-    fn find_variable_definitions(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        self.variable_definition_locations_from_analysis(fqn)
     }
 
     fn resolve_constant_fqn_from_analysis(
@@ -249,15 +229,55 @@ impl EngineQuery {
         }
     }
 
-    fn variable_definition_locations_from_analysis(
+    fn instance_variable_definition_locations_from_analysis(
         &self,
-        fqn: &FullyQualifiedName,
+        name: &str,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
         let locations = query
-            .variable_definition_ranges(fqn)
+            .instance_variable_definition_ranges(name)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+
+    fn class_variable_definition_locations_from_analysis(
+        &self,
+        name: &str,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .class_variable_definition_ranges(name)
+            .into_iter()
+            .filter_map(|range| location_for_range(&engine, range))
+            .collect::<Vec<_>>();
+
+        if locations.is_empty() {
+            None
+        } else {
+            Some(locations)
+        }
+    }
+
+    fn global_variable_definition_locations_from_analysis(
+        &self,
+        name: &str,
+    ) -> Option<Vec<Location>> {
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let locations = query
+            .global_variable_definition_ranges(name)
             .into_iter()
             .filter_map(|range| location_for_range(&engine, range))
             .collect::<Vec<_>>();

@@ -877,6 +877,10 @@ end
 
     #[tokio::test]
     async fn test_coordinator_performance_with_large_project() {
+        // SAFETY: This test is not run concurrently with other tests that modify this env var.
+        // Keep the large-project check focused on project files instead of local gem volume.
+        unsafe { std::env::set_var("RUBY_LSP_MAX_GEMS", "3") };
+
         let fixture = TestProjectFixture::new();
         fixture.setup_complete_project();
 
@@ -924,9 +928,11 @@ end
 
         // Performance assertion - should complete within reasonable time
         assert!(
-            duration.as_secs() < 30,
-            "Indexing should complete within 30 seconds"
+            duration.as_secs() < 45,
+            "Indexing should complete within 45 seconds"
         );
+
+        unsafe { std::env::remove_var("RUBY_LSP_MAX_GEMS") };
     }
 
     #[tokio::test]

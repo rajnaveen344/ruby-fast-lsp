@@ -10,11 +10,10 @@ use std::collections::HashMap;
 
 use log::debug;
 use ruby_analysis::engine::{AnalysisQuery, MixinUsageKind};
-use ruby_prism::{ModuleNode, Node, Visit};
+use ruby_analysis::indexer::module_definitions_for_lens;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::core::RubyConstant;
 
 use super::analysis_location::location_for_range;
 use super::EngineQuery;
@@ -60,13 +59,9 @@ impl EngineQuery {
     /// for every module that has at least one usage.
     pub fn get_code_lenses(&self, uri: &Url, content: &str) -> Vec<CodeLensData> {
         // 1. Parse AST and collect (FQN, start_offset, end_offset) for each module.
-        let parse_result = ruby_prism::parse(content.as_bytes());
-        let root = parse_result.node();
+        let modules = module_definitions_for_lens(content);
 
-        let mut collector = CodeLensCollector::new();
-        collector.visit(&root);
-
-        if collector.modules.is_empty() {
+        if modules.is_empty() {
             return Vec::new();
         }
 
@@ -78,7 +73,7 @@ impl EngineQuery {
 
         let mut results = Vec::new();
 
-        for (fqn, start_offset, end_offset) in &collector.modules {
+        for module in &modules {
             let engine_ref = self.analysis_engine().expect(
                 "INVARIANT VIOLATED: code lens query requires analysis engine. \
                  This is a bug because module usage lenses are derived from graph facts. \
@@ -86,17 +81,18 @@ impl EngineQuery {
             );
             let engine = engine_ref.lock();
             let query = AnalysisQuery::new(&engine);
-            let usages = mixin_usages_from_analysis(&query, &engine, fqn);
-            let class_locations = class_definition_locations_from_analysis(&query, &engine, fqn);
+            let usages = mixin_usages_from_analysis(&query, &engine, &module.fqn);
+            let class_locations =
+                class_definition_locations_from_analysis(&query, &engine, &module.fqn);
 
             if usages.is_empty() && class_locations.is_empty() {
-                debug!("No usages or classes found for module: {:?}", fqn);
+                debug!("No usages or classes found for module: {:?}", module.fqn);
                 continue;
             }
 
             // Convert byte offsets to LSP positions.
-            let start_position = document.offset_to_position(*start_offset);
-            let end_position = document.offset_to_position(*end_offset);
+            let start_position = document.offset_to_position(module.start_offset);
+            let end_position = document.offset_to_position(module.end_offset);
             let range = Range {
                 start: start_position,
                 end: end_position,
@@ -209,119 +205,5 @@ fn mixin_type_sort_key(mixin_type: MixinType) -> u8 {
         MixinType::Include => 0,
         MixinType::Prepend => 1,
         MixinType::Extend => 2,
-    }
-}
-
-// ============================================================================
-// Internal AST collector
-// ============================================================================
-
-/// Walks the AST and collects `(FullyQualifiedName, start_offset, end_offset)`
-/// for every `module` definition.
-struct CodeLensCollector {
-    modules: Vec<(FullyQualifiedName, usize, usize)>,
-    namespace_stack: Vec<String>,
-}
-
-impl CodeLensCollector {
-    fn new() -> Self {
-        Self {
-            modules: Vec::new(),
-            namespace_stack: Vec::new(),
-        }
-    }
-
-    /// Build an FQN from the current namespace stack plus a module name.
-    fn compute_fqn(&self, module_name: &str) -> Option<FullyQualifiedName> {
-        let mut constants = Vec::new();
-
-        for part in &self.namespace_stack {
-            match RubyConstant::new(part) {
-                Ok(c) => constants.push(c),
-                Err(_) => return None,
-            }
-        }
-
-        for part in module_name.split("::") {
-            match RubyConstant::new(part) {
-                Ok(c) => constants.push(c),
-                Err(_) => return None,
-            }
-        }
-
-        Some(FullyQualifiedName::from(constants))
-    }
-
-    /// Extract the constant name from a node (handles both simple and namespaced).
-    fn extract_constant_name(&self, node: &Node) -> String {
-        if let Some(constant_read) = node.as_constant_read_node() {
-            String::from_utf8_lossy(constant_read.name().as_slice()).to_string()
-        } else if node.as_constant_path_node().is_some() {
-            let mut parts = Vec::new();
-            self.collect_constant_path_parts(node, &mut parts);
-            parts.join("::")
-        } else {
-            String::new()
-        }
-    }
-
-    /// Recursively collect parts of a constant path (e.g. A::B → ["A", "B"]).
-    fn collect_constant_path_parts(&self, node: &Node, parts: &mut Vec<String>) {
-        if let Some(constant_path) = node.as_constant_path_node() {
-            if let Some(parent) = constant_path.parent() {
-                self.collect_constant_path_parts(&parent, parts);
-            }
-            if let Some(name_bytes) = constant_path.name() {
-                parts.push(String::from_utf8_lossy(name_bytes.as_slice()).to_string());
-            }
-        } else if let Some(constant_read) = node.as_constant_read_node() {
-            parts.push(String::from_utf8_lossy(constant_read.name().as_slice()).to_string());
-        }
-    }
-}
-
-impl Visit<'_> for CodeLensCollector {
-    fn visit_module_node(&mut self, node: &ModuleNode<'_>) {
-        let constant_path = node.constant_path();
-        let module_name = self.extract_constant_name(&constant_path);
-
-        if !module_name.is_empty() {
-            if let Some(fqn) = self.compute_fqn(&module_name) {
-                let start_offset = node.location().start_offset();
-                let end_offset = constant_path.location().end_offset();
-                self.modules.push((fqn, start_offset, end_offset));
-            }
-
-            // Push only the last segment for nested namespace resolution.
-            let simple_name = module_name.split("::").last().unwrap_or(&module_name);
-            self.namespace_stack.push(simple_name.to_string());
-        }
-
-        // Visit children.
-        if let Some(body) = node.body() {
-            self.visit(&body);
-        }
-
-        if !module_name.is_empty() {
-            self.namespace_stack.pop();
-        }
-    }
-
-    fn visit_class_node(&mut self, node: &ruby_prism::ClassNode<'_>) {
-        let constant_path = node.constant_path();
-        let class_name = self.extract_constant_name(&constant_path);
-
-        if !class_name.is_empty() {
-            let simple_name = class_name.split("::").last().unwrap_or(&class_name);
-            self.namespace_stack.push(simple_name.to_string());
-        }
-
-        if let Some(body) = node.body() {
-            self.visit(&body);
-        }
-
-        if !class_name.is_empty() {
-            self.namespace_stack.pop();
-        }
     }
 }

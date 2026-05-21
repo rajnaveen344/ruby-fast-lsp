@@ -77,7 +77,7 @@ impl<'a> AnalysisQuery<'a> {
         kind: NamespaceKind,
     ) -> Vec<MethodMatch> {
         let mut candidates = Vec::new();
-        for namespace_fqn in Self::receiver_type_to_namespaces(receiver_type, kind) {
+        for namespace_fqn in self.receiver_type_to_namespaces(receiver_type, kind) {
             for fact in self.method_facts_matching(&namespace_fqn, partial_method) {
                 candidates.push(self.method_match(&fact));
             }
@@ -233,7 +233,8 @@ impl<'a> AnalysisQuery<'a> {
             .starts_with(&request.partial_name.to_lowercase())
     }
 
-    fn receiver_type_to_namespaces(
+    pub fn receiver_type_to_namespaces(
+        &self,
         ruby_type: &RubyType,
         kind: NamespaceKind,
     ) -> Vec<FullyQualifiedName> {
@@ -251,9 +252,41 @@ impl<'a> AnalysisQuery<'a> {
             RubyType::Hash(_, _) => Self::namespace_for_builtin("Hash", kind),
             RubyType::Union(types) => types
                 .iter()
-                .flat_map(|ty| Self::receiver_type_to_namespaces(ty, kind))
+                .flat_map(|ty| self.receiver_type_to_namespaces(ty, kind))
                 .collect(),
             RubyType::Unknown => Vec::new(),
+        }
+    }
+
+    pub fn receiver_type_to_method_namespaces(
+        &self,
+        ruby_type: &RubyType,
+    ) -> Vec<FullyQualifiedName> {
+        match ruby_type {
+            RubyType::Class(fqn) | RubyType::Module(fqn) => {
+                let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
+                    fqn.namespace_parts(),
+                    NamespaceKind::Instance,
+                )];
+                if fqn.name() == "Object" {
+                    namespaces.push(FullyQualifiedName::namespace_with_kind(
+                        Vec::new(),
+                        NamespaceKind::Instance,
+                    ));
+                }
+                namespaces
+            }
+            RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
+                vec![FullyQualifiedName::namespace_with_kind(
+                    fqn.namespace_parts(),
+                    NamespaceKind::Singleton,
+                )]
+            }
+            RubyType::Union(types) => types
+                .iter()
+                .flat_map(|ty| self.receiver_type_to_method_namespaces(ty))
+                .collect(),
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
         }
     }
 

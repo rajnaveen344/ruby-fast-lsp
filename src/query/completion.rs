@@ -31,8 +31,8 @@ impl EngineQuery {
 
     fn find_constant_completions_from_analysis(
         &self,
-        analyzer: &RubyPrismAnalyzer,
-        position: Position,
+        _analyzer: &RubyPrismAnalyzer,
+        _position: Position,
         partial: &str,
     ) -> Option<Vec<CompletionItem>> {
         let engine = self.analysis_engine()?;
@@ -42,21 +42,8 @@ impl EngineQuery {
             return None;
         }
 
-        let (_, _, _, scope_stack, _) = analyzer.get_identifier(position);
-        let context =
-            crate::capabilities::completion::constant_completion::ConstantCompletionContext::new(
-                position,
-                scope_stack,
-                partial.to_string(),
-            );
-
         let mut items = query
-            .constant_matches(&ConstantLookupRequest {
-                partial_name: context.partial_name,
-                namespace_prefix: context.namespace_prefix,
-                is_qualified: context.is_qualified,
-                limit: 50,
-            })
+            .constant_matches(&ConstantLookupRequest::new(partial, 50))
             .into_iter()
             .map(constant_completion_item)
             .collect::<Vec<_>>();
