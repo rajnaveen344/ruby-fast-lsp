@@ -124,15 +124,15 @@ Decision rule:
   - Good in engine: `MethodMatch`, `ConstantMatch`
   - Fine in engine: `CallHierarchy`, `TypeHierarchy` (domain/tooling concepts)
 
-Current clobber to reduce:
+Current boundary status:
 
-- `src/query/*` mixes semantic lookup with LSP conversion. Move semantic parts
-  into `ruby-analysis`; leave protocol mapping in `src/query/*`.
-- `crates/ruby-analysis/src/engine/query_types.rs` must stay split by ownership
-  (`lookup`, `hierarchy`, `namespace_tree`, `debug`, workspace symbol search).
-- `src/capabilities/completion/mod.rs` mixes trigger routing, type probing, and
-  LSP item building. Keep `CompletionItem`/snippets/triggers there, but move
-  reusable semantic candidate discovery to `ruby-analysis`.
+- `src/query/*` is a protocol adapter over `ruby-analysis::engine::AnalysisQuery`.
+  Keep `TextRange -> Location`, cursor parsing, and LSP response shaping here.
+- `ruby-analysis::engine` query code stays split by ownership (`lookup`,
+  `hierarchy`, `namespace_tree`, `debug`, workspace symbol search).
+- `src/capabilities/completion/mod.rs` owns trigger routing, snippets, and LSP
+  completion flow. Reusable receiver/type probing and RBS candidate discovery
+  live in `ruby-analysis::inference::completion`.
 
 ### Analysis Module Responsibilities
 
@@ -198,21 +198,23 @@ inference/query seam is formalized.
 
 ### Migration Backlog
 
-Move remaining non-LSP logic out of `src/`:
+Moved non-LSP logic out of `src/`:
 
-1. `src/query/implementation.rs` -> engine domain query. LSP keeps only
-   `TextRange -> Location`.
-2. `src/query/namespace_tree.rs` -> engine snapshot/projection. LSP keeps JSON
-   command adapter.
-3. `src/query/debug.rs` -> engine debug/introspection query. LSP keeps command
-   response shaping.
-4. `src/query/references.rs` -> engine target resolution/reference grouping.
-   LSP keeps cursor identifier + `Location` mapping.
-5. `src/query/definition.rs` -> engine symbol/method/global lookup. LSP keeps
-   cursor identifier + protocol mapping.
-6. `src/query/completion.rs` and `src/capabilities/completion/*` -> engine
-   candidate selection. LSP keeps `CompletionItem`, snippets, trigger plumbing.
-7. `src/query/hover/*` -> split domain hover content from protocol hover.
+1. Done: `src/query/implementation.rs` delegates domain implementor lookup to
+   engine and keeps only `TextRange -> Location`.
+2. Done: `src/query/namespace_tree.rs` delegates snapshot/projection to engine
+   and keeps command adapter behavior.
+3. Done: `src/query/debug.rs` delegates debug/introspection queries to engine
+   and keeps command response shaping.
+4. Done: `src/query/references.rs` delegates target resolution/reference
+   grouping to engine and keeps cursor identifier + `Location` mapping.
+5. Done: `src/query/definition.rs` delegates symbol/method/global lookup to
+   engine and keeps cursor identifier + protocol mapping.
+6. Done: `src/query/completion.rs` maps engine/inference completion matches to
+   LSP items; `src/capabilities/completion/*` keeps snippets, variables, and
+   trigger plumbing.
+7. Done: `src/query/hover/*` keeps protocol hover formatting while domain hover
+   targets and semantic lookup live in `ruby-analysis`.
 8. Done: analysis crates collapsed into one `crates/ruby-analysis` crate with
    internal `core`, `engine`, `inference`, and `indexer` modules.
 9. Done: `src/inferrer/*` -> `crates/ruby-analysis/src/inference`.
@@ -385,7 +387,8 @@ RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` become
 **Key files:**
 - `crates/ruby-analysis/src/inference/type_tracker/mod.rs` — local flow/type tracking
 - `crates/ruby-analysis/src/inference/rbs.rs` — RBS type lookup with generic substitution
-- `src/capabilities/completion/method.rs` — LSP completion item mapping for RBS methods
+- `crates/ruby-analysis/src/inference/completion.rs` — receiver type probing and RBS completion matches
+- `src/query/completion.rs` — LSP completion item mapping for analysis matches
 
 ## Subagent Delegation
 

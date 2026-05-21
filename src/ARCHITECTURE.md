@@ -8,13 +8,11 @@ The Ruby Fast LSP server follows a modular architecture with clear separation of
 
 ```
 src/
-├── ruby-analysis/src/indexer/ - Ruby AST analysis and visitors
-├── capabilities/   - LSP feature implementations (AST-only logic)
+├── ruby-analysis/  - Reusable analysis engine, inference, and indexer
+├── capabilities/   - LSP/editor adapters, snippets, trigger handling
 ├── indexer/        - File discovery and fact collection orchestration
-├── query/          - Service Layer: Unified AnalysisEngine query engine
-├── inferrer/       - Type inference and RBS integration
+├── query/          - LSP protocol adapters over ruby-analysis
 ├── handlers/       - LSP request/notification routing
-├── types/          - Core data structures (FQN, Document, Method)
 ├── server.rs       - LSP server coordination
 └── main.rs         - Application entry point
 tests/
@@ -71,9 +69,10 @@ The Analyzer is responsible for understanding Ruby code structure using the Pris
 
 ### 3. Capabilities (`src/capabilities/`)
 
-Capabilities implement specific LSP features by coordinating between the Analyzer and the Query Engine.
+Capabilities implement LSP/editor feature entry points by coordinating query
+adapters, analysis APIs, and editor-specific behavior.
 
-- **Primary Responsibility**: Implement LSP feature endpoints and handle AST-only logic
+- **Primary Responsibility**: Implement LSP feature endpoints, trigger routing, snippets, and editor-only behavior
 - **Secondary Responsibility**: Convert between LSP types and internal types
 
 #### Key Files:
@@ -89,7 +88,7 @@ Capabilities implement specific LSP features by coordinating between the Analyze
 #### Design Decisions:
 
 - Each capability is self-contained in its own module
-- Capabilities focus on AST traversal and local scope analysis
+- Capabilities stay thin; reusable semantic analysis belongs in `ruby-analysis`
 - For engine-backed queries, capabilities delegate to the **Query Engine**
 - Capabilities handle LSP-specific concerns (request/validation/shaping)
 

@@ -1,8 +1,11 @@
-# Query Engine Design
+# Query Adapter Design
 
 ## Overview
 
-The Query Engine provides a unified service layer between LSP handlers (`server.rs`) and the data layer (`RubyIndex`). It consolidates all query logic into a single `src/query/` module, following a clean 3-layer architecture.
+`src/query/` is now the LSP adapter layer over `ruby-analysis`. Reusable Ruby
+semantics live in `ruby-analysis::{engine,inference,indexer}`; `src/query/`
+keeps cursor parsing, protocol response shaping, and `TextRange` to LSP
+`Location` conversion.
 
 ## Architecture Diagram
 
@@ -21,8 +24,8 @@ graph TB
         CAP[capabilities/]
     end
 
-    subgraph "Service Layer (src/query/)"
-        IQ[IndexQuery]
+    subgraph "Adapter Layer (src/query/)"
+        IQ[EngineQuery]
         DEF[definition.rs]
         REF[references.rs]
         HOV[hover.rs]
@@ -39,10 +42,10 @@ graph TB
         INF[inference.rs]
     end
 
-    subgraph "Data Layer (src/indexer/)"
-        IDX[RubyIndex]
-        GRAPH[Graph]
-        PT[PrefixTree]
+    subgraph "Reusable Analysis (crates/ruby-analysis)"
+        ENG[engine::AnalysisQuery]
+        INF[inference]
+        IDX[indexer]
     end
 
     TD --> CAP
@@ -69,15 +72,15 @@ graph TB
     IQ --> TH2
     IQ --> INF
 
-    DEF --> IDX
-    REF --> IDX
-    HOV --> IDX
-    COMP --> IDX
-    DBG --> IDX
-    METH --> IDX
+    DEF --> ENG
+    REF --> ENG
+    HOV --> ENG
+    COMP --> ENG
+    COMP --> INF
+    DBG --> ENG
+    METH --> ENG
 
-    IDX --> GRAPH
-    IDX --> PT
+    IDX --> ENG
 ```
 
 ## Key Principle: Composable Helpers
@@ -99,21 +102,21 @@ flowchart LR
 4. Find the assignment's return type via `get_method_return_type()`
 5. Use result type to call `get_method_completions(User)`
 
-This composability is why all helpers are on the same `IndexQuery` struct.
+Reusable semantic helpers now live in `ruby-analysis`; `EngineQuery` composes
+those results only when building LSP-facing responses.
 
-## Core Component: `IndexQuery`
+## Core Component: `EngineQuery`
 
 ```rust
 // src/query/mod.rs
-pub struct IndexQuery<'a> {
-    index: &'a RubyIndex,
-    uri: Option<&'a Url>,      // For file-scoped queries
-    content: Option<&'a [u8]>, // For position-based analysis
+pub struct EngineQuery {
+    doc: Option<Arc<RwLock<RubyDocument>>>,
+    uri: Option<Url>,
+    analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
-impl<'a> IndexQuery<'a> {
-    pub fn new(index: &'a RubyIndex) -> Self;
-    pub fn for_file(index: &'a RubyIndex, uri: &'a Url, content: &'a [u8]) -> Self;
+impl EngineQuery {
+    pub fn with_engine(engine: Arc<Mutex<AnalysisEngine>>) -> Self;
 }
 ```
 
@@ -135,7 +138,9 @@ Resolves method calls, receivers, and return types via MRO.
 Type inference utilities for assignments and local variables.
 
 ### 6. Completion Query (`completion.rs`)
-Constant completions (scope-resolved) and method completions (type-aware).
+Maps engine/inference completion matches into LSP `CompletionItem`s. Receiver
+type probing and RBS method candidates live in
+`ruby-analysis::inference::completion`.
 
 ### 7. Debug Query (`debug.rs`)
 Index inspection: lookup, stats, ancestors, methods, inference-stats, export-graph.
@@ -190,7 +195,8 @@ Query flow:
 
 ## Integration Status
 
-All capabilities now route through `IndexQuery`:
+All semantic LSP features now route through `EngineQuery` and
+`ruby-analysis::AnalysisQuery`:
 
 | Capability | Query Module | Status |
 |------------|-------------|--------|

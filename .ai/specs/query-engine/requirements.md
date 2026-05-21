@@ -2,7 +2,9 @@
 
 ## Introduction
 
-This specification defines a unified query engine layer (`IndexQuery`) for the Ruby Fast LSP, consolidating all business logic for querying the `RubyIndex`. The goal is to create a clean 3-layer architecture (Data → Service → API) that reduces code duplication, improves maintainability, and provides a single source of truth for query logic.
+This specification defines the LSP query adapter layer (`EngineQuery`) over
+`ruby-analysis`. Reusable Ruby semantics live in `ruby-analysis`; `src/query/`
+keeps protocol conversion, cursor parsing, and adapter glue.
 
 ## Requirements
 
@@ -67,10 +69,14 @@ This specification defines a unified query engine layer (`IndexQuery`) for the R
 
 #### Acceptance Criteria
 
-1. WHEN accessing RubyIndex THEN only query layer SHALL access it directly
-2. WHEN server.rs handles requests THEN it SHALL delegate to query layer
-3. WHEN adding new features THEN changes SHALL stay within query layer
-4. WHEN capabilities/ exists THEN it SHALL only contain AST-only logic
+1. WHEN accessing analysis state THEN LSP code SHALL go through `AnalysisQuery`
+   or a narrow trait adapter
+2. WHEN server.rs handles requests THEN it SHALL delegate to capabilities/query
+   adapters
+3. WHEN adding reusable Ruby semantics THEN changes SHALL live in
+   `ruby-analysis`
+4. WHEN capabilities/ exists THEN it SHALL contain editor behavior: trigger
+   routing, snippets, protocol plumbing, and AST-only editor features
 
 ## Non-Functional Requirements
 
@@ -80,19 +86,20 @@ This specification defines a unified query engine layer (`IndexQuery`) for the R
 - No additional memory overhead beyond existing structures
 
 ### Maintainability Requirements
-- All index-heavy logic SHALL be in one location (src/query/)
+- Reusable semantic logic SHALL be in `ruby-analysis`
+- `src/query/` SHALL keep protocol mapping and adapter glue only
 - New queries SHALL follow established patterns
 - Query methods SHALL be well-documented
 
 ### Compatibility Requirements
 - Existing capability tests SHALL continue to pass
 - Server.rs handler signatures SHALL remain compatible
-- RubyIndex public API SHALL remain stable during migration
+- `ruby-analysis` public query APIs SHALL remain stable during migration
 
 ## Success Criteria
 
-1. **Consolidation**: All duplicated query logic moved to `src/query/`
-2. **Simplification**: `capabilities/` reduced to AST-only handlers
-3. **Maintainability**: Adding a new query requires changes to one module
+1. **Consolidation**: Reusable query logic moved to `ruby-analysis`
+2. **Simplification**: `capabilities/` reduced to editor/LSP behavior
+3. **Maintainability**: Adding reusable semantics does not require LSP types
 4. **No Regressions**: All existing tests pass
 5. **Documentation**: Query API is well-documented

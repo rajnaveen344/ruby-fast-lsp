@@ -1,13 +1,16 @@
-pub mod method;
 pub mod snippets;
 pub mod variable;
 
-use ruby_analysis::core::{FullyQualifiedName, NamespaceKind};
+use ruby_analysis::core::{FullyQualifiedName, NamespaceKind, RubyMethod, SourceFileId};
 use tower_lsp::lsp_types::{
     CompletionContext, CompletionResponse, CompletionTriggerKind, Position, Url,
 };
 
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_analysis::inference::{
+    completion::{CompletionSemanticQuery, CompletionVariableKind},
+    RubyType,
+};
 
 use crate::{
     query::EngineQuery,
@@ -227,9 +230,10 @@ pub async fn find_completion_at_position(
         // Method call context: provide type-aware method completions
 
         // Get receiver type using type snapshots
-        let receiver_type = get_receiver_type_from_snapshots(
-            server,
-            &uri,
+        let semantic_query = ServerCompletionSemanticQuery { server };
+        let receiver_type = ruby_analysis::inference::completion::receiver_type_from_context(
+            &semantic_query,
+            &document,
             &document.content,
             position,
             &partial_name,
@@ -304,503 +308,34 @@ pub async fn find_completion_at_position(
 
     CompletionResponse::Array(completions)
 }
+struct ServerCompletionSemanticQuery<'a> {
+    server: &'a RubyLanguageServer,
+}
 
-/// Get the receiver type using type snapshots from TypeTracker
-///
-/// This function determines the type of the receiver expression at a completion position.
-/// It handles:
-/// - Constant receivers (e.g., `User.find`) -> ClassReference
-/// - Literal receivers (e.g., `"hello".`, `123.`) -> direct type
-/// - Variable receivers (e.g., `name.`) -> type from snapshots
-fn get_receiver_type_from_snapshots(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    content: &str,
-    position: Position,
-    identifier: &Option<Identifier>,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::core::FullyQualifiedName;
-    use ruby_analysis::core::RubyConstant;
-    use ruby_analysis::inference::RubyType;
-
-    // If we have a method identifier with constant receiver, use it directly
-    if let Some(Identifier::RubyMethod {
-        receiver: MethodReceiver::Constant(recv_parts),
-        ..
-    }) = identifier
-    {
-        let fqn = FullyQualifiedName::Constant(recv_parts.clone());
-        return Some(RubyType::ClassReference(fqn));
+impl CompletionSemanticQuery for ServerCompletionSemanticQuery<'_> {
+    fn method_return_type_for_receiver(
+        &self,
+        namespace: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<RubyType> {
+        let engine = self.server.analysis_engine.lock();
+        ruby_analysis::engine::AnalysisQuery::new(&engine)
+            .method_return_type_for_receiver(namespace, method)
     }
 
-    // Handle self receiver — resolve to the enclosing class/module
-    if let Some(Identifier::RubyMethod {
-        receiver: MethodReceiver::SelfReceiver,
-        namespace,
-        ..
-    }) = identifier
-    {
-        if !namespace.is_empty() {
-            let fqn = FullyQualifiedName::from(namespace.clone());
-            return Some(RubyType::Class(fqn));
-        }
-    }
-
-    // Handle method call chains — resolve inner receiver, then infer return type
-    // e.g., User.new.name -> Constant(User) + "new" -> Class(User) instance, then lookup "name"
-    // e.g., user.name.upcase -> Variable("user") + "name" -> infer return type of name
-    if let Some(Identifier::RubyMethod {
-        receiver:
-            MethodReceiver::MethodCall {
-                inner_receiver,
-                method_name,
-            },
-        ..
-    }) = identifier
-    {
-        let inner_type =
-            resolve_method_receiver_type(server, uri, content, position, inner_receiver);
-        if let Some(inner_type) = inner_type {
-            // Special case: .new on a ClassReference returns an instance of that class
-            if method_name == "new" {
-                if let RubyType::ClassReference(fqn) = &inner_type {
-                    return Some(RubyType::Class(fqn.clone()));
-                }
-            }
-
-            // General case: look up the method's return type
-            if let Some(rt) =
-                infer_method_call_return_type_from_analysis(server, &inner_type, method_name)
-            {
-                return Some(rt);
-            }
-        }
-    }
-
-    // Handle literal receivers — type is already known from the AST
-    if let Some(Identifier::RubyMethod {
-        receiver: MethodReceiver::Literal(ty),
-        ..
-    }) = identifier
-    {
-        return Some(ty.clone());
-    }
-
-    // Handle instance/class/global variable receivers — look up type from index
-    if let Some(Identifier::RubyMethod { receiver, .. }) = identifier {
-        let var_type = match receiver {
-            MethodReceiver::InstanceVariable(name)
-            | MethodReceiver::ClassVariable(name)
-            | MethodReceiver::GlobalVariable(name) => {
-                lookup_variable_type_from_engine(server, uri, name, receiver)
-            }
-            _ => None,
+    fn variable_type_in_file(
+        &self,
+        kind: CompletionVariableKind,
+        name: &str,
+        file_id: SourceFileId,
+    ) -> Option<RubyType> {
+        let kind = match kind {
+            CompletionVariableKind::Instance => ruby_analysis::engine::VariableTypeKind::Instance,
+            CompletionVariableKind::Class => ruby_analysis::engine::VariableTypeKind::Class,
+            CompletionVariableKind::Global => ruby_analysis::engine::VariableTypeKind::Global,
         };
-        if let Some(ty) = var_type {
-            return Some(ty);
-        }
+        let engine = self.server.analysis_engine.lock();
+        ruby_analysis::engine::AnalysisQuery::new(&engine)
+            .variable_type_in_file(kind, name, file_id)
     }
-
-    // Extract receiver text from the line
-    let line = content.lines().nth(position.line as usize)?;
-    let char_pos = position.character as usize;
-
-    let before_cursor = if char_pos <= line.len() {
-        &line[..char_pos]
-    } else {
-        line
-    };
-
-    let dot_pos = before_cursor.rfind('.')?;
-    let before_dot = before_cursor[..dot_pos].trim_end();
-
-    // Try literal detection on the raw text before the dot first,
-    // before we strip to just the last word token. This handles cases
-    // like `"hello".upcase` and `[1,2,3].first` where the literal
-    // expression contains non-alphanumeric chars.
-    if let Some(literal_type) =
-        ruby_analysis::inference::completion::infer_literal_type_from_expression(before_dot)
-    {
-        return Some(literal_type);
-    }
-
-    // Extract only the last token (word) before the dot
-    // This handles cases like "puts b." where we want just "b"
-    let receiver_text = before_dot
-        .rsplit(|c: char| !c.is_alphanumeric() && c != '_' && c != '@' && c != '$')
-        .next()
-        .map(|s| s.trim())
-        .unwrap_or("")
-        .trim();
-
-    if receiver_text.is_empty() {
-        return None;
-    }
-
-    // Handle literals from single-word text (e.g., integer `42.abs`)
-    if let Some(literal_type) =
-        ruby_analysis::inference::completion::infer_literal_type(receiver_text)
-    {
-        return Some(literal_type);
-    }
-
-    // Handle constant references (class/module names)
-    if receiver_text
-        .chars()
-        .next()
-        .map(|c| c.is_uppercase())
-        .unwrap_or(false)
-    {
-        if let Ok(constant) = RubyConstant::new(receiver_text) {
-            return Some(RubyType::ClassReference(FullyQualifiedName::Constant(
-                vec![constant],
-            )));
-        }
-    }
-
-    // For variables, use VariableScopes tree for type resolution
-    if ruby_analysis::inference::completion::is_variable_name(receiver_text) {
-        let receiver_position = Position {
-            line: position.line,
-            character: (dot_pos - receiver_text.len()) as u32,
-        };
-
-        // Get type from VariableScopes tree
-        if let Some(doc_arc) = server.docs.lock().get(uri) {
-            let doc = doc_arc.read();
-            if let Some(scope_id) = doc
-                .find_scope_for_variable_at(receiver_text, receiver_position)
-                .or_else(|| doc.scope_at_position(receiver_position))
-            {
-                if let Some(ty) =
-                    doc.variable_type_at_position(receiver_text, scope_id, receiver_position)
-                {
-                    if *ty != RubyType::Unknown {
-                        return Some(ty.clone());
-                    }
-                }
-            }
-        }
-
-        // Fallback: Look for constructor assignment pattern (var = ClassName.new)
-        if let Some(ty) = ruby_analysis::inference::completion::infer_constructor_assignment_type(
-            content,
-            receiver_text,
-        ) {
-            return Some(ty);
-        }
-    }
-
-    if let Some(return_type) =
-        infer_bare_method_return_type_from_analysis(server, receiver_text, identifier)
-    {
-        return Some(return_type);
-    }
-
-    None
-}
-
-/// Resolve a `MethodReceiver` to a `RubyType` for method chain resolution.
-///
-/// This handles the base cases (Constant, LocalVariable, SelfReceiver) that
-/// `get_receiver_type_from_snapshots` handles for Identifier, but operates
-/// on the recursive `MethodReceiver` structure used in chained calls.
-fn resolve_method_receiver_type(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    content: &str,
-    position: Position,
-    receiver: &MethodReceiver,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::core::FullyQualifiedName;
-    use ruby_analysis::inference::RubyType;
-
-    match receiver {
-        MethodReceiver::Constant(parts) => {
-            let fqn = FullyQualifiedName::Constant(parts.clone());
-            Some(RubyType::ClassReference(fqn))
-        }
-        MethodReceiver::LocalVariable(name) => {
-            // Look up variable type from VariableScopes
-            if let Some(doc_arc) = server.docs.lock().get(uri) {
-                let doc = doc_arc.read();
-                if let Some(scope_id) = doc
-                    .find_scope_for_variable_at(name, position)
-                    .or_else(|| doc.scope_at_position(position))
-                {
-                    if let Some(ty) = doc.variable_type_at_position(name, scope_id, position) {
-                        if *ty != RubyType::Unknown {
-                            return Some(ty.clone());
-                        }
-                    }
-                }
-            }
-            // Fallback to constructor pattern
-            ruby_analysis::inference::completion::infer_constructor_assignment_type(content, name)
-        }
-        MethodReceiver::SelfReceiver => {
-            // Would need namespace context — not available here
-            None
-        }
-        MethodReceiver::InstanceVariable(name)
-        | MethodReceiver::ClassVariable(name)
-        | MethodReceiver::GlobalVariable(name) => {
-            lookup_variable_type_from_engine(server, uri, name, receiver)
-        }
-        MethodReceiver::MethodCall {
-            inner_receiver,
-            method_name,
-        } => {
-            let inner_type =
-                resolve_method_receiver_type(server, uri, content, position, inner_receiver)?;
-            // Special case: .new on a ClassReference returns an instance
-            if method_name == "new" {
-                if let RubyType::ClassReference(fqn) = &inner_type {
-                    return Some(RubyType::Class(fqn.clone()));
-                }
-            }
-            infer_method_call_return_type_from_analysis(server, &inner_type, method_name)
-        }
-        MethodReceiver::Literal(ty) => Some(ty.clone()),
-        _ => None,
-    }
-}
-
-fn infer_method_call_return_type_from_analysis(
-    server: &RubyLanguageServer,
-    receiver_type: &ruby_analysis::inference::RubyType,
-    method_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::core::RubyMethod;
-    use ruby_analysis::inference::RubyType;
-
-    if method_name == "new" {
-        if let RubyType::ClassReference(fqn) = receiver_type {
-            return Some(RubyType::Class(fqn.clone()));
-        }
-    }
-
-    if let Some(return_type) = infer_generic_rbs_method_return_type(receiver_type, method_name) {
-        return Some(return_type);
-    }
-
-    let method = RubyMethod::new(method_name).ok()?;
-    let engine = server.analysis_engine.lock();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    for namespace in receiver_type_to_analysis_namespaces(receiver_type) {
-        if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
-            return Some(return_type);
-        }
-    }
-
-    infer_rbs_method_return_type(receiver_type, method_name)
-}
-
-fn infer_generic_rbs_method_return_type(
-    receiver_type: &ruby_analysis::inference::RubyType,
-    method_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::inference::RubyType;
-
-    match receiver_type {
-        RubyType::Array(element_types) => {
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Array",
-                method_name,
-                false,
-                element_types,
-            )
-        }
-        RubyType::Hash(key_types, value_types) => {
-            let type_args = vec![
-                RubyType::union(key_types.clone()),
-                RubyType::union(value_types.clone()),
-            ];
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Hash",
-                method_name,
-                false,
-                &type_args,
-            )
-        }
-        RubyType::Class(_)
-        | RubyType::Module(_)
-        | RubyType::ClassReference(_)
-        | RubyType::ModuleReference(_)
-        | RubyType::Union(_)
-        | RubyType::Unknown => None,
-    }
-}
-
-fn infer_rbs_method_return_type(
-    receiver_type: &ruby_analysis::inference::RubyType,
-    method_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::inference::RubyType;
-
-    match receiver_type {
-        RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, false)
-        }
-        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, true)
-        }
-        RubyType::Array(_) | RubyType::Hash(_, _) => {
-            infer_generic_rbs_method_return_type(receiver_type, method_name)
-        }
-        RubyType::Union(types) => {
-            let mut return_types = types
-                .iter()
-                .filter_map(|ty| {
-                    infer_method_call_return_type_from_analysis_fallback(ty, method_name)
-                })
-                .collect::<Vec<_>>();
-            return_types.sort_by_key(|ty| ty.to_string());
-            return_types.dedup();
-            match return_types.len() {
-                0 => None,
-                1 => return_types.pop(),
-                _ => Some(RubyType::union(return_types)),
-            }
-        }
-        RubyType::Unknown => None,
-    }
-}
-
-fn infer_method_call_return_type_from_analysis_fallback(
-    receiver_type: &ruby_analysis::inference::RubyType,
-    method_name: &str,
-) -> Option<ruby_analysis::inference::RubyType> {
-    infer_generic_rbs_method_return_type(receiver_type, method_name)
-        .or_else(|| infer_rbs_method_return_type(receiver_type, method_name))
-}
-
-fn rbs_method_return_for_fqn(
-    fqn: &FullyQualifiedName,
-    method_name: &str,
-    is_singleton: bool,
-) -> Option<ruby_analysis::inference::RubyType> {
-    for class_name in class_names_for_fqn(fqn) {
-        if let Some(return_type) =
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_as_ruby_type(
-                &class_name,
-                method_name,
-                is_singleton,
-            )
-        {
-            return Some(return_type);
-        }
-    }
-    None
-}
-
-fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
-    let parts = fqn.namespace_parts();
-    let fqn_name = parts
-        .iter()
-        .map(|part| part.to_string())
-        .collect::<Vec<_>>()
-        .join("::");
-    let simple_name = parts.last().map(|part| part.to_string());
-
-    let mut names = Vec::new();
-    if !fqn_name.is_empty() {
-        names.push(fqn_name);
-    }
-    if let Some(simple_name) = simple_name {
-        if !names.contains(&simple_name) {
-            names.push(simple_name);
-        }
-    }
-    names
-}
-
-fn receiver_type_to_analysis_namespaces(
-    receiver_type: &ruby_analysis::inference::RubyType,
-) -> Vec<FullyQualifiedName> {
-    use ruby_analysis::core::NamespaceKind;
-    use ruby_analysis::inference::RubyType;
-
-    match receiver_type {
-        RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            vec![FullyQualifiedName::namespace_with_kind(
-                fqn.namespace_parts(),
-                NamespaceKind::Instance,
-            )]
-        }
-        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            vec![FullyQualifiedName::namespace_with_kind(
-                fqn.namespace_parts(),
-                NamespaceKind::Singleton,
-            )]
-        }
-        RubyType::Union(types) => types
-            .iter()
-            .flat_map(receiver_type_to_analysis_namespaces)
-            .collect(),
-        RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
-    }
-}
-
-fn infer_bare_method_return_type_from_analysis(
-    server: &RubyLanguageServer,
-    method_name: &str,
-    identifier: &Option<Identifier>,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::core::NamespaceKind;
-    use ruby_analysis::core::RubyMethod;
-
-    let method = RubyMethod::new(method_name).ok()?;
-    let mut namespaces = Vec::new();
-    if let Some(Identifier::RubyMethod { namespace, .. }) = identifier {
-        namespaces.push(FullyQualifiedName::namespace_with_kind(
-            namespace.clone(),
-            NamespaceKind::Instance,
-        ));
-    }
-    namespaces.push(FullyQualifiedName::namespace_with_kind(
-        Vec::new(),
-        NamespaceKind::Instance,
-    ));
-
-    let engine = server.analysis_engine.lock();
-    let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-    for namespace in namespaces {
-        if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
-            return Some(return_type);
-        }
-    }
-    None
-}
-
-/// Look up the type of an instance/class/global variable from analysis type facts.
-fn lookup_variable_type_from_engine(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    name: &str,
-    receiver: &MethodReceiver,
-) -> Option<ruby_analysis::inference::RubyType> {
-    use ruby_analysis::engine::VariableTypeKind;
-
-    let file_id = {
-        let docs = server.docs.lock();
-        let file_id = docs.get(uri)?.read().analysis_file_id();
-        file_id
-    };
-
-    let kind = match receiver {
-        MethodReceiver::InstanceVariable(_) => VariableTypeKind::Instance,
-        MethodReceiver::ClassVariable(_) => VariableTypeKind::Class,
-        MethodReceiver::GlobalVariable(_) => VariableTypeKind::Global,
-        MethodReceiver::None
-        | MethodReceiver::SelfReceiver
-        | MethodReceiver::Constant(_)
-        | MethodReceiver::LocalVariable(_)
-        | MethodReceiver::MethodCall { .. }
-        | MethodReceiver::Literal(_)
-        | MethodReceiver::Expression => return None,
-    };
-
-    let engine = server.analysis_engine.lock();
-    ruby_analysis::engine::AnalysisQuery::new(&engine).variable_type_in_file(kind, name, file_id)
 }

@@ -84,15 +84,15 @@ This folder contains context and guidance for AI assistants working on the Ruby 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Query Layer (IndexQuery)                   │
+│              Query Adapter Layer (EngineQuery)              │
 │                      (src/query/)                           │
-│  definition, references, hover, completion, debug, etc.     │
+│  LSP mapping for definition, refs, hover, completion, etc.  │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌───────────────────┐  ┌───────────────┐  ┌────────────────────┐
-│      Indexer      │  │   Inferrer    │  │  Analyzer (Prism)  │
-│   (src/indexer)   │  │   (crates/)   │  │(analysis indexer)  │
+│ analysis::engine  │  │analysis::inf. │  │ analysis::indexer  │
+│ facts + queries   │  │ type logic    │  │ parser/fact emit   │
 └───────────────────┘  └───────────────┘  └────────────────────┘
 ```
 

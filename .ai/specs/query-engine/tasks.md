@@ -6,7 +6,7 @@
 - [x] Requirements analysis
 - [x] Architecture design
 - [x] Capability categorization (index-heavy vs AST-only)
-- [x] **Phase 1.1** — Foundation: `IndexQuery` struct, factory methods
+- [x] **Phase 1.1** — Foundation: `EngineQuery` adapter and factory methods
 - [x] **Phase 1.2** — Definition queries (`query/definition.rs`)
 - [x] **Phase 1.3** — Reference queries (`query/references.rs`)
 - [x] **Phase 1.4** — Type queries (`query/types.rs`)
@@ -21,7 +21,7 @@
 - [x] **Phase 1.13** — Type hierarchy queries (`query/type_hierarchy.rs`)
 - [x] **Phase 1.14** — Inference queries (`query/inference.rs`)
 - [x] **Phase 1.15** — Debug queries (`query/debug.rs`)
-- [x] **Phase 2** — All capability handlers updated to use IndexQuery
+- [x] **Phase 2** — All semantic capability handlers updated to use `EngineQuery`/`ruby-analysis`
 - [x] **Phase 3.2** — Documentation updated
 
 ### 🔄 In Progress Tasks
@@ -29,12 +29,7 @@ None currently.
 
 ### 📋 Pending Tasks
 
-#### Phase 3: Cleanup (Optional)
-
-- [ ] **Remove dead code from capabilities**
-  - Some capability files still contain private helpers that were copied (not moved) to query/.
-  - Audit and remove any truly dead code.
-  - Keep AST-only features in capabilities: folding, semantic_tokens, document_symbols, formatting.
+None for the LSP-wrapper-over-analysis boundary.
 
 ## Query Module Summary
 
@@ -42,7 +37,7 @@ All query modules are now implemented in `src/query/`:
 
 | Module | File | Methods |
 |--------|------|---------|
-| Foundation | `mod.rs` | `IndexQuery::new`, `with_doc`, `with_uri` |
+| Foundation | `mod.rs` | `EngineQuery::new`, `with_doc`, `with_uri`, `with_engine` |
 | Definition | `definition.rs` | `find_definitions_at_position` |
 | References | `references.rs` | `find_references_at_position` |
 | Hover | `hover.rs` | `get_hover_for_position` |
@@ -63,11 +58,12 @@ All query modules are now implemented in `src/query/`:
 All verified:
 - [x] `cargo build` — zero compilation errors
 - [x] `cargo test` — 702 tests pass, 0 failures
-- [x] All capabilities route through `IndexQuery`
+- [x] Semantic capabilities route through `EngineQuery`/`ruby-analysis`
 
 ## Success Criteria
 
-- [x] All index-heavy logic in `src/query/`
-- [x] `capabilities/` are thin adapters over query layer
+- [x] Reusable semantic logic lives in `ruby-analysis`
+- [x] `src/query/` maps analysis results to LSP protocol types
+- [x] `capabilities/` are thin editor/LSP adapters over query + analysis
 - [x] All existing tests pass
 - [x] No performance regression

@@ -6,12 +6,11 @@
 use tower_lsp::lsp_types::{CompletionItem, Position};
 use tower_lsp::lsp_types::{CompletionItemKind, CompletionItemLabelDetails};
 
-use crate::capabilities::completion::method;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::SymbolKind as AnalysisSymbolKind;
 use ruby_analysis::engine::{ConstantLookupRequest, ConstantMatch, MethodMatch};
 use ruby_analysis::indexer::RubyPrismAnalyzer;
-use ruby_analysis::inference::RubyType;
+use ruby_analysis::inference::{completion::rbs_method_matches_for_type, RubyType};
 
 use super::EngineQuery;
 
@@ -63,11 +62,13 @@ impl EngineQuery {
         kind: NamespaceKind,
     ) -> Vec<CompletionItem> {
         let mut items = self.method_completions_from_analysis(receiver_type, partial_method, kind);
-        items.extend(method::find_rbs_method_completions(
-            receiver_type,
-            partial_method,
-            kind,
-        ));
+        items.extend(
+            rbs_method_matches_for_type(receiver_type, partial_method, kind)
+                .into_iter()
+                .map(|candidate| {
+                    method_completion_item(candidate.name, candidate.params, candidate.return_type)
+                }),
+        );
         dedupe_completion_items(items)
     }
 
@@ -112,9 +113,15 @@ impl EngineQuery {
 }
 
 fn method_completion_item_from_analysis(candidate: MethodMatch) -> CompletionItem {
-    let name = candidate.name;
-    let params = candidate
-        .params
+    method_completion_item(candidate.name, candidate.params, candidate.return_type)
+}
+
+fn method_completion_item(
+    name: String,
+    params: Vec<String>,
+    return_type: Option<RubyType>,
+) -> CompletionItem {
+    let params = params
         .iter()
         .filter(|param| !param.is_empty())
         .cloned()
@@ -124,8 +131,7 @@ fn method_completion_item_from_analysis(candidate: MethodMatch) -> CompletionIte
     } else {
         format!("({})", params.join(", "))
     };
-    let return_type = candidate
-        .return_type
+    let return_type = return_type
         .map(|ruby_type| format!(" -> {ruby_type}"))
         .unwrap_or_default();
     let detail = format!("{name}{params}{return_type}");

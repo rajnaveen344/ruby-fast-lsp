@@ -143,7 +143,7 @@
 
 #### Phase 4: Type-Aware Completion (Milestone 8) ✅ COMPLETED
 
-- [x] **Method Completion** - `src/capabilities/completion/method.rs`
+- [x] **Method Completion** - `crates/ruby-analysis/src/inference/completion.rs` + `src/query/completion.rs`
 
   - Type-aware method suggestions based on receiver type
   - RBS integration for built-in method signatures
@@ -2147,14 +2147,15 @@ end
 | Step | Task                                     | Files to Modify                     | Status |
 | ---- | ---------------------------------------- | ----------------------------------- | ------ |
 | 8.1  | Get receiver type at completion position | `capabilities/completion/mod.rs`    | ✅     |
-| 8.2  | Filter methods by receiver type          | `capabilities/completion/method.rs` | ✅     |
-| 8.3  | Add type info to completion item detail  | `capabilities/completion/method.rs` | ✅     |
-| 8.4  | Sort completions by type relevance       | `capabilities/completion/method.rs` | ✅     |
+| 8.2  | Filter methods by receiver type          | `ruby-analysis::inference::completion` | ✅     |
+| 8.3  | Add type info to completion item detail  | `src/query/completion.rs` | ✅     |
+| 8.4  | Sort completions by type relevance       | `ruby-analysis::inference::completion` | ✅     |
 | 8.5  | Add integration tests                    | `test/`                             | ✅     |
 
 **Implementation Details**:
 
-- Created `capabilities/completion/method.rs` for type-aware method completions
+- Moved type-aware method candidate discovery to `ruby-analysis::inference::completion`
+- Kept LSP completion item mapping in `src/query/completion.rs`
 - Integrated CFG-based type narrowing for receiver type inference
 - Works for both method-level and top-level code
 - Uses RBS type definitions for built-in method signatures

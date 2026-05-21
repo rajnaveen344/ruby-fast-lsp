@@ -91,14 +91,14 @@ belong in engine; this layer keeps protocol mapping, cursor parsing, and
 query/
 ├── mod.rs                  # EngineQuery wrapper and module exports
 ├── code_lens.rs            # Code lens protocol adapter
-├── completion.rs           # Completion protocol adapter
+├── completion.rs           # Completion protocol adapter over analysis matches
 ├── debug.rs                # Debug/inspection queries (lookup, stats, ancestors, etc.)
 ├── definition.rs           # Go-to-definition adapter
 ├── diagnostics.rs          # YARD and unresolved diagnostics queries
-├── hover.rs                # Hover information queries
-├── inference.rs            # Type inference resolvers
+├── hover.rs                # Hover protocol formatting
+├── inference.rs            # Thin type-query adapters
 ├── inlay_hints.rs          # Inlay hint queries
-├── method.rs               # Method resolution and return types
+├── method.rs               # Method query adapter
 ├── namespace_tree.rs       # Namespace tree queries
 ├── references.rs           # Find-references queries
 ├── type_hierarchy.rs       # Supertype/subtype queries
@@ -108,8 +108,9 @@ query/
 
 ## Capabilities Module (`src/capabilities/`)
 
-Thin adapters that bridge handlers to the query layer. AST-only features
-(no index access) live here directly; index-heavy features delegate to `query/`.
+Thin adapters that bridge handlers to query/analysis. Editor behavior such as
+completion triggers, snippets, and protocol plumbing stays here; reusable Ruby
+semantics live in `ruby-analysis`.
 
 ```
 capabilities/
