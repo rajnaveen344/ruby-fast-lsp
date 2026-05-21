@@ -217,7 +217,16 @@ jobs:
       - name: Publish to Open VSX
         run: |
           cd vsix
-          npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
+          for attempt in 1 2 3; do
+            if npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}; then
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            echo "Open VSX publish failed; retrying in 60 seconds..."
+            sleep 60
+          done
 
   create-release:
     needs: [publish-npm, publish-vsix]
