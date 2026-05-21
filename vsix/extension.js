@@ -618,6 +618,10 @@ function getServerPath() {
         throw new Error(`Ruby Fast LSP binary not found. Tried: ${candidatePaths.join(', ')}`);
     }
 
+    if (!isWindows) {
+        fs.chmodSync(serverPath, 0o755);
+    }
+
     return serverPath;
 }
 
