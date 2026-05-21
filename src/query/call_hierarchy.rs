@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::{
 
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 
-use super::analysis_location::location_for_range;
+use super::analysis_location::{location_for_range, lsp_ranges_for_ranges};
 use super::EngineQuery;
 
 // ============================================================================
@@ -114,11 +114,7 @@ impl EngineQuery {
                 .filter_map(|call| {
                     Some(CallHierarchyIncomingCall {
                         from: call_hierarchy_item_from_engine_method(&engine, call.from)?,
-                        from_ranges: call
-                            .from_ranges
-                            .into_iter()
-                            .filter_map(|range| location_for_range(&engine, range).map(|l| l.range))
-                            .collect(),
+                        from_ranges: lsp_ranges_for_ranges(&engine, call.from_ranges),
                     })
                 })
                 .collect(),
@@ -145,11 +141,7 @@ impl EngineQuery {
                 .filter_map(|call| {
                     Some(CallHierarchyOutgoingCall {
                         to: call_hierarchy_item_from_engine_method(&engine, call.to)?,
-                        from_ranges: call
-                            .from_ranges
-                            .into_iter()
-                            .filter_map(|range| location_for_range(&engine, range).map(|l| l.range))
-                            .collect(),
+                        from_ranges: lsp_ranges_for_ranges(&engine, call.from_ranges),
                     })
                 })
                 .collect(),

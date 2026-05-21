@@ -11,7 +11,7 @@ use ruby_analysis::indexer::yard::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use super::analysis_location::location_for_range;
+use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
 
 impl EngineQuery {
@@ -185,16 +185,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .method_reference_ranges(namespace_fqn, method)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(crate::utils::deduplicate_locations(locations))
-        }
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine,
+            query.method_reference_ranges(namespace_fqn, method),
+        )))
     }
 
     fn method_reference_locations_for_constant_receiver_from_analysis(
@@ -206,16 +200,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .method_reference_ranges_for_constant_receiver(receiver_path, ancestors, method)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(crate::utils::deduplicate_locations(locations))
-        }
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine,
+            query.method_reference_ranges_for_constant_receiver(receiver_path, ancestors, method),
+        )))
     }
 
     fn method_reference_locations_for_current_scope_from_analysis(
@@ -226,16 +214,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .method_reference_ranges_for_current_scope(ancestors, method)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(crate::utils::deduplicate_locations(locations))
-        }
+        non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
+            &engine,
+            query.method_reference_ranges_for_current_scope(ancestors, method),
+        )))
     }
 
     fn constant_reference_locations_from_analysis(
@@ -246,16 +228,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .constant_reference_ranges(constant_path, ancestors)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.constant_reference_ranges(constant_path, ancestors),
+        ))
     }
 
     fn variable_reference_locations_from_analysis(
@@ -265,16 +241,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .variable_reference_ranges(fqn)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.variable_reference_ranges(fqn),
+        ))
     }
 
     fn reference_locations_for_fqn_from_analysis(
@@ -284,15 +254,9 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        let locations = query
-            .reference_ranges_for_fqn(fqn)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.reference_ranges_for_fqn(fqn),
+        ))
     }
 }

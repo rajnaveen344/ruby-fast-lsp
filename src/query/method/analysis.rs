@@ -1,4 +1,4 @@
-use crate::query::analysis_location::location_for_range;
+use crate::query::analysis_location::locations_for_ranges;
 use crate::query::EngineQuery;
 use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::RubyMethod;
@@ -22,11 +22,7 @@ pub(super) fn resolve_method_callees(
                 owner: callee.owner,
                 method: callee.method,
                 resolution: callee.resolution,
-                definition_locations: callee
-                    .definition_ranges
-                    .into_iter()
-                    .filter_map(|range| location_for_range(&engine, range))
-                    .collect(),
+                definition_locations: locations_for_ranges(&engine, callee.definition_ranges),
             })
             .collect(),
     )

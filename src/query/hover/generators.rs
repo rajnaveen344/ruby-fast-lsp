@@ -1,7 +1,7 @@
-//! Hover generators - convert HoverNodes to HoverInfo.
+//! Hover formatting helpers.
 //!
-//! Each generator function is a pure function that takes a node and context,
-//! and returns formatted hover information.
+//! Ruby target classification and reusable semantic lookup live in
+//! `ruby-analysis`; this module builds the protocol-facing hover text.
 
 use parking_lot::Mutex;
 use ruby_analysis::core::{NamespaceKind, RubyConstant};

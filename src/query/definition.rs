@@ -11,7 +11,7 @@ use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use super::analysis_location::location_for_range;
+use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
 
 impl EngineQuery {
@@ -182,17 +182,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .constant_definition_ranges(constant_path, ancestors)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.constant_definition_ranges(constant_path, ancestors),
+        ))
     }
 
     fn yard_type_definition_locations_from_analysis(
@@ -203,17 +196,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .yard_type_definition_ranges(type_name, ancestors)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.yard_type_definition_ranges(type_name, ancestors),
+        ))
     }
 
     fn instance_variable_definition_locations_from_analysis(
@@ -223,17 +209,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .instance_variable_definition_ranges(name)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.instance_variable_definition_ranges(name),
+        ))
     }
 
     fn class_variable_definition_locations_from_analysis(
@@ -243,17 +222,10 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .class_variable_definition_ranges(name)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.class_variable_definition_ranges(name),
+        ))
     }
 
     fn global_variable_definition_locations_from_analysis(
@@ -263,16 +235,9 @@ impl EngineQuery {
         let engine = self.analysis_engine()?;
         let engine = engine.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .global_variable_definition_ranges(name)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.global_variable_definition_ranges(name),
+        ))
     }
 }

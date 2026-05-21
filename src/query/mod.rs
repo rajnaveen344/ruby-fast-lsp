@@ -1,12 +1,12 @@
-//! Query Engine - Unified query layer for analysis facts
+//! LSP query adapters over analysis facts.
 //!
-//! This module provides a single entry point for all index queries, consolidating
-//! business logic that was previously scattered across capabilities.
+//! This module exposes protocol-facing helpers that keep editor request handling
+//! thin while delegating reusable Ruby semantics to `ruby-analysis`.
 //!
 //! # Architecture
 //!
 //! ```text
-//! server.rs (API) → query/ (Service) → analysis-engine/ (Data)
+//! server.rs → query/ protocol adapters → ruby-analysis engine/indexer/inference
 //! ```
 //!
 //! # Usage
@@ -44,10 +44,10 @@ use ruby_analysis::indexer::RubyDocument;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
-/// Unified query interface for analysis-backed LSP features.
+/// Protocol-facing query interface for analysis-backed LSP features.
 ///
-/// Provides high-level, domain-focused query methods that abstract away
-/// analysis-engine details.
+/// Keeps `tower_lsp` response construction in `ruby-fast-lsp` while semantic
+/// lookup stays in `ruby-analysis`.
 pub struct EngineQuery {
     doc: Option<Arc<RwLock<RubyDocument>>>,
     uri: Option<Url>,

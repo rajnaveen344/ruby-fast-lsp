@@ -10,6 +10,34 @@ pub(crate) fn location_for_range(engine: &AnalysisEngine, range: TextRange) -> O
     })
 }
 
+pub(crate) fn locations_for_ranges(
+    engine: &AnalysisEngine,
+    ranges: impl IntoIterator<Item = TextRange>,
+) -> Vec<Location> {
+    ranges
+        .into_iter()
+        .filter_map(|range| location_for_range(engine, range))
+        .collect()
+}
+
+pub(crate) fn lsp_ranges_for_ranges(
+    engine: &AnalysisEngine,
+    ranges: impl IntoIterator<Item = TextRange>,
+) -> Vec<Range> {
+    ranges
+        .into_iter()
+        .filter_map(|range| location_for_range(engine, range).map(|location| location.range))
+        .collect()
+}
+
+pub(crate) fn non_empty_locations(locations: Vec<Location>) -> Option<Vec<Location>> {
+    if locations.is_empty() {
+        None
+    } else {
+        Some(locations)
+    }
+}
+
 fn source_file_uri(file: &SourceFile) -> Option<Url> {
     Url::from_file_path(&file.path).ok()
 }

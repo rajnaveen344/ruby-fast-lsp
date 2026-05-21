@@ -11,7 +11,7 @@ use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use super::analysis_location::location_for_range;
+use super::analysis_location::{locations_for_ranges, non_empty_locations};
 use super::EngineQuery;
 
 impl EngineQuery {
@@ -85,17 +85,10 @@ impl EngineQuery {
         );
         let engine = engine_ref.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .method_implementation_ranges(owner_fqn, method)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.method_implementation_ranges(owner_fqn, method),
+        ))
     }
 
     fn namespace_implementations_from_analysis(
@@ -109,16 +102,9 @@ impl EngineQuery {
         );
         let engine = engine_ref.lock();
         let query = AnalysisQuery::new(&engine);
-        let locations = query
-            .namespace_implementation_ranges(fqn)
-            .into_iter()
-            .filter_map(|range| location_for_range(&engine, range))
-            .collect::<Vec<_>>();
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        non_empty_locations(locations_for_ranges(
+            &engine,
+            query.namespace_implementation_ranges(fqn),
+        ))
     }
 }

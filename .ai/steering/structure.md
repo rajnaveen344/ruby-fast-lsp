@@ -192,8 +192,8 @@ test/
 
 1. **Visitor Pattern**: Used extensively for AST traversal
 2. **Fact Collection**: Single-pass AST traversal emits engine-owned facts
-3. **3-Layer Architecture**: `handlers/` (API) → `query/` (Service) → `indexer/` (Data)
-4. **Thin Capabilities**: `capabilities/` are adapters; business logic lives in `query/`
-5. **Separation of Concerns**: Clear boundaries between parsing, indexing, analysis, and LSP features
+3. **Thin LSP Wrapper**: `handlers/` → `capabilities/` → `query/` adapt editor requests to `ruby-analysis`
+4. **Reusable Analysis**: Ruby semantics live in `ruby-analysis::{engine,indexer,inference}`
+5. **Separation of Concerns**: Clear boundaries between parsing, indexing, analysis, and LSP protocol shaping
 6. **Position Translation**: Consistent byte offset → LSP position conversion
 7. **FQN-based Indexing**: All symbols stored with fully qualified names
