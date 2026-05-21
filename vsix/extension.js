@@ -584,19 +584,21 @@ function getServerPath() {
     const extension = isWindows ? '.exe' : '';
     const binaryName = `ruby-fast-lsp${extension}`;
 
-    // Map platform.arch to the correct binary path
+    // Map platform.arch to the correct binary path.
+    // Release CI publishes VSIX binaries under VS Code target platform names
+    // (darwin-arm64/darwin-x64). Older local packages used macos-* names.
     const platformMap = {
         'darwin': {
-            'x64': 'macos-x64',
-            'arm64': 'macos-arm64'
+            'x64': ['darwin-x64', 'macos-x64'],
+            'arm64': ['darwin-arm64', 'macos-arm64']
         },
         'linux': {
-            'x64': 'linux-x64',
-            'arm64': 'linux-arm64'
+            'x64': ['linux-x64'],
+            'arm64': ['linux-arm64']
         },
         'win32': {
-            'x64': 'win32-x64',
-            'arm64': 'win32-arm64'
+            'x64': ['win32-x64'],
+            'arm64': ['win32-arm64']
         }
     };
 
@@ -605,12 +607,18 @@ function getServerPath() {
         throw new Error(`Unsupported platform: ${platform}`);
     }
 
-    const platformDir = platformInfo[arch];
-    if (!platformDir) {
+    const platformDirs = platformInfo[arch];
+    if (!platformDirs) {
         throw new Error(`Unsupported architecture ${arch} for platform ${platform}`);
     }
 
-    return path.join(__dirname, 'bin', platformDir, binaryName);
+    const candidatePaths = platformDirs.map(platformDir => path.join(__dirname, 'bin', platformDir, binaryName));
+    const serverPath = candidatePaths.find(candidatePath => fs.existsSync(candidatePath));
+    if (!serverPath) {
+        throw new Error(`Ruby Fast LSP binary not found. Tried: ${candidatePaths.join(', ')}`);
+    }
+
+    return serverPath;
 }
 
 function getBundledExtensionPackages(extensionPath) {
