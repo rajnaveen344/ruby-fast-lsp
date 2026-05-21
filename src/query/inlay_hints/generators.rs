@@ -3,11 +3,13 @@
 //! This module contains the logic for generating actual hints from AST nodes.
 //! Generators are pure functions that take nodes and context, returning hints.
 
-use super::nodes::{InlayNode, VariableKind};
 use parking_lot::Mutex;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
-use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::indexer::{
+    inlay_hints::{InlayNode, VariableKind},
+    RubyDocument,
+};
 use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
@@ -38,32 +40,32 @@ pub enum InlayHintKind {
 
 /// Context for hint generation (provides access to type inference).
 pub struct HintContext<'a> {
-    pub content: &'a str,
     pub file_id: SourceFileId,
+    pub document: &'a RubyDocument,
     pub analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
 ///
 /// These hints don't require type inference.
-pub fn generate_structural_hints(nodes: &[InlayNode]) -> Vec<InlayHintData> {
+pub fn generate_structural_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<InlayHintData> {
     nodes
         .iter()
         .filter_map(|node| match node {
             InlayNode::BlockEnd {
                 kind,
                 name,
-                end_position,
+                end_offset,
             } => Some(InlayHintData {
-                position: *end_position,
+                position: context.document.offset_to_position(*end_offset as usize),
                 label: format!("{} {}", kind.keyword(), name),
                 kind: InlayHintKind::EndLabel,
                 tooltip: None,
                 padding_left: true,
                 padding_right: false,
             }),
-            InlayNode::ImplicitReturn { position } => Some(InlayHintData {
-                position: *position,
+            InlayNode::ImplicitReturn { offset } => Some(InlayHintData {
+                position: context.document.offset_to_position(*offset as usize),
                 label: "return".to_string(),
                 kind: InlayHintKind::ImplicitReturn,
                 tooltip: None,
@@ -82,7 +84,6 @@ pub fn generate_structural_hints(nodes: &[InlayNode]) -> Vec<InlayHintData> {
 pub fn generate_variable_type_hints(
     nodes: &[InlayNode],
     context: &HintContext,
-    document: &RubyDocument,
 ) -> Vec<InlayHintData> {
     let mut hints = Vec::new();
 
@@ -90,7 +91,7 @@ pub fn generate_variable_type_hints(
         if let InlayNode::VariableWrite {
             kind,
             name,
-            name_end_position,
+            name_end_offset,
         } = node
         {
             // Skip constants - they don't get type hints
@@ -98,7 +99,7 @@ pub fn generate_variable_type_hints(
                 continue;
             }
 
-            let ruby_type = infer_variable_type(*kind, name, context, document, name_end_position);
+            let ruby_type = infer_variable_type(*kind, name, context, *name_end_offset);
 
             let label = match &ruby_type {
                 Some(ty) if *ty != RubyType::Unknown => format!(": {}", ty),
@@ -106,7 +107,9 @@ pub fn generate_variable_type_hints(
             };
 
             hints.push(InlayHintData {
-                position: *name_end_position,
+                position: context
+                    .document
+                    .offset_to_position(*name_end_offset as usize),
                 label,
                 kind: InlayHintKind::VariableType,
                 tooltip: None,
@@ -127,17 +130,19 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
         if let InlayNode::MethodDef {
             name,
             params,
-            return_type_position,
+            return_type_offset,
             ..
         } = node
         {
             let return_type_str =
-                method_return_type_from_analysis(name, *return_type_position, context)
+                method_return_type_from_analysis(name, *return_type_offset, context)
                     .map(|rt| rt.to_string())
                     .unwrap_or_else(|| "?".to_string());
 
             hints.push(InlayHintData {
-                position: *return_type_position,
+                position: context
+                    .document
+                    .offset_to_position(*return_type_offset as usize),
                 label: format!(" -> {}", return_type_str),
                 kind: InlayHintKind::MethodReturn,
                 tooltip: None,
@@ -147,7 +152,7 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
 
             for param in params {
                 if let Some(param_type) =
-                    parameter_type_from_analysis(name, &param.name, *return_type_position, context)
+                    parameter_type_from_analysis(name, &param.name, *return_type_offset, context)
                 {
                     let label = if param.has_colon {
                         format!(" {}", param_type)
@@ -156,7 +161,9 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
                     };
 
                     hints.push(InlayHintData {
-                        position: param.end_position,
+                        position: context
+                            .document
+                            .offset_to_position(param.end_offset as usize),
                         label,
                         kind: InlayHintKind::ParameterType,
                         tooltip: None,
@@ -174,19 +181,21 @@ pub fn generate_method_hints(nodes: &[InlayNode], context: &HintContext) -> Vec<
 /// Generate hints for chained method calls with line breaks.
 pub fn generate_chained_call_hints(
     nodes: &[InlayNode],
-    _context: &HintContext,
+    context: &HintContext,
 ) -> Vec<InlayHintData> {
     let mut hints = Vec::new();
 
     for node in nodes {
-        if let InlayNode::ChainedCall { call_end_position } = node {
+        if let InlayNode::ChainedCall { call_end_offset } = node {
             // TODO: Implement proper type inference for chained calls
             // This requires:
             // 1. Inferring the receiver type
             // 2. Looking up the method's return type
             // For now, we'll leave this as a placeholder
             hints.push(InlayHintData {
-                position: *call_end_position,
+                position: context
+                    .document
+                    .offset_to_position(*call_end_offset as usize),
                 label: ": ?".to_string(), // Placeholder
                 kind: InlayHintKind::ChainedMethodType,
                 tooltip: Some("Type at this point in method chain".to_string()),
@@ -206,24 +215,28 @@ fn infer_variable_type(
     kind: VariableKind,
     name: &str,
     context: &HintContext,
-    document: &RubyDocument,
-    position: &Position,
+    byte_offset: u32,
 ) -> Option<RubyType> {
     match kind {
         VariableKind::Local => {
+            let position = context.document.offset_to_position(byte_offset as usize);
+
             // Try VariableScopes tree
-            if let Some(scope_id) = document.scope_at_position(*position) {
-                if let Some(ty) = document.variable_type_at_position(name, scope_id, *position) {
+            if let Some(scope_id) = context.document.scope_at_position(position) {
+                if let Some(ty) = context
+                    .document
+                    .variable_type_at_position(name, scope_id, position)
+                {
                     if *ty != RubyType::Unknown {
                         return Some(ty.clone());
                     }
                 }
             }
 
-            variable_type_from_analysis_facts(kind, name, context, position)
+            variable_type_from_analysis_facts(kind, name, context, byte_offset)
         }
         VariableKind::Instance | VariableKind::Class | VariableKind::Global => {
-            if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, position) {
+            if let Some(ty) = variable_type_from_analysis_facts(kind, name, context, byte_offset) {
                 return Some(ty);
             }
             None
@@ -237,10 +250,9 @@ fn infer_variable_type(
 
 fn method_return_type_from_analysis(
     name: &str,
-    return_type_position: Position,
+    byte_offset: u32,
     context: &HintContext,
 ) -> Option<RubyType> {
-    let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
     let engine = context.analysis_engine.as_ref()?;
     let engine = engine.lock();
     AnalysisQuery::new(&engine).method_return_type_at(name, context.file_id, byte_offset)
@@ -249,10 +261,9 @@ fn method_return_type_from_analysis(
 fn parameter_type_from_analysis(
     method_name: &str,
     param_name: &str,
-    return_type_position: Position,
+    byte_offset: u32,
     context: &HintContext,
 ) -> Option<RubyType> {
-    let byte_offset = position_to_byte_offset(context.content, return_type_position)?;
     let engine = context.analysis_engine.as_ref()?;
     let engine = engine.lock();
     AnalysisQuery::new(&engine).parameter_type_at(
@@ -267,9 +278,8 @@ fn variable_type_from_analysis_facts(
     kind: VariableKind,
     name: &str,
     context: &HintContext,
-    position: &Position,
+    byte_offset: u32,
 ) -> Option<RubyType> {
-    let byte_offset = position_to_byte_offset(context.content, *position)?;
     let engine = context.analysis_engine.as_ref()?;
     let engine = engine.lock();
     AnalysisQuery::new(&engine).variable_type_before(
@@ -288,28 +298,4 @@ fn variable_type_kind(kind: VariableKind) -> VariableTypeKind {
         VariableKind::Global => VariableTypeKind::Global,
         VariableKind::Constant => VariableTypeKind::Constant,
     }
-}
-
-fn position_to_byte_offset(content: &str, position: Position) -> Option<u32> {
-    let mut line = 0u32;
-    let mut character = 0u32;
-
-    for (byte_offset, ch) in content.char_indices() {
-        if line == position.line && character == position.character {
-            return u32::try_from(byte_offset).ok();
-        }
-
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-
-    if line == position.line && character == position.character {
-        return u32::try_from(content.len()).ok();
-    }
-
-    None
 }

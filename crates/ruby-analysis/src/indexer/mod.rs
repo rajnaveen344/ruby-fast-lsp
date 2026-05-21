@@ -13,6 +13,7 @@ pub mod document_symbols;
 pub mod fact_collector;
 pub mod identifier;
 pub mod identifier_visitor;
+pub mod inlay_hints;
 pub mod rename;
 mod ruby_document;
 mod scope_tracker;

@@ -379,6 +379,64 @@ fn build_namespace_tree(namespace_map: HashMap<String, NamespaceNode>) -> Namesp
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{
+        FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
+        RubyConstant, SourceKind, TextRange,
+    };
+
+    fn constant(name: &str) -> RubyConstant {
+        RubyConstant::new(name).unwrap()
+    }
+
+    #[test]
+    fn namespace_tree_filters_external_mixins() {
+        let mut engine = AnalysisEngine::new();
+        let user_file = engine.open_or_update_file_with_kind(
+            "/tmp/project/user.rb",
+            "class User; include Auth; end",
+            SourceKind::Project,
+        );
+        let auth_file = engine.open_or_update_file_with_kind(
+            "/tmp/gems/auth.rb",
+            "module Auth; end",
+            SourceKind::Gem,
+        );
+        let user = FullyQualifiedName::namespace(vec![constant("User")]);
+        let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
+        engine.add_graph_node_fact(GraphNodeFact::new(
+            user.clone(),
+            GraphNodeKind::Class,
+            TextRange::new(user_file, 0, 10),
+        ));
+        engine.add_graph_node_fact(GraphNodeFact::new(
+            auth.clone(),
+            GraphNodeKind::Module,
+            TextRange::new(auth_file, 0, 11),
+        ));
+        engine.add_graph_edge_fact(GraphEdgeFact::new(
+            user,
+            auth,
+            GraphEdgeKind::Include,
+            TextRange::new(user_file, 12, 24),
+        ));
+
+        let query = AnalysisQuery::new(&engine);
+        let project_only = query.namespace_tree(false);
+        assert_eq!(project_only.modules.len(), 0);
+        assert_eq!(project_only.classes.len(), 1);
+        assert_eq!(project_only.classes[0].fqn, "User");
+        assert_eq!(project_only.classes[0].includes.len(), 0);
+
+        let with_external = query.namespace_tree(true);
+        assert_eq!(with_external.modules.len(), 1);
+        assert_eq!(with_external.modules[0].fqn, "Auth");
+        assert_eq!(with_external.classes[0].includes[0].name, "Auth");
+    }
+}
+
 fn build_children_iterative(
     parent_fqn: &str,
     parent_node: &mut NamespaceNode,

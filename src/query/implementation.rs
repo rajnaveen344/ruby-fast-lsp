@@ -57,11 +57,11 @@ impl EngineQuery {
                     namespace_kind,
                     position,
                 )?;
-                self.find_method_implementations(&owner_fqn, iden)
+                self.method_implementations_from_analysis(&owner_fqn, iden)
             }
             Identifier::RubyConstant { namespace: _, iden } => {
                 let fqn = self.resolve_constant_fqn(iden, &ancestors);
-                self.find_namespace_implementations(&fqn)
+                self.namespace_implementations_from_analysis(&fqn)
             }
             _ => {
                 info!(
@@ -71,32 +71,6 @@ impl EngineQuery {
                 None
             }
         }
-    }
-
-    /// Find all implementations of a method across descendants and includers.
-    ///
-    /// Given `Serializable#to_json`, finds overrides in:
-    /// 1. Direct descendants (subclasses, sub-subclasses, etc.)
-    /// 2. Transitive mixers (modules/classes that include/prepend, recursively)
-    /// 3. Descendants of each mixer
-    ///
-    /// Example: Module A included by Module B included by Class C < Class D
-    /// → checks B, C, and D for method overrides.
-    fn find_method_implementations(
-        &self,
-        owner_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<Vec<Location>> {
-        self.method_implementations_from_analysis(owner_fqn, method)
-    }
-
-    /// Find all implementations of a module/class.
-    ///
-    /// For a module: returns all classes/modules that include/prepend/extend it
-    /// (transitively through module chains), plus all subclasses.
-    /// For a class: returns all subclasses.
-    fn find_namespace_implementations(&self, fqn: &FullyQualifiedName) -> Option<Vec<Location>> {
-        self.namespace_implementations_from_analysis(fqn)
     }
 
     fn method_implementations_from_analysis(

@@ -5,21 +5,20 @@
 
 use super::nodes::HoverNode;
 use parking_lot::Mutex;
-use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::{FullyQualifiedName, RubyConstant, RubyMethod};
 use ruby_analysis::engine::{
     AnalysisEngine, AnalysisQuery, ConstantHover, ConstantHoverKind, VariableTypeKind,
 };
 use ruby_analysis::indexer::LVScopeId;
 use ruby_analysis::indexer::MethodReceiver;
 use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::inference::method::method_call_return_type as infer_method_call_return_type;
 use ruby_analysis::inference::RubyType;
 use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
 /// Context for hover generation (provides access to necessary data).
 pub struct HoverContext<'a> {
-    pub content: &'a str,
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
     pub analysis_engine: Option<&'a Arc<Mutex<AnalysisEngine>>>,
 }
@@ -106,6 +105,7 @@ fn get_type_from_type_query(
 ) -> Option<RubyType> {
     let doc = context.document?.read();
     let file_id = doc.analysis_file_id();
+    let byte_offset = doc.position_to_analysis_offset(position);
     let scope_id = doc
         .find_scope_for_variable_at(name, position)
         .or_else(|| doc.scope_at_position(position))
@@ -117,7 +117,6 @@ fn get_type_from_type_query(
     );
     drop(doc);
 
-    let byte_offset = position_to_byte_offset(context.content, position)?;
     let engine = context.analysis_engine?.lock();
     AnalysisQuery::new(&engine).local_variable_type_at(name, scope_id, file_id, byte_offset)
 }
@@ -191,7 +190,7 @@ pub fn generate_method_hover(node: &HoverNode, context: &HoverContext) -> Option
     // For method calls, resolve receiver type and infer return type
     let receiver_type = resolve_receiver_type(receiver, namespace, *scope_id, *position, context);
 
-    let return_type = method_call_return_type(context, &receiver_type, name);
+    let return_type = method_call_return_type_from_analysis(context, &receiver_type, name);
 
     match return_type {
         Some(t) if t != RubyType::Unknown => Some(HoverInfo::ruby_code(t.to_string())),
@@ -303,137 +302,19 @@ fn constant_reference_type_from_analysis(
     AnalysisQuery::new(&engine).constant_reference_type(path)
 }
 
-fn method_call_return_type(
+fn method_call_return_type_from_analysis(
     context: &HoverContext,
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
-    use ruby_analysis::core::RubyMethod;
-
-    if method_name == "new" {
-        if let RubyType::ClassReference(fqn) = receiver_type {
-            return Some(RubyType::Class(fqn.clone()));
-        }
-    }
-
-    if let Some(return_type) = generic_rbs_method_return_type(receiver_type, method_name) {
-        return Some(return_type);
-    }
-
     let method = RubyMethod::new(method_name).ok()?;
     if let Some(engine) = context.analysis_engine {
         let engine = engine.lock();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
-        for namespace in query.receiver_type_to_method_namespaces(receiver_type) {
-            if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
-                return Some(return_type);
-            }
-        }
+        return infer_method_call_return_type(Some(&query), receiver_type, method.as_str());
     }
 
-    rbs_method_return_type(receiver_type, method_name)
-}
-
-fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
-    match receiver_type {
-        RubyType::Array(element_types) => {
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Array",
-                method_name,
-                false,
-                element_types,
-            )
-        }
-        RubyType::Hash(key_types, value_types) => {
-            let type_args = vec![
-                RubyType::union(key_types.clone()),
-                RubyType::union(value_types.clone()),
-            ];
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_with_type_args(
-                "Hash",
-                method_name,
-                false,
-                &type_args,
-            )
-        }
-        RubyType::Class(_)
-        | RubyType::Module(_)
-        | RubyType::ClassReference(_)
-        | RubyType::ModuleReference(_)
-        | RubyType::Union(_)
-        | RubyType::Unknown => None,
-    }
-}
-
-fn rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
-    match receiver_type {
-        RubyType::Class(fqn) | RubyType::Module(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, false)
-        }
-        RubyType::ClassReference(fqn) | RubyType::ModuleReference(fqn) => {
-            rbs_method_return_for_fqn(fqn, method_name, true)
-        }
-        RubyType::Array(_) | RubyType::Hash(_, _) => {
-            generic_rbs_method_return_type(receiver_type, method_name)
-        }
-        RubyType::Union(types) => {
-            let mut return_types = types
-                .iter()
-                .filter_map(|ty| {
-                    generic_rbs_method_return_type(ty, method_name)
-                        .or_else(|| rbs_method_return_type(ty, method_name))
-                })
-                .collect::<Vec<_>>();
-            return_types.sort_by_key(|ty| ty.to_string());
-            return_types.dedup();
-            match return_types.len() {
-                0 => None,
-                1 => return_types.pop(),
-                _ => Some(RubyType::union(return_types)),
-            }
-        }
-        RubyType::Unknown => None,
-    }
-}
-
-fn rbs_method_return_for_fqn(
-    fqn: &FullyQualifiedName,
-    method_name: &str,
-    is_singleton: bool,
-) -> Option<RubyType> {
-    for class_name in class_names_for_fqn(fqn) {
-        if let Some(return_type) =
-            ruby_analysis::inference::rbs::get_rbs_method_return_type_as_ruby_type(
-                &class_name,
-                method_name,
-                is_singleton,
-            )
-        {
-            return Some(return_type);
-        }
-    }
-    None
-}
-
-fn class_names_for_fqn(fqn: &FullyQualifiedName) -> Vec<String> {
-    let parts = fqn.namespace_parts();
-    let fqn_name = parts
-        .iter()
-        .map(|part| part.to_string())
-        .collect::<Vec<_>>()
-        .join("::");
-    let simple_name = parts.last().map(|part| part.to_string());
-
-    let mut names = Vec::new();
-    if !fqn_name.is_empty() {
-        names.push(fqn_name);
-    }
-    if let Some(simple_name) = simple_name {
-        if !names.contains(&simple_name) {
-            names.push(simple_name);
-        }
-    }
-    names
+    infer_method_call_return_type(None, receiver_type, method_name)
 }
 
 fn generate_method_definition_hover(
@@ -457,9 +338,9 @@ fn method_definition_hover_from_analysis(
 ) -> Option<HoverInfo> {
     let doc = context.document?.read();
     let file_id = doc.analysis_file_id();
+    let byte_offset = doc.position_to_analysis_offset(position);
     drop(doc);
 
-    let byte_offset = position_to_byte_offset(context.content, position)?;
     let engine = context.analysis_engine?.lock();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let return_type = query.method_return_type_at(method_name, file_id, byte_offset)?;
@@ -471,30 +352,6 @@ fn method_definition_hover_from_analysis(
         "def {} -> {}",
         method_name, return_type
     )))
-}
-
-fn position_to_byte_offset(content: &str, position: Position) -> Option<u32> {
-    let mut line = 0u32;
-    let mut character = 0u32;
-
-    for (byte_offset, ch) in content.char_indices() {
-        if line == position.line && character == position.character {
-            return u32::try_from(byte_offset).ok();
-        }
-
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-
-    if line == position.line && character == position.character {
-        return u32::try_from(content.len()).ok();
-    }
-
-    None
 }
 
 fn resolve_receiver_type(
@@ -582,7 +439,8 @@ fn resolve_receiver_type(
                 return RubyType::Unknown;
             }
 
-            method_call_return_type(context, &inner_type, method_name).unwrap_or(RubyType::Unknown)
+            method_call_return_type_from_analysis(context, &inner_type, method_name)
+                .unwrap_or(RubyType::Unknown)
         }
         MethodReceiver::Literal(t) => t.clone(),
         MethodReceiver::Expression => RubyType::Unknown,
