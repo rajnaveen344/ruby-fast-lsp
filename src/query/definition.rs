@@ -3,9 +3,9 @@
 //! Consolidates definition logic from `capabilities/definitions/`.
 
 use log::info;
-use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
+use ruby_analysis::core::{FullyQualifiedName, SymbolKind};
 use ruby_analysis::engine::AnalysisQuery;
 use ruby_analysis::indexer::yard::YardParser;
 use ruby_analysis::indexer::{Identifier, RubyPrismAnalyzer};
@@ -72,6 +72,13 @@ impl EngineQuery {
         document
             .local_variable_definition_range_before(name, byte_offset)
             .map(|range| vec![document.text_range_to_lsp_location(range)])
+            .or_else(|| {
+                self.local_variable_definition_locations_from_analysis(
+                    name,
+                    document.analysis_file_id(),
+                    byte_offset,
+                )
+            })
     }
 
     /// Find definitions for a global variable.
@@ -161,7 +168,7 @@ impl EngineQuery {
             return fqn;
         }
 
-        FullyQualifiedName::Constant(constant_path.to_vec())
+        FullyQualifiedName::constant(constant_path.to_vec())
     }
 
     fn resolve_constant_fqn_from_analysis(
@@ -239,5 +246,25 @@ impl EngineQuery {
             &engine,
             query.global_variable_definition_ranges(name),
         ))
+    }
+
+    fn local_variable_definition_locations_from_analysis(
+        &self,
+        name: &str,
+        file_id: ruby_analysis::core::SourceFileId,
+        byte_offset: u32,
+    ) -> Option<Vec<Location>> {
+        let fqn = FullyQualifiedName::local_variable(name.to_string()).ok()?;
+        let engine = self.analysis_engine()?;
+        let engine = engine.lock();
+        let range = engine
+            .symbol_facts_for(&fqn)
+            .into_iter()
+            .filter(|fact| fact.kind == SymbolKind::LocalVariable)
+            .filter(|fact| fact.range.file_id == file_id)
+            .filter(|fact| fact.range.start_byte < byte_offset)
+            .max_by_key(|fact| fact.range.start_byte)
+            .map(|fact| fact.range)?;
+        non_empty_locations(locations_for_ranges(&engine, vec![range]))
     }
 }

@@ -20,7 +20,6 @@ impl FactCollector {
             range,
             vec![constant],
             self.scope_tracker.get_ns_stack(),
-            name,
         ));
     }
 

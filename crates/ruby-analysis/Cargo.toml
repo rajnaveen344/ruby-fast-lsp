@@ -18,3 +18,4 @@ ruby-fast-lsp-extension-api = { path = "../extension-api" }
 ruby-prism = "1.4.0"
 regex = "1.10"
 tower-lsp = "0.20.0"
+smallvec = "1.13"

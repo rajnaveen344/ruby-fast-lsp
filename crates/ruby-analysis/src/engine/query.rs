@@ -38,7 +38,7 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
-        self.engine.symbol_store().facts_in_file(file_id)
+        self.engine.symbol_facts_in_file(file_id)
     }
 
     pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
@@ -49,7 +49,7 @@ impl<'a> AnalysisQuery<'a> {
         !self.engine.all_symbol_facts().is_empty()
     }
 
-    pub fn symbols_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [SymbolFact] {
+    pub fn symbols_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
         self.engine.symbol_facts_for(fqn)
     }
 
@@ -57,12 +57,12 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.reference_facts_for(fqn)
     }
 
-    pub fn methods_for_fqn(&self, fqn: &FullyQualifiedName) -> &'a [MethodFact] {
+    pub fn methods_for_fqn(&self, fqn: &FullyQualifiedName) -> Vec<MethodFact> {
         self.engine.method_facts_for(fqn)
     }
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
-        self.engine.method_store().facts_in_file(file_id)
+        self.engine.method_facts_in_file(file_id)
     }
 
     pub fn all_method_facts(&self) -> Vec<MethodFact> {
@@ -73,11 +73,11 @@ impl<'a> AnalysisQuery<'a> {
         self.engine.reference_store().facts_in_file(file_id)
     }
 
-    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> &'a [GraphNodeFact] {
+    pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {
         self.engine.graph_nodes_for(fqn)
     }
 
-    pub fn graph_edges_from(&self, fqn: &FullyQualifiedName) -> &'a [GraphEdgeFact] {
+    pub fn graph_edges_from(&self, fqn: &FullyQualifiedName) -> Vec<GraphEdgeFact> {
         self.engine.graph_edges_from(fqn)
     }
 
@@ -94,10 +94,10 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
-        self.engine.graph_store().nodes_in_file(file_id)
+        self.engine.graph_nodes_in_file(file_id)
     }
 
     pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
-        self.engine.graph_store().edges_in_file(file_id)
+        self.engine.graph_edges_in_file(file_id)
     }
 }

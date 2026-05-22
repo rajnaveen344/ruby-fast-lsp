@@ -1,4 +1,4 @@
-use crate::core::{TypeFact, TypeProvenance, TypeSubject};
+use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
 use log::{error, trace};
 use ruby_prism::{
     GlobalVariableAndWriteNode, GlobalVariableOperatorWriteNode, GlobalVariableOrWriteNode,
@@ -29,13 +29,21 @@ impl FactCollector {
             error!("Global variable name too short: {}", variable_name);
             return;
         }
+        if let Ok(fqn) = FullyQualifiedName::global_variable(variable_name.clone()) {
+            self.direct_push_variable_symbol(fqn, SymbolKind::GlobalVariable, &name_loc);
+        }
 
         // Infer type from value if available
         let inferred_type = if let Some(value) = value_node {
-            self.infer_type_from_value(value)
+            self.infer_assignment_type_from_value(value)
         } else {
             RubyType::Unknown
         };
+        self.direct_push_assignment_type(
+            TypeSubject::GlobalVariable(variable_name.clone()),
+            inferred_type.clone(),
+            &name_loc,
+        );
 
         self.type_store.add(TypeFact::new(
             TypeSubject::GlobalVariable(variable_name.clone()),

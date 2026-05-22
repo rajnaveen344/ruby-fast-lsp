@@ -54,6 +54,5 @@ pub async fn handle_rename(
         changes: Some(changes),
         document_changes: None,
         change_annotations: None,
-        ..Default::default()
     })
 }

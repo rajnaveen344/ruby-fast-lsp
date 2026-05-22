@@ -9,7 +9,6 @@ mod debug;
 mod debug_types;
 mod diagnostic_helpers;
 mod diagnostics;
-mod engine;
 mod file_id_map;
 mod hierarchy;
 mod hierarchy_types;
@@ -19,6 +18,7 @@ mod namespace_tree;
 mod namespace_tree_types;
 mod query;
 mod resolution;
+mod state;
 mod types;
 mod workspace_symbol_types;
 mod workspace_symbols;
@@ -28,7 +28,6 @@ pub use debug_types::{
     InferenceStatsResponse, LookupEntry, LookupResponse, MethodEntry, MethodsResponse,
     StatsResponse,
 };
-pub use engine::{AnalysisEngine, FileAnalysisFacts, SourceFile};
 pub use file_id_map::FileIdMap;
 pub use hierarchy_types::{
     CallHierarchyMethod, IncomingCall, OutgoingCall, TypeHierarchyEntry, TypeHierarchyNode,
@@ -42,4 +41,7 @@ pub use namespace_tree_types::{
     IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 pub use query::AnalysisQuery;
+pub use state::{
+    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SourceFile, SourceFileInput,
+};
 pub use workspace_symbol_types::WorkspaceSymbolMatch;

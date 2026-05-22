@@ -146,11 +146,9 @@ impl WasmExtension {
             instance.get_typed_func::<(i32, i32), i64>(&mut store, "index_call"),
             "extension missing `index_call(ptr, len) -> packed_ptr_len` export",
         )?;
-        let handle_event =
-            match instance.get_typed_func::<(i32, i32), i64>(&mut store, "handle_event") {
-                Ok(handle_event) => Some(handle_event),
-                Err(_) => None,
-            };
+        let handle_event = instance
+            .get_typed_func::<(i32, i32), i64>(&mut store, "handle_event")
+            .ok();
 
         let actual_abi = map_wasmtime(
             store.set_fuel(host_config.fuel_per_call),

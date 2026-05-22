@@ -1,19 +1,22 @@
 use crate::core::{
-    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, FullyQualifiedName,
-    ReferenceCandidate, RubyConstant, TextRange, TypeStore,
+    DiagnosticCandidate, DiagnosticFact, DiagnosticSeverity, FullyQualifiedName, GraphEdgeFact,
+    GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact, MethodParamFact, NamespaceKind,
+    ReferenceCandidate, RubyConstant, RubyMethod, SymbolFact, SymbolKind, TextRange, TypeFact,
+    TypeProvenance, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 use crate::engine::AnalysisEngine;
 use once_cell::unsync::OnceCell;
 use ruby_fast_lsp_extension_api::{IndexPatch, Receiver, ResolvedCall, SourceRange};
 use ruby_prism::*;
 
+use super::AnalysisIndex;
 use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
 use crate::{collect_namespaces, ScopeTracker};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 mod bad_splat;
@@ -42,6 +45,7 @@ pub struct FactCollector {
     pub analysis_diagnostics: Vec<DiagnosticFact>,
     pub type_store: TypeStore,
     pub extension_call_stack: Vec<ruby_fast_lsp_extension_api::ResolvedCall>,
+    pub extension_call_stack_marks: Vec<bool>,
     pub extension_index_patches: Vec<IndexPatch>,
     pub extension_host: Arc<dyn FactCollectorExtensionHost>,
     pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
@@ -49,17 +53,26 @@ pub struct FactCollector {
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
     pub variable_types: OnceCell<HashMap<String, RubyType>>,
+    pub resolve_analysis_method_returns: bool,
+    pub infer_expression_receivers: bool,
+    pub diagnostics_enabled: bool,
+    pub direct_facts: AnalysisIndex,
+    direct_known_namespaces: HashSet<FullyQualifiedName>,
 }
 
 pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
     fn process_call_node(&self, _visitor: &mut FactCollector, _node: &CallNode) {}
+
+    fn should_track_enclosing_call(&self, _method_name: &str) -> bool {
+        false
+    }
 
     fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
         let call_range = source_range(visitor, &node.location());
         let message_range = node
             .message_loc()
             .map(|loc| source_range(visitor, &loc))
-            .unwrap_or(call_range.clone());
+            .unwrap_or(call_range);
         ResolvedCall {
             method_name: String::from_utf8_lossy(node.name().as_slice()).to_string(),
             receiver: Receiver::Expression,
@@ -82,6 +95,9 @@ impl FactCollector {
         code: &'static str,
         message: String,
     ) {
+        if !self.diagnostics_enabled {
+            return;
+        }
         self.analysis_diagnostics.push(DiagnosticFact::new(
             range,
             DiagnosticSeverity::Warning,
@@ -141,6 +157,7 @@ impl FactCollector {
             analysis_diagnostics: Vec::new(),
             type_store: TypeStore::new(),
             extension_call_stack: Vec::new(),
+            extension_call_stack_marks: Vec::new(),
             extension_index_patches: Vec::new(),
             extension_host,
             analysis_engine,
@@ -148,7 +165,182 @@ impl FactCollector {
             reference_candidates: Vec::new(),
             diagnostic_candidates: Vec::new(),
             variable_types: OnceCell::new(),
+            resolve_analysis_method_returns: true,
+            infer_expression_receivers: true,
+            diagnostics_enabled: true,
+            direct_facts: AnalysisIndex::default(),
+            direct_known_namespaces: HashSet::new(),
         }
+    }
+
+    pub fn without_analysis_method_return_resolution(mut self) -> Self {
+        self.resolve_analysis_method_returns = false;
+        self
+    }
+
+    pub fn without_expression_receiver_inference(mut self) -> Self {
+        self.infer_expression_receivers = false;
+        self
+    }
+
+    pub fn without_diagnostics(mut self) -> Self {
+        self.diagnostics_enabled = false;
+        self
+    }
+
+    pub fn with_direct_known_namespaces(
+        mut self,
+        known_namespaces: HashSet<FullyQualifiedName>,
+    ) -> Self {
+        self.direct_known_namespaces = known_namespaces;
+        self
+    }
+
+    pub fn direct_range(&self, location: &ruby_prism::Location<'_>) -> TextRange {
+        TextRange::new(
+            self.document.analysis_file_id(),
+            u32_offset(location.start_offset()),
+            u32_offset(location.end_offset()),
+        )
+    }
+
+    pub fn direct_push_namespace_facts(
+        &mut self,
+        fqn: FullyQualifiedName,
+        kind: GraphNodeKind,
+        range: TextRange,
+    ) {
+        self.direct_known_namespaces.insert(fqn.clone());
+        self.direct_facts.symbols.push(SymbolFact::new(
+            fqn.clone(),
+            match kind {
+                GraphNodeKind::Class => SymbolKind::Class,
+                GraphNodeKind::Module => SymbolKind::Module,
+            },
+            range,
+        ));
+        self.direct_facts
+            .graph_nodes
+            .push(GraphNodeFact::new(fqn.clone(), kind, range));
+        self.direct_facts.types.push(TypeFact::new(
+            TypeSubject::Constant(FullyQualifiedName::constant(fqn.namespace_parts())),
+            match kind {
+                GraphNodeKind::Class => RubyType::ClassReference(fqn.clone()),
+                GraphNodeKind::Module => RubyType::ModuleReference(fqn.clone()),
+            },
+            range,
+            TypeProvenance::Inferred,
+        ));
+
+        let singleton_fqn = fqn.to_singleton_namespace().expect(
+            "INVARIANT VIOLATED: namespace fact could not convert to singleton namespace. \
+             This is a bug because class/module graph nodes must be namespace FQNs. \
+             Fix: only call direct_push_namespace_facts with Namespace facts.",
+        );
+        self.direct_known_namespaces.insert(singleton_fqn.clone());
+        self.direct_facts
+            .graph_nodes
+            .push(GraphNodeFact::new(singleton_fqn, kind, range));
+    }
+
+    pub fn direct_resolve_namespace(
+        &self,
+        parts: &[RubyConstant],
+        absolute: bool,
+    ) -> Option<FullyQualifiedName> {
+        let mut search = if absolute {
+            Vec::new()
+        } else {
+            self.scope_tracker.get_ns_stack()
+        };
+
+        loop {
+            let mut probe = search.clone();
+            probe.extend(parts.iter().cloned());
+            let fqn = FullyQualifiedName::namespace(probe);
+            if self.direct_known_namespaces.contains(&fqn) {
+                return Some(fqn);
+            }
+            if absolute || search.is_empty() {
+                break;
+            }
+            search.pop();
+        }
+
+        let fqn = FullyQualifiedName::namespace(parts.to_vec());
+        self.direct_known_namespaces.contains(&fqn).then_some(fqn)
+    }
+
+    pub fn direct_push_edge(
+        &mut self,
+        source: FullyQualifiedName,
+        parts: &[RubyConstant],
+        absolute: bool,
+        kind: GraphEdgeKind,
+        range: TextRange,
+    ) {
+        let Some(target) = self.direct_resolve_namespace(parts, absolute) else {
+            self.direct_facts
+                .unresolved_graph_edges
+                .push(UnresolvedGraphEdgeFact::new(
+                    source,
+                    parts.to_vec(),
+                    absolute,
+                    FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack()),
+                    kind,
+                    range,
+                ));
+            return;
+        };
+        self.direct_facts
+            .graph_edges
+            .push(GraphEdgeFact::new(source, target, kind, range));
+    }
+
+    pub fn direct_push_method_fact(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        params: Vec<MethodParamFact>,
+    ) {
+        let fqn = FullyQualifiedName::method(namespace.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
+        self.direct_facts
+            .symbols
+            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.direct_facts
+            .methods
+            .push(MethodFact::with_param_facts(fqn, owner, range, params));
+    }
+
+    pub fn direct_push_variable_symbol(
+        &mut self,
+        fqn: FullyQualifiedName,
+        kind: SymbolKind,
+        location: &ruby_prism::Location<'_>,
+    ) {
+        self.direct_facts
+            .symbols
+            .push(SymbolFact::new(fqn, kind, self.direct_range(location)));
+    }
+
+    pub fn direct_push_assignment_type(
+        &mut self,
+        subject: TypeSubject,
+        ruby_type: RubyType,
+        location: &ruby_prism::Location<'_>,
+    ) {
+        if ruby_type == RubyType::Unknown {
+            return;
+        }
+        self.direct_facts.types.push(TypeFact::new(
+            subject,
+            ruby_type,
+            self.direct_range(location),
+            TypeProvenance::Assignment,
+        ));
     }
 
     pub fn infer_variable_type_cached(&self, var_name: &str) -> Option<RubyType> {
@@ -211,7 +403,7 @@ impl FactCollector {
                 if namespace.is_empty() {
                     return RubyType::Unknown;
                 }
-                let current_fqn = FullyQualifiedName::namespace(namespace.into());
+                let current_fqn = FullyQualifiedName::namespace(namespace);
                 RubyType::Class(current_fqn)
             };
 
@@ -233,6 +425,48 @@ impl FactCollector {
         }
 
         RubyType::Unknown
+    }
+
+    pub fn infer_assignment_type_from_value(&self, value_node: &Node) -> RubyType {
+        if self.resolve_analysis_method_returns {
+            return self.infer_type_from_value(value_node);
+        }
+
+        if let Some(literal_type) = self.literal_analyzer.analyze_literal(value_node) {
+            return literal_type;
+        }
+        if let Some(call) = value_node.as_call_node() {
+            if call.name().as_slice() == b"new" {
+                if let Some(receiver) = call.receiver() {
+                    if let Some(fqn) = self.constant_reference_type(&receiver) {
+                        return RubyType::Class(fqn);
+                    }
+                }
+            }
+            return RubyType::Unknown;
+        }
+        self.constant_reference_type(value_node)
+            .map(RubyType::ClassReference)
+            .unwrap_or(RubyType::Unknown)
+    }
+
+    fn constant_reference_type(&self, node: &Node) -> Option<FullyQualifiedName> {
+        if let Some(const_node) = node.as_constant_read_node() {
+            let name = String::from_utf8_lossy(const_node.name().as_slice()).to_string();
+            let constant = RubyConstant::new(&name).ok()?;
+            return Some(FullyQualifiedName::constant(vec![constant]));
+        }
+        if let Some(path_node) = node.as_constant_path_node() {
+            let mut parts = Vec::new();
+            collect_namespaces(&path_node, &mut parts);
+            if parts.is_empty() {
+                None
+            } else {
+                Some(FullyQualifiedName::constant(parts))
+            }
+        } else {
+            None
+        }
     }
 
     /// Helper to get the type of a local variable by name at a given location.
@@ -423,9 +657,17 @@ fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
             continue;
         }
         map.entry(lhs.to_string())
-            .or_insert_with(|| RubyType::Class(FullyQualifiedName::Constant(parts)));
+            .or_insert_with(|| RubyType::Class(FullyQualifiedName::constant(parts)));
     }
     map
+}
+
+fn u32_offset(offset: usize) -> u32 {
+    u32::try_from(offset).expect(
+        "INVARIANT VIOLATED: source byte offset exceeded u32. \
+         This is a bug because analysis facts currently store u32 ranges. \
+         Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
+    )
 }
 
 impl Visit<'_> for FactCollector {

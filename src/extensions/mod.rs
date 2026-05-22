@@ -260,6 +260,16 @@ impl FactCollectorExtensionHost for ExtensionRegistryHandle {
         ExtensionRegistryHandle::process_call_node(self, visitor, node);
     }
 
+    fn should_track_enclosing_call(&self, method_name: &str) -> bool {
+        if self.inner.read().has_loaded_extensions() {
+            return true;
+        }
+        matches!(
+            method_name,
+            "describe" | "context" | "shared_examples" | "shared_context"
+        )
+    }
+
     fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
         resolved_call_for_stack(visitor, node)
     }
@@ -288,6 +298,12 @@ impl ExtensionRegistry {
 
     fn extensions(&self) -> Vec<Arc<LoadedWasmExtension>> {
         self.extensions.clone()
+    }
+
+    fn has_loaded_extensions(&self) -> bool {
+        self.extensions
+            .iter()
+            .any(|extension| extension.is_loaded())
     }
 
     fn status_reports(&self) -> Vec<ExtensionStatusReport> {
@@ -1047,14 +1063,23 @@ fn call_context(visitor: &FactCollector, node: &CallNode) -> CallContext {
 }
 
 pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
+    let method_name = utils::utf8_str(node.name().as_slice()).to_string();
     let receiver = node
         .receiver()
         .map(|receiver| receiver_from_node(&receiver))
         .unwrap_or(Receiver::None);
+    let resolved_callees = if matches!(
+        method_name.as_str(),
+        "describe" | "context" | "shared_examples" | "shared_context"
+    ) {
+        resolved_callees_for_call(visitor, node)
+    } else {
+        Vec::new()
+    };
     ResolvedCall {
-        method_name: utils::utf8_str(node.name().as_slice()).to_string(),
+        method_name,
         receiver: receiver.clone(),
-        resolved_callees: resolved_callees_for_call(visitor, node),
+        resolved_callees,
         call_range: source_range(visitor, &node.location()),
         message_range: node
             .message_loc()

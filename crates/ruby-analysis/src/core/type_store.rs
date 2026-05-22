@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+use super::memory_estimate::{
+    map_table_bytes, ruby_type_heap_bytes, type_subject_heap_bytes, vec_payload_bytes,
+};
 use crate::{FullyQualifiedName, RubyType};
 
 /// Stable file identifier owned by the analysis layer.
@@ -102,6 +105,14 @@ impl TypeFact {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StoredTypeFact {
+    subject: TypeSubjectId,
+    ruby_type: RubyType,
+    range: TextRange,
+    provenance: TypeProvenance,
+}
+
 /// Deterministic type query result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeResolution {
@@ -113,8 +124,19 @@ pub enum TypeResolution {
 /// Append-only type fact store.
 #[derive(Debug, Clone, Default)]
 pub struct TypeStore {
-    facts: HashMap<TypeSubject, Vec<TypeFact>>,
+    facts: Vec<Option<StoredTypeFact>>,
+    free_facts: Vec<TypeFactId>,
+    subjects: Vec<TypeSubject>,
+    subject_ids: HashMap<TypeSubject, TypeSubjectId>,
+    facts_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
+    facts_by_file: HashMap<SourceFileId, Vec<TypeFactId>>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct TypeFactId(usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct TypeSubjectId(usize);
 
 impl TypeStore {
     pub fn new() -> Self {
@@ -122,43 +144,63 @@ impl TypeStore {
     }
 
     pub fn add(&mut self, fact: TypeFact) {
-        let facts = self.facts.entry(fact.subject.clone()).or_default();
-        facts.push(fact);
-        facts.sort_by_key(|fact| {
-            (
-                fact.range.file_id,
-                fact.range.start_byte,
-                fact.range.end_byte,
-                provenance_rank(fact.provenance),
-            )
+        let file_id = fact.range.file_id;
+        let subject = self.intern_subject(fact.subject);
+        let id = self.insert_fact(StoredTypeFact {
+            subject,
+            ruby_type: fact.ruby_type,
+            range: fact.range,
+            provenance: fact.provenance,
         });
+        self.facts_by_subject.entry(subject).or_default().push(id);
+        self.facts_by_file.entry(file_id).or_default().push(id);
     }
 
-    pub fn facts_for(&self, subject: &TypeSubject) -> &[TypeFact] {
-        self.facts.get(subject).map(Vec::as_slice).unwrap_or(&[])
+    pub fn facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
+        let Some(subject_id) = self.subject_ids.get(subject).copied() else {
+            return Vec::new();
+        };
+        self.facts_by_subject
+            .get(&subject_id)
+            .map(|ids| self.clone_facts(ids))
+            .unwrap_or_default()
     }
 
     pub fn all_facts(&self) -> Vec<TypeFact> {
         self.facts
-            .values()
-            .flat_map(|facts| facts.iter().cloned())
+            .iter()
+            .filter_map(|fact| fact.as_ref())
+            .map(|fact| self.expand_fact(fact))
             .collect()
+    }
+
+    pub fn fact_count(&self) -> usize {
+        self.facts.iter().filter(|fact| fact.is_some()).count()
     }
 
     pub fn facts_in_file(&self, file_id: SourceFileId) -> Vec<TypeFact> {
-        self.facts
-            .values()
-            .flat_map(|facts| facts.iter())
-            .filter(|fact| fact.range.file_id == file_id)
-            .cloned()
-            .collect()
+        self.facts_by_file
+            .get(&file_id)
+            .map(|ids| self.clone_facts(ids))
+            .unwrap_or_default()
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
-        self.facts.retain(|_, facts| {
-            facts.retain(|fact| fact.range.file_id != file_id);
-            !facts.is_empty()
-        });
+        let Some(stale_ids) = self.facts_by_file.remove(&file_id) else {
+            return;
+        };
+        for stale_id in stale_ids {
+            let Some(stale) = self.take_fact(stale_id) else {
+                continue;
+            };
+            self.free_facts.push(stale_id);
+            if let Some(ids) = self.facts_by_subject.get_mut(&stale.subject) {
+                ids.retain(|id| *id != stale_id);
+                if ids.is_empty() {
+                    self.facts_by_subject.remove(&stale.subject);
+                }
+            }
+        }
     }
 
     pub fn replace_file(
@@ -167,6 +209,7 @@ impl TypeStore {
         facts: impl IntoIterator<Item = TypeFact>,
     ) {
         self.remove_file(file_id);
+        let mut touched_subjects = Vec::new();
         for fact in facts {
             assert!(
                 fact.range.file_id == file_id,
@@ -174,7 +217,78 @@ impl TypeStore {
                  This is a bug because TypeStore::replace_file must only receive facts for the target file. \
                  Fix: partition facts by SourceFileId before replacing."
             );
-            self.add(fact);
+            let key = self.intern_subject(fact.subject);
+            if !touched_subjects.contains(&key) {
+                touched_subjects.push(key);
+            }
+            let id = self.insert_fact(StoredTypeFact {
+                subject: key,
+                ruby_type: fact.ruby_type,
+                range: fact.range,
+                provenance: fact.provenance,
+            });
+            self.facts_by_subject.entry(key).or_default().push(id);
+            self.facts_by_file.entry(file_id).or_default().push(id);
+        }
+        for subject in touched_subjects {
+            if let Some(ids) = self.facts_by_subject.get_mut(&subject) {
+                sort_type_ids(&self.facts, ids);
+                ids.shrink_to_fit();
+            }
+        }
+        if let Some(ids) = self.facts_by_file.get_mut(&file_id) {
+            sort_type_ids_by_file(&self.facts, ids);
+            ids.shrink_to_fit();
+        }
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        vec_payload_bytes(&self.facts)
+            + vec_payload_bytes(&self.free_facts)
+            + vec_payload_bytes(&self.subjects)
+            + self
+                .subjects
+                .iter()
+                .map(type_subject_heap_bytes)
+                .sum::<usize>()
+            + map_table_bytes(&self.subject_ids)
+            + self
+                .subject_ids
+                .keys()
+                .map(type_subject_heap_bytes)
+                .sum::<usize>()
+            + self
+                .facts
+                .iter()
+                .filter_map(|fact| fact.as_ref())
+                .map(type_fact_heap_bytes)
+                .sum::<usize>()
+            + map_table_bytes(&self.facts_by_subject)
+            + map_table_bytes(&self.facts_by_file)
+            + self
+                .facts_by_subject
+                .values()
+                .map(vec_payload_bytes)
+                .sum::<usize>()
+            + self
+                .facts_by_file
+                .values()
+                .map(vec_payload_bytes)
+                .sum::<usize>()
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.facts.shrink_to_fit();
+        self.free_facts.shrink_to_fit();
+        self.subjects.shrink_to_fit();
+        self.subject_ids.shrink_to_fit();
+        self.facts_by_subject.shrink_to_fit();
+        self.facts_by_file.shrink_to_fit();
+        for ids in self.facts_by_subject.values_mut() {
+            ids.shrink_to_fit();
+        }
+        for ids in self.facts_by_file.values_mut() {
+            ids.shrink_to_fit();
         }
     }
 
@@ -184,12 +298,16 @@ impl TypeStore {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> TypeResolution {
-        let Some(facts) = self.facts.get(subject) else {
+        let Some(subject_id) = self.subject_ids.get(subject).copied() else {
+            return TypeResolution::Unresolved;
+        };
+        let Some(ids) = self.facts_by_subject.get(&subject_id) else {
             return TypeResolution::Unresolved;
         };
 
-        let Some(latest_start) = facts
+        let Some(latest_start) = ids
             .iter()
+            .filter_map(|id| self.fact(*id))
             .filter(|fact| fact.range.starts_before_or_at(file_id, byte_offset))
             .map(|fact| fact.range.start_byte)
             .max()
@@ -197,10 +315,11 @@ impl TypeStore {
             return TypeResolution::Unresolved;
         };
 
-        let mut candidates: Vec<TypeFact> = facts
+        let mut candidates: Vec<TypeFact> = ids
             .iter()
+            .filter_map(|id| self.fact(*id))
             .filter(|fact| fact.range.file_id == file_id && fact.range.start_byte == latest_start)
-            .cloned()
+            .map(|fact| self.expand_fact(fact))
             .collect();
 
         candidates
@@ -213,6 +332,104 @@ impl TypeStore {
             _ => TypeResolution::Ambiguous(candidates),
         }
     }
+
+    fn insert_fact(&mut self, fact: StoredTypeFact) -> TypeFactId {
+        if let Some(id) = self.free_facts.pop() {
+            let slot = self.facts.get_mut(id.0).expect(
+                "INVARIANT VIOLATED: type free list points outside fact arena. \
+                 This is a bug because free ids must come from previous arena slots. \
+                 Fix: only push ids returned by TypeStore::take_fact.",
+            );
+            assert!(
+                slot.is_none(),
+                "INVARIANT VIOLATED: type free list points to occupied fact slot. \
+                 This is a bug because free ids must only reference removed type facts. \
+                 Fix: push each removed type id at most once."
+            );
+            *slot = Some(fact);
+            return id;
+        }
+        let id = TypeFactId(self.facts.len());
+        self.facts.push(Some(fact));
+        id
+    }
+
+    fn fact(&self, id: TypeFactId) -> Option<&StoredTypeFact> {
+        self.facts.get(id.0).and_then(Option::as_ref)
+    }
+
+    fn take_fact(&mut self, id: TypeFactId) -> Option<StoredTypeFact> {
+        self.facts.get_mut(id.0).and_then(Option::take)
+    }
+
+    fn clone_facts(&self, ids: &[TypeFactId]) -> Vec<TypeFact> {
+        ids.iter()
+            .filter_map(|id| self.fact(*id))
+            .map(|fact| self.expand_fact(fact))
+            .collect()
+    }
+
+    fn intern_subject(&mut self, subject: TypeSubject) -> TypeSubjectId {
+        if let Some(id) = self.subject_ids.get(&subject) {
+            return *id;
+        }
+        let id = TypeSubjectId(self.subjects.len());
+        self.subjects.push(subject.clone());
+        self.subject_ids.insert(subject, id);
+        id
+    }
+
+    fn subject(&self, id: TypeSubjectId) -> &TypeSubject {
+        self.subjects.get(id.0).expect(
+            "INVARIANT VIOLATED: type fact points to missing subject id. \
+             This is a bug because type facts must only store interned subject ids. \
+             Fix: intern type subjects before inserting facts.",
+        )
+    }
+
+    fn expand_fact(&self, fact: &StoredTypeFact) -> TypeFact {
+        TypeFact {
+            subject: self.subject(fact.subject).clone(),
+            ruby_type: fact.ruby_type.clone(),
+            range: fact.range,
+            provenance: fact.provenance,
+        }
+    }
+}
+
+fn type_fact_heap_bytes(fact: &StoredTypeFact) -> usize {
+    ruby_type_heap_bytes(&fact.ruby_type)
+}
+
+fn sort_type_ids(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
+    ids.sort_by_key(|id| {
+        let fact = facts[id.0].as_ref().expect(
+            "INVARIANT VIOLATED: type index points to missing fact. \
+             This is a bug because indexes must be removed before arena facts. \
+             Fix: remove stale ids from every TypeStore index.",
+        );
+        (
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+            provenance_rank(fact.provenance),
+        )
+    });
+}
+
+fn sort_type_ids_by_file(facts: &[Option<StoredTypeFact>], ids: &mut [TypeFactId]) {
+    ids.sort_by_key(|id| {
+        let fact = facts[id.0].as_ref().expect(
+            "INVARIANT VIOLATED: type file index points to missing fact. \
+             This is a bug because indexes must be removed before arena facts. \
+             Fix: remove stale ids from every TypeStore index.",
+        );
+        (
+            fact.range.start_byte,
+            fact.range.end_byte,
+            provenance_rank(fact.provenance),
+        )
+    });
 }
 
 fn provenance_rank(provenance: TypeProvenance) -> u8 {
@@ -238,7 +455,7 @@ mod tests {
     }
 
     fn constant_subject(name: &str) -> TypeSubject {
-        TypeSubject::Constant(FullyQualifiedName::Constant(vec![
+        TypeSubject::Constant(FullyQualifiedName::constant(vec![
             RubyConstant::new(name).unwrap()
         ]))
     }

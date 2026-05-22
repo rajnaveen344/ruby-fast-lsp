@@ -54,7 +54,6 @@ end
 
 /// Tag-based: method with no callers — no tags means no assertions needed.
 /// Using FakeEditor for this case since check() requires at least one tag.
-
 /// Tag-based: outgoing calls from a method.
 #[tokio::test]
 async fn tag_outgoing_basic() {

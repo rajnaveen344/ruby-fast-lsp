@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, RubyConstant, RubyMethod, RubyType,
-    SourceFileId, SymbolKind, TypeFact, TypeResolution, TypeSubject,
+    SourceFileId, TypeFact, TypeResolution, TypeSubject,
 };
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
@@ -17,8 +17,7 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Option<RubyType> {
         let method_fact = self
             .engine
-            .method_store()
-            .facts_in_file(file_id)
+            .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
                 let FullyQualifiedName::Method(_, method) = &fact.fqn else {
@@ -57,8 +56,7 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Option<RubyType> {
         let method_fact = self
             .engine
-            .method_store()
-            .facts_in_file(file_id)
+            .method_facts_in_file(file_id)
             .into_iter()
             .find(|fact| {
                 let FullyQualifiedName::Method(_, method) = &fact.fqn else {
@@ -272,7 +270,7 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn constant_reference_type(&self, path: &[RubyConstant]) -> Option<RubyType> {
         let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
-        let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
+        let constant_fqn = FullyQualifiedName::constant(path.to_vec());
         match self.namespace_node_kind(&namespace_fqn)? {
             GraphNodeKind::Class => Some(RubyType::ClassReference(constant_fqn)),
             GraphNodeKind::Module => Some(RubyType::ModuleReference(constant_fqn)),
@@ -321,7 +319,7 @@ impl<'a> AnalysisQuery<'a> {
             return None;
         }
 
-        Some(RubyType::Class(FullyQualifiedName::Constant(
+        Some(RubyType::Class(FullyQualifiedName::constant(
             namespace_fqn.namespace_parts(),
         )))
     }
@@ -344,7 +342,7 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn constant_hover(&self, path: &[RubyConstant]) -> Option<ConstantHover> {
         let namespace_fqn = FullyQualifiedName::namespace(path.to_vec());
-        let constant_fqn = FullyQualifiedName::Constant(path.to_vec());
+        let constant_fqn = FullyQualifiedName::constant(path.to_vec());
         let name = path
             .iter()
             .map(|constant| constant.to_string())
@@ -376,10 +374,10 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn known_namespace_fqns(&self) -> HashSet<FullyQualifiedName> {
         self.engine
-            .all_symbol_facts()
+            .symbol_store()
+            .known_namespace_fqns()
             .into_iter()
-            .filter(|fact| matches!(fact.kind, SymbolKind::Class | SymbolKind::Module))
-            .filter_map(|fact| fact.fqn.to_instance_namespace())
+            .filter_map(|id| self.engine.fqn_for_id(id).cloned())
             .collect()
     }
 
@@ -447,9 +445,8 @@ impl<'a> AnalysisQuery<'a> {
 
         for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
             let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
-            let facts = self
-                .engine
-                .method_facts_for(&method_fqn)
+            let method_facts = self.engine.method_facts_for(&method_fqn);
+            let facts = method_facts
                 .iter()
                 .filter(|fact| {
                     fact.owner.namespace_parts() == ancestor.namespace_parts()

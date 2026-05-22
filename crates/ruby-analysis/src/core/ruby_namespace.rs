@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use ustr::Ustr;
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct RubyConstant(Ustr);
 
 impl RubyConstant {

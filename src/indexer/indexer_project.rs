@@ -99,62 +99,85 @@ impl IndexerProject {
     ) -> Result<()> {
         use crate::indexer::coordinator::IndexingCoordinator;
 
-        const BATCH_SIZE: usize = 10;
-        info!("Collecting facts in parallel batches of {}", BATCH_SIZE);
+        info!("Collecting facts in one parallel pass");
 
         let file_processor = self.file_processor.clone();
         let required_stdlib = self.required_stdlib.clone();
         let required_gems = self.required_gems.clone();
 
-        // Process in batches for progress reporting
-        for (batch_idx, batch) in files.chunks(BATCH_SIZE).enumerate() {
-            // Report progress before each batch
-            let processed = batch_idx * BATCH_SIZE;
-            IndexingCoordinator::send_progress_report(
-                server,
-                "Collecting facts".to_string(),
-                processed,
-                total_files,
-            )
-            .await;
+        IndexingCoordinator::send_progress_report(
+            server,
+            "Collecting facts".to_string(),
+            0,
+            total_files,
+        )
+        .await;
 
-            // Process batch in parallel with rayon
-            let file_processor_ref = &file_processor;
-            let required_stdlib_ref = &required_stdlib;
-            let required_gems_ref = &required_gems;
+        let file_processor_ref = &file_processor;
+        let required_stdlib_ref = &required_stdlib;
+        let required_gems_ref = &required_gems;
+        let known_namespaces = {
+            let engine = server.analysis_engine.lock();
+            ruby_analysis::engine::AnalysisQuery::new(&engine).known_namespace_fqns()
+        };
+        let slow_files = Arc::new(Mutex::new(Vec::new()));
 
-            batch.par_iter().for_each(|file_path| {
-                // Read file content
-                let content = match std::fs::read_to_string(file_path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("Failed to read file {:?}: {}", file_path, e);
-                        return;
-                    }
-                };
+        let collect_start = Instant::now();
+        files.par_iter().for_each(|file_path| {
+            let file_start = Instant::now();
+            // Read file content
+            let content = match std::fs::read_to_string(file_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("Failed to read file {:?}: {}", file_path, e);
+                    return;
+                }
+            };
 
-                // Index Definitions
-                if let Ok(uri) = Url::from_file_path(file_path) {
-                    if let Err(e) = file_processor_ref.collect_file_facts_as(
+            // Index Definitions
+            if let Ok(uri) = Url::from_file_path(file_path) {
+                if let Err(e) = file_processor_ref
+                    .collect_file_facts_as_deferred_resolution_with_known_namespaces(
                         &uri,
                         &content,
                         server,
                         ruby_analysis::core::SourceKind::Project,
-                    ) {
-                        warn!("Failed to collect facts {:?}: {}", file_path, e);
-                    }
-                } else {
-                    warn!("Failed to convert path to URI: {:?}", file_path);
+                        &known_namespaces,
+                    )
+                {
+                    warn!("Failed to collect facts {:?}: {}", file_path, e);
                 }
+            } else {
+                warn!("Failed to convert path to URI: {:?}", file_path);
+            }
 
-                // Track dependencies
-                Self::extract_and_track_dependencies(
-                    &content,
-                    required_stdlib_ref,
-                    required_gems_ref,
-                );
-            });
+            // Track dependencies
+            Self::extract_and_track_dependencies(&content, required_stdlib_ref, required_gems_ref);
+            let elapsed = file_start.elapsed();
+            if elapsed.as_millis() >= 500 {
+                slow_files.lock().push((elapsed, file_path.clone()));
+            }
+        });
+        let collect_elapsed = collect_start.elapsed();
+        info!(
+            "Project parallel file fact pass completed in {:?}",
+            collect_elapsed
+        );
+
+        {
+            let mut slow_files = slow_files.lock();
+            slow_files.sort_by(|left, right| right.0.cmp(&left.0));
+            for (elapsed, path) in slow_files.iter().take(10) {
+                info!("Slow project fact file: {:?} {:?}", elapsed, path);
+            }
         }
+
+        let resolve_start = Instant::now();
+        server.analysis_engine.lock().resolve();
+        info!(
+            "Project reference/diagnostic resolution completed in {:?}",
+            resolve_start.elapsed()
+        );
 
         // Final progress report
         IndexingCoordinator::send_progress_report(

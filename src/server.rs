@@ -222,7 +222,11 @@ impl RubyLanguageServer {
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         self.analysis_engine
             .lock()
-            .open_or_update_file_with_kind(path, source, kind)
+            .register_file(ruby_analysis::engine::SourceFileInput {
+                path,
+                content: source.into(),
+                kind,
+            })
     }
 
     /// Register a new workspace. If a workspace with the same root URI is

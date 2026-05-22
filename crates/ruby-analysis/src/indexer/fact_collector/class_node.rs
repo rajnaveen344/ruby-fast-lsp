@@ -1,3 +1,5 @@
+use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind};
+use crate::mixin_ref_from_node;
 use crate::LocalScopeKind as LVScopeKind;
 use log::error;
 use ruby_prism::ClassNode;
@@ -16,6 +18,37 @@ impl FactCollector {
         {
             error!("Error creating namespace for class");
             return;
+        }
+
+        let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+        let range = self.direct_range(&node.location());
+        self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range);
+        if let Some(superclass) = node.superclass() {
+            if let Some(superclass_ref) = mixin_ref_from_node(&superclass) {
+                let super_range = self.direct_range(&superclass.location());
+                self.direct_push_edge(
+                    fqn.clone(),
+                    &superclass_ref.parts,
+                    superclass_ref.absolute,
+                    GraphEdgeKind::Superclass,
+                    super_range,
+                );
+                if let Some(source_singleton) = fqn.to_singleton_namespace() {
+                    if let Some(target) = self
+                        .direct_resolve_namespace(&superclass_ref.parts, superclass_ref.absolute)
+                        .and_then(|target| target.to_singleton_namespace())
+                    {
+                        self.direct_facts
+                            .graph_edges
+                            .push(crate::core::GraphEdgeFact::new(
+                                source_singleton,
+                                target,
+                                GraphEdgeKind::Superclass,
+                                super_range,
+                            ));
+                    }
+                }
+            }
         }
 
         // Setup local variable scope

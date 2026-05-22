@@ -10,9 +10,14 @@ use crate::indexer::version::version_detector::RubyVersionDetector;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::{debug, info, warn};
+use ruby_analysis::core::{
+    DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity, TextRange,
+};
+use ruby_analysis::engine::SourceFile;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 /// Wall-clock timings captured by the coordinator during the most recent
 /// [`IndexingCoordinator::run_complete_indexing`] call. Consumed by the
@@ -26,6 +31,38 @@ pub struct IndexingTimings {
     /// Publish diagnostics to the client.
     pub publish: Duration,
     pub total: Duration,
+}
+
+fn diagnostic_from_fact_fast(file: &SourceFile, fact: &DiagnosticFact) -> Option<Diagnostic> {
+    Some(Diagnostic {
+        range: lsp_range_for_text_range_fast(file, fact.range)?,
+        severity: Some(lsp_diagnostic_severity(fact.severity)),
+        code: Some(NumberOrString::String(fact.code.clone())),
+        code_description: None,
+        source: Some("ruby-fast-lsp".to_string()),
+        message: fact.message.clone(),
+        related_information: None,
+        tags: None,
+        data: None,
+    })
+}
+
+fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSeverity {
+    match severity {
+        AnalysisDiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+        AnalysisDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+        AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+        AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
+    }
+}
+
+fn lsp_range_for_text_range_fast(file: &SourceFile, range: TextRange) -> Option<Range> {
+    let (start_line, start_character) = file.byte_offset_to_line_character(range.start_byte)?;
+    let (end_line, end_character) = file.byte_offset_to_line_character(range.end_byte)?;
+    Some(Range::new(
+        Position::new(start_line, start_character),
+        Position::new(end_line, end_character),
+    ))
 }
 
 /// The IndexingCoordinator manages the entire indexing process.
@@ -155,6 +192,12 @@ impl IndexingCoordinator {
 
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
+        {
+            let mut engine = server.analysis_engine.lock();
+            engine.shrink_to_fit();
+        }
+        release_allocator_free_pages();
+        self.log_analysis_memory_stats(server);
 
         self.last_timings = IndexingTimings {
             facts: facts_dur,
@@ -163,6 +206,45 @@ impl IndexingCoordinator {
             total: total_dur,
         };
         Ok(())
+    }
+
+    fn log_analysis_memory_stats(&self, server: &RubyLanguageServer) {
+        let engine = server.analysis_engine.lock();
+        let stats = engine.stats();
+        let memory = engine.estimated_memory_stats();
+        let total = memory.total();
+
+        info!(
+            "Analysis stats: files={}, source_bytes={}, symbols={}, methods={}, ref_candidates={}, refs={}, types={}, diagnostic_candidates={}, diagnostics={}, graph_nodes={}, graph_edges={}, unresolved_graph_edges={}",
+            stats.files,
+            stats.source_bytes,
+            stats.symbols,
+            stats.methods,
+            stats.reference_candidates,
+            stats.references,
+            stats.types,
+            stats.diagnostic_candidates,
+            stats.diagnostics,
+            stats.graph_nodes,
+            stats.graph_edges,
+            stats.unresolved_graph_edges
+        );
+        info!("Estimated engine heap: {:.1} MB", bytes_to_mb(total));
+        log_memory_bucket("names", memory.names, total);
+        log_memory_bucket("files", memory.files, total);
+        log_memory_bucket("symbols", memory.symbols, total);
+        log_memory_bucket("methods", memory.methods, total);
+        log_memory_bucket("types", memory.types, total);
+        log_memory_bucket("reference candidates", memory.reference_candidates, total);
+        log_memory_bucket("references", memory.references, total);
+        log_memory_bucket("diagnostics", memory.diagnostics, total);
+        log_memory_bucket("diagnostic candidates", memory.diagnostic_candidates, total);
+        log_memory_bucket("graph", memory.graph, total);
+        log_memory_bucket(
+            "unresolved graph edges",
+            memory.unresolved_graph_edges,
+            total,
+        );
     }
 
     /// Helper function to send progress report updates to the client
@@ -248,35 +330,58 @@ impl IndexingCoordinator {
 
     /// Publish diagnostics for unresolved entries across all indexed files.
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
-        use crate::query::{analysis_location::location_for_range, EngineQuery};
-
-        let uris: Vec<_> = {
+        let file_ids = {
             let engine = server.analysis_engine.lock();
-            let mut uris = engine
-                .all_diagnostic_facts()
-                .into_iter()
-                .filter_map(|fact| location_for_range(&engine, fact.range).map(|loc| loc.uri))
-                .collect::<Vec<_>>();
-            uris.sort();
-            uris.dedup();
+            let mut file_ids = engine.diagnostic_store().file_ids();
+            file_ids.sort_by(|left, right| {
+                let left_path = engine
+                    .file(*left)
+                    .map(|file| file.path.as_path())
+                    .unwrap_or_else(|| Path::new(""));
+                let right_path = engine
+                    .file(*right)
+                    .map(|file| file.path.as_path())
+                    .unwrap_or_else(|| Path::new(""));
+                left_path.cmp(right_path)
+            });
             info!(
                 "Publishing diagnostics for {} files with analysis diagnostics",
-                uris.len()
+                file_ids.len()
             );
-            uris
+            file_ids
         };
 
-        let query = EngineQuery::with_engine(server.analysis_engine.clone());
-        for uri in uris {
-            let diagnostics = query.get_unresolved_diagnostics(&uri);
-            if !diagnostics.is_empty() {
-                debug!(
-                    "Publishing {} unresolved diagnostics for {}",
-                    diagnostics.len(),
-                    uri.path()
-                );
-                server.publish_diagnostics(uri, diagnostics).await;
-            }
+        for file_id in file_ids {
+            let Some((uri, diagnostics)) = ({
+                let engine = server.analysis_engine.lock();
+                match engine.file(file_id) {
+                    Some(file) => match Url::from_file_path(&file.path) {
+                        Ok(uri) => {
+                            let diagnostics = engine
+                                .diagnostic_store()
+                                .facts_for_file(file_id)
+                                .iter()
+                                .filter_map(|fact| diagnostic_from_fact_fast(file, fact))
+                                .collect::<Vec<_>>();
+                            if diagnostics.is_empty() {
+                                None
+                            } else {
+                                Some((uri, diagnostics))
+                            }
+                        }
+                        Err(()) => None,
+                    },
+                    None => None,
+                }
+            }) else {
+                continue;
+            };
+            debug!(
+                "Publishing {} unresolved diagnostics for {}",
+                diagnostics.len(),
+                uri.path()
+            );
+            server.publish_diagnostics(uri, diagnostics).await;
         }
     }
 
@@ -446,6 +551,37 @@ impl IndexingCoordinator {
         &self.ruby_library_paths
     }
 }
+
+fn log_memory_bucket(name: &str, bytes: usize, total: usize) {
+    let percent = if total == 0 {
+        0.0
+    } else {
+        bytes as f64 * 100.0 / total as f64
+    };
+    info!("{name}: {:.1} MB ({percent:.1}%)", bytes_to_mb(bytes));
+}
+
+fn bytes_to_mb(bytes: usize) -> f64 {
+    bytes as f64 / 1_048_576.0
+}
+
+#[cfg(target_os = "macos")]
+fn release_allocator_free_pages() {
+    unsafe extern "C" {
+        fn malloc_default_zone() -> *mut libc::c_void;
+        fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: usize) -> usize;
+    }
+
+    unsafe {
+        let zone = malloc_default_zone();
+        if !zone.is_null() {
+            malloc_zone_pressure_relief(zone, 0);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn release_allocator_free_pages() {}
 
 /// Integration tests for IndexingCoordinator
 /// Tests the complete indexing workflow with realistic project structures
@@ -1045,10 +1181,7 @@ end
         let lib_dirs = coordinator.get_ruby_library_paths();
         // We should at least have some directories (even if gem discovery failed)
         // The system Ruby directories should still be found
-        assert!(
-            !lib_dirs.is_empty() || true,
-            "Should handle gem discovery errors gracefully"
-        );
+        let _ = lib_dirs;
 
         // Clean up environment variable
         // SAFETY: This test is not run concurrently with other tests that modify this env var

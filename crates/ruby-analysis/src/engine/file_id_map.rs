@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use crate::core::SourceFileId;
@@ -51,10 +52,34 @@ impl FileIdMap {
     pub fn is_empty(&self) -> bool {
         self.by_path.is_empty()
     }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.by_path.shrink_to_fit();
+        self.by_id.shrink_to_fit();
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        self.by_path.capacity() * (size_of::<PathBuf>() + size_of::<SourceFileId>() + 1)
+            + self.by_id.capacity() * (size_of::<SourceFileId>() + size_of::<PathBuf>() + 1)
+            + self
+                .by_path
+                .keys()
+                .map(|path| path_heap_bytes(path.as_path()))
+                .sum::<usize>()
+            + self
+                .by_id
+                .values()
+                .map(|path| path_heap_bytes(path.as_path()))
+                .sum::<usize>()
+    }
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
     path.components().collect()
+}
+
+fn path_heap_bytes(path: &Path) -> usize {
+    path.as_os_str().len()
 }
 
 #[cfg(test)]

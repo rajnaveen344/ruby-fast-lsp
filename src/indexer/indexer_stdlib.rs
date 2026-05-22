@@ -124,7 +124,7 @@ impl IndexerStdlib {
                 stub_files.par_iter().for_each(|path| {
                     if let Ok(content) = std::fs::read_to_string(path) {
                         if let Ok(uri) = Url::from_file_path(path) {
-                            if let Err(e) = processor.collect_file_facts_as(
+                            if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
                                 &uri,
                                 &content,
                                 server,
@@ -135,6 +135,8 @@ impl IndexerStdlib {
                         }
                     }
                 });
+
+                server.analysis_engine.lock().resolve();
 
                 info!("Indexed {} core stub files", stub_files.len());
                 return Ok(());
@@ -158,7 +160,7 @@ impl IndexerStdlib {
         stub_files.par_iter().for_each(|path| {
             if let Ok(content) = std::fs::read_to_string(path) {
                 if let Ok(uri) = Url::from_file_path(path) {
-                    if let Err(e) = processor.collect_file_facts_as(
+                    if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
                         &uri,
                         &content,
                         server,
@@ -169,6 +171,7 @@ impl IndexerStdlib {
                 }
             }
         });
+        server.analysis_engine.lock().resolve();
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
@@ -210,7 +213,7 @@ impl IndexerStdlib {
             files.par_iter().for_each(|path| {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     if let Ok(uri) = Url::from_file_path(path) {
-                        if let Err(e) = processor.collect_file_facts_as(
+                        if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
                             &uri,
                             &content,
                             server,
@@ -223,6 +226,10 @@ impl IndexerStdlib {
             });
 
             indexed_count += files.len();
+        }
+
+        if indexed_count > 0 {
+            server.analysis_engine.lock().resolve();
         }
 
         info!(
@@ -362,6 +369,9 @@ impl IndexerStdlib {
                 }
             }
         }
+
+        files.sort();
+        files.dedup();
 
         if files.is_empty() {
             None

@@ -25,9 +25,32 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
     Ok(())
 }
 
+fn analysis_file_already_indexed(server: &RubyLanguageServer, uri: &Url, content: &str) -> bool {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
+    let engine = server.analysis_engine.lock();
+    let Some(file_id) = engine.file_id(&path) else {
+        return false;
+    };
+    let Some(file) = engine.file(file_id) else {
+        return false;
+    };
+    file.line_index.len() == content.len() && file.content_hash == source_hash(content)
+}
+
+fn source_hash(source: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
+    let file_already_indexed = analysis_file_already_indexed(server, &uri, &content);
     let analysis_file_id = server.open_or_update_analysis_file(&uri, content.clone());
 
     // Only create a fresh document if one doesn't exist
@@ -38,17 +61,30 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             let mut doc_guard = existing_doc.write();
             doc_guard.set_analysis_file_id(analysis_file_id);
             doc_guard.update(content.clone(), params.text_document.version);
+            if file_already_indexed {
+                doc_guard.indexed_version = Some(params.text_document.version);
+            }
         } else {
-            let document = RubyDocument::with_analysis_file_id(
+            let mut document = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.clone(),
                 params.text_document.version,
                 analysis_file_id,
             );
+            if file_already_indexed {
+                document.indexed_version = Some(params.text_document.version);
+            }
             docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
         }
     }
     debug!("Doc cache size: {}", server.docs.lock().len());
+
+    if file_already_indexed {
+        let query = EngineQuery::with_engine(server.analysis_engine.clone());
+        let diagnostics = query.get_unresolved_diagnostics(&uri);
+        server.publish_diagnostics(uri, diagnostics).await;
+        return;
+    }
 
     // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
@@ -256,7 +292,9 @@ mod tests {
         let file_id = engine
             .file_id(path)
             .expect("did_open must register file in analysis engine");
-        assert_eq!(engine.file(file_id).unwrap().source, "A = 1");
+        let file = engine.file(file_id).unwrap();
+        assert_eq!(file.line_index.len(), "A = 1".len());
+        assert!(file.source_text().is_none());
     }
 
     #[tokio::test]
@@ -285,7 +323,9 @@ mod tests {
         let file_id = engine
             .file_id(path)
             .expect("did_change must register file in analysis engine");
-        assert_eq!(engine.file(file_id).unwrap().source, "A = 2");
+        let file = engine.file(file_id).unwrap();
+        assert_eq!(file.line_index.len(), "A = 2".len());
+        assert!(file.source_text().is_none());
     }
 
     #[tokio::test]
@@ -482,11 +522,11 @@ mod tests {
 
         let user = RubyConstant::new("User").unwrap();
         let name_fqn = FullyQualifiedName::method(
-            vec![user.clone()],
+            vec![user],
             RubyMethod::new("name").expect("test method must be valid"),
         );
         let find_fqn = FullyQualifiedName::method(
-            vec![user.clone()],
+            vec![user],
             RubyMethod::new("find").expect("test method must be valid"),
         );
 

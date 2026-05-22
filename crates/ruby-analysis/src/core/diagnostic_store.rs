@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::memory_estimate::{map_table_bytes, string_heap_bytes, vec_payload_bytes};
 use crate::{SourceFileId, TextRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,11 +72,26 @@ impl DiagnosticStore {
             .unwrap_or_default()
     }
 
+    pub fn facts_for_file(&self, file_id: SourceFileId) -> &[DiagnosticFact] {
+        self.facts_by_file
+            .get(&file_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     pub fn all_facts(&self) -> Vec<DiagnosticFact> {
         self.facts_by_file
             .values()
             .flat_map(|facts| facts.iter().cloned())
             .collect()
+    }
+
+    pub fn file_ids(&self) -> Vec<SourceFileId> {
+        self.facts_by_file.keys().copied().collect()
+    }
+
+    pub fn fact_count(&self) -> usize {
+        self.facts_by_file.values().map(Vec::len).sum()
     }
 
     pub fn remove_file(&mut self, file_id: SourceFileId) {
@@ -118,6 +134,30 @@ impl DiagnosticStore {
                         right.message.as_str(),
                     ))
             });
+        }
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        map_table_bytes(&self.facts_by_file)
+            + self
+                .facts_by_file
+                .values()
+                .map(|facts| {
+                    vec_payload_bytes(facts)
+                        + facts
+                            .iter()
+                            .map(|fact| {
+                                string_heap_bytes(&fact.code) + string_heap_bytes(&fact.message)
+                            })
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.facts_by_file.shrink_to_fit();
+        for facts in self.facts_by_file.values_mut() {
+            facts.shrink_to_fit();
         }
     }
 }

@@ -25,7 +25,7 @@ use ruby_analysis::core::{
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
 };
-use ruby_analysis::engine::{AnalysisQuery, FileAnalysisFacts};
+use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
@@ -73,6 +73,25 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         server: &RubyLanguageServer,
+    ) -> Result<ProcessResult> {
+        self.process_file_with_resolution(uri, content, server, true)
+    }
+
+    pub fn process_file_deferred_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<ProcessResult> {
+        self.process_file_with_resolution(uri, content, server, false)
+    }
+
+    fn process_file_with_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        resolve_references: bool,
     ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
         let already_indexed = {
@@ -129,10 +148,11 @@ impl FileProcessor {
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
-            server
-                .analysis_engine
-                .lock()
-                .replace_file_analysis(analysis_file_id, FileAnalysisFacts::default());
+            server.analysis_engine.lock().replace_facts(
+                analysis_file_id,
+                FileFacts::default(),
+                ResolveMode::Immediate,
+            );
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -142,8 +162,14 @@ impl FileProcessor {
         let affected_uris = HashSet::new();
 
         // 3. Collect facts.
-        let direct_facts_seed = collect_direct_facts(server, content, document.analysis_file_id());
-        replace_analysis_facts_for_file(server, document.analysis_file_id(), &direct_facts_seed);
+        let direct_facts_seed =
+            collect_direct_facts(server, &node, document.analysis_file_id(), None);
+        replace_analysis_facts_for_file(
+            server,
+            document.analysis_file_id(),
+            &direct_facts_seed,
+            false,
+        );
 
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
@@ -175,9 +201,9 @@ impl FileProcessor {
                 .into_iter()
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
-        server.analysis_engine.lock().replace_file_analysis(
+        server.analysis_engine.lock().replace_facts(
             updated_document.analysis_file_id(),
-            FileAnalysisFacts {
+            FileFacts {
                 symbols: symbol_facts,
                 methods: method_facts,
                 types: type_facts,
@@ -187,6 +213,11 @@ impl FileProcessor {
                 reference_candidates: visitor.reference_candidates,
                 diagnostic_candidates: visitor.diagnostic_candidates,
                 diagnostics: visitor.analysis_diagnostics,
+            },
+            if resolve_references {
+                ResolveMode::Immediate
+            } else {
+                ResolveMode::Deferred
             },
         );
 
@@ -232,9 +263,50 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         source_kind: SourceKind,
     ) -> Result<()> {
+        self.collect_file_facts_as_with_resolution(uri, content, server, source_kind, true, None)
+    }
+
+    pub fn collect_file_facts_as_deferred_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        source_kind: SourceKind,
+    ) -> Result<()> {
+        self.collect_file_facts_as_with_resolution(uri, content, server, source_kind, false, None)
+    }
+
+    pub fn collect_file_facts_as_deferred_resolution_with_known_namespaces(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        source_kind: SourceKind,
+        known_namespaces: &HashSet<FullyQualifiedName>,
+    ) -> Result<()> {
+        self.collect_file_facts_as_with_resolution(
+            uri,
+            content,
+            server,
+            source_kind,
+            false,
+            Some(known_namespaces),
+        )
+    }
+
+    fn collect_file_facts_as_with_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        source_kind: SourceKind,
+        resolve_references: bool,
+        known_namespaces: Option<&HashSet<FullyQualifiedName>>,
+    ) -> Result<()> {
         let start = Instant::now();
         debug!("Collecting facts for: {:?}", uri);
 
+        let register_start = Instant::now();
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
         let document = RubyDocument::with_analysis_file_id(
@@ -243,41 +315,116 @@ impl FileProcessor {
             0,
             analysis_file_id,
         );
+        let register_elapsed = register_start.elapsed();
+
+        let parse_start = Instant::now();
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
+        let parse_elapsed = parse_start.elapsed();
 
-        let direct_facts_seed = collect_direct_facts(server, content, analysis_file_id);
-        replace_analysis_facts_for_file(server, analysis_file_id, &direct_facts_seed);
+        let direct_start = Instant::now();
+        let direct_facts_seed = if resolve_references {
+            collect_direct_facts(server, &node, analysis_file_id, known_namespaces)
+        } else {
+            ruby_analysis::indexer::AnalysisIndex::default()
+        };
+        if resolve_references {
+            replace_analysis_facts_for_file(
+                server,
+                analysis_file_id,
+                &direct_facts_seed,
+                resolve_references,
+            );
+        }
+        let direct_elapsed = direct_start.elapsed();
 
         let mut fact_collector = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
             server.analysis_engine.clone(),
         );
+        if !resolve_references {
+            let direct_known_namespaces = known_namespaces
+                .cloned()
+                .unwrap_or_else(|| collect_known_namespaces(server));
+            fact_collector = fact_collector.with_direct_known_namespaces(direct_known_namespaces);
+        }
+        let visit_start = Instant::now();
         fact_collector.visit(&node);
+        let visit_elapsed = visit_start.elapsed();
 
-        let mut direct_facts = direct_facts_seed;
+        let extension_start = Instant::now();
+        let mut direct_facts = if resolve_references {
+            direct_facts_seed
+        } else {
+            fact_collector.direct_facts.clone()
+        };
         add_extension_analysis_facts(
             server,
             &document,
             &fact_collector.extension_index_patches,
             &mut direct_facts,
         );
-        server.analysis_engine.lock().replace_file_analysis(
+        let extension_elapsed = extension_start.elapsed();
+        let symbol_count = direct_facts.symbols.len();
+        let method_count = direct_facts.methods.len();
+        let type_count = direct_facts.types.len();
+        let graph_node_count = direct_facts.graph_nodes.len();
+        let graph_edge_count = direct_facts.graph_edges.len();
+        let (reference_candidates, diagnostic_candidates, diagnostics) = if source_kind.is_project()
+        {
+            (
+                fact_collector.reference_candidates,
+                fact_collector.diagnostic_candidates,
+                fact_collector.analysis_diagnostics,
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
+        let reference_candidate_count = reference_candidates.len();
+        let diagnostic_candidate_count = diagnostic_candidates.len();
+        let diagnostic_count = diagnostics.len();
+        let replace_start = Instant::now();
+        replace_file_analysis(
+            server,
             analysis_file_id,
-            FileAnalysisFacts {
+            FileFacts {
                 symbols: direct_facts.symbols,
                 methods: direct_facts.methods,
                 types: direct_facts.types,
                 graph_nodes: direct_facts.graph_nodes,
                 graph_edges: direct_facts.graph_edges,
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                reference_candidates: fact_collector.reference_candidates,
-                diagnostic_candidates: fact_collector.diagnostic_candidates,
-                diagnostics: fact_collector.analysis_diagnostics,
+                reference_candidates,
+                diagnostic_candidates,
+                diagnostics,
             },
+            resolve_references,
         );
-        debug!("Collected facts for {:?} in {:?}", uri, start.elapsed());
+        let replace_elapsed = replace_start.elapsed();
+        let elapsed = start.elapsed();
+        if should_trace_file(uri, elapsed) {
+            log::info!(
+                "File fact timings {:?}: total={:?} register={:?} parse={:?} direct={:?} visit={:?} extension={:?} replace={:?} symbols={} methods={} types={} graph_nodes={} graph_edges={} refs={} diag_candidates={} diagnostics={}",
+                uri.to_file_path().unwrap_or_else(|_| PathBuf::from(uri.as_str())),
+                elapsed,
+                register_elapsed,
+                parse_elapsed,
+                direct_elapsed,
+                visit_elapsed,
+                extension_elapsed,
+                replace_elapsed,
+                symbol_count,
+                method_count,
+                type_count,
+                graph_node_count,
+                graph_edge_count,
+                reference_candidate_count,
+                diagnostic_candidate_count,
+                diagnostic_count
+            );
+        }
+        debug!("Collected facts for {:?} in {:?}", uri, elapsed);
         Ok(())
     }
 
@@ -294,30 +441,77 @@ impl FileProcessor {
     }
 }
 
+impl Default for FileProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct ExtensionGraphEdge<'a> {
+    source: FullyQualifiedName,
+    target_parts: &'a [RubyConstant],
+    absolute: bool,
+    context: FullyQualifiedName,
+    kind: GraphEdgeKind,
+    range: TextRange,
+}
+
+fn should_trace_file(uri: &Url, elapsed: std::time::Duration) -> bool {
+    if std::env::var_os("RUBY_FAST_LSP_TRACE_SLOW_FILES").is_some() && elapsed.as_millis() >= 500 {
+        return true;
+    }
+    let Ok(pattern) = std::env::var("RUBY_FAST_LSP_TRACE_FILE") else {
+        return false;
+    };
+    uri.as_str().contains(&pattern)
+}
+
 fn collect_direct_facts(
     server: &RubyLanguageServer,
-    content: &str,
+    node: &ruby_prism::Node<'_>,
     file_id: ruby_analysis::core::SourceFileId,
+    known_namespaces: Option<&HashSet<FullyQualifiedName>>,
 ) -> ruby_analysis::indexer::AnalysisIndex {
-    AnalysisIndexer::with_known_namespaces(file_id, collect_known_namespaces(server))
-        .index_source(content)
+    let known_namespaces = known_namespaces
+        .cloned()
+        .unwrap_or_else(|| collect_known_namespaces(server));
+    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_node(node)
 }
 
 fn replace_analysis_facts_for_file(
     server: &RubyLanguageServer,
     file_id: ruby_analysis::core::SourceFileId,
     facts: &ruby_analysis::indexer::AnalysisIndex,
+    resolve_references: bool,
 ) {
-    server
-        .analysis_engine
-        .lock()
-        .replace_file_analysis(file_id, file_analysis_facts_from_index(facts));
+    replace_file_analysis(
+        server,
+        file_id,
+        file_analysis_facts_from_index(facts),
+        resolve_references,
+    );
 }
 
-fn file_analysis_facts_from_index(
-    facts: &ruby_analysis::indexer::AnalysisIndex,
-) -> FileAnalysisFacts {
-    FileAnalysisFacts {
+fn replace_file_analysis(
+    server: &RubyLanguageServer,
+    file_id: ruby_analysis::core::SourceFileId,
+    facts: FileFacts,
+    resolve_references: bool,
+) {
+    let mut engine = server.analysis_engine.lock();
+    engine.replace_facts(
+        file_id,
+        facts,
+        if resolve_references {
+            ResolveMode::Immediate
+        } else {
+            ResolveMode::Deferred
+        },
+    );
+}
+
+fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex) -> FileFacts {
+    FileFacts {
         symbols: facts.symbols.clone(),
         methods: facts.methods.clone(),
         types: facts.types.clone(),
@@ -422,24 +616,28 @@ fn add_extension_analysis_facts(
                 push_extension_graph_edge(
                     facts,
                     &known_namespaces,
-                    source.clone(),
-                    &target_parts,
-                    mixin.absolute,
-                    FullyQualifiedName::namespace(source_parts.clone()),
-                    kind,
-                    range,
+                    ExtensionGraphEdge {
+                        source: source.clone(),
+                        target_parts: &target_parts,
+                        absolute: mixin.absolute,
+                        context: FullyQualifiedName::namespace(source_parts.clone()),
+                        kind,
+                        range,
+                    },
                 );
                 if mixin.kind == MixinKind::Extend {
                     if let Some(singleton_source) = source.to_singleton_namespace() {
                         push_extension_graph_edge(
                             facts,
                             &known_namespaces,
-                            singleton_source,
-                            &target_parts,
-                            mixin.absolute,
-                            FullyQualifiedName::namespace(source_parts),
-                            GraphEdgeKind::Include,
-                            range,
+                            ExtensionGraphEdge {
+                                source: singleton_source,
+                                target_parts: &target_parts,
+                                absolute: mixin.absolute,
+                                context: FullyQualifiedName::namespace(source_parts),
+                                kind: GraphEdgeKind::Include,
+                                range,
+                            },
                         );
                     }
                 }
@@ -451,31 +649,32 @@ fn add_extension_analysis_facts(
 fn push_extension_graph_edge(
     facts: &mut ruby_analysis::indexer::AnalysisIndex,
     known_namespaces: &HashSet<FullyQualifiedName>,
-    source: FullyQualifiedName,
-    target_parts: &[RubyConstant],
-    absolute: bool,
-    context: FullyQualifiedName,
-    kind: GraphEdgeKind,
-    range: TextRange,
+    edge: ExtensionGraphEdge<'_>,
 ) {
-    let Some(target) =
-        resolve_extension_namespace(known_namespaces, target_parts, absolute, &context)
-    else {
+    let Some(target) = resolve_extension_namespace(
+        known_namespaces,
+        edge.target_parts,
+        edge.absolute,
+        &edge.context,
+    ) else {
         facts
             .unresolved_graph_edges
             .push(UnresolvedGraphEdgeFact::new(
-                source,
-                target_parts.to_vec(),
-                absolute,
-                context,
-                kind,
-                range,
+                edge.source,
+                edge.target_parts.to_vec(),
+                edge.absolute,
+                edge.context,
+                edge.kind,
+                edge.range,
             ));
         return;
     };
-    facts
-        .graph_edges
-        .push(GraphEdgeFact::new(source, target, kind, range));
+    facts.graph_edges.push(GraphEdgeFact::new(
+        edge.source,
+        target,
+        edge.kind,
+        edge.range,
+    ));
 }
 
 fn resolve_extension_namespace(

@@ -1,4 +1,4 @@
-use crate::core::{TypeFact, TypeProvenance, TypeSubject};
+use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
 use log::error;
 use ruby_prism::{
     LocalVariableAndWriteNode, LocalVariableOperatorWriteNode, LocalVariableOrWriteNode,
@@ -20,7 +20,7 @@ impl FactCollector {
 
         // Infer type from value if available
         let inferred_type = if let Some(value) = value_node {
-            self.infer_type_from_value(value)
+            self.infer_assignment_type_from_value(value)
         } else {
             RubyType::Unknown
         };
@@ -57,6 +57,17 @@ impl FactCollector {
 
         // Get location for both index entry and VariableScopes
         let location = self.document.prism_location_to_text_range(&name_loc);
+        if let Ok(fqn) = FullyQualifiedName::local_variable(variable_name.clone()) {
+            self.direct_push_variable_symbol(fqn, SymbolKind::LocalVariable, &name_loc);
+        }
+        self.direct_push_assignment_type(
+            TypeSubject::Local {
+                scope_id: 0,
+                name: variable_name.clone(),
+            },
+            inferred_type.clone(),
+            &name_loc,
+        );
 
         self.document
             .variable_scopes_mut()

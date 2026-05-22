@@ -1128,7 +1128,7 @@ mod soak_test {
             }
 
             // Print progress every 100 runs
-            if (i + 1) % 100 == 0 {
+            if (i + 1).is_multiple_of(100) {
                 let total = TOTAL_RUNS.load(Ordering::SeqCst);
                 let failures = TOTAL_FAILURES.load(Ordering::SeqCst);
                 let unique = FAILURES.lock().map(|f| f.len()).unwrap_or(0);

@@ -1,6 +1,6 @@
 //! Reference tests for local variables.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, FakeEditor};
 
 /// Find references to a method parameter - should find definition and all usages
 #[tokio::test]
@@ -70,6 +70,25 @@ puts <ref>x</ref>
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn references_local_variable_survives_reopen_without_reindex() {
+    let mut editor = FakeEditor::new().await;
+    let content = "def work\n  user = 1\n  puts user\nend\n";
+
+    editor.open("local_refs_reopen.rb", content).await;
+    editor.close("local_refs_reopen.rb").await;
+    editor.open("local_refs_reopen.rb", content).await;
+
+    let locations = editor.references_at("local_refs_reopen.rb", 2, 7).await;
+    assert_eq!(locations.len(), 2);
+    assert!(locations
+        .iter()
+        .any(|location| location.range.start.line == 1 && location.range.start.character == 2));
+    assert!(locations
+        .iter()
+        .any(|location| location.range.start.line == 2 && location.range.start.character == 7));
 }
 
 /// Find references to a variable captured in a block

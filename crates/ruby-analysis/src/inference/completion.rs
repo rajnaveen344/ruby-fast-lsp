@@ -44,7 +44,7 @@ pub fn receiver_type_from_context(
         ..
     }) = identifier
     {
-        let fqn = FullyQualifiedName::Constant(recv_parts.clone());
+        let fqn = FullyQualifiedName::constant(recv_parts.clone());
         return Some(RubyType::ClassReference(fqn));
     }
 
@@ -151,7 +151,7 @@ pub fn receiver_type_from_context(
         .unwrap_or(false)
     {
         if let Ok(constant) = RubyConstant::new(receiver_text) {
-            return Some(RubyType::ClassReference(FullyQualifiedName::Constant(
+            return Some(RubyType::ClassReference(FullyQualifiedName::constant(
                 vec![constant],
             )));
         }
@@ -240,7 +240,7 @@ fn resolve_method_receiver_type(
 ) -> Option<RubyType> {
     match receiver {
         MethodReceiver::Constant(parts) => {
-            let fqn = FullyQualifiedName::Constant(parts.clone());
+            let fqn = FullyQualifiedName::constant(parts.clone());
             Some(RubyType::ClassReference(fqn))
         }
         MethodReceiver::LocalVariable(name) => {
@@ -546,7 +546,7 @@ pub fn infer_constructor_assignment_type(content: &str, var_name: &str) -> Optio
             .collect();
 
         if !parts.is_empty() {
-            return Some(RubyType::Class(FullyQualifiedName::Constant(parts)));
+            return Some(RubyType::Class(FullyQualifiedName::constant(parts)));
         }
     }
 

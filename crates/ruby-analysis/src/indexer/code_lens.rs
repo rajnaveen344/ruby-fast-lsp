@@ -55,24 +55,24 @@ impl CodeLensCollector {
             String::from_utf8_lossy(constant_read.name().as_slice()).to_string()
         } else if node.as_constant_path_node().is_some() {
             let mut parts = Vec::new();
-            self.collect_constant_path_parts(node, &mut parts);
+            collect_constant_path_parts(node, &mut parts);
             parts.join("::")
         } else {
             String::new()
         }
     }
+}
 
-    fn collect_constant_path_parts(&self, node: &Node, parts: &mut Vec<String>) {
-        if let Some(constant_path) = node.as_constant_path_node() {
-            if let Some(parent) = constant_path.parent() {
-                self.collect_constant_path_parts(&parent, parts);
-            }
-            if let Some(name_bytes) = constant_path.name() {
-                parts.push(String::from_utf8_lossy(name_bytes.as_slice()).to_string());
-            }
-        } else if let Some(constant_read) = node.as_constant_read_node() {
-            parts.push(String::from_utf8_lossy(constant_read.name().as_slice()).to_string());
+fn collect_constant_path_parts(node: &Node, parts: &mut Vec<String>) {
+    if let Some(constant_path) = node.as_constant_path_node() {
+        if let Some(parent) = constant_path.parent() {
+            collect_constant_path_parts(&parent, parts);
         }
+        if let Some(name_bytes) = constant_path.name() {
+            parts.push(String::from_utf8_lossy(name_bytes.as_slice()).to_string());
+        }
+    } else if let Some(constant_read) = node.as_constant_read_node() {
+        parts.push(String::from_utf8_lossy(constant_read.name().as_slice()).to_string());
     }
 }
 

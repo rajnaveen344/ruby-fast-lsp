@@ -520,13 +520,13 @@ impl<'a> TypeTracker<'a> {
         if let Some(const_read) = node.as_constant_read_node() {
             let const_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
             if let Ok(constant) = RubyConstant::new(&const_name) {
-                return RubyType::ClassReference(FullyQualifiedName::Constant(vec![constant]));
+                return RubyType::ClassReference(FullyQualifiedName::constant(vec![constant]));
             }
         }
 
         // Handle constant path (namespaced constants like Foo::Bar)
         if let Some(const_path) = node.as_constant_path_node() {
-            if let Some(fqn) = self.resolve_constant_path(&const_path) {
+            if let Some(fqn) = Self::resolve_constant_path(&const_path) {
                 return RubyType::ClassReference(fqn);
             }
         }
@@ -558,13 +558,13 @@ impl<'a> TypeTracker<'a> {
                     let class_name =
                         String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                     if let Ok(constant) = RubyConstant::new(&class_name) {
-                        let fqn = FullyQualifiedName::Constant(vec![constant]);
+                        let fqn = FullyQualifiedName::constant(vec![constant]);
                         return RubyType::Class(fqn);
                     }
                 }
                 // Handle namespaced constant like Foo::Bar.new
                 if let Some(const_path) = receiver.as_constant_path_node() {
-                    if let Some(fqn) = self.resolve_constant_path(&const_path) {
+                    if let Some(fqn) = Self::resolve_constant_path(&const_path) {
                         return RubyType::Class(fqn);
                     }
                 }
@@ -663,7 +663,7 @@ impl<'a> TypeTracker<'a> {
     }
 
     /// Resolve a constant path to an FQN (e.g., Foo::Bar::Baz)
-    fn resolve_constant_path(&self, const_path: &ConstantPathNode) -> Option<FullyQualifiedName> {
+    fn resolve_constant_path(const_path: &ConstantPathNode) -> Option<FullyQualifiedName> {
         let mut parts = Vec::new();
 
         // Get the child constant name
@@ -675,22 +675,22 @@ impl<'a> TypeTracker<'a> {
         // Get parent parts recursively
         if let Some(parent) = const_path.parent() {
             if let Some(parent_path) = parent.as_constant_path_node() {
-                if let Some(parent_fqn) = self.resolve_constant_path(&parent_path) {
-                    if let FullyQualifiedName::Constant(parent_parts) = parent_fqn {
-                        let mut full_parts = parent_parts;
-                        full_parts.extend(parts);
-                        return Some(FullyQualifiedName::Constant(full_parts));
-                    }
+                if let Some(FullyQualifiedName::Constant(parent_parts)) =
+                    Self::resolve_constant_path(&parent_path)
+                {
+                    let mut full_parts = parent_parts;
+                    full_parts.extend(parts);
+                    return Some(FullyQualifiedName::constant(full_parts));
                 }
             } else if let Some(const_read) = parent.as_constant_read_node() {
                 let parent_name = String::from_utf8_lossy(const_read.name().as_slice()).to_string();
                 let mut full_parts = vec![RubyConstant::new(&parent_name).ok()?];
                 full_parts.extend(parts);
-                return Some(FullyQualifiedName::Constant(full_parts));
+                return Some(FullyQualifiedName::constant(full_parts));
             }
         } else {
             // No parent means this is a top-level constant
-            return Some(FullyQualifiedName::Constant(parts));
+            return Some(FullyQualifiedName::constant(parts));
         }
 
         None

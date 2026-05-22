@@ -261,8 +261,7 @@ fn is_assignment_with_conditional(line: &str) -> bool {
             // Check if there's a valid identifier before =
             if !before_eq.is_empty() && is_valid_identifier(before_eq) {
                 // Check if after = starts with our keyword followed by space or end of line
-                if after_eq.starts_with(keyword) {
-                    let after_keyword = &after_eq[keyword.len()..];
+                if let Some(after_keyword) = after_eq.strip_prefix(keyword) {
                     if after_keyword.is_empty() || after_keyword.starts_with(' ') {
                         return true;
                     }

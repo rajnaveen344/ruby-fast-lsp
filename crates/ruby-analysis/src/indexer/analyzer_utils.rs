@@ -76,7 +76,7 @@ pub fn fqn_from_node(
         let mut fqn_parts = current_namespace.to_vec();
         if let Ok(constant) = RubyConstant::new(name) {
             fqn_parts.push(constant);
-            Some(FullyQualifiedName::Constant(fqn_parts))
+            Some(FullyQualifiedName::constant(fqn_parts))
         } else {
             None
         }
@@ -92,7 +92,7 @@ pub fn fqn_from_node(
             parts.extend(collected_parts);
             parts
         };
-        Some(FullyQualifiedName::Constant(final_parts))
+        Some(FullyQualifiedName::constant(final_parts))
     } else {
         None
     }

@@ -137,10 +137,10 @@ impl fmt::Display for Identifier {
 impl From<Identifier> for FullyQualifiedName {
     fn from(value: Identifier) -> Self {
         match value {
-            Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::Constant(iden),
+            Identifier::RubyConstant { namespace: _, iden } => FullyQualifiedName::constant(iden),
             Identifier::RubyMethod {
                 namespace, iden, ..
-            } => FullyQualifiedName::Method(namespace, iden),
+            } => FullyQualifiedName::method(namespace, iden),
             Identifier::RubyLocalVariable { name, .. } => {
                 FullyQualifiedName::LocalVariable(Ustr::from(&name))
             }
@@ -154,11 +154,11 @@ impl From<Identifier> for FullyQualifiedName {
                 FullyQualifiedName::GlobalVariable(Ustr::from(&name))
             }
             Identifier::YardType { type_name, .. } => {
-                let namespace = type_name
+                let namespace: Vec<RubyConstant> = type_name
                     .split("::")
                     .filter_map(|part| RubyConstant::try_from(part.trim()).ok())
                     .collect();
-                FullyQualifiedName::Constant(namespace)
+                FullyQualifiedName::constant(namespace)
             }
         }
     }

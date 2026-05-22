@@ -46,7 +46,7 @@ pub fn get_stub_files(stubs_dir: &Path) -> Vec<PathBuf> {
                 .flatten()
                 .filter_map(|e| {
                     let path = e.path();
-                    if path.extension().map_or(false, |ext| ext == "rb") {
+                    if path.extension().is_some_and(|ext| ext == "rb") {
                         Some(path)
                     } else {
                         None

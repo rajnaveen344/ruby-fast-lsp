@@ -40,8 +40,12 @@ impl FactCollector {
             }
         }
 
-        self.resolve_method_return_type_from_analysis(receiver_type, method_name)
-            .or_else(|| resolve_rbs_method_return_type(receiver_type, method_name))
+        if self.resolve_analysis_method_returns {
+            self.resolve_method_return_type_from_analysis(receiver_type, method_name)
+                .or_else(|| resolve_rbs_method_return_type(receiver_type, method_name))
+        } else {
+            resolve_rbs_method_return_type(receiver_type, method_name)
+        }
     }
 
     fn resolve_method_return_type_from_analysis(

@@ -408,10 +408,8 @@ mod cross_file_tests {
 
             let char_pos = if let Some(pos) = line.find(&class_pattern) {
                 Some(pos + 6) // "class " is 6 chars
-            } else if let Some(pos) = line.find(&module_pattern) {
-                Some(pos + 7) // "module " is 7 chars
             } else {
-                None
+                line.find(&module_pattern).map(|pos| pos + 7)
             };
 
             if let Some(char_pos) = char_pos {
@@ -499,12 +497,7 @@ end
         // ModuleB SHOULD have warning (different file)
         let details: Vec<(&str, &str)> = supertypes
             .iter()
-            .map(|s| {
-                (
-                    s.name.as_str(),
-                    s.detail.as_ref().map(|d| d.as_str()).unwrap_or(""),
-                )
-            })
+            .map(|s| (s.name.as_str(), s.detail.as_deref().unwrap_or("")))
             .collect();
 
         let module_a_detail = details.iter().find(|(n, _)| *n == "ModuleA").unwrap().1;
@@ -770,12 +763,7 @@ end
         // Collect details
         let details: std::collections::HashMap<&str, &str> = supertypes
             .iter()
-            .map(|s| {
-                (
-                    s.name.as_str(),
-                    s.detail.as_ref().map(|d| d.as_str()).unwrap_or(""),
-                )
-            })
+            .map(|s| (s.name.as_str(), s.detail.as_deref().unwrap_or("")))
             .collect();
 
         // Check relation labels are present

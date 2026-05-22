@@ -24,8 +24,10 @@ mod tests {
     #[test]
     fn test_config_get_ruby_version() {
         // Test with configured version
-        let mut config = RubyFastLspConfig::default();
-        config.ruby_version = "3.1".to_string();
+        let mut config = RubyFastLspConfig {
+            ruby_version: "3.1".to_string(),
+            ..Default::default()
+        };
 
         let version = config.get_ruby_version();
         assert_eq!(version, Some((3, 1)));
@@ -67,8 +69,10 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let mut config = RubyFastLspConfig::default();
-            config.ruby_version = input.to_string();
+            let config = RubyFastLspConfig {
+                ruby_version: input.to_string(),
+                ..Default::default()
+            };
 
             let result = config.get_ruby_version();
             assert_eq!(result, expected, "Failed for input: {}", input);

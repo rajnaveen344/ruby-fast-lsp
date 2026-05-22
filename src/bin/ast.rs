@@ -126,9 +126,7 @@ impl Dumper<'_> {
 
     fn node_kind(node: &Node) -> String {
         let dbg = format!("{node:?}");
-        let end = dbg
-            .find(|c: char| c == '(' || c == '{' || c == ' ')
-            .unwrap_or(dbg.len());
+        let end = dbg.find(['(', '{', ' ']).unwrap_or(dbg.len());
         let raw = &dbg[..end];
         let trimmed = raw.strip_suffix("Node").unwrap_or(raw);
         to_snake(trimmed)

@@ -1,7 +1,7 @@
 use crate::core::{
-    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, KeywordArgCandidate,
-    MethodCallSignatureCandidate, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
-    RubyConstant, RubyMethod,
+    DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeKind,
+    KeywordArgCandidate, MethodCallSignatureCandidate, MethodFact, NamespaceKind,
+    RaiseArgCandidate, ReferenceCandidate, RubyConstant, RubyMethod,
 };
 use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
 use log::trace;
@@ -25,10 +25,127 @@ impl FactCollector {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let extension_host = self.extension_host.clone();
         extension_host.process_call_node(self, node);
-        self.extension_call_stack
-            .push(extension_host.resolved_call_for_stack(self, node));
+        let method_name = utf8_str(node.name().as_slice());
+        let track_call = extension_host.should_track_enclosing_call(method_name);
+        self.extension_call_stack_marks.push(track_call);
+        if track_call {
+            self.extension_call_stack
+                .push(extension_host.resolved_call_for_stack(self, node));
+        }
 
+        self.process_direct_call_facts(node);
         self.process_call_reference_candidate(node);
+    }
+
+    fn process_direct_call_facts(&mut self, node: &CallNode) {
+        if node.receiver().is_some() {
+            return;
+        }
+
+        match node.name().as_slice() {
+            b"attr_reader" => self.push_direct_attr_method_facts(node, true, false),
+            b"attr_writer" => self.push_direct_attr_method_facts(node, false, true),
+            b"attr_accessor" => self.push_direct_attr_method_facts(node, true, true),
+            b"module_function" => self.push_direct_module_function_facts(node),
+            b"include" => self.push_direct_mixin_edges(node, GraphEdgeKind::Include),
+            b"prepend" => self.push_direct_mixin_edges(node, GraphEdgeKind::Prepend),
+            b"extend" => self.push_direct_mixin_edges(node, GraphEdgeKind::Extend),
+            _ => {}
+        }
+    }
+
+    fn push_direct_attr_method_facts(&mut self, node: &CallNode, reader: bool, writer: bool) {
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+        let owner_kind = self.scope_tracker.current_method_context();
+        for arg in arguments.arguments().iter() {
+            let Some((name, range)) = direct_attr_name_and_range(self, &arg) else {
+                continue;
+            };
+            if reader {
+                if let Ok(method) = RubyMethod::new(&name) {
+                    self.direct_push_method_fact(
+                        self.scope_tracker.get_ns_stack(),
+                        owner_kind,
+                        method,
+                        range,
+                        Vec::new(),
+                    );
+                }
+            }
+            if writer {
+                if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
+                    self.direct_push_method_fact(
+                        self.scope_tracker.get_ns_stack(),
+                        owner_kind,
+                        method,
+                        range,
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+    }
+
+    fn push_direct_module_function_facts(&mut self, node: &CallNode) {
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+        for arg in arguments.arguments().iter() {
+            let Some((name, fallback_range)) = direct_symbol_name_and_range(self, &arg) else {
+                continue;
+            };
+            let Ok(method) = RubyMethod::new(&name) else {
+                continue;
+            };
+            let namespace = self.scope_tracker.get_ns_stack();
+            let fqn = FullyQualifiedName::method(namespace.clone(), method);
+            let instance_owner =
+                FullyQualifiedName::namespace_with_kind(namespace.clone(), NamespaceKind::Instance);
+            let range = self
+                .direct_facts
+                .methods
+                .iter()
+                .find(|fact| fact.fqn == fqn && fact.owner == instance_owner)
+                .map(|fact| fact.range)
+                .unwrap_or(fallback_range);
+            let owner =
+                FullyQualifiedName::namespace_with_kind(namespace, NamespaceKind::Singleton);
+            self.direct_facts
+                .methods
+                .push(MethodFact::new(fqn, owner, range));
+        }
+    }
+
+    fn push_direct_mixin_edges(&mut self, node: &CallNode, kind: GraphEdgeKind) {
+        let Some(arguments) = node.arguments() else {
+            return;
+        };
+        let source = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+        let range = self.direct_range(&node.location());
+        for arg in arguments.arguments().iter() {
+            if let Some(mixin_ref) = crate::mixin_ref_from_node(&arg) {
+                self.direct_push_edge(
+                    source.clone(),
+                    &mixin_ref.parts,
+                    mixin_ref.absolute,
+                    kind,
+                    range,
+                );
+                if kind == GraphEdgeKind::Extend {
+                    if let Some(source_singleton) = source.to_singleton_namespace() {
+                        self.direct_push_edge(
+                            source_singleton,
+                            &mixin_ref.parts,
+                            mixin_ref.absolute,
+                            GraphEdgeKind::Include,
+                            range,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn process_call_reference_candidate(&mut self, node: &CallNode) {
@@ -81,28 +198,40 @@ impl FactCollector {
                     None
                 }
             };
+            let signature = if self.diagnostics_enabled {
+                self.method_call_signature_candidate(node)
+            } else {
+                crate::core::MethodCallSignatureCandidate::default()
+            };
             self.reference_candidates.push(ReferenceCandidate::method(
                 call_range,
-                target_namespace,
-                namespace_kind,
-                method,
-                self.scope_tracker.current_method_fqn().cloned(),
-                message_range,
-                receiver_label,
-                !matches!(receiver_info, ReceiverInfo::SelfReceiver),
-                self.method_call_signature_candidate(node),
+                crate::core::MethodReferenceCandidate {
+                    owner: target_namespace,
+                    owner_kind: namespace_kind,
+                    method,
+                    caller: self.scope_tracker.current_method_fqn().cloned(),
+                    diagnostics: crate::core::MethodReferenceDiagnostics {
+                        diagnostic_range: message_range,
+                        receiver_label,
+                        diagnose_unresolved: self.diagnostics_enabled
+                            && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
+                        signature,
+                    },
+                },
             ));
         }
 
-        if method_name == "raise" && node.receiver().is_none() {
+        if self.diagnostics_enabled && method_name == "raise" && node.receiver().is_none() {
             if let Some(candidate) = self.raise_non_exception_candidate(node) {
                 self.diagnostic_candidates.push(candidate);
             }
         }
 
-        for entry in super::bad_splat::check(node, &self.document) {
-            let candidate = self.bad_splat_candidate(entry);
-            self.diagnostic_candidates.push(candidate);
+        if self.diagnostics_enabled {
+            for entry in super::bad_splat::check(node, &self.document) {
+                let candidate = self.bad_splat_candidate(entry);
+                self.diagnostic_candidates.push(candidate);
+            }
         }
     }
 
@@ -138,7 +267,7 @@ impl FactCollector {
             let (ns, kind) = self.handle_constant_read_receiver(&constant_read, current_namespace);
             (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
-            if self.is_valid_constant_path_receiver(receiver_node) {
+            if is_valid_constant_path_receiver(receiver_node) {
                 let receiver_name = build_constant_path_name(receiver_node);
                 let (ns, kind) = self.handle_constant_path_receiver(
                     &constant_path,
@@ -191,6 +320,11 @@ impl FactCollector {
                 current_namespace.to_vec()
             };
             if let Some(resolved_fqn) =
+                self.direct_resolve_namespace(&mixin_ref.parts, mixin_ref.absolute)
+            {
+                return (resolved_fqn.namespace_parts(), NamespaceKind::Singleton);
+            }
+            if let Some(resolved_fqn) =
                 self.resolve_constant_from_analysis(&mixin_ref.parts, &context)
             {
                 return (resolved_fqn.namespace_parts(), NamespaceKind::Singleton);
@@ -229,6 +363,10 @@ impl FactCollector {
     }
 
     fn infer_expression_receiver_type(&self, receiver_node: &Node) -> Option<RubyType> {
+        if !self.infer_expression_receivers {
+            return None;
+        }
+
         if let Some(local_var) = receiver_node.as_local_variable_read_node() {
             let var_name = utf8_str(local_var.name().as_slice());
             if let Some(ty) = self.get_local_var_type(var_name, &local_var.location()) {
@@ -242,7 +380,7 @@ impl FactCollector {
             let inner_type = if let Some(inner_receiver) = call.receiver() {
                 if let Some(constant_read) = inner_receiver.as_constant_read_node() {
                     let name = utf8_str(constant_read.name().as_slice());
-                    Some(RubyType::ClassReference(FullyQualifiedName::Constant(
+                    Some(RubyType::ClassReference(FullyQualifiedName::constant(
                         vec![RubyConstant::new(name).ok()?],
                     )))
                 } else {
@@ -253,7 +391,7 @@ impl FactCollector {
                 if ns.is_empty() {
                     None
                 } else {
-                    Some(RubyType::Class(FullyQualifiedName::Constant(ns)))
+                    Some(RubyType::Class(FullyQualifiedName::constant(ns)))
                 }
             }?;
 
@@ -289,14 +427,8 @@ impl FactCollector {
             let mut resolved = None;
             for i in (0..=current_namespace.len()).rev() {
                 let test_namespace = &current_namespace[..i];
-                if test_namespace
-                    .iter()
-                    .any(|c| c.to_string() == first_part.to_string())
-                {
-                    if let Some(pos) = test_namespace
-                        .iter()
-                        .position(|c| c.to_string() == first_part.to_string())
-                    {
+                if test_namespace.iter().any(|c| c == first_part) {
+                    if let Some(pos) = test_namespace.iter().position(|c| c == first_part) {
                         let mut result = test_namespace[..=pos].to_vec();
                         result.extend(parts.iter().skip(1).cloned());
                         resolved = Some(result);
@@ -308,7 +440,7 @@ impl FactCollector {
             resolved.unwrap_or_else(|| {
                 if current_namespace.len() >= 2 {
                     let parent_ns = &current_namespace[..current_namespace.len() - 1];
-                    if parent_ns.last().map(|c| c.to_string()) == Some(first_part.to_string()) {
+                    if parent_ns.last() == Some(first_part) {
                         let mut result = parent_ns.to_vec();
                         result.extend(parts.iter().cloned());
                         return result;
@@ -322,21 +454,6 @@ impl FactCollector {
         } else {
             current_namespace.to_vec()
         }
-    }
-
-    fn is_valid_constant_path_receiver(&self, node: &Node) -> bool {
-        if node.as_constant_read_node().is_some() {
-            return true;
-        }
-
-        if let Some(constant_path) = node.as_constant_path_node() {
-            if let Some(parent) = constant_path.parent() {
-                return self.is_valid_constant_path_receiver(&parent);
-            }
-            return true;
-        }
-
-        false
     }
 
     fn method_call_signature_candidate(&self, node: &CallNode) -> MethodCallSignatureCandidate {
@@ -472,10 +589,64 @@ impl FactCollector {
     }
 
     pub fn process_call_node_exit(&mut self, _node: &CallNode) {
+        let tracked = self.extension_call_stack_marks.pop().expect(
+            "INVARIANT VIOLATED: extension call stack mark underflow in FactCollector. \
+             This is a bug because every call-node entry must push exactly one stack mark. \
+             Fix: keep process_call_node_entry/process_call_node_exit balanced.",
+        );
+        if !tracked {
+            return;
+        }
         self.extension_call_stack.pop().expect(
             "INVARIANT VIOLATED: extension call stack underflow in FactCollector. \
              This is a bug because every call-node entry must push exactly one stack frame. \
              Fix: keep process_call_node_entry/process_call_node_exit balanced.",
         );
     }
+}
+
+fn is_valid_constant_path_receiver(node: &Node) -> bool {
+    if node.as_constant_read_node().is_some() {
+        return true;
+    }
+
+    if let Some(constant_path) = node.as_constant_path_node() {
+        if let Some(parent) = constant_path.parent() {
+            return is_valid_constant_path_receiver(&parent);
+        }
+        return true;
+    }
+
+    false
+}
+
+fn direct_attr_name_and_range(
+    visitor: &FactCollector,
+    node: &Node<'_>,
+) -> Option<(String, crate::core::TextRange)> {
+    if let Some(symbol) = node.as_symbol_node() {
+        return Some((
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            visitor.direct_range(&symbol.location()),
+        ));
+    }
+    if let Some(string) = node.as_string_node() {
+        return Some((
+            String::from_utf8_lossy(string.unescaped()).to_string(),
+            visitor.direct_range(&string.content_loc()),
+        ));
+    }
+    None
+}
+
+fn direct_symbol_name_and_range(
+    visitor: &FactCollector,
+    node: &Node<'_>,
+) -> Option<(String, crate::core::TextRange)> {
+    node.as_symbol_node().map(|symbol| {
+        (
+            String::from_utf8_lossy(symbol.unescaped()).to_string(),
+            visitor.direct_range(&symbol.location()),
+        )
+    })
 }

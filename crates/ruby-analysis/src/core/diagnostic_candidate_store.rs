@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+use super::memory_estimate::{
+    map_table_bytes, ruby_type_heap_bytes, string_heap_bytes, vec_payload_bytes,
+};
 use crate::{RubyConstant, RubyMethod, RubyType, SourceFileId, TextRange};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,8 +89,40 @@ impl DiagnosticCandidateStore {
             .collect()
     }
 
+    pub fn iter_candidates(&self) -> impl Iterator<Item = &DiagnosticCandidate> {
+        self.candidates_by_file
+            .values()
+            .flat_map(|candidates| candidates.iter())
+    }
+
+    pub fn candidate_count(&self) -> usize {
+        self.candidates_by_file.values().map(Vec::len).sum()
+    }
+
     pub fn file_ids(&self) -> Vec<SourceFileId> {
         self.candidates_by_file.keys().copied().collect()
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        map_table_bytes(&self.candidates_by_file)
+            + self
+                .candidates_by_file
+                .values()
+                .map(|candidates| {
+                    vec_payload_bytes(candidates)
+                        + candidates
+                            .iter()
+                            .map(diagnostic_candidate_heap_bytes)
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.candidates_by_file.shrink_to_fit();
+        for candidates in self.candidates_by_file.values_mut() {
+            candidates.shrink_to_fit();
+        }
     }
 }
 
@@ -95,5 +130,33 @@ fn diagnostic_candidate_rank(kind: &DiagnosticCandidateKind) -> u8 {
     match kind {
         DiagnosticCandidateKind::RaiseNonException { .. } => 0,
         DiagnosticCandidateKind::BadSplat { .. } => 1,
+    }
+}
+
+fn diagnostic_candidate_heap_bytes(candidate: &DiagnosticCandidate) -> usize {
+    match &candidate.kind {
+        DiagnosticCandidateKind::RaiseNonException { arg_repr, arg } => {
+            string_heap_bytes(arg_repr) + raise_arg_heap_bytes(arg)
+        }
+        DiagnosticCandidateKind::BadSplat {
+            operator,
+            arg_repr,
+            expected,
+        } => {
+            string_heap_bytes(operator) + string_heap_bytes(arg_repr) + string_heap_bytes(expected)
+        }
+    }
+}
+
+fn raise_arg_heap_bytes(arg: &RaiseArgCandidate) -> usize {
+    match arg {
+        RaiseArgCandidate::StringLiteral
+        | RaiseArgCandidate::NonExceptionLiteral
+        | RaiseArgCandidate::Unknown => 0,
+        RaiseArgCandidate::Constant(name) => string_heap_bytes(name),
+        RaiseArgCandidate::Type(ruby_type) => ruby_type_heap_bytes(ruby_type),
+        RaiseArgCandidate::BareMethodReturn {
+            current_namespace, ..
+        } => vec_payload_bytes(current_namespace),
     }
 }

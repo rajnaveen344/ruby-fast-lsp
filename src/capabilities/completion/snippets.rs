@@ -1118,10 +1118,7 @@ mod tests {
 
         let context = RubySnippets::determine_context(&identifier);
         match context {
-            SnippetContext::MethodCall => {
-                // This should be MethodCall context
-                assert!(true, "Expected MethodCall context for 'a.each'");
-            }
+            SnippetContext::MethodCall => {}
             SnippetContext::General => {
                 // If we get here, let's see what the identifier actually is
                 panic!(

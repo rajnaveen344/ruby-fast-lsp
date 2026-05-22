@@ -3,6 +3,9 @@ use std::fmt;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant};
 use ruby_prism::{ConstantPathNode, Node};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamespacePushError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LocalScopeKind {
     Constant,
@@ -92,7 +95,7 @@ impl ScopeTracker {
         &mut self,
         constant_path: &Node,
         fallback_name: &[u8],
-    ) -> Result<(), ()> {
+    ) -> Result<(), NamespacePushError> {
         if let Some(path_node) = constant_path.as_constant_path_node() {
             let mut namespace_parts = Vec::new();
             collect_namespaces(&path_node, &mut namespace_parts);
@@ -101,7 +104,7 @@ impl ScopeTracker {
         }
 
         let name = String::from_utf8_lossy(fallback_name);
-        let constant = RubyConstant::new(&name).map_err(|_| ())?;
+        let constant = RubyConstant::new(&name).map_err(|_| NamespacePushError)?;
         self.push_ns_scope(constant);
         Ok(())
     }

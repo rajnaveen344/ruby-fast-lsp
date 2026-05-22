@@ -286,14 +286,14 @@ impl LiteralAnalyzer {
         if let Some(program_node) = node.as_program_node() {
             let statements_node = program_node.statements();
             if let Some(first_stmt) = statements_node.body().iter().next() {
-                return self.get_literal_value(&first_stmt);
+                return get_literal_value(first_stmt);
             }
             return None;
         }
 
         if let Some(statements_node) = node.as_statements_node() {
             if let Some(first_stmt) = statements_node.body().iter().next() {
-                return self.get_literal_value(&first_stmt);
+                return get_literal_value(first_stmt);
             }
             return None;
         }
@@ -324,6 +324,10 @@ impl LiteralAnalyzer {
 
         None
     }
+}
+
+fn get_literal_value(node: Node<'_>) -> Option<String> {
+    LiteralAnalyzer::new().get_literal_value(&node)
 }
 
 #[cfg(test)]

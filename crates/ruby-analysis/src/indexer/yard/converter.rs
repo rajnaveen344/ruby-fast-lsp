@@ -329,7 +329,7 @@ impl YardTypeConverter {
         if namespace.is_empty() {
             None
         } else {
-            Some(FullyQualifiedName::Constant(namespace))
+            Some(FullyQualifiedName::constant(namespace))
         }
     }
 }

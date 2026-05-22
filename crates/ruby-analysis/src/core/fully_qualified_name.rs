@@ -1,7 +1,10 @@
+use smallvec::SmallVec;
 use std::fmt::{self, Display, Formatter};
 use ustr::Ustr;
 
 use super::{ruby_method::RubyMethod, ruby_namespace::RubyConstant};
+
+pub type FqnParts = SmallVec<[RubyConstant; 4]>;
 
 /// Distinguishes between instance namespace and singleton namespace.
 /// In Ruby, all methods are instance methods; they differ in which namespace
@@ -14,21 +17,21 @@ pub enum NamespaceKind {
     Singleton,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum FullyQualifiedName {
     /// Represents a namespace (class or module) with its kind.
     /// - Instance namespace: `Foo::Bar` (regular class/module)
     /// - Singleton namespace: `#<Class:Foo::Bar>` (singleton class for class methods)
-    Namespace(Vec<RubyConstant>, NamespaceKind),
+    Namespace(FqnParts, NamespaceKind),
 
     /// Represents a value constant (not a class/module).
     /// Example: `Foo::BAR` where `BAR = 42`
-    Constant(Vec<RubyConstant>),
+    Constant(FqnParts),
 
     /// Represents a method (just namespace + name, no kind).
     /// All methods are conceptually instance methods of their namespace.
     /// Example: `Foo::Bar#baz` → `Method(vec!["Foo", "Bar"], RubyMethod::new("baz"))`
-    Method(Vec<RubyConstant>, RubyMethod),
+    Method(FqnParts, RubyMethod),
 
     /// Local variable, e.g., `a = 1` → `LocalVariable("a")`
     LocalVariable(Ustr),
@@ -47,28 +50,28 @@ impl FullyQualifiedName {
     /// Create a namespace FQN (class/module)
     /// Eg. Foo::Bar::Baz
     /// Classes and modules are stored as Namespace with Instance kind
-    pub fn namespace(namespace: Vec<RubyConstant>) -> Self {
-        FullyQualifiedName::Namespace(namespace, NamespaceKind::Instance)
+    pub fn namespace(namespace: impl Into<FqnParts>) -> Self {
+        FullyQualifiedName::Namespace(namespace.into(), NamespaceKind::Instance)
     }
 
     /// Create a namespace with explicit kind
-    pub fn namespace_with_kind(namespace: Vec<RubyConstant>, kind: NamespaceKind) -> Self {
-        FullyQualifiedName::Namespace(namespace, kind)
+    pub fn namespace_with_kind(namespace: impl Into<FqnParts>, kind: NamespaceKind) -> Self {
+        FullyQualifiedName::Namespace(namespace.into(), kind)
     }
 
     /// Create a singleton namespace (for class methods)
     /// Eg. #<Class:Foo::Bar>
-    pub fn singleton_namespace(namespace: Vec<RubyConstant>) -> Self {
-        FullyQualifiedName::Namespace(namespace, NamespaceKind::Singleton)
+    pub fn singleton_namespace(namespace: impl Into<FqnParts>) -> Self {
+        FullyQualifiedName::Namespace(namespace.into(), NamespaceKind::Singleton)
     }
 
     /// Create a value constant (not a class/module)
-    pub fn constant(namespace: Vec<RubyConstant>) -> Self {
-        FullyQualifiedName::Constant(namespace)
+    pub fn constant(namespace: impl Into<FqnParts>) -> Self {
+        FullyQualifiedName::Constant(namespace.into())
     }
 
-    pub fn method(namespace: Vec<RubyConstant>, method: RubyMethod) -> Self {
-        FullyQualifiedName::Method(namespace, method)
+    pub fn method(namespace: impl Into<FqnParts>, method: RubyMethod) -> Self {
+        FullyQualifiedName::Method(namespace.into(), method)
     }
 
     /// Get the namespace kind if this is a Namespace FQN
@@ -253,13 +256,25 @@ impl FullyQualifiedName {
     // Common accessor for namespace parts
     pub fn namespace_parts(&self) -> Vec<RubyConstant> {
         match self {
-            FullyQualifiedName::Namespace(ns, _) => ns.clone(),
-            FullyQualifiedName::Constant(ns) => ns.clone(),
-            FullyQualifiedName::Method(ns, _) => ns.clone(),
+            FullyQualifiedName::Namespace(ns, _) => ns.to_vec(),
+            FullyQualifiedName::Constant(ns) => ns.to_vec(),
+            FullyQualifiedName::Method(ns, _) => ns.to_vec(),
             FullyQualifiedName::LocalVariable(_) => vec![],
             FullyQualifiedName::InstanceVariable(_) => vec![],
             FullyQualifiedName::ClassVariable(_) => vec![],
             FullyQualifiedName::GlobalVariable(_) => vec![],
+        }
+    }
+
+    pub fn namespace_parts_slice(&self) -> &[RubyConstant] {
+        match self {
+            FullyQualifiedName::Namespace(ns, _)
+            | FullyQualifiedName::Constant(ns)
+            | FullyQualifiedName::Method(ns, _) => ns.as_slice(),
+            FullyQualifiedName::LocalVariable(_)
+            | FullyQualifiedName::InstanceVariable(_)
+            | FullyQualifiedName::ClassVariable(_)
+            | FullyQualifiedName::GlobalVariable(_) => &[],
         }
     }
 

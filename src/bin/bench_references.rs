@@ -192,7 +192,7 @@ fn log_corpus_shape(dir: &PathBuf) {
         .into_iter()
         .filter_map(|e| e.ok())
     {
-        if entry.file_type().is_file() && entry.path().extension().map_or(false, |e| e == "rb") {
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|e| e == "rb") {
             count += 1;
             if let Ok(m) = entry.metadata() {
                 bytes += m.len();

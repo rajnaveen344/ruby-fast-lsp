@@ -134,6 +134,232 @@ Current boundary status:
   completion flow. Reusable receiver/type probing and RBS candidate discovery
   live in `ruby-analysis::inference::completion`.
 
+### Engine Store Direction
+
+Keep the engine public API dead simple and composable. The engine is a fact DB:
+files are registered, facts are replaced per file, deferred refs/diagnostics are
+resolved in one batch, and all reads go through `AnalysisQuery`.
+
+Public write API:
+
+```rust
+impl AnalysisEngine {
+    pub fn new() -> Self;
+
+    pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId;
+
+    pub fn replace_facts(
+        &mut self,
+        file_id: SourceFileId,
+        facts: FileFacts,
+        mode: ResolveMode,
+    );
+
+    pub fn resolve(&mut self);
+
+    pub fn query(&self) -> AnalysisQuery<'_>;
+
+    pub fn stats(&self) -> AnalysisStats;
+}
+
+pub struct SourceFileInput {
+    pub path: PathBuf,
+    pub content: String,
+    pub kind: SourceKind,
+}
+
+pub enum ResolveMode {
+    Immediate,
+    Deferred,
+}
+```
+
+`register_file` owns only file registry/meta:
+
+```text
+path -> SourceFileId
+SourceFileId -> SourceFile { path, content, kind }
+```
+
+`replace_facts` owns semantic reindex for one file: remove stale facts for that
+file, insert new facts, clear caches, and optionally resolve immediately.
+
+Initial workspace indexing should use:
+
+```rust
+for file in files {
+    let file_id = engine.register_file(file.input);
+    let facts = collect_facts(file_id, &file.content);
+    engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+}
+engine.resolve();
+```
+
+Single-file edit should use:
+
+```rust
+let file_id = engine.register_file(file.input);
+let facts = collect_facts(file_id, &file.content);
+engine.replace_facts(file_id, facts, ResolveMode::Immediate);
+```
+
+Do not merge `register_file` and `replace_facts` unless the engine also owns
+parsing/fact collection. It should not. Fact collection needs `SourceFileId` for
+`TextRange`, but parsing and AST traversal belong in `ruby-analysis::indexer`.
+
+Private engine shape:
+
+```rust
+pub struct AnalysisEngine {
+    files: FileStore,
+    names: NameInterner,
+    facts: FactArena,
+    indexes: Indexes,
+    caches: QueryCaches,
+}
+
+pub(crate) struct FileStore {
+    by_path: HashMap<PathBuf, SourceFileId>,
+    files: SlotMap<SourceFileId, SourceFile>,
+}
+
+pub(crate) struct NameInterner {
+    fqns: Interner<FqnId, FullyQualifiedName>,
+    methods: Interner<MethodId, RubyMethod>,
+    constants: Interner<ConstantId, RubyConstant>,
+    type_subjects: Interner<TypeSubjectId, TypeSubject>,
+}
+
+pub(crate) struct FactArena {
+    symbols: SlotMap<SymbolId, SymbolFact>,
+    methods: SlotMap<MethodFactId, MethodFact>,
+    refs: SlotMap<ReferenceId, ReferenceFact>,
+    types: SlotMap<TypeFactId, TypeFact>,
+    diagnostics: SlotMap<DiagnosticId, DiagnosticFact>,
+    graph_nodes: SlotMap<GraphNodeId, GraphNodeFact>,
+    graph_edges: SlotMap<GraphEdgeId, GraphEdgeFact>,
+}
+```
+
+Minimal v1 indexes. Add more only when profiler proves need:
+
+```rust
+pub(crate) struct Indexes {
+    by_file: ByFileIndexes,
+
+    symbols_by_fqn: HashMap<FqnId, Vec<SymbolId>>,
+
+    methods_by_fqn: HashMap<FqnId, Vec<MethodFactId>>,
+    methods_by_owner_name: HashMap<(FqnId, MethodId), Vec<MethodFactId>>,
+
+    refs_by_target: HashMap<FqnId, Vec<ReferenceId>>,
+
+    types_by_subject: HashMap<TypeSubjectId, Vec<TypeFactId>>,
+
+    diagnostics_by_file: HashMap<SourceFileId, Vec<DiagnosticId>>,
+
+    graph_nodes_by_fqn: HashMap<FqnId, Vec<GraphNodeId>>,
+    graph_out: HashMap<FqnId, Vec<GraphEdgeId>>,
+}
+
+pub(crate) struct ByFileIndexes {
+    symbols: HashMap<SourceFileId, Vec<SymbolId>>,
+    methods: HashMap<SourceFileId, Vec<MethodFactId>>,
+    refs: HashMap<SourceFileId, Vec<ReferenceId>>,
+    types: HashMap<SourceFileId, Vec<TypeFactId>>,
+    diagnostics: HashMap<SourceFileId, Vec<DiagnosticId>>,
+    graph_nodes: HashMap<SourceFileId, Vec<GraphNodeId>>,
+    graph_edges: HashMap<SourceFileId, Vec<GraphEdgeId>>,
+}
+
+pub(crate) struct QueryCaches {
+    mro_by_namespace: HashMap<FqnId, Vec<FqnId>>,
+    method_lookup: HashMap<(FqnId, MethodId), Option<MethodFactId>>,
+    method_suggestion: HashMap<(FqnId, MethodId), Option<String>>,
+}
+```
+
+Do not add an `IndexCore` wrapper; it adds ceremony without improving the mental
+model. Keep the fields directly on `AnalysisEngine`.
+
+Public query API should be small primitives that features compose:
+
+```rust
+impl AnalysisQuery<'_> {
+    pub fn file(&self, file_id: SourceFileId) -> Option<&SourceFile>;
+    pub fn file_id(&self, path: &Path) -> Option<SourceFileId>;
+
+    pub fn symbols(&self, key: SymbolKey<'_>) -> impl Iterator<Item = SymbolView<'_>>;
+    pub fn methods(&self, key: MethodKey<'_>) -> impl Iterator<Item = MethodView<'_>>;
+    pub fn refs(&self, key: RefKey<'_>) -> impl Iterator<Item = ReferenceView<'_>>;
+    pub fn types(&self, key: TypeKey<'_>) -> impl Iterator<Item = TypeView<'_>>;
+    pub fn diagnostics(&self, key: DiagnosticKey) -> impl Iterator<Item = DiagnosticView<'_>>;
+
+    pub fn graph(&self) -> GraphQuery<'_>;
+}
+```
+
+Composable query keys:
+
+```rust
+pub enum SymbolKey<'a> {
+    Fqn(&'a FullyQualifiedName),
+    File(SourceFileId),
+    All,
+}
+
+pub enum MethodKey<'a> {
+    Fqn(&'a FullyQualifiedName),
+    Owner(&'a FullyQualifiedName),
+    OwnerName {
+        owner: &'a FullyQualifiedName,
+        name: &'a RubyMethod,
+    },
+    File(SourceFileId),
+    All,
+}
+
+pub enum RefKey<'a> {
+    Target(&'a FullyQualifiedName),
+    Caller(&'a FullyQualifiedName),
+    File(SourceFileId),
+    AllProject,
+}
+
+pub enum TypeKey<'a> {
+    Subject(&'a TypeSubject),
+    File(SourceFileId),
+    At {
+        subject: &'a TypeSubject,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    },
+}
+
+pub enum DiagnosticKey {
+    File(SourceFileId),
+    AllProject,
+    All,
+}
+```
+
+Views should borrow facts or expose IDs; do not clone facts in hot read paths.
+Public callers should not see arena/index IDs unless they explicitly need a
+stable handle.
+
+Rules:
+
+- Public API sees domain facts/views/ranges, not store internals.
+- Private core uses IDs, arenas, indexes, and caches.
+- No public store getters such as `method_store()` or `graph_store()`.
+- No direct `HashMap<FullyQualifiedName, Vec<FullFact>>` outside engine internals.
+- One write path: `register_file -> replace_facts -> resolve`.
+- Feature APIs compose query primitives, e.g. type hints from `types(File)` and
+  project diagnostics from `diagnostics(AllProject)`.
+- Migrate incrementally: hide stores first, then port methods, graph, refs,
+  symbols, types, diagnostics. Start with method/graph because flamegraphs show
+  method lookup, MRO, and unresolved-method suggestions as hot.
+
 ### Analysis Module Responsibilities
 
 ```text

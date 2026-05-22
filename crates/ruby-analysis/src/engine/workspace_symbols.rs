@@ -258,32 +258,45 @@ impl SymbolMatcher {
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolFact, SymbolKind,
-        TextRange,
+        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
+        SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::AnalysisEngine;
+    use crate::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
 
     use super::*;
 
     fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
         let mut engine = AnalysisEngine::new();
-        let file_id = engine.open_or_update_file("/tmp/user.rb", source);
+        let file_id = engine.register_file(SourceFileInput {
+            path: "/tmp/user.rb".into(),
+            content: source.into(),
+            kind: SourceKind::Project,
+        });
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.add_symbol_fact(SymbolFact::new(
-            FullyQualifiedName::namespace(vec![user.clone()]),
-            SymbolKind::Class,
-            TextRange::new(file_id, 6, 10),
-        ));
-        engine.add_symbol_fact(SymbolFact::new(
-            FullyQualifiedName::method(
-                vec![user],
-                RubyMethod::new("name").expect("test method must be valid"),
-            ),
-            SymbolKind::Method,
-            TextRange::new(file_id, 17, 21),
-        ));
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                symbols: vec![
+                    SymbolFact::new(
+                        FullyQualifiedName::namespace(vec![user.clone()]),
+                        SymbolKind::Class,
+                        TextRange::new(file_id, 6, 10),
+                    ),
+                    SymbolFact::new(
+                        FullyQualifiedName::method(
+                            vec![user],
+                            RubyMethod::new("name").expect("test method must be valid"),
+                        ),
+                        SymbolKind::Method,
+                        TextRange::new(file_id, 17, 21),
+                    ),
+                ],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
         (engine, file_id)
     }
 

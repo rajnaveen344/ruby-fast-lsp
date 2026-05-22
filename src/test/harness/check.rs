@@ -160,32 +160,32 @@ pub(super) async fn run_checks_on_fixture(
     let mut checks_run = Vec::new();
 
     // Run goto definition check if we have cursor and def tags
-    if cursor.is_some() && !def_ranges.is_empty() {
-        run_goto_check(server, uri, cursor.unwrap(), &def_ranges).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !def_ranges.is_empty()) {
+        run_goto_check(server, uri, *cursor, &def_ranges).await;
         checks_run.push("goto");
     }
 
     // Run references check if we have cursor and ref tags
-    if cursor.is_some() && !ref_ranges.is_empty() {
-        run_references_check(server, uri, cursor.unwrap(), &ref_ranges).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !ref_ranges.is_empty()) {
+        run_references_check(server, uri, *cursor, &ref_ranges).await;
         checks_run.push("references");
     }
 
     // Run implementation check if we have cursor and impl tags
-    if cursor.is_some() && !impl_ranges.is_empty() {
-        run_implementation_check(server, uri, cursor.unwrap(), &impl_ranges).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !impl_ranges.is_empty()) {
+        run_implementation_check(server, uri, *cursor, &impl_ranges).await;
         checks_run.push("implementation");
     }
 
     // Run incoming calls check if we have cursor and incoming tags
-    if cursor.is_some() && !incoming_ranges.is_empty() {
-        run_incoming_calls_check(server, uri, cursor.unwrap(), &incoming_ranges).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !incoming_ranges.is_empty()) {
+        run_incoming_calls_check(server, uri, *cursor, &incoming_ranges).await;
         checks_run.push("incoming_calls");
     }
 
     // Run outgoing calls check if we have cursor and outgoing tags
-    if cursor.is_some() && !outgoing_ranges.is_empty() {
-        run_outgoing_calls_check(server, uri, cursor.unwrap(), &outgoing_ranges).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !outgoing_ranges.is_empty()) {
+        run_outgoing_calls_check(server, uri, *cursor, &outgoing_ranges).await;
         checks_run.push("outgoing_calls");
     }
 
@@ -231,8 +231,8 @@ pub(super) async fn run_checks_on_fixture(
     }
 
     // Run type hierarchy check if we have th tags
-    if cursor.is_some() && !th_tags.is_empty() {
-        run_type_hierarchy_check(server, uri, cursor.unwrap(), &th_tags).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !th_tags.is_empty()) {
+        run_type_hierarchy_check(server, uri, *cursor, &th_tags).await;
         checks_run.push("type_hierarchy");
     }
 
@@ -243,8 +243,8 @@ pub(super) async fn run_checks_on_fixture(
     }
 
     // Run completion check if we have complete tags (requires cursor)
-    if cursor.is_some() && !complete_tags.is_empty() {
-        run_completion_check(server, uri, cursor.unwrap(), &complete_tags).await;
+    if let Some(cursor) = cursor.as_ref().filter(|_| !complete_tags.is_empty()) {
+        run_completion_check(server, uri, *cursor, &complete_tags).await;
         checks_run.push("completion");
     }
 
@@ -703,7 +703,7 @@ async fn run_type_check(
                 }
                 ruby_analysis::indexer::Identifier::RubyConstant { iden, .. } => {
                     let constant_fqn =
-                        ruby_analysis::core::FullyQualifiedName::Constant(iden.clone());
+                        ruby_analysis::core::FullyQualifiedName::constant(iden.clone());
                     let namespace_fqn =
                         ruby_analysis::core::FullyQualifiedName::namespace(iden.clone());
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
@@ -775,9 +775,8 @@ async fn run_type_check(
                                 }
                             }
                             ruby_analysis::indexer::MethodReceiver::Constant(path) => {
-                                let fqn = ruby_analysis::core::FullyQualifiedName::Constant(
-                                    path.clone().into(),
-                                );
+                                let fqn =
+                                    ruby_analysis::core::FullyQualifiedName::constant(path.clone());
                                 RubyType::ClassReference(fqn)
                             }
                             ruby_analysis::indexer::MethodReceiver::LocalVariable(name) => {
@@ -1025,15 +1024,30 @@ async fn run_diagnostics_check(
             server.analysis_engine.clone(),
         );
         visitor.visit(&parse_result.node());
-        server
-            .analysis_engine
-            .lock()
-            .replace_file_reference_analysis(
-                visitor.document.analysis_file_id(),
-                visitor.reference_candidates,
-                visitor.diagnostic_candidates,
-                visitor.analysis_diagnostics,
-            );
+        let file_id = visitor.document.analysis_file_id();
+        let mut engine = server.analysis_engine.lock();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        let facts = ruby_analysis::engine::FileFacts {
+            symbols: query.symbol_facts_in_file(file_id),
+            methods: query.method_facts_in_file(file_id),
+            types: query.type_facts_in_file(file_id),
+            graph_nodes: query.graph_nodes_in_file(file_id),
+            graph_edges: query.graph_edges_in_file(file_id),
+            unresolved_graph_edges: engine
+                .unresolved_graph_edges()
+                .iter()
+                .filter(|edge| edge.range.file_id == file_id)
+                .cloned()
+                .collect(),
+            reference_candidates: visitor.reference_candidates,
+            diagnostic_candidates: visitor.diagnostic_candidates,
+            diagnostics: visitor.analysis_diagnostics,
+        };
+        engine.replace_facts(
+            file_id,
+            facts,
+            ruby_analysis::engine::ResolveMode::Immediate,
+        );
     }
 
     // Add unresolved-entry diagnostics (unresolved-constant, unresolved-method, etc.)

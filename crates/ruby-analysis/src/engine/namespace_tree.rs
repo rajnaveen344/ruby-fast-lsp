@@ -30,8 +30,7 @@ fn compute_namespace_tree_hash(engine: &AnalysisEngine, show_external_types: boo
     show_external_types.hash(&mut hasher);
 
     let mut node_keys = engine
-        .graph_store()
-        .all_nodes()
+        .all_graph_nodes()
         .into_iter()
         .filter(|node| show_external_types || analysis_range_is_project(engine, node.range))
         .map(|node| {
@@ -74,7 +73,7 @@ fn compute_namespace_tree(
 ) -> NamespaceTreeResponse {
     let mut nodes_by_fqn: HashMap<FullyQualifiedName, Vec<GraphNodeFact>> = HashMap::new();
 
-    for node in engine.graph_store().all_nodes() {
+    for node in engine.all_graph_nodes() {
         if node.fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton) {
             continue;
         }
@@ -224,10 +223,7 @@ fn analysis_find_includers(
     queue.push_back((module_fqn.clone(), Vec::<ViaModuleInfo>::new()));
 
     while let Some((target, via_modules)) = queue.pop_front() {
-        for edge in engine.all_graph_edges() {
-            if edge.target != target {
-                continue;
-            }
+        for edge in engine.graph_edges_to(&target) {
             if !matches!(edge.kind, GraphEdgeKind::Include | GraphEdgeKind::Prepend) {
                 continue;
             }
@@ -253,7 +249,7 @@ fn analysis_find_includers(
                         name: edge.source.to_string(),
                         call_location: analysis_location_info(engine, edge.range),
                     });
-                    queue.push_back((edge.source, next_via_modules));
+                    queue.push_back((edge.source.clone(), next_via_modules));
                 }
                 None => {}
             }
@@ -297,11 +293,7 @@ pub(super) fn analysis_location_info(
     range: TextRange,
 ) -> Option<LocationInfo> {
     let file = engine.file(range.file_id)?;
-    let offset = usize::try_from(range.start_byte).ok()?;
-    let prefix = file.source.get(..offset)?;
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
-    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    let character = prefix[line_start..].chars().count() as u32;
+    let (line, character) = file.byte_offset_to_line_character(range.start_byte)?;
     Some(LocationInfo {
         uri: file.path.to_string_lossy().to_string(),
         line,
@@ -386,6 +378,7 @@ mod tests {
         FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind,
         RubyConstant, SourceKind, TextRange,
     };
+    use crate::{FileFacts, ResolveMode, SourceFileInput};
 
     fn constant(name: &str) -> RubyConstant {
         RubyConstant::new(name).unwrap()
@@ -394,34 +387,48 @@ mod tests {
     #[test]
     fn namespace_tree_filters_external_mixins() {
         let mut engine = AnalysisEngine::new();
-        let user_file = engine.open_or_update_file_with_kind(
-            "/tmp/project/user.rb",
-            "class User; include Auth; end",
-            SourceKind::Project,
-        );
-        let auth_file = engine.open_or_update_file_with_kind(
-            "/tmp/gems/auth.rb",
-            "module Auth; end",
-            SourceKind::Gem,
-        );
+        let user_file = engine.register_file(SourceFileInput {
+            path: "/tmp/project/user.rb".into(),
+            content: "class User; include Auth; end".into(),
+            kind: SourceKind::Project,
+        });
+        let auth_file = engine.register_file(SourceFileInput {
+            path: "/tmp/gems/auth.rb".into(),
+            content: "module Auth; end".into(),
+            kind: SourceKind::Gem,
+        });
         let user = FullyQualifiedName::namespace(vec![constant("User")]);
         let auth = FullyQualifiedName::namespace(vec![constant("Auth")]);
-        engine.add_graph_node_fact(GraphNodeFact::new(
-            user.clone(),
-            GraphNodeKind::Class,
-            TextRange::new(user_file, 0, 10),
-        ));
-        engine.add_graph_node_fact(GraphNodeFact::new(
-            auth.clone(),
-            GraphNodeKind::Module,
-            TextRange::new(auth_file, 0, 11),
-        ));
-        engine.add_graph_edge_fact(GraphEdgeFact::new(
-            user,
-            auth,
-            GraphEdgeKind::Include,
-            TextRange::new(user_file, 12, 24),
-        ));
+        engine.replace_facts(
+            user_file,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    user.clone(),
+                    GraphNodeKind::Class,
+                    TextRange::new(user_file, 0, 10),
+                )],
+                graph_edges: vec![GraphEdgeFact::new(
+                    user,
+                    auth.clone(),
+                    GraphEdgeKind::Include,
+                    TextRange::new(user_file, 12, 24),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        engine.replace_facts(
+            auth_file,
+            FileFacts {
+                graph_nodes: vec![GraphNodeFact::new(
+                    auth,
+                    GraphNodeKind::Module,
+                    TextRange::new(auth_file, 0, 11),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
 
         let query = AnalysisQuery::new(&engine);
         let project_only = query.namespace_tree(false);

@@ -182,7 +182,7 @@ fn class_name_to_ruby_type(name: &str) -> RubyType {
         _ => {
             // Try to create an FQN from the class name
             if let Ok(constant) = RubyConstant::new(clean_name) {
-                RubyType::Class(FullyQualifiedName::Constant(vec![constant]))
+                RubyType::Class(FullyQualifiedName::constant(vec![constant]))
             } else {
                 RubyType::Unknown
             }
@@ -267,7 +267,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         RbsType::Proc { .. } => {
             // Proc types - just use Proc class for now
             if let Ok(constant) = RubyConstant::new("Proc") {
-                RubyType::Class(FullyQualifiedName::Constant(vec![constant]))
+                RubyType::Class(FullyQualifiedName::constant(vec![constant]))
             } else {
                 RubyType::Unknown
             }
@@ -279,7 +279,7 @@ pub fn rbs_type_to_ruby_type(rbs_type: &RbsType) -> RubyType {
         RbsType::Interface(name) => {
             // Interface types
             if let Ok(constant) = RubyConstant::new(name) {
-                RubyType::Class(FullyQualifiedName::Constant(vec![constant]))
+                RubyType::Class(FullyQualifiedName::constant(vec![constant]))
             } else {
                 RubyType::Unknown
             }

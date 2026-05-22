@@ -6,8 +6,10 @@
 
 pub mod diagnostic_candidate_store;
 pub mod diagnostic_store;
+pub mod fqn_id;
 pub mod fully_qualified_name;
 pub mod graph_store;
+pub mod memory_estimate;
 pub mod method_resolution;
 pub mod method_store;
 pub mod reference_store;
@@ -22,21 +24,28 @@ pub use diagnostic_candidate_store::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
 };
 pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
+pub use fqn_id::{ConstantPathId, FqnId};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
-    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, UnresolvedGraphEdgeFact,
+    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, StoredGraphEdgeFact,
+    StoredGraphNodeFact, UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
-pub use method_store::{MethodFact, MethodParamFact, MethodParamKind, MethodStore};
+pub use method_store::{
+    MethodFact, MethodParamFact, MethodParamKind, MethodStore, StoredMethodFact,
+};
 pub use reference_store::{
-    KeywordArgCandidate, MethodCallSignatureCandidate, ReferenceCandidate, ReferenceCandidateKind,
-    ReferenceCandidateStore, ReferenceFact, ReferenceStore,
+    ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate, MethodReferenceCandidate,
+    MethodReferenceDiagnostics, ReferenceCandidate, ReferenceCandidateKind,
+    ReferenceCandidateStore, ReferenceFact, ReferenceStore, StoredConstantReferenceCandidate,
+    StoredMethodReferenceCandidate, StoredReferenceCandidate, StoredReferenceCandidateKind,
+    StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
 };
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;
 pub use ruby_type::RubyType;
 pub use source_file::SourceKind;
-pub use symbol_store::{SymbolFact, SymbolKind, SymbolStore};
+pub use symbol_store::{StoredSymbolFact, SymbolFact, SymbolKind, SymbolStore};
 pub use type_store::{
     SourceFileId, TextRange, TypeFact, TypeProvenance, TypeResolution, TypeStore, TypeSubject,
 };

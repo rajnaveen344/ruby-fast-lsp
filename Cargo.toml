@@ -119,5 +119,5 @@ memory-profiling = []
 
 [profile.release]
 opt-level = "z"
-strip = false   # Keep symbols for profiling
-debug = 2       # Full debug info for DHAT
+strip = "symbols"
+debug = 0

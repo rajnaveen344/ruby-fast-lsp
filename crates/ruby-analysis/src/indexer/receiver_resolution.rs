@@ -70,7 +70,7 @@ pub fn resolve_receiver_type(
                     return ruby_type;
                 }
             }
-            RubyType::ClassReference(FullyQualifiedName::Constant(path.clone()))
+            RubyType::ClassReference(FullyQualifiedName::constant(path.clone()))
         }
         MethodReceiver::LocalVariable(name) => {
             variable_receiver_type(name, context).unwrap_or(RubyType::Unknown)
@@ -93,7 +93,7 @@ pub fn resolve_receiver_type(
         } => {
             if method_name == "new" {
                 if let MethodReceiver::Constant(path) = inner_receiver.as_ref() {
-                    return RubyType::Class(FullyQualifiedName::Constant(path.clone()));
+                    return RubyType::Class(FullyQualifiedName::constant(path.clone()));
                 }
             }
 
@@ -174,13 +174,13 @@ fn method_call_receiver_type(
 ) -> Option<RubyType> {
     if method_name == "new" {
         if let MethodReceiver::Constant(path) = inner_receiver {
-            return Some(RubyType::Class(FullyQualifiedName::Constant(path.clone())));
+            return Some(RubyType::Class(FullyQualifiedName::constant(path.clone())));
         }
     }
 
     let inner_namespace = resolve_receiver_to_namespace(inner_receiver, context)?;
     if method_name == "new" && inner_namespace.namespace_kind() == Some(NamespaceKind::Singleton) {
-        return Some(RubyType::Class(FullyQualifiedName::Constant(
+        return Some(RubyType::Class(FullyQualifiedName::constant(
             inner_namespace.namespace_parts(),
         )));
     }

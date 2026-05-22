@@ -7,8 +7,11 @@ use ruby_analysis::core::FullyQualifiedName;
 use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
+use ruby_analysis::indexer::fact_collector::{FactCollector, NullFactCollectorExtensionHost};
 use ruby_analysis::indexer::yard::YardTypeConverter;
 use ruby_analysis::indexer::{Identifier, MethodReceiver, RubyPrismAnalyzer};
+use ruby_prism::Visit;
+use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use super::analysis_location::{locations_for_ranges, non_empty_locations};
@@ -111,10 +114,22 @@ impl EngineQuery {
 
         let byte_offset = document.position_to_analysis_offset(position);
         let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
+        if !ranges.is_empty() {
+            return Some(
+                ranges
+                    .into_iter()
+                    .map(|range| document.text_range_to_lsp_location(range))
+                    .collect(),
+            );
+        }
+        drop(document);
+
+        self.rebuild_local_variable_scopes_for_open_document()?;
+        let document = doc_arc.read();
+        let ranges = document.local_variable_reference_ranges_at(name, byte_offset);
         if ranges.is_empty() {
             return None;
         }
-
         Some(
             ranges
                 .into_iter()
@@ -258,5 +273,24 @@ impl EngineQuery {
             &engine,
             query.reference_ranges_for_fqn(fqn),
         ))
+    }
+
+    fn rebuild_local_variable_scopes_for_open_document(&self) -> Option<()> {
+        let doc_arc = self.doc.as_ref()?;
+        let document = doc_arc.read().clone();
+        let content = document.content.clone();
+        let parse_result = ruby_prism::parse(content.as_bytes());
+        let node = parse_result.node();
+        let mut collector = FactCollector::analysis_only(
+            document,
+            Arc::new(NullFactCollectorExtensionHost),
+            self.analysis_engine()?.clone(),
+        )
+        .without_analysis_method_return_resolution()
+        .without_expression_receiver_inference()
+        .without_diagnostics();
+        collector.visit(&node);
+        doc_arc.write().variable_scopes = collector.document.variable_scopes;
+        Some(())
     }
 }

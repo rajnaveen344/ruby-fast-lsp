@@ -1,4 +1,6 @@
-use crate::core::{FullyQualifiedName, RubyConstant, TypeFact, TypeProvenance, TypeSubject};
+use crate::core::{
+    FullyQualifiedName, RubyConstant, SymbolFact, SymbolKind, TypeFact, TypeProvenance, TypeSubject,
+};
 use log::{error, trace};
 use ruby_prism::ConstantWriteNode;
 
@@ -24,7 +26,17 @@ impl FactCollector {
         namespace.push(constant);
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(namespace);
-        let inferred_type = self.infer_type_from_value(&node.value());
+        self.direct_facts.symbols.push(SymbolFact::new(
+            fqn.clone(),
+            SymbolKind::Constant,
+            self.direct_range(&node.location()),
+        ));
+        let inferred_type = self.infer_assignment_type_from_value(&node.value());
+        self.direct_push_assignment_type(
+            TypeSubject::Constant(fqn.clone()),
+            inferred_type.clone(),
+            &node.name_loc(),
+        );
         self.type_store.add(TypeFact::new(
             TypeSubject::Constant(fqn.clone()),
             inferred_type.clone(),

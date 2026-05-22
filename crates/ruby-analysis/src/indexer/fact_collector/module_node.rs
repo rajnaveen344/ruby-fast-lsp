@@ -1,3 +1,4 @@
+use crate::core::{FullyQualifiedName, GraphNodeKind};
 use crate::LocalScopeKind as LVScopeKind;
 use log::error;
 use ruby_prism::ModuleNode;
@@ -16,6 +17,10 @@ impl FactCollector {
             error!("Error creating namespace for module");
             return;
         }
+
+        let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
+        let range = self.direct_range(&node.location());
+        self.direct_push_namespace_facts(fqn, GraphNodeKind::Module, range);
 
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 

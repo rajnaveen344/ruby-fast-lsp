@@ -14,6 +14,11 @@ use tower_lsp::lsp_types::Url;
 
 use crate::indexer::version::ruby_version::RubyVersion;
 
+type DetectionMethod = (
+    &'static str,
+    fn(&RubyVersionDetector) -> Option<RubyVersion>,
+);
+
 // ============================================================================
 // RubyVersionDetector
 // ============================================================================
@@ -43,7 +48,7 @@ impl RubyVersionDetector {
 
     /// Detect Ruby version from workspace, trying multiple sources in priority order
     pub fn detect_version(&self) -> Option<RubyVersion> {
-        let detection_methods: &[(&str, fn(&Self) -> Option<RubyVersion>)] = &[
+        let detection_methods: &[DetectionMethod] = &[
             ("ruby-version file", Self::detect_from_ruby_version),
             ("Gemfile", Self::detect_from_gemfile),
             ("rbenv version", Self::detect_from_rbenv),

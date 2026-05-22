@@ -567,15 +567,30 @@ impl FakeEditor {
                 self.server.analysis_engine.clone(),
             );
             visitor.visit(&parse_result.node());
-            self.server
-                .analysis_engine
-                .lock()
-                .replace_file_reference_analysis(
-                    visitor.document.analysis_file_id(),
-                    visitor.reference_candidates,
-                    visitor.diagnostic_candidates,
-                    visitor.analysis_diagnostics,
-                );
+            let file_id = visitor.document.analysis_file_id();
+            let mut engine = self.server.analysis_engine.lock();
+            let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+            let facts = ruby_analysis::engine::FileFacts {
+                symbols: query.symbol_facts_in_file(file_id),
+                methods: query.method_facts_in_file(file_id),
+                types: query.type_facts_in_file(file_id),
+                graph_nodes: query.graph_nodes_in_file(file_id),
+                graph_edges: query.graph_edges_in_file(file_id),
+                unresolved_graph_edges: engine
+                    .unresolved_graph_edges()
+                    .iter()
+                    .filter(|edge| edge.range.file_id == file_id)
+                    .cloned()
+                    .collect(),
+                reference_candidates: visitor.reference_candidates,
+                diagnostic_candidates: visitor.diagnostic_candidates,
+                diagnostics: visitor.analysis_diagnostics,
+            };
+            engine.replace_facts(
+                file_id,
+                facts,
+                ruby_analysis::engine::ResolveMode::Immediate,
+            );
         }
 
         // Add unresolved entry diagnostics
@@ -616,7 +631,7 @@ impl FakeEditor {
             expected,
             filename,
             diags.len(),
-            diags.iter().map(|d| describe(d)).collect::<Vec<_>>()
+            diags.iter().map(describe).collect::<Vec<_>>()
         );
     }
 
@@ -634,7 +649,7 @@ impl FakeEditor {
                 "Expected error with code '{}' in '{}'. Actual diagnostics: {:?}",
                 code,
                 filename,
-                diags.iter().map(|d| describe(d)).collect::<Vec<_>>()
+                diags.iter().map(describe).collect::<Vec<_>>()
             ),
         }
     }

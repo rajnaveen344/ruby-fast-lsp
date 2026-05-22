@@ -6,7 +6,7 @@ use ustr::Ustr;
 /// The distinction between instance/class methods is encoded in the namespace they belong to:
 /// - `Foo#bar` is an instance method on the instance namespace
 /// - `#<Class:Foo>#bar` is an instance method on the singleton namespace (class method)
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct RubyMethod(Ustr);
 
 impl RubyMethod {

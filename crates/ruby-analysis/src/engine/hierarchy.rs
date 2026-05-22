@@ -19,7 +19,8 @@ impl<'a> AnalysisQuery<'a> {
         &self,
         method_fqn: &FullyQualifiedName,
     ) -> Option<CallHierarchyMethod> {
-        let fact = self.engine.method_facts_for(method_fqn).first()?;
+        let facts = self.engine.method_facts_for(method_fqn);
+        let fact = facts.first()?;
         Some(CallHierarchyMethod {
             fqn: method_fqn.clone(),
             range: fact.range,
@@ -38,7 +39,10 @@ impl<'a> AnalysisQuery<'a> {
     pub fn incoming_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<IncomingCall> {
         let mut grouped = Vec::<(FullyQualifiedName, Vec<TextRange>)>::new();
         for fact in self.engine.reference_facts_for(method_fqn) {
-            let Some(caller) = &fact.caller else {
+            let Some(caller_id) = fact.caller else {
+                continue;
+            };
+            let Some(caller) = self.engine.fqn_for_id(caller_id) else {
                 continue;
             };
             push_grouped_text_range(&mut grouped, caller.clone(), fact.range);
@@ -58,11 +62,17 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn outgoing_calls(&self, method_fqn: &FullyQualifiedName) -> Vec<OutgoingCall> {
         let mut grouped = Vec::<(FullyQualifiedName, Vec<TextRange>)>::new();
-        for fact in self.engine.reference_store().all_facts() {
-            if fact.caller.as_ref() != Some(method_fqn) {
+        let Some(method_id) = self.engine.names.fqn_id(method_fqn) else {
+            return Vec::new();
+        };
+        for (target_id, fact) in self.engine.reference_store().iter_facts_with_targets() {
+            if fact.caller != Some(method_id) {
                 continue;
             }
-            push_grouped_text_range(&mut grouped, fact.target, fact.range);
+            let Some(target) = self.engine.fqn_for_id(target_id) else {
+                continue;
+            };
+            push_grouped_text_range(&mut grouped, target.clone(), fact.range);
         }
 
         grouped.sort_by(|(left, _), (right, _)| left.to_string().cmp(&right.to_string()));
@@ -85,7 +95,8 @@ impl<'a> AnalysisQuery<'a> {
         &self,
         fqn: &FullyQualifiedName,
     ) -> Option<(GraphNodeKind, TextRange)> {
-        let node = self.engine.graph_nodes_for(fqn).first()?;
+        let nodes = self.engine.graph_nodes_for(fqn);
+        let node = nodes.first()?;
         Some((node.kind, node.range))
     }
 
@@ -95,7 +106,8 @@ impl<'a> AnalysisQuery<'a> {
         ancestors: &[RubyConstant],
     ) -> Option<TypeHierarchyNode> {
         let fqn = self.resolve_constant_in_context(constant_parts, ancestors)?;
-        let node = self.engine.graph_nodes_for(&fqn).first()?;
+        let nodes = self.engine.graph_nodes_for(&fqn);
+        let node = nodes.first()?;
         Some(TypeHierarchyNode {
             fqn,
             node_kind: node.kind,
@@ -104,7 +116,8 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn supertypes(&self, fqn: &FullyQualifiedName) -> Vec<TypeHierarchyEntry> {
-        let primary_file_id = match self.engine.graph_nodes_for(fqn).first() {
+        let nodes = self.engine.graph_nodes_for(fqn);
+        let primary_file_id = match nodes.first() {
             Some(node) => node.range.file_id,
             None => return Vec::new(),
         };
@@ -113,28 +126,28 @@ impl<'a> AnalysisQuery<'a> {
         let mut supertypes = Vec::new();
         push_supertype_entries(
             self.engine,
-            edges,
+            &edges,
             GraphEdgeKind::Prepend,
             TypeHierarchyRelation::Prepend,
             &mut supertypes,
         );
         push_supertype_entries(
             self.engine,
-            edges,
+            &edges,
             GraphEdgeKind::Include,
             TypeHierarchyRelation::Include,
             &mut supertypes,
         );
         push_supertype_entries(
             self.engine,
-            edges,
+            &edges,
             GraphEdgeKind::Superclass,
             TypeHierarchyRelation::Superclass,
             &mut supertypes,
         );
         push_supertype_entries(
             self.engine,
-            edges,
+            &edges,
             GraphEdgeKind::Extend,
             TypeHierarchyRelation::Extend,
             &mut supertypes,
@@ -160,26 +173,23 @@ impl<'a> AnalysisQuery<'a> {
         let mut prepended_by_edges = Vec::new();
         let mut extended_by_edges = Vec::new();
 
-        for edge in self.engine.all_graph_edges() {
-            if &edge.target != fqn {
-                continue;
-            }
+        for edge in self.engine.graph_edges_to(fqn) {
             match edge.kind {
-                GraphEdgeKind::Superclass => subclass_edges.push(edge),
+                GraphEdgeKind::Superclass => subclass_edges.push(edge.clone()),
                 GraphEdgeKind::Include
                     if edge.source.namespace_kind()
                         == Some(crate::core::NamespaceKind::Instance) =>
                 {
-                    included_by_edges.push(edge)
+                    included_by_edges.push(edge.clone())
                 }
                 GraphEdgeKind::Prepend
                     if edge.source.namespace_kind()
                         == Some(crate::core::NamespaceKind::Instance) =>
                 {
-                    prepended_by_edges.push(edge)
+                    prepended_by_edges.push(edge.clone())
                 }
                 GraphEdgeKind::Include | GraphEdgeKind::Prepend => {}
-                GraphEdgeKind::Extend => extended_by_edges.push(edge),
+                GraphEdgeKind::Extend => extended_by_edges.push(edge.clone()),
             }
         }
 
@@ -243,8 +253,12 @@ impl<'a> AnalysisQuery<'a> {
     pub fn namespace_implementation_ranges(&self, fqn: &FullyQualifiedName) -> Vec<TextRange> {
         collect_all_implementors(self.engine, fqn)
             .iter()
-            .filter_map(|impl_fqn| self.engine.graph_nodes_for(impl_fqn).first())
-            .map(|fact| fact.range)
+            .filter_map(|impl_fqn| {
+                self.engine
+                    .graph_nodes_for(impl_fqn)
+                    .first()
+                    .map(|fact| fact.range)
+            })
             .collect()
     }
 }
@@ -358,7 +372,8 @@ fn hierarchy_entry_for_node(
     edge_file_id: Option<SourceFileId>,
     unresolved: bool,
 ) -> Option<TypeHierarchyEntry> {
-    let node = engine.graph_nodes_for(fqn).first()?;
+    let nodes = engine.graph_nodes_for(fqn);
+    let node = nodes.first()?;
     Some(TypeHierarchyEntry {
         fqn: fqn.clone(),
         node_kind: Some(node.kind),
@@ -403,18 +418,16 @@ fn mixers(
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
     let mut mixers = engine
-        .all_graph_edges()
-        .into_iter()
+        .graph_edges_to(origin_fqn)
+        .iter()
         .filter(|edge| {
-            edge.target == *origin_fqn
-                && matches!(
-                    edge.kind,
-                    GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
-                )
-                && (matches!(edge.kind, GraphEdgeKind::Extend)
-                    || edge.source.namespace_kind() == Some(crate::core::NamespaceKind::Instance))
+            matches!(
+                edge.kind,
+                GraphEdgeKind::Include | GraphEdgeKind::Prepend | GraphEdgeKind::Extend
+            ) && (matches!(edge.kind, GraphEdgeKind::Extend)
+                || edge.source.namespace_kind() == Some(crate::core::NamespaceKind::Instance))
         })
-        .map(|edge| edge.source)
+        .map(|edge| edge.source.clone())
         .collect::<Vec<_>>();
     mixers.sort_by_key(|fqn| fqn.to_string());
     mixers.dedup();
@@ -432,13 +445,10 @@ fn descendants(
     seen.insert(origin_fqn.clone());
 
     while let Some(current) = queue.pop_front() {
-        for edge in engine.all_graph_edges() {
-            if edge.kind == GraphEdgeKind::Superclass
-                && edge.target == current
-                && seen.insert(edge.source.clone())
-            {
+        for edge in engine.graph_edges_to(&current) {
+            if edge.kind == GraphEdgeKind::Superclass && seen.insert(edge.source.clone()) {
                 result.push(edge.source.clone());
-                queue.push_back(edge.source);
+                queue.push_back(edge.source.clone());
             }
         }
     }
@@ -449,30 +459,43 @@ fn descendants(
 #[cfg(test)]
 mod tests {
     use crate::core::{
-        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SymbolFact, SymbolKind,
-        TextRange,
+        FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
+        SymbolKind, TextRange,
     };
     use crate::engine::AnalysisQuery;
-    use crate::AnalysisEngine;
+    use crate::{AnalysisEngine, FileFacts, ResolveMode, SourceFileInput};
 
     fn query_with_symbols() -> (AnalysisEngine, SourceFileId) {
         let source = "class User\n  def name\n  end\nend";
         let mut engine = AnalysisEngine::new();
-        let file_id = engine.open_or_update_file("/tmp/user.rb", source);
+        let file_id = engine.register_file(SourceFileInput {
+            path: "/tmp/user.rb".into(),
+            content: source.into(),
+            kind: SourceKind::Project,
+        });
         let user = RubyConstant::new("User").expect("test constant must be valid");
-        engine.add_symbol_fact(SymbolFact::new(
-            FullyQualifiedName::namespace(vec![user.clone()]),
-            SymbolKind::Class,
-            TextRange::new(file_id, 6, 10),
-        ));
-        engine.add_symbol_fact(SymbolFact::new(
-            FullyQualifiedName::method(
-                vec![user],
-                RubyMethod::new("name").expect("test method must be valid"),
-            ),
-            SymbolKind::Method,
-            TextRange::new(file_id, 17, 21),
-        ));
+        engine.replace_facts(
+            file_id,
+            FileFacts {
+                symbols: vec![
+                    SymbolFact::new(
+                        FullyQualifiedName::namespace(vec![user.clone()]),
+                        SymbolKind::Class,
+                        TextRange::new(file_id, 6, 10),
+                    ),
+                    SymbolFact::new(
+                        FullyQualifiedName::method(
+                            vec![user],
+                            RubyMethod::new("name").expect("test method must be valid"),
+                        ),
+                        SymbolKind::Method,
+                        TextRange::new(file_id, 17, 21),
+                    ),
+                ],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
         (engine, file_id)
     }
 

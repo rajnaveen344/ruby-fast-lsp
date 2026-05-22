@@ -23,19 +23,11 @@ impl<'a> AnalysisQuery<'a> {
         let mut facts = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
-            for fact in self.engine.all_method_facts() {
-                if fact.owner.namespace_parts() != ancestor.namespace_parts()
-                    || fact.owner.namespace_kind() != ancestor.namespace_kind()
-                {
-                    continue;
-                }
+            for fact in self.engine.method_facts_matching_owner(&ancestor, partial) {
                 let FullyQualifiedName::Method(_, method) = &fact.fqn else {
                     continue;
                 };
                 let method_name = method.get_name();
-                if !method_name.starts_with(partial) {
-                    continue;
-                }
                 if seen.insert(method_name) {
                     facts.push(fact);
                 }
@@ -77,7 +69,7 @@ impl<'a> AnalysisQuery<'a> {
         kind: NamespaceKind,
     ) -> Vec<MethodMatch> {
         let mut candidates = Vec::new();
-        for namespace_fqn in self.receiver_type_to_namespaces(receiver_type, kind) {
+        for namespace_fqn in Self::receiver_type_to_namespaces(receiver_type, kind) {
             for fact in self.method_facts_matching(&namespace_fqn, partial_method) {
                 candidates.push(self.method_match(&fact));
             }
@@ -234,7 +226,6 @@ impl<'a> AnalysisQuery<'a> {
     }
 
     pub fn receiver_type_to_namespaces(
-        &self,
         ruby_type: &RubyType,
         kind: NamespaceKind,
     ) -> Vec<FullyQualifiedName> {
@@ -252,16 +243,13 @@ impl<'a> AnalysisQuery<'a> {
             RubyType::Hash(_, _) => Self::namespace_for_builtin("Hash", kind),
             RubyType::Union(types) => types
                 .iter()
-                .flat_map(|ty| self.receiver_type_to_namespaces(ty, kind))
+                .flat_map(|ty| Self::receiver_type_to_namespaces(ty, kind))
                 .collect(),
             RubyType::Unknown => Vec::new(),
         }
     }
 
-    pub fn receiver_type_to_method_namespaces(
-        &self,
-        ruby_type: &RubyType,
-    ) -> Vec<FullyQualifiedName> {
+    pub fn receiver_type_to_method_namespaces(ruby_type: &RubyType) -> Vec<FullyQualifiedName> {
         match ruby_type {
             RubyType::Class(fqn) | RubyType::Module(fqn) => {
                 let mut namespaces = vec![FullyQualifiedName::namespace_with_kind(
@@ -284,7 +272,7 @@ impl<'a> AnalysisQuery<'a> {
             }
             RubyType::Union(types) => types
                 .iter()
-                .flat_map(|ty| self.receiver_type_to_method_namespaces(ty))
+                .flat_map(Self::receiver_type_to_method_namespaces)
                 .collect(),
             RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Unknown => Vec::new(),
         }

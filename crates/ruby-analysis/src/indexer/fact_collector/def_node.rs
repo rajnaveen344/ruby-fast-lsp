@@ -1,6 +1,6 @@
 use crate::core::{
-    FullyQualifiedName, MethodParamKind, NamespaceKind, RubyMethod, TypeFact, TypeProvenance,
-    TypeSubject,
+    FullyQualifiedName, MethodParamFact, MethodParamKind, NamespaceKind, RubyMethod, TypeFact,
+    TypeProvenance, TypeSubject,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
@@ -88,12 +88,24 @@ impl FactCollector {
 
         let namespace_parts = self.scope_tracker.get_ns_stack();
 
-        let fqn = FullyQualifiedName::method(namespace_parts.clone(), method.clone());
+        let fqn = FullyQualifiedName::method(namespace_parts.clone(), method);
         self.scope_tracker.push_method_fqn(Some(fqn.clone()));
 
         // Owner FQN uses Namespace variant with kind to distinguish instance vs singleton methods
         let _owner_fqn =
             FullyQualifiedName::namespace_with_kind(namespace_parts.clone(), actual_namespace_kind);
+
+        let direct_params = params
+            .iter()
+            .map(|param| MethodParamFact::new(param.name.clone(), param.kind))
+            .collect();
+        self.direct_push_method_fact(
+            namespace_parts.clone(),
+            actual_namespace_kind,
+            method,
+            self.direct_range(&full_location),
+            direct_params,
+        );
 
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
@@ -175,6 +187,8 @@ impl FactCollector {
             (Some(return_type), TypeProvenance::Rbs)
         } else if let Some(return_type) = yard_return_type {
             (Some(return_type), TypeProvenance::Yard)
+        } else if !self.resolve_analysis_method_returns {
+            (None, TypeProvenance::Inferred)
         } else {
             // Infer return type from method body using TypeTracker
             let mut tracker = TypeTracker::new(self.document.content.as_bytes());

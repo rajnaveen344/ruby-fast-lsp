@@ -184,6 +184,8 @@ pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>
     let mut remaining = text;
     let mut current_line = 0u32;
     let mut current_char = 0u32;
+    let attr_regex = regex::Regex::new(r#"(\w+)="([^"]*)""#).unwrap();
+    let keyword_regex = regex::Regex::new(r#"\b(none)\b"#).unwrap();
 
     while !remaining.is_empty() {
         // Find the earliest occurrence of any open tag
@@ -193,15 +195,10 @@ pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>
             if let Some(idx) = remaining.find(open_tag_start) {
                 // Check if it's a real match (followed by space or >)
                 let char_after_start = remaining.chars().nth(idx + open_tag_start.len());
-                let is_match = match char_after_start {
-                    Some(' ') | Some('>') => true,
-                    _ => false,
-                };
+                let is_match = matches!(char_after_start, Some(' ') | Some('>'));
 
-                if is_match {
-                    if next_tag_idx.map_or(true, |(min_idx, _, _)| idx < min_idx) {
-                        next_tag_idx = Some((idx, open_tag_start.as_str(), name.as_str()));
-                    }
+                if is_match && next_tag_idx.is_none_or(|(min_idx, _, _)| idx < min_idx) {
+                    next_tag_idx = Some((idx, open_tag_start.as_str(), name.as_str()));
                 }
             }
         }
@@ -255,12 +252,10 @@ pub fn extract_tags_with_attributes(text: &str, tag_names: &[&str]) -> (Vec<Tag>
             // Parse attributes
             let mut attributes = std::collections::HashMap::new();
             // Match key="value" pairs
-            let attr_regex = regex::Regex::new(r#"(\w+)="([^"]*)""#).unwrap();
             for cap in attr_regex.captures_iter(tag_content) {
                 attributes.insert(cap[1].to_string(), cap[2].to_string());
             }
             // Also match standalone keywords like "none"
-            let keyword_regex = regex::Regex::new(r#"\b(none)\b"#).unwrap();
             for cap in keyword_regex.captures_iter(tag_content) {
                 attributes.insert(cap[1].to_string(), "true".to_string());
             }

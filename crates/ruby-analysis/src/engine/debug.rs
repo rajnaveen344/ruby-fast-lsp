@@ -199,8 +199,8 @@ impl<'a> AnalysisQuery<'a> {
                 .iter()
                 .find(|edge| edge.kind == GraphEdgeKind::Superclass)
                 .map(|edge| fqn_to_key(&edge.target));
-            let includes = edge_targets(outgoing, GraphEdgeKind::Include);
-            let prepends = edge_targets(outgoing, GraphEdgeKind::Prepend);
+            let includes = edge_targets(&outgoing, GraphEdgeKind::Include);
+            let prepends = edge_targets(&outgoing, GraphEdgeKind::Prepend);
             let included_by = reverse_edge_sources(self.engine, fqn, GraphEdgeKind::Include);
             let prepended_by = reverse_edge_sources(self.engine, fqn, GraphEdgeKind::Prepend);
             let children = reverse_edge_sources(self.engine, fqn, GraphEdgeKind::Superclass);
@@ -378,7 +378,7 @@ fn fqn_to_key(fqn: &FullyQualifiedName) -> String {
 
 fn graph_nodes_by_fqn(engine: &AnalysisEngine) -> HashMap<FullyQualifiedName, GraphNodeKind> {
     let mut nodes = HashMap::new();
-    for node in engine.graph_store().all_nodes() {
+    for node in engine.all_graph_nodes() {
         nodes.entry(node.fqn).or_insert(node.kind);
     }
     nodes

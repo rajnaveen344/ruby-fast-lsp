@@ -110,6 +110,10 @@ impl IndexerGem {
             self.index_all_gems(server).await?
         };
 
+        if !indexed_files.is_empty() {
+            server.analysis_engine.lock().resolve();
+        }
+
         info!("Indexed {} files from gems", indexed_files.len());
         Ok(indexed_files)
     }
@@ -189,7 +193,7 @@ impl IndexerGem {
                 ruby_files.par_iter().for_each(|file_path| {
                     if let Ok(content) = std::fs::read_to_string(file_path) {
                         if let Ok(uri) = Url::from_file_path(file_path) {
-                            if let Err(e) = processor.collect_file_facts_as(
+                            if let Err(e) = processor.collect_file_facts_as_deferred_resolution(
                                 &uri,
                                 &content,
                                 server,

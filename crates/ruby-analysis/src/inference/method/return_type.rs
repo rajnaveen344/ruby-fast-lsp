@@ -21,7 +21,7 @@ pub fn method_call_return_type(
 
     let method = RubyMethod::new(method_name).ok()?;
     if let Some(query) = query {
-        for namespace in query.receiver_type_to_method_namespaces(receiver_type) {
+        for namespace in AnalysisQuery::receiver_type_to_method_namespaces(receiver_type) {
             if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
                 return Some(return_type);
             }

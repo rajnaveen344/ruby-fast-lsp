@@ -1,4 +1,4 @@
-use crate::core::{FullyQualifiedName, TypeFact, TypeProvenance, TypeSubject};
+use crate::core::{FullyQualifiedName, SymbolKind, TypeFact, TypeProvenance, TypeSubject};
 use log::error;
 use ruby_prism::{
     ClassVariableAndWriteNode, ClassVariableOperatorWriteNode, ClassVariableOrWriteNode,
@@ -28,20 +28,32 @@ impl FactCollector {
             error!("Class variable name too short: {}", variable_name);
             return;
         }
+        if let Ok(fqn) = FullyQualifiedName::class_variable(variable_name.clone()) {
+            self.direct_push_variable_symbol(fqn, SymbolKind::ClassVariable, &name_loc);
+        }
 
         // Infer type from value if available
         let inferred_type = if let Some(value) = value_node {
-            self.infer_type_from_value(value)
+            self.infer_assignment_type_from_value(value)
         } else {
             RubyType::Unknown
         };
+        let owner = FullyQualifiedName::namespace_with_kind(
+            self.scope_tracker.get_ns_stack(),
+            self.scope_tracker.current_method_context(),
+        );
+        self.direct_push_assignment_type(
+            TypeSubject::ClassVariable {
+                owner: owner.clone(),
+                name: variable_name.clone(),
+            },
+            inferred_type.clone(),
+            &name_loc,
+        );
 
         self.type_store.add(TypeFact::new(
             TypeSubject::ClassVariable {
-                owner: FullyQualifiedName::namespace_with_kind(
-                    self.scope_tracker.get_ns_stack(),
-                    self.scope_tracker.current_method_context(),
-                ),
+                owner,
                 name: variable_name.clone(),
             },
             inferred_type.clone(),

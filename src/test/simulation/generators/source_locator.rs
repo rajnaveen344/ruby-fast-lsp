@@ -81,10 +81,9 @@ impl<'a> SourceLocator<'a> {
             let char_after = self.source[end_offset..].chars().next();
 
             let valid_start =
-                char_before.map_or(true, |c| !c.is_alphanumeric() && c != '_' && c != '@');
-            let valid_end = char_after.map_or(true, |c| {
-                !c.is_alphanumeric() && c != '_' && c != '!' && c != '?'
-            });
+                char_before.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '@');
+            let valid_end =
+                char_after.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '!' && c != '?');
 
             if valid_start && valid_end {
                 return Some(self.byte_to_position(offset));
@@ -190,10 +189,9 @@ impl<'a> SourceLocator<'a> {
             let char_after = line_content[end_offset..].chars().next();
 
             let valid_start =
-                char_before.map_or(true, |c| !c.is_alphanumeric() && c != '_' && c != '@');
-            let valid_end = char_after.map_or(true, |c| {
-                !c.is_alphanumeric() && c != '_' && c != '!' && c != '?'
-            });
+                char_before.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '@');
+            let valid_end =
+                char_after.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '!' && c != '?');
 
             if valid_start && valid_end {
                 return Some(Position {

@@ -485,7 +485,7 @@ impl VariableScopes {
                             .filter(|ta| {
                                 ta.range.file_id == file_id && ta.range.start_byte <= byte_offset
                             })
-                            .last();
+                            .next_back();
                         if let Some(ta) = best {
                             return Some(&ta.ruby_type);
                         }
