@@ -316,16 +316,8 @@ pub(super) fn namespace_target_exists(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
 ) -> bool {
-    if let Some(exists) = engine.caches.namespace_exists.borrow().get(fqn).copied() {
-        return exists;
-    }
     let parts = fqn.namespace_parts();
     if parts.is_empty() {
-        engine
-            .caches
-            .namespace_exists
-            .borrow_mut()
-            .insert(fqn.clone(), true);
         return true;
     }
     let instance_fqn = FullyQualifiedName::namespace_with_kind(
@@ -338,15 +330,9 @@ pub(super) fn namespace_target_exists(
     );
     let constant_fqn = FullyQualifiedName::constant(parts);
 
-    let exists = !engine.graph_nodes_for(&instance_fqn).is_empty()
+    !engine.graph_nodes_for(&instance_fqn).is_empty()
         || !engine.graph_nodes_for(&singleton_fqn).is_empty()
-        || !engine.symbol_facts_for(&constant_fqn).is_empty();
-    engine
-        .caches
-        .namespace_exists
-        .borrow_mut()
-        .insert(fqn.clone(), exists);
-    exists
+        || !engine.symbol_facts_for(&constant_fqn).is_empty()
 }
 
 fn is_module_instance_namespace(engine: &crate::AnalysisEngine, fqn: &FullyQualifiedName) -> bool {
@@ -363,15 +349,6 @@ fn module_includers(
     engine: &crate::AnalysisEngine,
     module_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    if let Some(includers) = engine
-        .caches
-        .module_includers
-        .borrow()
-        .get(module_fqn)
-        .cloned()
-    {
-        return includers;
-    }
     let mut result = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
@@ -402,11 +379,6 @@ fn module_includers(
     }
 
     result.sort_by_key(|fqn| fqn.to_string());
-    engine
-        .caches
-        .module_includers
-        .borrow_mut()
-        .insert(module_fqn.clone(), result.clone());
     result
 }
 
@@ -446,9 +418,6 @@ fn descendants(
     engine: &crate::AnalysisEngine,
     origin_fqn: &FullyQualifiedName,
 ) -> Vec<FullyQualifiedName> {
-    if let Some(descendants) = engine.caches.descendants.borrow().get(origin_fqn).cloned() {
-        return descendants;
-    }
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
@@ -464,11 +433,6 @@ fn descendants(
         }
     }
 
-    engine
-        .caches
-        .descendants
-        .borrow_mut()
-        .insert(origin_fqn.clone(), result.clone());
     result
 }
 
@@ -483,11 +447,7 @@ pub(super) fn method_lookup_chain(
          Fix: resolve receivers to Namespace FQNs before method lookup."
     );
 
-    if let Some(chain) = engine.caches.mro_by_namespace.borrow().get(fqn).cloned() {
-        return chain;
-    }
-
-    let chain = if engine.graph_nodes_for(fqn).is_empty() {
+    if engine.graph_nodes_for(fqn).is_empty() {
         if fqn.namespace_parts().is_empty() {
             let mut chain = Vec::new();
             let mut visited = std::collections::HashSet::new();
@@ -495,15 +455,15 @@ pub(super) fn method_lookup_chain(
             if chain.is_empty() {
                 chain.push(fqn.clone());
             }
-            chain
+            return chain;
         } else {
-            vec![
+            return vec![
                 fqn.clone(),
                 FullyQualifiedName::namespace_with_kind(
                     Vec::new(),
                     crate::core::NamespaceKind::Instance,
                 ),
-            ]
+            ];
         }
     } else {
         let mut chain = Vec::new();
@@ -519,13 +479,7 @@ pub(super) fn method_lookup_chain(
         }
 
         chain
-    };
-    engine
-        .caches
-        .mro_by_namespace
-        .borrow_mut()
-        .insert(fqn.clone(), chain.clone());
-    chain
+    }
 }
 
 fn build_mro(

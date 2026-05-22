@@ -2,12 +2,29 @@ use std::collections::HashMap;
 
 use super::memory_estimate::{map_table_bytes, vec_payload_bytes};
 use crate::{
-    ConstantPathId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod,
+    ConstLookupId, FqnId, FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod,
     SourceFileId, TextRange,
 };
 use smallvec::SmallVec;
 
 pub type ConstantPath = SmallVec<[RubyConstant; 4]>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConstLookup {
+    pub path: ConstantPath,
+    pub absolute: bool,
+    pub context: FqnId,
+}
+
+impl ConstLookup {
+    pub fn new(path: ConstantPath, absolute: bool, context: FqnId) -> Self {
+        Self {
+            path,
+            absolute,
+            context,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceFact {
@@ -95,14 +112,13 @@ pub struct StoredReferenceCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredConstantReferenceCandidate {
     pub range: TextRange,
-    pub parts: ConstantPathId,
-    pub current_namespace: ConstantPathId,
+    pub lookup: ConstLookupId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredMethodReferenceCandidate {
     pub range: TextRange,
-    pub owner: ConstantPathId,
+    pub owner: ConstLookupId,
     pub owner_kind: NamespaceKind,
     pub method: RubyMethod,
     pub caller: Option<FqnId>,
@@ -136,11 +152,10 @@ impl StoredReferenceCandidateRef<'_> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoredReferenceCandidateKind {
     Constant {
-        parts: ConstantPathId,
-        current_namespace: ConstantPathId,
+        lookup: ConstLookupId,
     },
     Method {
-        owner: ConstantPathId,
+        owner: ConstLookupId,
         owner_kind: NamespaceKind,
         method: RubyMethod,
         caller: Option<FqnId>,
@@ -153,23 +168,16 @@ pub enum StoredReferenceCandidateKind {
 }
 
 impl StoredReferenceCandidate {
-    pub fn constant(
-        range: TextRange,
-        parts: ConstantPathId,
-        current_namespace: ConstantPathId,
-    ) -> Self {
+    pub fn constant(range: TextRange, lookup: ConstLookupId) -> Self {
         Self {
             range,
-            kind: StoredReferenceCandidateKind::Constant {
-                parts,
-                current_namespace,
-            },
+            kind: StoredReferenceCandidateKind::Constant { lookup },
         }
     }
 
     pub fn method(
         range: TextRange,
-        owner: ConstantPathId,
+        owner: ConstLookupId,
         owner_kind: NamespaceKind,
         method: RubyMethod,
         caller: Option<FqnId>,
@@ -280,14 +288,12 @@ impl ReferenceCandidateStore {
                  Fix: partition candidates by SourceFileId before replacing."
             );
             match candidate.kind {
-                StoredReferenceCandidateKind::Constant {
-                    parts,
-                    current_namespace,
-                } => constants.push(StoredConstantReferenceCandidate {
-                    range: candidate.range,
-                    parts,
-                    current_namespace,
-                }),
+                StoredReferenceCandidateKind::Constant { lookup } => {
+                    constants.push(StoredConstantReferenceCandidate {
+                        range: candidate.range,
+                        lookup,
+                    })
+                }
                 StoredReferenceCandidateKind::Method {
                     owner,
                     owner_kind,
@@ -337,8 +343,7 @@ impl ReferenceCandidateStore {
                 StoredReferenceCandidateRef::Constant(candidate) => StoredReferenceCandidate {
                     range: candidate.range,
                     kind: StoredReferenceCandidateKind::Constant {
-                        parts: candidate.parts,
-                        current_namespace: candidate.current_namespace,
+                        lookup: candidate.lookup,
                     },
                 },
                 StoredReferenceCandidateRef::Method(candidate) => StoredReferenceCandidate {

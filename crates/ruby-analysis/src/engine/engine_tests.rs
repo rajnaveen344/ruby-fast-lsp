@@ -231,14 +231,18 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
         FileFacts {
             reference_candidates: vec![ReferenceCandidate::method(
                 TextRange::new(ref_file, 5, 9),
-                user.namespace_parts(),
-                crate::core::NamespaceKind::Instance,
-                method,
-                None,
-                TextRange::new(ref_file, 5, 9),
-                Some("User".to_string()),
-                true,
-                crate::core::MethodCallSignatureCandidate::default(),
+                crate::core::MethodReferenceCandidate {
+                    owner: user.namespace_parts(),
+                    owner_kind: crate::core::NamespaceKind::Instance,
+                    method,
+                    caller: None,
+                    diagnostics: crate::core::MethodReferenceDiagnostics {
+                        diagnostic_range: TextRange::new(ref_file, 5, 9),
+                        receiver_label: Some("User".to_string()),
+                        diagnose_unresolved: true,
+                        signature: crate::core::MethodCallSignatureCandidate::default(),
+                    },
+                },
             )],
             ..Default::default()
         },

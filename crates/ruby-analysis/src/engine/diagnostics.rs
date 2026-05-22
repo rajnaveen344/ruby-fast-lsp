@@ -37,27 +37,28 @@ impl AnalysisEngine {
                     );
                 }
                 StoredReferenceCandidateRef::Constant(candidate) => {
-                    let parts = self
+                    let lookup = self
                         .names
-                        .constant_path(candidate.parts)
+                        .const_lookup(candidate.lookup)
                         .expect(
-                            "INVARIANT VIOLATED: reference candidate points to missing constant path. \
-                             This is a bug because stored reference candidates must only contain interned path ids. \
-                             Fix: intern constant paths before inserting candidates.",
-                        )
-                        .to_vec();
-                    let current_namespace = self
-                        .names
-                        .constant_path(candidate.current_namespace)
-                        .expect(
-                            "INVARIANT VIOLATED: reference candidate points to missing current namespace path. \
-                             This is a bug because stored reference candidates must only contain interned path ids. \
-                             Fix: intern constant paths before inserting candidates.",
-                        )
-                        .to_vec();
-                    if let Some(target) =
-                        self.resolve_constant_reference(&parts, &current_namespace)
-                    {
+                            "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
+                             This is a bug because stored reference candidates must only contain interned lookup ids. \
+                             Fix: intern constant lookups before inserting candidates.",
+                        );
+                    let parts = lookup.path.to_vec();
+                    let context = self.names.fqn(lookup.context).expect(
+                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
+                         This is a bug because constant lookups must only store interned context FQN ids. \
+                         Fix: intern lookup contexts before inserting candidates.",
+                    );
+                    if let Some(target) = self.resolve_constant_reference(
+                        &parts,
+                        &if lookup.absolute {
+                            Vec::new()
+                        } else {
+                            context.namespace_parts()
+                        },
+                    ) {
                         let target = self.names.intern_fqn(target);
                         self.facts
                             .reference_store
@@ -75,15 +76,15 @@ impl AnalysisEngine {
                     }
                 }
                 StoredReferenceCandidateRef::Method(candidate) => {
-                    let owner = self
+                    let owner_lookup = self
                         .names
-                        .constant_path(candidate.owner)
+                        .const_lookup(candidate.owner)
                         .expect(
-                            "INVARIANT VIOLATED: method reference candidate points to missing owner path. \
-                             This is a bug because stored reference candidates must only contain interned path ids. \
-                             Fix: intern constant paths before inserting candidates.",
-                        )
-                        .to_vec();
+                            "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
+                             This is a bug because stored reference candidates must only contain interned lookup ids. \
+                             Fix: intern constant lookups before inserting candidates.",
+                        );
+                    let owner = owner_lookup.path.to_vec();
                     let owner_fqn =
                         FullyQualifiedName::namespace_with_kind(owner, candidate.owner_kind);
                     let fact = method_fact_cache

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
@@ -6,13 +5,13 @@ use std::path::{Path, PathBuf};
 
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
-    ConstantPath, ConstantPathId, DiagnosticCandidate, DiagnosticCandidateStore, DiagnosticFact,
-    DiagnosticStore, FqnId, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, GraphStore,
+    ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
+    DiagnosticFact, DiagnosticStore, FqnId, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
     MethodFact, MethodStore, ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore,
-    ReferenceFact, ReferenceStore, RubyConstant, SourceFileId, SourceKind, StoredGraphEdgeFact,
-    StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, SymbolFact,
-    SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
-    UnresolvedGraphEdgeFact,
+    ReferenceFact, ReferenceStore, RubyConstant, SemanticGraph, SourceFileId, SourceKind,
+    StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate,
+    StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolStore, TextRange, TypeFact,
+    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -186,17 +185,17 @@ impl AnalysisMemoryStats {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct FileStore {
+pub(super) struct SourceRegistry {
     pub(super) ids: FileIdMap,
     pub(super) files: HashMap<SourceFileId, SourceFile>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct NameInterner {
-    state: NameInternerState,
+pub(super) struct NameRegistry {
+    state: NameRegistryState,
 }
 
-impl NameInterner {
+impl NameRegistry {
     pub(super) fn intern_fqn(&mut self, fqn: FullyQualifiedName) -> FqnId {
         let state = &mut self.state;
         if let Some(id) = state.by_fqn.get(&fqn) {
@@ -220,23 +219,23 @@ impl NameInterner {
         self.state.fqns.get(id.0 as usize)
     }
 
-    pub(super) fn intern_constant_path(&mut self, path: ConstantPath) -> ConstantPathId {
+    pub(super) fn intern_const_lookup(&mut self, lookup: ConstLookup) -> ConstLookupId {
         let state = &mut self.state;
-        if let Some(id) = state.by_constant_path.get(&path) {
+        if let Some(id) = state.by_const_lookup.get(&lookup) {
             return *id;
         }
-        let id = ConstantPathId(u32::try_from(state.constant_paths.len()).expect(
-            "INVARIANT VIOLATED: constant path interner exceeded u32 ids. \
-                 This is a bug because ConstantPathId stores u32. \
-                 Fix: widen ConstantPathId before interning more than u32::MAX paths.",
+        let id = ConstLookupId(u32::try_from(state.const_lookups.len()).expect(
+            "INVARIANT VIOLATED: constant lookup interner exceeded u32 ids. \
+                 This is a bug because ConstLookupId stores u32. \
+                 Fix: widen ConstLookupId before interning more than u32::MAX lookups.",
         ));
-        state.constant_paths.push(path.clone());
-        state.by_constant_path.insert(path, id);
+        state.const_lookups.push(lookup.clone());
+        state.by_const_lookup.insert(lookup, id);
         id
     }
 
-    pub(super) fn constant_path(&self, id: ConstantPathId) -> Option<&ConstantPath> {
-        self.state.constant_paths.get(id.0 as usize)
+    pub(super) fn const_lookup(&self, id: ConstLookupId) -> Option<&ConstLookup> {
+        self.state.const_lookups.get(id.0 as usize)
     }
 
     fn estimated_heap_bytes(&self) -> usize {
@@ -244,13 +243,13 @@ impl NameInterner {
         state.by_fqn.capacity() * (size_of::<FullyQualifiedName>() + size_of::<FqnId>() + 1)
             + vec_payload_bytes(&state.fqns)
             + state.fqns.iter().map(fqn_heap_bytes).sum::<usize>()
-            + state.by_constant_path.capacity()
-                * (size_of::<ConstantPath>() + size_of::<ConstantPathId>() + 1)
-            + vec_payload_bytes(&state.constant_paths)
+            + state.by_const_lookup.capacity()
+                * (size_of::<ConstLookup>() + size_of::<ConstLookupId>() + 1)
+            + vec_payload_bytes(&state.const_lookups)
             + state
-                .constant_paths
+                .const_lookups
                 .iter()
-                .map(constant_path_heap_bytes)
+                .map(const_lookup_heap_bytes)
                 .sum::<usize>()
     }
 }
@@ -263,18 +262,20 @@ fn constant_path_heap_bytes(path: &ConstantPath) -> usize {
     }
 }
 
+fn const_lookup_heap_bytes(lookup: &ConstLookup) -> usize {
+    constant_path_heap_bytes(&lookup.path)
+}
+
 #[derive(Debug, Clone, Default)]
-struct NameInternerState {
+struct NameRegistryState {
     by_fqn: HashMap<FullyQualifiedName, FqnId>,
     fqns: Vec<FullyQualifiedName>,
-    by_constant_path: HashMap<ConstantPath, ConstantPathId>,
-    constant_paths: Vec<ConstantPath>,
+    by_const_lookup: HashMap<ConstLookup, ConstLookupId>,
+    const_lookups: Vec<ConstLookup>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct FactArena {
-    pub(super) graph_store: GraphStore,
-    pub(super) unresolved_graph_edges: Vec<UnresolvedGraphEdgeFact>,
     pub(super) method_store: MethodStore,
     pub(super) reference_candidate_store: ReferenceCandidateStore,
     pub(super) reference_store: ReferenceStore,
@@ -284,37 +285,13 @@ pub(super) struct FactArena {
     pub(super) diagnostic_store: DiagnosticStore,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct Indexes {}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct QueryCaches {
-    pub(super) mro_by_namespace: RefCell<HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>>,
-    pub(super) namespace_exists: RefCell<HashMap<FullyQualifiedName, bool>>,
-    pub(super) module_includers: RefCell<HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>>,
-    pub(super) descendants: RefCell<HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>>,
-}
-
-impl QueryCaches {
-    fn clear(&self) {
-        self.mro_by_namespace.borrow_mut().clear();
-        self.namespace_exists.borrow_mut().clear();
-        self.module_includers.borrow_mut().clear();
-        self.descendants.borrow_mut().clear();
-    }
-}
-
 /// Shared analysis state for editor and agent consumers.
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisEngine {
-    pub(super) files: FileStore,
-    #[allow(dead_code)]
-    pub(super) names: NameInterner,
+    pub(super) sources: SourceRegistry,
+    pub(super) names: NameRegistry,
     pub(super) facts: FactArena,
-    #[allow(dead_code)]
-    pub(super) indexes: Indexes,
-    #[allow(dead_code)]
-    pub(super) caches: QueryCaches,
+    pub(super) graph: SemanticGraph,
 }
 
 impl AnalysisEngine {
@@ -323,7 +300,7 @@ impl AnalysisEngine {
     }
 
     pub fn register_file(&mut self, file: SourceFileInput) -> SourceFileId {
-        let id = self.files.ids.get_or_insert(&file.path);
+        let id = self.sources.ids.get_or_insert(&file.path);
         let line_index = SourceLineIndex::new(&file.content);
         let content_hash = source_hash(&file.content);
         let source = if line_index.is_ascii() {
@@ -331,7 +308,7 @@ impl AnalysisEngine {
         } else {
             Some(file.content)
         };
-        self.files.files.insert(
+        self.sources.files.insert(
             id,
             SourceFile {
                 id,
@@ -359,9 +336,9 @@ impl AnalysisEngine {
     }
 
     pub fn shrink_to_fit(&mut self) {
-        self.files.ids.shrink_to_fit();
-        self.files.files.shrink_to_fit();
-        for file in self.files.files.values_mut() {
+        self.sources.ids.shrink_to_fit();
+        self.sources.files.shrink_to_fit();
+        for file in self.sources.files.values_mut() {
             file.path.shrink_to_fit();
             if let Some(source) = &mut file.source {
                 source.shrink_to_fit();
@@ -371,18 +348,17 @@ impl AnalysisEngine {
 
         self.names.state.by_fqn.shrink_to_fit();
         self.names.state.fqns.shrink_to_fit();
-        self.names.state.by_constant_path.shrink_to_fit();
-        self.names.state.constant_paths.shrink_to_fit();
+        self.names.state.by_const_lookup.shrink_to_fit();
+        self.names.state.const_lookups.shrink_to_fit();
 
         self.facts.symbol_store.shrink_to_fit();
         self.facts.method_store.shrink_to_fit();
         self.facts.type_store.shrink_to_fit();
-        self.facts.graph_store.shrink_to_fit();
+        self.graph.shrink_to_fit();
         self.facts.reference_candidate_store.shrink_to_fit();
         self.facts.reference_store.shrink_to_fit();
         self.facts.diagnostic_candidate_store.shrink_to_fit();
         self.facts.diagnostic_store.shrink_to_fit();
-        self.facts.unresolved_graph_edges.shrink_to_fit();
     }
 
     pub fn query(&self) -> AnalysisQuery<'_> {
@@ -392,9 +368,9 @@ impl AnalysisEngine {
     pub fn stats(&self) -> AnalysisStats {
         let reference_candidate_stats = self.facts.reference_candidate_store.stats();
         AnalysisStats {
-            files: self.files.files.len(),
+            files: self.sources.files.len(),
             source_bytes: self
-                .files
+                .sources
                 .files
                 .values()
                 .map(|file| file.line_index.len())
@@ -409,9 +385,9 @@ impl AnalysisEngine {
             types: self.facts.type_store.fact_count(),
             diagnostic_candidates: self.facts.diagnostic_candidate_store.candidate_count(),
             diagnostics: self.facts.diagnostic_store.fact_count(),
-            graph_nodes: self.facts.graph_store.node_count(),
-            graph_edges: self.facts.graph_store.edge_count(),
-            unresolved_graph_edges: self.facts.unresolved_graph_edges.len(),
+            graph_nodes: self.graph.node_count(),
+            graph_edges: self.graph.edge_count(),
+            unresolved_graph_edges: self.graph.unresolved_edges().len(),
         }
     }
 
@@ -426,23 +402,17 @@ impl AnalysisEngine {
             references: self.facts.reference_store.estimated_heap_bytes(),
             diagnostics: self.facts.diagnostic_store.estimated_heap_bytes(),
             diagnostic_candidates: self.facts.diagnostic_candidate_store.estimated_heap_bytes(),
-            graph: self.facts.graph_store.estimated_heap_bytes(),
-            unresolved_graph_edges: vec_payload_bytes(&self.facts.unresolved_graph_edges)
-                + self
-                    .facts
-                    .unresolved_graph_edges
-                    .iter()
-                    .map(unresolved_graph_edge_heap_bytes)
-                    .sum::<usize>(),
+            graph: self.graph.estimated_heap_bytes(),
+            unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
         }
     }
 
     fn estimated_file_store_heap_bytes(&self) -> usize {
-        self.files.ids.estimated_heap_bytes()
-            + self.files.files.capacity()
+        self.sources.ids.estimated_heap_bytes()
+            + self.sources.files.capacity()
                 * (size_of::<SourceFileId>() + size_of::<SourceFile>() + 1)
             + self
-                .files
+                .sources
                 .files
                 .values()
                 .map(|file| {
@@ -454,53 +424,26 @@ impl AnalysisEngine {
     }
 
     pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
-        self.files.ids.get(path)
+        self.sources.ids.get(path)
     }
 
     pub fn file(&self, id: SourceFileId) -> Option<&SourceFile> {
-        self.files.files.get(&id)
+        self.sources.files.get(&id)
     }
 
     fn replace_facts_deferred(&mut self, file_id: SourceFileId, facts: FileFacts) {
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
-        self.caches.clear();
         let symbols = self.intern_symbol_facts(facts.symbols);
         self.facts.symbol_store.replace_file(file_id, symbols);
         let methods = self.intern_method_facts(facts.methods);
         self.facts.method_store.replace_file(file_id, methods);
         self.facts.type_store.replace_file(file_id, facts.types);
-        self.facts.graph_store.remove_file(file_id);
-        self.facts
-            .unresolved_graph_edges
-            .retain(|edge| edge.range.file_id != file_id);
-
-        for node in self.intern_graph_node_facts(facts.graph_nodes) {
-            assert!(
-                node.range.file_id == file_id,
-                "INVARIANT VIOLATED: file analysis graph node belongs to a different file id. \
-                 This is a bug because replace_file_analysis must only receive facts for one file. \
-                 Fix: partition collected file facts before ingest."
-            );
-            self.facts.graph_store.add_node(node);
-        }
-        for edge in self.intern_graph_edge_facts(facts.graph_edges) {
-            assert!(
-                edge.range.file_id == file_id,
-                "INVARIANT VIOLATED: file analysis graph edge belongs to a different file id. \
-                 This is a bug because replace_file_analysis must only receive facts for one file. \
-                 Fix: partition collected file facts before ingest."
-            );
-            self.facts.graph_store.add_edge(edge);
-        }
-        for edge in facts.unresolved_graph_edges {
-            assert!(
-                edge.range.file_id == file_id,
-                "INVARIANT VIOLATED: file analysis unresolved graph edge belongs to a different file id. \
-                 This is a bug because replace_file_analysis must only receive facts for one file. \
-                 Fix: partition collected file facts before ingest."
-            );
-            self.facts.unresolved_graph_edges.push(edge);
-        }
+        let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
+        let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
+        let unresolved_graph_edges =
+            self.intern_unresolved_graph_edge_facts(facts.unresolved_graph_edges);
+        self.graph
+            .replace_file(file_id, graph_nodes, graph_edges, unresolved_graph_edges);
 
         let reference_candidates = self.intern_reference_candidates(facts.reference_candidates);
         self.facts
@@ -641,8 +584,7 @@ impl AnalysisEngine {
         let Some(fqn_id) = self.names.fqn_id(fqn) else {
             return Vec::new();
         };
-        self.facts
-            .graph_store
+        self.graph
             .nodes_for(fqn_id)
             .into_iter()
             .map(|fact| self.expand_graph_node_fact(fact))
@@ -653,8 +595,7 @@ impl AnalysisEngine {
         let Some(source_id) = self.names.fqn_id(source) else {
             return Vec::new();
         };
-        self.facts
-            .graph_store
+        self.graph
             .edges_from(source_id)
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
@@ -665,8 +606,7 @@ impl AnalysisEngine {
         let Some(target_id) = self.names.fqn_id(target) else {
             return Vec::new();
         };
-        self.facts
-            .graph_store
+        self.graph
             .edges_to(target_id)
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
@@ -674,8 +614,7 @@ impl AnalysisEngine {
     }
 
     pub fn graph_nodes_in_file(&self, file_id: SourceFileId) -> Vec<GraphNodeFact> {
-        self.facts
-            .graph_store
+        self.graph
             .nodes_in_file(file_id)
             .into_iter()
             .map(|fact| self.expand_graph_node_fact(fact))
@@ -683,8 +622,7 @@ impl AnalysisEngine {
     }
 
     pub fn graph_edges_in_file(&self, file_id: SourceFileId) -> Vec<GraphEdgeFact> {
-        self.facts
-            .graph_store
+        self.graph
             .edges_in_file(file_id)
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
@@ -692,8 +630,7 @@ impl AnalysisEngine {
     }
 
     pub fn all_graph_nodes(&self) -> Vec<GraphNodeFact> {
-        self.facts
-            .graph_store
+        self.graph
             .all_nodes()
             .into_iter()
             .map(|fact| self.expand_graph_node_fact(fact))
@@ -701,8 +638,7 @@ impl AnalysisEngine {
     }
 
     pub fn all_graph_edges(&self) -> Vec<GraphEdgeFact> {
-        self.facts
-            .graph_store
+        self.graph
             .all_edges()
             .into_iter()
             .map(|fact| self.expand_graph_edge_fact(fact))
@@ -717,12 +653,12 @@ impl AnalysisEngine {
         self.facts.diagnostic_store.all_facts()
     }
 
-    pub fn graph_store(&self) -> &GraphStore {
-        &self.facts.graph_store
-    }
-
-    pub fn unresolved_graph_edges(&self) -> &[UnresolvedGraphEdgeFact] {
-        &self.facts.unresolved_graph_edges
+    pub fn unresolved_graph_edges(&self) -> Vec<UnresolvedGraphEdgeFact> {
+        self.graph
+            .unresolved_edges()
+            .into_iter()
+            .map(|edge| self.expand_unresolved_graph_edge_fact(edge))
+            .collect()
     }
 
     pub fn reference_store(&self) -> &ReferenceStore {
@@ -750,7 +686,7 @@ impl AnalysisEngine {
     }
 
     pub fn file_count(&self) -> usize {
-        self.files.files.len()
+        self.sources.files.len()
     }
 
     pub fn text_range(&self, file_id: SourceFileId, start_byte: u32, end_byte: u32) -> TextRange {
@@ -760,7 +696,7 @@ impl AnalysisEngine {
 
     fn assert_known_file_id(&self, file_id: SourceFileId, message: &str) {
         assert!(
-            self.files.files.contains_key(&file_id),
+            self.sources.files.contains_key(&file_id),
             "INVARIANT VIOLATED: {message}. \
              This is a bug because analysis facts and ranges must only reference registered files. \
              Fix: call AnalysisEngine::register_file before adding file facts."
@@ -778,9 +714,13 @@ impl AnalysisEngine {
                     parts,
                     current_namespace,
                 } => {
-                    let parts = self.names.intern_constant_path(parts);
-                    let current_namespace = self.names.intern_constant_path(current_namespace);
-                    StoredReferenceCandidate::constant(candidate.range, parts, current_namespace)
+                    let context = self
+                        .names
+                        .intern_fqn(FullyQualifiedName::namespace(current_namespace));
+                    let lookup = self
+                        .names
+                        .intern_const_lookup(ConstLookup::new(parts, false, context));
+                    StoredReferenceCandidate::constant(candidate.range, lookup)
                 }
                 ReferenceCandidateKind::Method {
                     owner,
@@ -789,7 +729,12 @@ impl AnalysisEngine {
                     caller,
                     diagnostics,
                 } => {
-                    let owner = self.names.intern_constant_path(owner);
+                    let root = self
+                        .names
+                        .intern_fqn(FullyQualifiedName::namespace(Vec::new()));
+                    let owner = self
+                        .names
+                        .intern_const_lookup(ConstLookup::new(owner, true, root));
                     let caller = caller.map(|caller| self.names.intern_fqn(caller));
                     StoredReferenceCandidate::method(
                         candidate.range,
@@ -863,6 +808,25 @@ impl AnalysisEngine {
                 let source = self.names.intern_fqn(fact.source);
                 let target = self.names.intern_fqn(fact.target);
                 StoredGraphEdgeFact::new(source, target, fact.kind, fact.range)
+            })
+            .collect()
+    }
+
+    fn intern_unresolved_graph_edge_facts(
+        &mut self,
+        facts: Vec<UnresolvedGraphEdgeFact>,
+    ) -> Vec<StoredUnresolvedGraphEdgeFact> {
+        facts
+            .into_iter()
+            .map(|fact| {
+                let source = self.names.intern_fqn(fact.source);
+                let context = self.names.intern_fqn(fact.context);
+                let target = self.names.intern_const_lookup(ConstLookup::new(
+                    ConstantPath::from_vec(fact.target_parts),
+                    fact.absolute,
+                    context,
+                ));
+                StoredUnresolvedGraphEdgeFact::new(source, target, fact.kind, fact.range)
             })
             .collect()
     }
@@ -943,47 +907,93 @@ impl AnalysisEngine {
         GraphEdgeFact::new(source, target, fact.kind, fact.range)
     }
 
+    fn expand_unresolved_graph_edge_fact(
+        &self,
+        fact: StoredUnresolvedGraphEdgeFact,
+    ) -> UnresolvedGraphEdgeFact {
+        let source = self
+            .names
+            .fqn(fact.source)
+            .expect(
+                "INVARIANT VIOLATED: unresolved graph edge points to missing source FQN id. \
+                 This is a bug because unresolved graph edges must only store interned source FQN ids. \
+                 Fix: intern unresolved graph edge sources before inserting facts.",
+            )
+            .clone();
+        let lookup = self.names.const_lookup(fact.target).expect(
+            "INVARIANT VIOLATED: unresolved graph edge points to missing constant lookup id. \
+             This is a bug because unresolved graph edges must only store interned constant lookup ids. \
+             Fix: intern unresolved graph edge targets before inserting facts.",
+        );
+        let context = self
+            .names
+            .fqn(lookup.context)
+            .expect(
+                "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
+                 This is a bug because constant lookups must only store interned context FQN ids. \
+                 Fix: intern constant lookup contexts before inserting facts.",
+            )
+            .clone();
+        UnresolvedGraphEdgeFact::new(
+            source,
+            lookup.path.to_vec(),
+            lookup.absolute,
+            context,
+            fact.kind,
+            fact.range,
+        )
+    }
+
     fn retry_unresolved_graph_edges(&mut self) {
-        if self.facts.unresolved_graph_edges.is_empty() {
+        if self.graph.unresolved_edges().is_empty() {
             return;
         }
 
-        let pending = std::mem::take(&mut self.facts.unresolved_graph_edges);
+        let pending = self.graph.take_unresolved_edges();
         for unresolved in pending {
             if let Some(target) = self.resolve_unresolved_graph_target(&unresolved) {
-                let source = self.names.intern_fqn(unresolved.source);
                 let target = self.names.intern_fqn(target);
-                self.facts.graph_store.add_edge(StoredGraphEdgeFact::new(
-                    source,
+                self.graph.add_edge(StoredGraphEdgeFact::new(
+                    unresolved.source,
                     target,
                     unresolved.kind,
                     unresolved.range,
                 ));
             } else {
-                self.facts.unresolved_graph_edges.push(unresolved);
+                self.graph.add_unresolved_edge(unresolved);
             }
         }
     }
 
     fn resolve_unresolved_graph_target(
         &self,
-        unresolved: &UnresolvedGraphEdgeFact,
+        unresolved: &StoredUnresolvedGraphEdgeFact,
     ) -> Option<FullyQualifiedName> {
-        let mut search_namespaces = if unresolved.absolute {
+        let lookup = self.names.const_lookup(unresolved.target).expect(
+            "INVARIANT VIOLATED: unresolved graph edge points to missing constant lookup id. \
+             This is a bug because unresolved graph edges must only store interned constant lookup ids. \
+             Fix: intern unresolved graph edge targets before inserting facts.",
+        );
+        let context = self.names.fqn(lookup.context).expect(
+            "INVARIANT VIOLATED: unresolved graph edge lookup points to missing context FQN id. \
+             This is a bug because constant lookups must only store interned context FQN ids. \
+             Fix: intern constant lookup contexts before inserting facts.",
+        );
+        let mut search_namespaces = if lookup.absolute {
             Vec::new()
         } else {
-            unresolved.context.namespace_parts()
+            context.namespace_parts()
         };
 
         loop {
             let mut probe = search_namespaces.clone();
-            probe.extend(unresolved.target_parts.iter().cloned());
+            probe.extend(lookup.path.iter().cloned());
             let namespace_fqn = FullyQualifiedName::namespace(probe);
             if !self.graph_nodes_for(&namespace_fqn).is_empty() {
                 return Some(namespace_fqn);
             }
 
-            if unresolved.absolute || search_namespaces.is_empty() {
+            if lookup.absolute || search_namespaces.is_empty() {
                 break;
             }
             search_namespaces.pop();
@@ -997,12 +1007,6 @@ fn source_hash(source: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     hasher.finish()
-}
-
-fn unresolved_graph_edge_heap_bytes(edge: &UnresolvedGraphEdgeFact) -> usize {
-    fqn_heap_bytes(&edge.source)
-        + vec_payload_bytes(&edge.target_parts)
-        + fqn_heap_bytes(&edge.context)
 }
 
 #[cfg(test)]

@@ -24,22 +24,22 @@ pub use diagnostic_candidate_store::{
     DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticCandidateStore, RaiseArgCandidate,
 };
 pub use diagnostic_store::{DiagnosticFact, DiagnosticSeverity, DiagnosticStore};
-pub use fqn_id::{ConstantPathId, FqnId};
+pub use fqn_id::{ConstLookupId, FqnId};
 pub use fully_qualified_name::{FullyQualifiedName, NamespaceKind};
 pub use graph_store::{
-    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, GraphStore, StoredGraphEdgeFact,
-    StoredGraphNodeFact, UnresolvedGraphEdgeFact,
+    GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, SemanticGraph, StoredGraphEdgeFact,
+    StoredGraphNodeFact, StoredUnresolvedGraphEdgeFact, UnresolvedGraphEdgeFact,
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{
     MethodFact, MethodParamFact, MethodParamKind, MethodStore, StoredMethodFact,
 };
 pub use reference_store::{
-    ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate, MethodReferenceCandidate,
-    MethodReferenceDiagnostics, ReferenceCandidate, ReferenceCandidateKind,
-    ReferenceCandidateStore, ReferenceFact, ReferenceStore, StoredConstantReferenceCandidate,
-    StoredMethodReferenceCandidate, StoredReferenceCandidate, StoredReferenceCandidateKind,
-    StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
+    ConstLookup, ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate,
+    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate,
+    ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore,
+    StoredConstantReferenceCandidate, StoredMethodReferenceCandidate, StoredReferenceCandidate,
+    StoredReferenceCandidateKind, StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
 };
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;
