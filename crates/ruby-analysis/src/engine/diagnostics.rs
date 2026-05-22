@@ -13,25 +13,25 @@ use crate::{AnalysisEngine, AnalysisQuery};
 
 impl AnalysisEngine {
     pub(super) fn resolve_reference_candidates(&mut self) {
-        let mut candidate_file_ids = self.facts.reference_candidate_store.file_ids();
-        for file_id in self.facts.diagnostic_candidate_store.file_ids() {
+        let mut candidate_file_ids = self.facts.references.candidates.file_ids();
+        for file_id in self.facts.diagnostics.candidates.file_ids() {
             if !candidate_file_ids.contains(&file_id) {
                 candidate_file_ids.push(file_id);
             }
         }
 
-        let reference_candidate_store = std::mem::take(&mut self.facts.reference_candidate_store);
+        let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
         let mut method_fact_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<MethodFact>> =
             HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
-        self.facts.reference_store.clear();
+        self.facts.references.resolved.clear();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
                 StoredReferenceCandidateRef::Resolved(candidate) => {
-                    self.facts.reference_store.add(
+                    self.facts.references.resolved.add(
                         candidate.target,
                         ReferenceFact::new(candidate.range, candidate.caller),
                     );
@@ -61,7 +61,8 @@ impl AnalysisEngine {
                     ) {
                         let target = self.names.intern_fqn(target);
                         self.facts
-                            .reference_store
+                            .references
+                            .resolved
                             .add(target, ReferenceFact::new(candidate.range, None));
                     } else {
                         unresolved_constants
@@ -100,7 +101,7 @@ impl AnalysisEngine {
                             candidate.method,
                         );
                         let target = self.names.intern_fqn(target);
-                        self.facts.reference_store.add(
+                        self.facts.references.resolved.add(
                             target,
                             ReferenceFact::new(candidate.range, candidate.caller),
                         );
@@ -122,7 +123,7 @@ impl AnalysisEngine {
                             candidate.method,
                         );
                         let target = self.names.intern_fqn(target);
-                        self.facts.reference_store.add(
+                        self.facts.references.resolved.add(
                             target,
                             ReferenceFact::new(candidate.range, candidate.caller),
                         );
@@ -167,13 +168,14 @@ impl AnalysisEngine {
                 }
             }
         }
-        self.facts.reference_candidate_store = reference_candidate_store;
-        self.facts.reference_store.sort_all();
+        self.facts.references.candidates = reference_candidate_store;
+        self.facts.references.resolved.sort_all();
 
         for file_id in candidate_file_ids {
             let mut diagnostics = self
                 .facts
-                .diagnostic_store
+                .diagnostics
+                .resolved
                 .facts_in_file(file_id)
                 .into_iter()
                 .filter(|fact| fact.code != "unresolved-constant")
@@ -186,7 +188,8 @@ impl AnalysisEngine {
                 .collect::<Vec<_>>();
             diagnostics.extend(unresolved_constants.remove(&file_id).unwrap_or_default());
             self.facts
-                .diagnostic_store
+                .diagnostics
+                .resolved
                 .replace_file(file_id, diagnostics);
         }
     }
@@ -292,7 +295,7 @@ impl AnalysisEngine {
 
     fn resolve_diagnostic_candidates(&self) -> HashMap<SourceFileId, Vec<DiagnosticFact>> {
         let mut diagnostics = HashMap::new();
-        for candidate in self.facts.diagnostic_candidate_store.iter_candidates() {
+        for candidate in self.facts.diagnostics.candidates.iter_candidates() {
             match &candidate.kind {
                 DiagnosticCandidateKind::BadSplat {
                     operator,

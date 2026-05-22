@@ -276,13 +276,28 @@ struct NameRegistryState {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct FactArena {
-    pub(super) method_store: MethodStore,
-    pub(super) reference_candidate_store: ReferenceCandidateStore,
-    pub(super) reference_store: ReferenceStore,
-    pub(super) diagnostic_candidate_store: DiagnosticCandidateStore,
-    pub(super) symbol_store: SymbolStore,
-    pub(super) type_store: TypeStore,
-    pub(super) diagnostic_store: DiagnosticStore,
+    pub(super) definitions: DefinitionFacts,
+    pub(super) references: ReferenceFacts,
+    pub(super) types: TypeStore,
+    pub(super) diagnostics: DiagnosticFacts,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct DefinitionFacts {
+    pub(super) symbols: SymbolStore,
+    pub(super) methods: MethodStore,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct ReferenceFacts {
+    pub(super) candidates: ReferenceCandidateStore,
+    pub(super) resolved: ReferenceStore,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct DiagnosticFacts {
+    pub(super) candidates: DiagnosticCandidateStore,
+    pub(super) resolved: DiagnosticStore,
 }
 
 /// Shared analysis state for editor and agent consumers.
@@ -351,14 +366,14 @@ impl AnalysisEngine {
         self.names.state.by_const_lookup.shrink_to_fit();
         self.names.state.const_lookups.shrink_to_fit();
 
-        self.facts.symbol_store.shrink_to_fit();
-        self.facts.method_store.shrink_to_fit();
-        self.facts.type_store.shrink_to_fit();
+        self.facts.definitions.symbols.shrink_to_fit();
+        self.facts.definitions.methods.shrink_to_fit();
+        self.facts.types.shrink_to_fit();
         self.graph.shrink_to_fit();
-        self.facts.reference_candidate_store.shrink_to_fit();
-        self.facts.reference_store.shrink_to_fit();
-        self.facts.diagnostic_candidate_store.shrink_to_fit();
-        self.facts.diagnostic_store.shrink_to_fit();
+        self.facts.references.candidates.shrink_to_fit();
+        self.facts.references.resolved.shrink_to_fit();
+        self.facts.diagnostics.candidates.shrink_to_fit();
+        self.facts.diagnostics.resolved.shrink_to_fit();
     }
 
     pub fn query(&self) -> AnalysisQuery<'_> {
@@ -366,7 +381,7 @@ impl AnalysisEngine {
     }
 
     pub fn stats(&self) -> AnalysisStats {
-        let reference_candidate_stats = self.facts.reference_candidate_store.stats();
+        let reference_candidate_stats = self.facts.references.candidates.stats();
         AnalysisStats {
             files: self.sources.files.len(),
             source_bytes: self
@@ -375,16 +390,16 @@ impl AnalysisEngine {
                 .values()
                 .map(|file| file.line_index.len())
                 .sum(),
-            symbols: self.facts.symbol_store.fact_count(),
-            methods: self.facts.method_store.fact_count(),
-            reference_candidates: self.facts.reference_candidate_store.candidate_count(),
+            symbols: self.facts.definitions.symbols.fact_count(),
+            methods: self.facts.definitions.methods.fact_count(),
+            reference_candidates: self.facts.references.candidates.candidate_count(),
             constant_reference_candidates: reference_candidate_stats.constants,
             method_reference_candidates: reference_candidate_stats.methods,
             resolved_reference_candidates: reference_candidate_stats.resolved,
-            references: self.facts.reference_store.fact_count(),
-            types: self.facts.type_store.fact_count(),
-            diagnostic_candidates: self.facts.diagnostic_candidate_store.candidate_count(),
-            diagnostics: self.facts.diagnostic_store.fact_count(),
+            references: self.facts.references.resolved.fact_count(),
+            types: self.facts.types.fact_count(),
+            diagnostic_candidates: self.facts.diagnostics.candidates.candidate_count(),
+            diagnostics: self.facts.diagnostics.resolved.fact_count(),
             graph_nodes: self.graph.node_count(),
             graph_edges: self.graph.edge_count(),
             unresolved_graph_edges: self.graph.unresolved_edges().len(),
@@ -395,13 +410,13 @@ impl AnalysisEngine {
         AnalysisMemoryStats {
             names: self.names.estimated_heap_bytes(),
             files: self.estimated_file_store_heap_bytes(),
-            symbols: self.facts.symbol_store.estimated_heap_bytes(),
-            methods: self.facts.method_store.estimated_heap_bytes(),
-            types: self.facts.type_store.estimated_heap_bytes(),
-            reference_candidates: self.facts.reference_candidate_store.estimated_heap_bytes(),
-            references: self.facts.reference_store.estimated_heap_bytes(),
-            diagnostics: self.facts.diagnostic_store.estimated_heap_bytes(),
-            diagnostic_candidates: self.facts.diagnostic_candidate_store.estimated_heap_bytes(),
+            symbols: self.facts.definitions.symbols.estimated_heap_bytes(),
+            methods: self.facts.definitions.methods.estimated_heap_bytes(),
+            types: self.facts.types.estimated_heap_bytes(),
+            reference_candidates: self.facts.references.candidates.estimated_heap_bytes(),
+            references: self.facts.references.resolved.estimated_heap_bytes(),
+            diagnostics: self.facts.diagnostics.resolved.estimated_heap_bytes(),
+            diagnostic_candidates: self.facts.diagnostics.candidates.estimated_heap_bytes(),
             graph: self.graph.estimated_heap_bytes(),
             unresolved_graph_edges: self.graph.estimated_unresolved_heap_bytes(),
         }
@@ -434,10 +449,16 @@ impl AnalysisEngine {
     fn replace_facts_deferred(&mut self, file_id: SourceFileId, facts: FileFacts) {
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
         let symbols = self.intern_symbol_facts(facts.symbols);
-        self.facts.symbol_store.replace_file(file_id, symbols);
+        self.facts
+            .definitions
+            .symbols
+            .replace_file(file_id, symbols);
         let methods = self.intern_method_facts(facts.methods);
-        self.facts.method_store.replace_file(file_id, methods);
-        self.facts.type_store.replace_file(file_id, facts.types);
+        self.facts
+            .definitions
+            .methods
+            .replace_file(file_id, methods);
+        self.facts.types.replace_file(file_id, facts.types);
         let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
         let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
         let unresolved_graph_edges =
@@ -447,13 +468,16 @@ impl AnalysisEngine {
 
         let reference_candidates = self.intern_reference_candidates(facts.reference_candidates);
         self.facts
-            .reference_candidate_store
+            .references
+            .candidates
             .replace_file(file_id, reference_candidates);
         self.facts
-            .diagnostic_candidate_store
+            .diagnostics
+            .candidates
             .replace_file(file_id, facts.diagnostic_candidates);
         self.facts
-            .diagnostic_store
+            .diagnostics
+            .resolved
             .replace_file(file_id, facts.diagnostics);
     }
 
@@ -463,11 +487,11 @@ impl AnalysisEngine {
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> TypeResolution {
-        self.facts.type_store.type_at(subject, file_id, byte_offset)
+        self.facts.types.type_at(subject, file_id, byte_offset)
     }
 
     pub fn type_facts_for(&self, subject: &TypeSubject) -> Vec<TypeFact> {
-        self.facts.type_store.facts_for(subject)
+        self.facts.types.facts_for(subject)
     }
 
     pub fn symbol_facts_for(&self, fqn: &FullyQualifiedName) -> Vec<SymbolFact> {
@@ -475,7 +499,8 @@ impl AnalysisEngine {
             return Vec::new();
         };
         self.facts
-            .symbol_store
+            .definitions
+            .symbols
             .facts_for(fqn_id)
             .into_iter()
             .map(|fact| self.expand_symbol_fact(fact))
@@ -484,7 +509,8 @@ impl AnalysisEngine {
 
     pub fn all_symbol_facts(&self) -> Vec<SymbolFact> {
         self.facts
-            .symbol_store
+            .definitions
+            .symbols
             .all_facts()
             .into_iter()
             .map(|fact| self.expand_symbol_fact(fact))
@@ -493,7 +519,8 @@ impl AnalysisEngine {
 
     pub fn symbol_facts_in_file(&self, file_id: SourceFileId) -> Vec<SymbolFact> {
         self.facts
-            .symbol_store
+            .definitions
+            .symbols
             .facts_in_file(file_id)
             .into_iter()
             .map(|fact| self.expand_symbol_fact(fact))
@@ -504,7 +531,7 @@ impl AnalysisEngine {
         let Some(target_id) = self.names.fqn_id(target) else {
             return &[];
         };
-        self.facts.reference_store.facts_for(target_id)
+        self.facts.references.resolved.facts_for(target_id)
     }
 
     pub fn fqn_for_id(&self, id: FqnId) -> Option<&FullyQualifiedName> {
@@ -516,7 +543,8 @@ impl AnalysisEngine {
             return Vec::new();
         };
         self.facts
-            .method_store
+            .definitions
+            .methods
             .facts_for(fqn_id)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
@@ -525,7 +553,8 @@ impl AnalysisEngine {
 
     pub fn all_method_facts(&self) -> Vec<MethodFact> {
         self.facts
-            .method_store
+            .definitions
+            .methods
             .all_facts()
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
@@ -541,7 +570,8 @@ impl AnalysisEngine {
             return Vec::new();
         };
         self.facts
-            .method_store
+            .definitions
+            .methods
             .facts_matching_owner(owner_id, partial)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
@@ -557,7 +587,8 @@ impl AnalysisEngine {
             return Vec::new();
         };
         self.facts
-            .method_store
+            .definitions
+            .methods
             .facts_matching_owner_name(owner_id, method)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
@@ -568,12 +599,16 @@ impl AnalysisEngine {
         let Some(owner_id) = self.names.fqn_id(owner) else {
             return Vec::new();
         };
-        self.facts.method_store.method_names_for_owner(owner_id)
+        self.facts
+            .definitions
+            .methods
+            .method_names_for_owner(owner_id)
     }
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
         self.facts
-            .method_store
+            .definitions
+            .methods
             .facts_in_file(file_id)
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
@@ -646,11 +681,11 @@ impl AnalysisEngine {
     }
 
     pub fn diagnostic_facts_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
-        self.facts.diagnostic_store.facts_in_file(file_id)
+        self.facts.diagnostics.resolved.facts_in_file(file_id)
     }
 
     pub fn all_diagnostic_facts(&self) -> Vec<DiagnosticFact> {
-        self.facts.diagnostic_store.all_facts()
+        self.facts.diagnostics.resolved.all_facts()
     }
 
     pub fn unresolved_graph_edges(&self) -> Vec<UnresolvedGraphEdgeFact> {
@@ -662,27 +697,27 @@ impl AnalysisEngine {
     }
 
     pub fn reference_store(&self) -> &ReferenceStore {
-        &self.facts.reference_store
+        &self.facts.references.resolved
     }
 
     pub fn method_store(&self) -> &MethodStore {
-        &self.facts.method_store
+        &self.facts.definitions.methods
     }
 
     pub fn symbol_store(&self) -> &SymbolStore {
-        &self.facts.symbol_store
+        &self.facts.definitions.symbols
     }
 
     pub fn type_store(&self) -> &TypeStore {
-        &self.facts.type_store
+        &self.facts.types
     }
 
     pub fn diagnostic_store(&self) -> &DiagnosticStore {
-        &self.facts.diagnostic_store
+        &self.facts.diagnostics.resolved
     }
 
     pub fn reference_candidate_store(&self) -> &ReferenceCandidateStore {
-        &self.facts.reference_candidate_store
+        &self.facts.references.candidates
     }
 
     pub fn file_count(&self) -> usize {
