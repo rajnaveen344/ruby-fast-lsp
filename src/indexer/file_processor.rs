@@ -18,7 +18,7 @@ use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::ExtensionRegistryHandle;
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
-use log::debug;
+use log::{debug, info};
 use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
@@ -109,7 +109,9 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         resolution: FileResolution,
     ) -> Result<ProcessResult> {
+        let total_start = Instant::now();
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
+        let indexed_check_start = Instant::now();
         let already_indexed = {
             let docs = server.docs.lock();
             if let Some(doc_arc) = docs.get(uri) {
@@ -119,6 +121,7 @@ impl FileProcessor {
                 false
             }
         };
+        let indexed_check_elapsed = indexed_check_start.elapsed();
 
         if already_indexed {
             debug!(
@@ -126,20 +129,37 @@ impl FileProcessor {
                 uri.path().split('/').next_back().unwrap_or("unknown")
             );
             // Still parse for syntax diagnostics
+            let parse_start = Instant::now();
             let parse_result = ruby_prism::parse(content.as_bytes());
+            let parse_elapsed = parse_start.elapsed();
+            let register_start = Instant::now();
             let source_kind = self.analysis_source_kind_for_uri(server, uri);
             let analysis_file_id = server.open_or_update_analysis_file_with_kind(
                 uri,
                 content.to_string(),
                 source_kind,
             );
+            let register_elapsed = register_start.elapsed();
             let doc = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.to_string(),
                 0,
                 analysis_file_id,
             );
+            let syntax_start = Instant::now();
             let diagnostics = generate_diagnostics(&parse_result, &doc);
+            let syntax_elapsed = syntax_start.elapsed();
+            info!(
+                "[PERF][FileProcessor waterfall] file={} resolution={:?} already_indexed=true total={:?} indexed_check={:?} parse={:?} register={:?} syntax_diag={:?} diagnostics={}",
+                uri.path(),
+                resolution,
+                total_start.elapsed(),
+                indexed_check_elapsed,
+                parse_elapsed,
+                register_elapsed,
+                syntax_elapsed,
+                diagnostics.len()
+            );
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -147,8 +167,11 @@ impl FileProcessor {
         }
 
         // 1. Parse ONLY ONCE
+        let parse_start = Instant::now();
         let parse_result = ruby_prism::parse(content.as_bytes());
         let node = parse_result.node();
+        let parse_elapsed = parse_start.elapsed();
+        let register_start = Instant::now();
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
@@ -158,13 +181,30 @@ impl FileProcessor {
             0,
             analysis_file_id,
         );
+        let register_elapsed = register_start.elapsed();
 
         // 2. Generate Syntax Diagnostics
+        let syntax_start = Instant::now();
         let diagnostics = generate_diagnostics(&parse_result, &document);
+        let syntax_elapsed = syntax_start.elapsed();
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
+            let replace_start = Instant::now();
             replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
+            let replace_elapsed = replace_start.elapsed();
+            info!(
+                "[PERF][FileProcessor waterfall] file={} resolution={:?} severe_parse=true total={:?} indexed_check={:?} parse={:?} register={:?} syntax_diag={:?} replace={:?} diagnostics={}",
+                uri.path(),
+                resolution,
+                total_start.elapsed(),
+                indexed_check_elapsed,
+                parse_elapsed,
+                register_elapsed,
+                syntax_elapsed,
+                replace_elapsed,
+                diagnostics.len()
+            );
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -174,22 +214,29 @@ impl FileProcessor {
         let affected_uris = HashSet::new();
 
         // 3. Collect facts.
+        let direct_start = Instant::now();
         let direct_facts_seed =
             collect_direct_facts(server, &node, document.analysis_file_id(), None);
+        let direct_elapsed = direct_start.elapsed();
+        let direct_replace_start = Instant::now();
         replace_analysis_facts_for_file(
             server,
             document.analysis_file_id(),
             &direct_facts_seed,
             false,
         );
+        let direct_replace_elapsed = direct_replace_start.elapsed();
 
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
             server.analysis_engine.clone(),
         );
+        let visit_start = Instant::now();
         visitor.visit(&node);
+        let visit_elapsed = visit_start.elapsed();
 
+        let extension_start = Instant::now();
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
         let mut direct_facts = direct_facts_seed;
@@ -199,6 +246,7 @@ impl FileProcessor {
             &extension_index_patches,
             &mut direct_facts,
         );
+        let extension_elapsed = extension_start.elapsed();
         let symbol_facts = direct_facts.symbols;
         let method_facts = direct_facts.methods;
         let mut type_facts = direct_facts.types;
@@ -213,6 +261,16 @@ impl FileProcessor {
                 .into_iter()
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
+        let symbol_count = symbol_facts.len();
+        let method_count = method_facts.len();
+        let type_count = type_facts.len();
+        let graph_node_count = direct_facts.graph_nodes.len();
+        let graph_edge_count = direct_facts.graph_edges.len();
+        let unresolved_graph_edge_count = direct_facts.unresolved_graph_edges.len();
+        let reference_candidate_count = visitor.reference_candidates.len();
+        let diagnostic_candidate_count = visitor.diagnostic_candidates.len();
+        let analysis_diagnostic_count = visitor.analysis_diagnostics.len();
+        let replace_start = Instant::now();
         replace_file_analysis(
             server,
             updated_document.analysis_file_id(),
@@ -230,7 +288,9 @@ impl FileProcessor {
             },
             resolution,
         );
+        let replace_elapsed = replace_start.elapsed();
 
+        let doc_store_start = Instant::now();
         {
             let mut docs = server.docs.lock();
             docs.insert(
@@ -238,14 +298,43 @@ impl FileProcessor {
                 Arc::new(parking_lot::RwLock::new(updated_document.clone())),
             );
         }
+        let doc_store_elapsed = doc_store_start.elapsed();
 
         // Mark as indexed
+        let mark_start = Instant::now();
         if let Some(doc_arc) = server.docs.lock().get(uri) {
             let mut doc = doc_arc.write();
             doc.indexed_version = Some(doc.version);
         }
+        let mark_elapsed = mark_start.elapsed();
 
         debug!("Processed file {:?}", uri);
+        info!(
+            "[PERF][FileProcessor waterfall] file={} resolution={:?} already_indexed=false total={:?} indexed_check={:?} parse={:?} register={:?} syntax_diag={:?} direct={:?} direct_replace={:?} visit={:?} extension={:?} replace={:?} doc_store={:?} mark_indexed={:?} symbols={} methods={} types={} graph_nodes={} graph_edges={} unresolved_graph_edges={} refs={} diag_candidates={} diagnostics={}",
+            uri.path(),
+            resolution,
+            total_start.elapsed(),
+            indexed_check_elapsed,
+            parse_elapsed,
+            register_elapsed,
+            syntax_elapsed,
+            direct_elapsed,
+            direct_replace_elapsed,
+            visit_elapsed,
+            extension_elapsed,
+            replace_elapsed,
+            doc_store_elapsed,
+            mark_elapsed,
+            symbol_count,
+            method_count,
+            type_count,
+            graph_node_count,
+            graph_edge_count,
+            unresolved_graph_edge_count,
+            reference_candidate_count,
+            diagnostic_candidate_count,
+            analysis_diagnostic_count
+        );
 
         Ok(ProcessResult {
             affected_uris,
@@ -487,10 +576,25 @@ fn collect_direct_facts(
     file_id: ruby_analysis::core::SourceFileId,
     known_namespaces: Option<&HashSet<FullyQualifiedName>>,
 ) -> ruby_analysis::indexer::AnalysisIndex {
+    let total_start = Instant::now();
+    let namespace_start = Instant::now();
     let known_namespaces = known_namespaces
         .cloned()
         .unwrap_or_else(|| collect_known_namespaces(server));
-    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_node(node)
+    let namespace_count = known_namespaces.len();
+    let namespace_elapsed = namespace_start.elapsed();
+    let index_start = Instant::now();
+    let result = AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_node(node);
+    let index_elapsed = index_start.elapsed();
+    info!(
+        "[PERF][direct facts waterfall] file_id={:?} total={:?} known_namespaces={}@{:?} index_node={:?}",
+        file_id,
+        total_start.elapsed(),
+        namespace_count,
+        namespace_elapsed,
+        index_elapsed
+    );
+    result
 }
 
 fn replace_analysis_facts_for_file(
@@ -517,15 +621,39 @@ fn replace_file_analysis(
     facts: FileFacts,
     resolution: FileResolution,
 ) {
+    let total_start = Instant::now();
+    let lock_start = Instant::now();
     let mut engine = server.analysis_engine.lock();
-    match resolution {
-        FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
-        FileResolution::CurrentFile => {
-            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
-            engine.resolve_file(file_id);
+    let lock_elapsed = lock_start.elapsed();
+    let (replace_elapsed, resolve_elapsed) = match resolution {
+        FileResolution::Full => {
+            let replace_start = Instant::now();
+            engine.replace_facts(file_id, facts, ResolveMode::Immediate);
+            (replace_start.elapsed(), std::time::Duration::ZERO)
         }
-        FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
-    }
+        FileResolution::CurrentFile => {
+            let replace_start = Instant::now();
+            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            let replace_elapsed = replace_start.elapsed();
+            let resolve_start = Instant::now();
+            engine.resolve_file(file_id);
+            (replace_elapsed, resolve_start.elapsed())
+        }
+        FileResolution::Deferred => {
+            let replace_start = Instant::now();
+            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            (replace_start.elapsed(), std::time::Duration::ZERO)
+        }
+    };
+    info!(
+        "[PERF][engine replace waterfall] file_id={:?} resolution={:?} total={:?} lock={:?} replace={:?} resolve={:?}",
+        file_id,
+        resolution,
+        total_start.elapsed(),
+        lock_elapsed,
+        replace_elapsed,
+        resolve_elapsed
+    );
 }
 
 fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex) -> FileFacts {
@@ -544,8 +672,15 @@ fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex)
 }
 
 fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
+    let start = Instant::now();
     let engine = server.analysis_engine.lock();
-    AnalysisQuery::new(&engine).known_namespace_fqns()
+    let namespaces = AnalysisQuery::new(&engine).known_namespace_fqns();
+    info!(
+        "[PERF][known namespaces] count={} elapsed={:?}",
+        namespaces.len(),
+        start.elapsed()
+    );
+    namespaces
 }
 
 fn add_extension_analysis_facts(
@@ -558,15 +693,20 @@ fn add_extension_analysis_facts(
         return;
     }
 
+    let total_start = Instant::now();
+    let namespace_start = Instant::now();
     let mut known_namespaces = {
         let engine = server.analysis_engine.lock();
         AnalysisQuery::new(&engine).known_namespace_fqns()
     };
+    let namespace_elapsed = namespace_start.elapsed();
+    let initial_namespace_count = known_namespaces.len();
     for node in &facts.graph_nodes {
         if let Some(namespace) = node.fqn.to_instance_namespace() {
             known_namespaces.insert(namespace);
         }
     }
+    let patch_start = Instant::now();
 
     for patch in patches {
         match patch {
@@ -663,6 +803,15 @@ fn add_extension_analysis_facts(
             }
         }
     }
+    info!(
+        "[PERF][extension facts waterfall] file_id={:?} total={:?} known_namespaces={}@{:?} patches={} patch_apply={:?}",
+        document.analysis_file_id(),
+        total_start.elapsed(),
+        initial_namespace_count,
+        namespace_elapsed,
+        patches.len(),
+        patch_start.elapsed()
+    );
 }
 
 fn push_extension_graph_edge(

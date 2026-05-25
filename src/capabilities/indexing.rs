@@ -7,6 +7,7 @@ use ruby_analysis::indexer::RubyDocument;
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::time::Instant;
 use tower_lsp::lsp_types::*;
 
 fn process_interactive_file(
@@ -15,10 +16,23 @@ fn process_interactive_file(
     uri: &Url,
     content: &str,
 ) -> anyhow::Result<crate::indexer::file_processor::ProcessResult> {
+    let start = Instant::now();
     if server.workspace_for_uri(uri).is_some() {
-        indexer.process_file_current_file_resolution(uri, content, server)
+        let result = indexer.process_file_current_file_resolution(uri, content, server);
+        info!(
+            "[PERF][interactive] file={} mode=current-file elapsed={:?}",
+            uri.path(),
+            start.elapsed()
+        );
+        result
     } else {
-        indexer.process_file(uri, content, server)
+        let result = indexer.process_file(uri, content, server);
+        info!(
+            "[PERF][interactive] file={} mode=full-orphan elapsed={:?}",
+            uri.path(),
+            start.elapsed()
+        );
+        result
     }
 }
 
@@ -39,10 +53,14 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
 }
 
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
+    let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
+    let register_start = Instant::now();
     let analysis_file_id = server.open_or_update_analysis_file(&uri, content.clone());
+    let register_elapsed = register_start.elapsed();
 
+    let doc_start = Instant::now();
     {
         let mut docs = server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
@@ -59,39 +77,68 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
         }
     }
+    let doc_elapsed = doc_start.elapsed();
     debug!("Doc cache size: {}", server.docs.lock().len());
 
     // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
+    let process_start = Instant::now();
     let (affected_uris, mut diagnostics) =
         match process_interactive_file(&indexer, server, &uri, &content) {
             Ok(result) => (result.affected_uris, result.diagnostics),
             Err(_) => (std::collections::HashSet::new(), Vec::new()),
         };
+    let process_elapsed = process_start.elapsed();
 
+    let cache_start = Instant::now();
     // Invalidate namespace tree cache with debouncing
     server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to new definitions");
+    let cache_elapsed = cache_start.elapsed();
 
     // Add unresolved entry diagnostics from the analysis engine.
+    let diag_start = Instant::now();
     let query = EngineQuery::with_engine(server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    let diag_count = diagnostics.len();
+    let diag_elapsed = diag_start.elapsed();
+    let publish_start = Instant::now();
     server.publish_diagnostics(uri.clone(), diagnostics).await;
+    let publish_elapsed = publish_start.elapsed();
 
+    let affected_start = Instant::now();
+    let mut affected_count = 0usize;
     // Publish diagnostics for files affected by removed definitions (cross-file propagation)
     for affected_uri in affected_uris {
         if affected_uri != uri {
+            affected_count += 1;
             let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
             server
                 .publish_diagnostics(affected_uri, affected_diagnostics)
                 .await;
         }
     }
+    let affected_elapsed = affected_start.elapsed();
+    info!(
+        "[PERF][didOpen waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} cache_invalidate={:?} diag_query={}@{:?} publish={:?} affected_publish={}@{:?}",
+        uri.path(),
+        total_start.elapsed(),
+        register_elapsed,
+        doc_elapsed,
+        process_elapsed,
+        cache_elapsed,
+        diag_count,
+        diag_elapsed,
+        publish_elapsed,
+        affected_count,
+        affected_elapsed
+    );
 }
 
 pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
+    let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let version = params.text_document.version;
 
@@ -100,8 +147,11 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         Some(change) => change.text.clone(),
         None => return,
     };
+    let register_start = Instant::now();
     let analysis_file_id = server.open_or_update_analysis_file(&uri, final_content.clone());
+    let register_elapsed = register_start.elapsed();
 
+    let doc_start = Instant::now();
     // Update or create the document atomically
     {
         let mut docs = server.docs.lock();
@@ -119,42 +169,70 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
             docs.insert(uri.clone(), Arc::new(RwLock::new(new_doc)));
         }
     }
+    let doc_elapsed = doc_start.elapsed();
 
     // Process current file without forcing a project-wide reference/diagnostic
     // resolve. Project-wide propagation runs during workspace indexing/save.
     // Route by URI so the file's workspace index is the one updated.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
+    let process_start = Instant::now();
     let (affected_uris, mut diagnostics) =
         match process_interactive_file(&indexer, server, &uri, &final_content) {
             Ok(result) => (result.affected_uris, result.diagnostics),
             Err(_) => (std::collections::HashSet::new(), Vec::new()),
         };
+    let process_elapsed = process_start.elapsed();
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
+    let diag_start = Instant::now();
     let query = EngineQuery::with_engine(server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    let diag_count = diagnostics.len();
+    let diag_elapsed = diag_start.elapsed();
 
     debug!(
         "Publishing {} diagnostics for {} on change",
         diagnostics.len(),
         uri.path().split('/').next_back().unwrap_or("unknown")
     );
+    let publish_start = Instant::now();
     server.publish_diagnostics(uri.clone(), diagnostics).await;
+    let publish_elapsed = publish_start.elapsed();
 
+    let cache_start = Instant::now();
     // Invalidate namespace tree cache with debouncing
     server.invalidate_namespace_tree_cache_debounced();
     debug!("Namespace tree cache invalidation scheduled due to index change");
+    let cache_elapsed = cache_start.elapsed();
 
+    let affected_start = Instant::now();
+    let mut affected_count = 0usize;
     // Publish diagnostics for affected files (cross-file propagation)
     for affected_uri in affected_uris {
         if affected_uri != uri {
+            affected_count += 1;
             let affected_diagnostics = query.get_unresolved_diagnostics(&affected_uri);
             server
                 .publish_diagnostics(affected_uri, affected_diagnostics)
                 .await;
         }
     }
+    let affected_elapsed = affected_start.elapsed();
+    info!(
+        "[PERF][didChange waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} diag_query={}@{:?} publish={:?} cache_invalidate={:?} affected_publish={}@{:?}",
+        uri.path(),
+        total_start.elapsed(),
+        register_elapsed,
+        doc_elapsed,
+        process_elapsed,
+        diag_count,
+        diag_elapsed,
+        publish_elapsed,
+        cache_elapsed,
+        affected_count,
+        affected_elapsed
+    );
 }
 
 pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
