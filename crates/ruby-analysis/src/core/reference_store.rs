@@ -30,12 +30,32 @@ impl ConstLookup {
 pub struct ReferenceFact {
     pub range: TextRange,
     pub caller: Option<FqnId>,
+    pub access: MethodReferenceAccess,
 }
 
 impl ReferenceFact {
     pub fn new(range: TextRange, caller: Option<FqnId>) -> Self {
-        Self { range, caller }
+        Self {
+            range,
+            caller,
+            access: MethodReferenceAccess::Normal,
+        }
     }
+
+    pub fn method(range: TextRange, caller: Option<FqnId>, access: MethodReferenceAccess) -> Self {
+        Self {
+            range,
+            caller,
+            access,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MethodReferenceAccess {
+    Normal,
+    ExplicitReceiver,
+    VisibilityBypass,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +68,8 @@ pub enum ReferenceCandidateKind {
         owner: ConstantPath,
         owner_kind: NamespaceKind,
         method: RubyMethod,
+        is_super: bool,
+        access: MethodReferenceAccess,
         caller: Option<FullyQualifiedName>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
@@ -87,6 +109,8 @@ pub struct MethodReferenceCandidate {
     pub owner: Vec<RubyConstant>,
     pub owner_kind: NamespaceKind,
     pub method: RubyMethod,
+    pub is_super: bool,
+    pub access: MethodReferenceAccess,
     pub caller: Option<FullyQualifiedName>,
     pub diagnostics: MethodReferenceDiagnostics,
 }
@@ -121,6 +145,8 @@ pub struct StoredMethodReferenceCandidate {
     pub owner: ConstLookupId,
     pub owner_kind: NamespaceKind,
     pub method: RubyMethod,
+    pub is_super: bool,
+    pub access: MethodReferenceAccess,
     pub caller: Option<FqnId>,
     pub diagnostics: Option<Box<MethodReferenceDiagnostics>>,
 }
@@ -158,6 +184,8 @@ pub enum StoredReferenceCandidateKind {
         owner: ConstLookupId,
         owner_kind: NamespaceKind,
         method: RubyMethod,
+        is_super: bool,
+        access: MethodReferenceAccess,
         caller: Option<FqnId>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     },
@@ -180,6 +208,8 @@ impl StoredReferenceCandidate {
         owner: ConstLookupId,
         owner_kind: NamespaceKind,
         method: RubyMethod,
+        is_super: bool,
+        access: MethodReferenceAccess,
         caller: Option<FqnId>,
         diagnostics: Option<Box<MethodReferenceDiagnostics>>,
     ) -> Self {
@@ -189,6 +219,8 @@ impl StoredReferenceCandidate {
                 owner,
                 owner_kind,
                 method,
+                is_super,
+                access,
                 caller,
                 diagnostics,
             },
@@ -242,6 +274,8 @@ impl ReferenceCandidate {
                 owner: ConstantPath::from_vec(candidate.owner),
                 owner_kind: candidate.owner_kind,
                 method: candidate.method,
+                is_super: candidate.is_super,
+                access: candidate.access,
                 caller: candidate.caller,
                 diagnostics: Some(Box::new(candidate.diagnostics)),
             },
@@ -298,6 +332,8 @@ impl ReferenceCandidateStore {
                     owner,
                     owner_kind,
                     method,
+                    is_super,
+                    access,
                     caller,
                     diagnostics,
                 } => methods.push(StoredMethodReferenceCandidate {
@@ -305,6 +341,8 @@ impl ReferenceCandidateStore {
                     owner,
                     owner_kind,
                     method,
+                    is_super,
+                    access,
                     caller,
                     diagnostics,
                 }),
@@ -352,6 +390,8 @@ impl ReferenceCandidateStore {
                         owner: candidate.owner,
                         owner_kind: candidate.owner_kind,
                         method: candidate.method,
+                        is_super: candidate.is_super,
+                        access: candidate.access,
                         caller: candidate.caller,
                         diagnostics: candidate.diagnostics.clone(),
                     },
@@ -365,6 +405,43 @@ impl ReferenceCandidateStore {
                 },
             })
             .collect()
+    }
+
+    pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<StoredReferenceCandidate> {
+        let mut candidates = Vec::new();
+        if let Some(constants) = self.constants_by_file.get(&file_id) {
+            candidates.extend(constants.iter().map(|candidate| StoredReferenceCandidate {
+                range: candidate.range,
+                kind: StoredReferenceCandidateKind::Constant {
+                    lookup: candidate.lookup,
+                },
+            }));
+        }
+        if let Some(methods) = self.methods_by_file.get(&file_id) {
+            candidates.extend(methods.iter().map(|candidate| StoredReferenceCandidate {
+                range: candidate.range,
+                kind: StoredReferenceCandidateKind::Method {
+                    owner: candidate.owner,
+                    owner_kind: candidate.owner_kind,
+                    method: candidate.method,
+                    is_super: candidate.is_super,
+                    access: candidate.access,
+                    caller: candidate.caller,
+                    diagnostics: candidate.diagnostics.clone(),
+                },
+            }));
+        }
+        if let Some(resolved) = self.resolved_by_file.get(&file_id) {
+            candidates.extend(resolved.iter().map(|candidate| StoredReferenceCandidate {
+                range: candidate.range,
+                kind: StoredReferenceCandidateKind::Resolved {
+                    target: candidate.target,
+                    caller: candidate.caller,
+                },
+            }));
+        }
+        candidates.sort_by_key(|candidate| (candidate.range.start_byte, candidate.range.end_byte));
+        candidates
     }
 
     pub fn iter_candidates(&self) -> impl Iterator<Item = StoredReferenceCandidateRef<'_>> {

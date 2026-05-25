@@ -121,6 +121,120 @@ async fn extend_class_first_then_module() {
     assert_hits_file(&locs, "class_a.rb");
 }
 
+#[tokio::test]
+async fn singleton_class_include_makes_module_methods_class_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "class_a.rb",
+            "class ClassA\n  class << self\n    include M_A\n  end\nend\n\nClassA.foo\n",
+        )
+        .await;
+    editor
+        .open("m_a.rb", "module M_A\n  def foo\n    \"ok\"\n  end\nend\n")
+        .await;
+
+    let locs = editor.goto_def_at("class_a.rb", 6, 7).await;
+    assert_hits_file(&locs, "m_a.rb");
+}
+
+#[tokio::test]
+async fn singleton_class_prepend_makes_module_methods_class_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "class_a.rb",
+            "class ClassA\n  class << self\n    prepend M_A\n  end\nend\n\nClassA.foo\n",
+        )
+        .await;
+    editor
+        .open("m_a.rb", "module M_A\n  def foo\n    \"ok\"\n  end\nend\n")
+        .await;
+
+    let locs = editor.goto_def_at("class_a.rb", 6, 7).await;
+    assert_hits_file(&locs, "m_a.rb");
+}
+
+#[tokio::test]
+async fn included_hook_extend_class_methods_makes_includer_class_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "worker.rb",
+            "class Worker\n  include FeatureFlags\nend\n\nWorker.enabled?\n",
+        )
+        .await;
+    editor
+        .open(
+            "feature_flags.rb",
+            "module FeatureFlags\n  def self.included(base)\n    base.extend(ClassMethods)\n  end\n\n  module ClassMethods\n    def enabled?\n      true\n    end\n  end\nend\n",
+        )
+        .await;
+
+    let locs = editor.goto_def_at("worker.rb", 4, 8).await;
+    assert_hits_file(&locs, "feature_flags.rb");
+}
+
+#[tokio::test]
+async fn included_hook_send_include_makes_includer_instance_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "worker.rb",
+            "class Worker\n  include DailyTrends\n\n  def render\n    get_html\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "daily_trends.rb",
+            "module DailyTrends\n  def self.included(base)\n    base.send :include, SharedMethods\n  end\n\n  module SharedMethods\n    def get_html\n      \"html\"\n    end\n  end\nend\n",
+        )
+        .await;
+
+    let locs = editor.goto_def_at("worker.rb", 4, 4).await;
+    assert_hits_file(&locs, "daily_trends.rb");
+}
+
+#[tokio::test]
+async fn included_hook_class_eval_include_makes_includer_instance_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "spec_context.rb",
+            "class SpecContext\n  include AdminHelper\n\n  def render\n    api_get\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "admin_helper.rb",
+            "module AdminHelper\n  def self.included(base)\n    base.class_eval do\n      include RequestHelpers\n    end\n  end\n\n  module RequestHelpers\n    def api_get\n      \"ok\"\n    end\n  end\nend\n",
+        )
+        .await;
+
+    let locs = editor.goto_def_at("spec_context.rb", 4, 4).await;
+    assert_hits_file(&locs, "admin_helper.rb");
+}
+
+#[tokio::test]
+async fn concern_class_methods_make_includer_class_methods() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "product.rb",
+            "class Product\n  include Searchable\nend\n\nProduct.find_by_term\n",
+        )
+        .await;
+    editor
+        .open(
+            "searchable.rb",
+            "module Searchable\n  extend ActiveSupport::Concern\n\n  class_methods do\n    def find_by_term\n      \"ok\"\n    end\n  end\nend\n",
+        )
+        .await;
+
+    let locs = editor.goto_def_at("product.rb", 4, 8).await;
+    assert_hits_file(&locs, "searchable.rb");
+}
+
 /// `class Child < Parent` with Parent defined later.
 #[tokio::test]
 async fn superclass_child_first_then_parent() {

@@ -9,6 +9,25 @@ pub fn method_call_return_type(
     receiver_type: &RubyType,
     method_name: &str,
 ) -> Option<RubyType> {
+    method_call_return_type_with_private(query, receiver_type, method_name, true)
+}
+
+pub fn method_call_return_type_with_private(
+    query: Option<&AnalysisQuery<'_>>,
+    receiver_type: &RubyType,
+    method_name: &str,
+    allow_private: bool,
+) -> Option<RubyType> {
+    method_call_return_type_with_visibility(query, receiver_type, method_name, allow_private, None)
+}
+
+pub fn method_call_return_type_with_visibility(
+    query: Option<&AnalysisQuery<'_>>,
+    receiver_type: &RubyType,
+    method_name: &str,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> Option<RubyType> {
     if method_name == "new" {
         if let RubyType::ClassReference(fqn) = receiver_type {
             return Some(RubyType::Class(fqn.clone()));
@@ -22,7 +41,14 @@ pub fn method_call_return_type(
     let method = RubyMethod::new(method_name).ok()?;
     if let Some(query) = query {
         for namespace in AnalysisQuery::receiver_type_to_method_namespaces(receiver_type) {
-            if let Some(return_type) = query.method_return_type_for_receiver(&namespace, &method) {
+            let return_type = if allow_private {
+                query.method_return_type_for_receiver(&namespace, &method)
+            } else if let Some(caller) = protected_caller {
+                query.method_return_type_for_protected_receiver(&namespace, &method, caller)
+            } else {
+                query.method_return_type_for_public_receiver(&namespace, &method)
+            };
+            if let Some(return_type) = return_type {
                 return Some(return_type);
             }
         }

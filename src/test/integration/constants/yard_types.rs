@@ -3,13 +3,13 @@
 use crate::test::harness::check;
 
 /// YARD type should resolve using namespace context.
-/// Inside `GoshPosh` module, `Platform::PlatformServices` in YARD annotation
-/// should resolve to `GoshPosh::Platform::PlatformServices`.
+/// Inside `SampleApp` module, `Platform::PlatformServices` in YARD annotation
+/// should resolve to `SampleApp::Platform::PlatformServices`.
 #[tokio::test]
 async fn yard_type_with_namespace_resolution() {
     check(
         r#"
-module GoshPosh
+module SampleApp
   module Platform
     <def>class PlatformServices
     end</def>
@@ -31,14 +31,14 @@ end
 async fn yard_type_with_full_namespace() {
     check(
         r#"
-module GoshPosh
+module SampleApp
   module Platform
     <def>class PlatformServices
     end</def>
   end
 
   class Base
-    # @return [GoshPosh::Platform::PlatformServices$0]
+    # @return [SampleApp::Platform::PlatformServices$0]
     def services
     end
   end

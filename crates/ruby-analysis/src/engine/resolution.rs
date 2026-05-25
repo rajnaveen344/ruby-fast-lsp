@@ -1,6 +1,7 @@
+use crate::core::method_store::MethodVisibility;
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
-    ResolvedMethodCallee, RubyConstant, RubyMethod, SymbolKind, TextRange,
+    MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, SymbolKind, TextRange,
 };
 use crate::engine::query::AnalysisQuery;
 
@@ -10,11 +11,56 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_inner(namespace_fqn, method, true, None)
+    }
+
+    pub fn resolve_public_method_callees(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_inner(namespace_fqn, method, false, None)
+    }
+
+    pub fn resolve_protected_method_callees(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
+        self.resolve_method_callees_inner(namespace_fqn, method, false, Some(caller_namespace_fqn))
+    }
+
+    fn resolve_method_callees_inner(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Option<Vec<ResolvedMethodCallee>> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
             return None;
         }
 
         let fqns_to_search = if is_module_instance_namespace(self.engine, namespace_fqn) {
+            let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+            if let Some(callee) = method_callee_in_chain(
+                self.engine,
+                &ancestor_chain,
+                method,
+                MethodCalleeResolution::Exact,
+                allow_private,
+                protected_caller,
+            ) {
+                return Some(vec![callee]);
+            }
+            if !allow_private && private_method_in_chain(self.engine, &ancestor_chain, method) {
+                return Some(vec![receiver_only_callee(namespace_fqn.clone(), method)]);
+            }
+            if let Some(callee) = method_missing_callee_in_chain(self.engine, &ancestor_chain) {
+                return Some(vec![callee]);
+            }
+
             let includers = module_includers(self.engine, namespace_fqn);
             if includers.is_empty() {
                 vec![namespace_fqn.clone()]
@@ -33,7 +79,17 @@ impl<'a> AnalysisQuery<'a> {
                 &ancestor_chain,
                 method,
                 MethodCalleeResolution::Exact,
+                allow_private,
+                protected_caller,
             ) {
+                callees.push(callee);
+            } else if !allow_private
+                && private_method_in_chain(self.engine, &ancestor_chain, method)
+            {
+                callees.push(receiver_only_callee(fqn.clone(), method));
+            } else if let Some(callee) =
+                method_missing_callee_in_chain(self.engine, &ancestor_chain)
+            {
                 callees.push(callee);
             }
         }
@@ -42,17 +98,25 @@ impl<'a> AnalysisQuery<'a> {
             return Some(
                 fqns_to_search
                     .into_iter()
-                    .map(|fqn| ResolvedMethodCallee {
-                        owner: fqn,
-                        method: *method,
-                        resolution: MethodCalleeResolution::ReceiverOnly,
-                        definition_ranges: Vec::new(),
-                    })
+                    .map(|fqn| receiver_only_callee(fqn, method))
                     .collect(),
             );
         }
 
         Some(callees)
+    }
+
+    pub fn resolve_super_method_callee(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<ResolvedMethodCallee> {
+        if !namespace_target_exists(self.engine, namespace_fqn) {
+            return None;
+        }
+
+        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+        method_callee_after_owner(self.engine, &ancestor_chain, namespace_fqn, method)
     }
 
     pub fn method_reference_targets(
@@ -66,15 +130,71 @@ impl<'a> AnalysisQuery<'a> {
 
         let mut targets = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for namespace in related_namespaces_for_method_references(self.engine, namespace_fqn) {
-            for ancestor in method_lookup_chain(self.engine, &namespace) {
-                let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
-                if seen.insert(method_fqn.clone()) {
-                    targets.push(method_fqn);
-                }
+        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+        let has_exact = method_callee_in_chain(
+            self.engine,
+            &ancestor_chain,
+            method,
+            MethodCalleeResolution::Exact,
+            true,
+            None,
+        )
+        .is_some();
+
+        if !has_exact {
+            if let Some(callee) = method_missing_callee_in_chain(self.engine, &ancestor_chain) {
+                let method_fqn =
+                    FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method);
+                return vec![method_fqn];
+            }
+        }
+
+        for ancestor in ancestor_chain {
+            let has_method_fact = !self
+                .engine
+                .method_facts_matching_owner_name(&ancestor, method)
+                .is_empty();
+            if ancestor != *namespace_fqn
+                && ancestor.namespace_parts().is_empty()
+                && !has_method_fact
+            {
+                continue;
+            }
+
+            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
+            if seen.insert(method_fqn.clone()) {
+                targets.push(method_fqn);
+            }
+        }
+        for override_fact in self.engine.all_method_visibility_overrides() {
+            if override_fact.method != *method {
+                continue;
+            }
+            if !method_lookup_chain(self.engine, &override_fact.owner)
+                .iter()
+                .any(|ancestor| {
+                    ancestor.namespace_parts() == namespace_fqn.namespace_parts()
+                        && ancestor.namespace_kind() == namespace_fqn.namespace_kind()
+                })
+            {
+                continue;
+            }
+            let method_fqn =
+                FullyQualifiedName::method(override_fact.owner.namespace_parts(), *method);
+            if seen.insert(method_fqn.clone()) {
+                targets.push(method_fqn);
             }
         }
         targets
+    }
+
+    pub fn super_method_reference_target(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<FullyQualifiedName> {
+        self.resolve_super_method_callee(namespace_fqn, method)
+            .map(|callee| FullyQualifiedName::method(callee.owner.namespace_parts(), *method))
     }
 
     pub fn resolve_constant_receiver(
@@ -232,16 +352,211 @@ impl<'a> AnalysisQuery<'a> {
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Vec<TextRange> {
+        self.method_reference_ranges_with_private(namespace_fqn, method, true, None)
+    }
+
+    pub fn method_reference_ranges_public_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        self.method_reference_ranges_with_private(namespace_fqn, method, false, None)
+    }
+
+    pub fn method_reference_ranges_protected_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Vec<TextRange> {
+        self.method_reference_ranges_with_private(
+            namespace_fqn,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+        )
+    }
+
+    fn method_reference_ranges_with_private(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Vec<TextRange> {
         let mut ranges = Vec::new();
+        let receiver_non_public =
+            self.method_lookup_has_visibility(namespace_fqn, method, MethodVisibility::Private)
+                || self.method_lookup_has_visibility(
+                    namespace_fqn,
+                    method,
+                    MethodVisibility::Protected,
+                );
+        let same_name_non_public = self
+            .method_name_has_visibility(method, MethodVisibility::Private)
+            || self.method_name_has_visibility(method, MethodVisibility::Protected)
+            || method_name_declared_private_in_source(self.engine, method);
         for target in self.method_reference_targets(namespace_fqn, method) {
+            let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+            let target_visibility_owner =
+                self.method_target_visibility_owner(&target, &ancestor_chain);
+            let target_non_public = target_visibility_owner
+                .as_ref()
+                .is_some_and(|(visibility, _owner)| *visibility != MethodVisibility::Public);
+            let non_public_target = receiver_non_public
+                || target_non_public
+                || (same_name_non_public && target_visibility_owner.is_none());
+            let protected_query_allowed =
+                target_visibility_owner
+                    .as_ref()
+                    .is_some_and(|(visibility, owner)| {
+                        *visibility == MethodVisibility::Protected
+                            && protected_caller.is_some_and(|caller| {
+                                protected_method_visible_from(self.engine, owner, caller)
+                            })
+                    });
+            if non_public_target && !allow_private && !protected_query_allowed {
+                continue;
+            }
             ranges.extend(
                 self.engine
                     .reference_facts_for(&target)
                     .iter()
-                    .map(|fact| fact.range),
+                    .filter_map(|fact| {
+                        if target_non_public
+                            && fact.access == MethodReferenceAccess::ExplicitReceiver
+                        {
+                            if target_visibility_owner.as_ref().is_some_and(
+                                |(visibility, owner)| {
+                                    *visibility == MethodVisibility::Protected
+                                        && self.reference_caller_can_see_protected(fact, owner)
+                                },
+                            ) {
+                                Some(fact.range)
+                            } else {
+                                None
+                            }
+                        } else {
+                            Some(fact.range)
+                        }
+                    }),
             );
         }
         ranges
+    }
+
+    fn method_target_visibility_owner(
+        &self,
+        method_fqn: &FullyQualifiedName,
+        ancestor_chain: &[FullyQualifiedName],
+    ) -> Option<(MethodVisibility, FullyQualifiedName)> {
+        let FullyQualifiedName::Method(parts, method) = method_fqn else {
+            return None;
+        };
+        self.engine.all_method_facts().iter().find_map(|fact| {
+            let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
+                return None;
+            };
+            if fact_method != method || fact.owner.namespace_parts().as_slice() != parts.as_slice()
+            {
+                return None;
+            }
+            let effective =
+                effective_method_visibility_for_chain(self.engine, ancestor_chain, fact, method);
+            if effective.0 != MethodVisibility::Public {
+                if let Some(override_fact) = global_visibility_override_for_method_owner_matching(
+                    self.engine,
+                    &fact.owner,
+                    method,
+                    MethodVisibility::Public,
+                ) {
+                    return Some((override_fact.visibility, override_fact.owner));
+                }
+            }
+            if effective.0 == MethodVisibility::Public {
+                if let Some(override_fact) =
+                    global_visibility_override_for_method_owner(self.engine, &fact.owner, method)
+                {
+                    return Some((override_fact.visibility, override_fact.owner));
+                }
+            }
+            Some(effective_method_visibility_for_chain(
+                self.engine,
+                ancestor_chain,
+                fact,
+                method,
+            ))
+        })
+    }
+
+    fn reference_caller_can_see_protected(
+        &self,
+        fact: &crate::core::ReferenceFact,
+        protected_owner: &FullyQualifiedName,
+    ) -> bool {
+        let Some(caller_id) = fact.caller else {
+            return false;
+        };
+        let Some(FullyQualifiedName::Method(parts, _method)) = self.engine.names.fqn(caller_id)
+        else {
+            return false;
+        };
+        let caller_namespace = FullyQualifiedName::namespace_with_kind(
+            parts.clone(),
+            crate::core::NamespaceKind::Instance,
+        );
+        protected_method_visible_from(self.engine, protected_owner, &caller_namespace)
+    }
+
+    fn method_lookup_has_visibility(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        visibility: MethodVisibility,
+    ) -> bool {
+        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+        ancestor_chain.iter().any(|owner| {
+            self.engine
+                .method_facts_matching_owner_name(owner, method)
+                .iter()
+                .any(|fact| {
+                    effective_method_visibility_for_chain(
+                        self.engine,
+                        &ancestor_chain,
+                        fact,
+                        method,
+                    )
+                    .0 == visibility
+                })
+        })
+    }
+
+    fn method_name_has_visibility(
+        &self,
+        method: &RubyMethod,
+        visibility: MethodVisibility,
+    ) -> bool {
+        self.engine.all_method_facts().iter().any(|fact| {
+            let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
+                return false;
+            };
+            fact_method == method && fact.visibility == visibility
+        })
+    }
+
+    pub fn super_method_reference_ranges(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let Some(target) = self.super_method_reference_target(namespace_fqn, method) else {
+            return Vec::new();
+        };
+        self.engine
+            .reference_facts_for(&target)
+            .iter()
+            .map(|fact| fact.range)
+            .collect()
     }
 
     pub fn method_reference_ranges_for_constant_receiver(
@@ -252,6 +567,16 @@ impl<'a> AnalysisQuery<'a> {
     ) -> Vec<TextRange> {
         let namespace_fqn = self.resolve_constant_receiver(receiver_path, context);
         self.method_reference_ranges(&namespace_fqn, method)
+    }
+
+    pub fn method_reference_ranges_for_constant_receiver_public(
+        &self,
+        receiver_path: &[RubyConstant],
+        context: &[RubyConstant],
+        method: &RubyMethod,
+    ) -> Vec<TextRange> {
+        let namespace_fqn = self.resolve_constant_receiver(receiver_path, context);
+        self.method_reference_ranges_public_receiver(&namespace_fqn, method)
     }
 
     pub fn method_reference_ranges_for_current_scope(
@@ -310,6 +635,48 @@ impl<'a> AnalysisQuery<'a> {
 
         None
     }
+}
+
+fn method_name_declared_private_in_source(
+    engine: &crate::AnalysisEngine,
+    method: &RubyMethod,
+) -> bool {
+    let needle = method.as_str();
+    for file in engine.files() {
+        let Some(source) = file.source.as_ref() else {
+            continue;
+        };
+        let mut visibility = MethodVisibility::Public;
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            match trimmed {
+                "private" => {
+                    visibility = MethodVisibility::Private;
+                    continue;
+                }
+                "protected" => {
+                    visibility = MethodVisibility::Protected;
+                    continue;
+                }
+                "public" => {
+                    visibility = MethodVisibility::Public;
+                    continue;
+                }
+                _ => {}
+            }
+            let Some(rest) = trimmed.strip_prefix("def ") else {
+                continue;
+            };
+            let name = rest
+                .split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ';'))
+                .next()
+                .unwrap_or("");
+            if name == needle && visibility == MethodVisibility::Private {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub(super) fn namespace_target_exists(
@@ -382,60 +749,6 @@ fn module_includers(
     result
 }
 
-fn related_namespaces_for_method_references(
-    engine: &crate::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut result = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut queue = std::collections::VecDeque::new();
-
-    if seen.insert(origin_fqn.clone()) {
-        queue.push_back(origin_fqn.clone());
-    }
-
-    while let Some(current) = queue.pop_front() {
-        result.push(current.clone());
-
-        for descendant in descendants(engine, &current) {
-            if seen.insert(descendant.clone()) {
-                queue.push_back(descendant);
-            }
-        }
-
-        for includer in module_includers(engine, &current) {
-            if seen.insert(includer.clone()) {
-                queue.push_back(includer);
-            }
-        }
-    }
-
-    result.sort_by_key(|fqn| fqn.to_string());
-    result
-}
-
-fn descendants(
-    engine: &crate::AnalysisEngine,
-    origin_fqn: &FullyQualifiedName,
-) -> Vec<FullyQualifiedName> {
-    let mut result = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut queue = std::collections::VecDeque::new();
-    queue.push_back(origin_fqn.clone());
-    seen.insert(origin_fqn.clone());
-
-    while let Some(current) = queue.pop_front() {
-        for edge in engine.graph_edges_to(&current) {
-            if edge.kind == GraphEdgeKind::Superclass && seen.insert(edge.source.clone()) {
-                result.push(edge.source.clone());
-                queue.push_back(edge.source.clone());
-            }
-        }
-    }
-
-    result
-}
-
 pub(super) fn method_lookup_chain(
     engine: &crate::AnalysisEngine,
     fqn: &FullyQualifiedName,
@@ -504,9 +817,35 @@ fn build_mro(
         build_mro(engine, &edge.target, chain, visited);
     }
 
+    let mut included_hook_extends = included_hook_extend_edges(engine, fqn);
+    for edge in included_hook_extends.iter_mut().rev() {
+        build_mro(engine, &edge.target, chain, visited);
+    }
+
     if let Some(superclass) = edges_from(engine, fqn, GraphEdgeKind::Superclass).first() {
         build_mro(engine, &superclass.target, chain, visited);
     }
+}
+
+fn included_hook_extend_edges(
+    engine: &crate::AnalysisEngine,
+    fqn: &FullyQualifiedName,
+) -> Vec<GraphEdgeFact> {
+    if fqn.namespace_kind() != Some(crate::core::NamespaceKind::Singleton) {
+        return Vec::new();
+    }
+    let Some(instance_fqn) = fqn.to_instance_namespace() else {
+        return Vec::new();
+    };
+
+    let mut hook_edges = Vec::new();
+    for edge in edges_from(engine, &instance_fqn, GraphEdgeKind::Include)
+        .into_iter()
+        .chain(edges_from(engine, &instance_fqn, GraphEdgeKind::Prepend))
+    {
+        hook_edges.extend(edges_from(engine, &edge.target, GraphEdgeKind::Extend));
+    }
+    hook_edges
 }
 
 fn edges_from(
@@ -527,6 +866,8 @@ fn method_callee_in_chain(
     ancestor_chain: &[FullyQualifiedName],
     method: &RubyMethod,
     resolution: MethodCalleeResolution,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
 ) -> Option<ResolvedMethodCallee> {
     for ancestor in ancestor_chain {
         let definition_ranges = engine
@@ -536,7 +877,17 @@ fn method_callee_in_chain(
                 ancestor_chain.iter().any(|chain_fqn| {
                     chain_fqn.namespace_parts() == fact.owner.namespace_parts()
                         && chain_fqn.namespace_kind() == fact.owner.namespace_kind()
-                })
+                }) && {
+                    let (visibility, owner) =
+                        effective_method_visibility_for_chain(engine, ancestor_chain, fact, method);
+                    method_visibility_allowed(
+                        engine,
+                        visibility,
+                        &owner,
+                        allow_private,
+                        protected_caller,
+                    )
+                }
             })
             .map(|fact| fact.range)
             .collect::<Vec<_>>();
@@ -552,6 +903,229 @@ fn method_callee_in_chain(
     }
 
     None
+}
+
+fn private_method_in_chain(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+    method: &RubyMethod,
+) -> bool {
+    ancestor_chain.iter().any(|ancestor| {
+        engine
+            .method_facts_matching_owner_name(ancestor, method)
+            .iter()
+            .any(|fact| {
+                ancestor_chain.iter().any(|chain_fqn| {
+                    chain_fqn.namespace_parts() == fact.owner.namespace_parts()
+                        && chain_fqn.namespace_kind() == fact.owner.namespace_kind()
+                }) && effective_method_visibility_for_chain(engine, ancestor_chain, fact, method).0
+                    != MethodVisibility::Public
+            })
+    })
+}
+
+pub(super) fn effective_method_visibility_for_chain(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+    fact: &crate::core::MethodFact,
+    method: &RubyMethod,
+) -> (MethodVisibility, FullyQualifiedName) {
+    if let Some(override_fact) =
+        method_visibility_override_for_chain(engine, ancestor_chain, &fact.owner, method)
+    {
+        return (override_fact.visibility, override_fact.owner);
+    }
+    (fact.visibility, fact.owner.clone())
+}
+
+fn method_visibility_override_for_chain(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+    method_owner: &FullyQualifiedName,
+    method: &RubyMethod,
+) -> Option<crate::core::MethodVisibilityOverrideFact> {
+    for ancestor in ancestor_chain {
+        let mut overrides =
+            engine.method_visibility_overrides_matching_owner_name(ancestor, method);
+        overrides.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+            )
+        });
+        if let Some(override_fact) = overrides.pop() {
+            return Some(override_fact);
+        }
+        if ancestor.namespace_parts() == method_owner.namespace_parts()
+            && ancestor.namespace_kind() == method_owner.namespace_kind()
+        {
+            break;
+        }
+    }
+    None
+}
+
+fn global_visibility_override_for_method_owner(
+    engine: &crate::AnalysisEngine,
+    method_owner: &FullyQualifiedName,
+    method: &RubyMethod,
+) -> Option<crate::core::MethodVisibilityOverrideFact> {
+    let mut public_overrides = Vec::new();
+    let mut non_public_overrides = Vec::new();
+    for override_fact in engine.all_method_visibility_overrides() {
+        if override_fact.method != *method {
+            continue;
+        }
+        if !method_lookup_chain(engine, &override_fact.owner)
+            .iter()
+            .any(|ancestor| {
+                ancestor.namespace_parts() == method_owner.namespace_parts()
+                    && ancestor.namespace_kind() == method_owner.namespace_kind()
+            })
+        {
+            continue;
+        }
+        if override_fact.visibility == MethodVisibility::Public {
+            public_overrides.push(override_fact);
+        } else {
+            non_public_overrides.push(override_fact);
+        }
+    }
+    let sort_key = |fact: &crate::core::MethodVisibilityOverrideFact| {
+        (
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    };
+    public_overrides.sort_by_key(sort_key);
+    non_public_overrides.sort_by_key(sort_key);
+    non_public_overrides
+        .pop()
+        .or_else(|| public_overrides.pop())
+}
+
+fn global_visibility_override_for_method_owner_matching(
+    engine: &crate::AnalysisEngine,
+    method_owner: &FullyQualifiedName,
+    method: &RubyMethod,
+    visibility: MethodVisibility,
+) -> Option<crate::core::MethodVisibilityOverrideFact> {
+    let mut overrides = engine
+        .all_method_visibility_overrides()
+        .into_iter()
+        .filter(|override_fact| {
+            override_fact.method == *method
+                && override_fact.visibility == visibility
+                && method_lookup_chain(engine, &override_fact.owner)
+                    .iter()
+                    .any(|ancestor| {
+                        ancestor.namespace_parts() == method_owner.namespace_parts()
+                            && ancestor.namespace_kind() == method_owner.namespace_kind()
+                    })
+        })
+        .collect::<Vec<_>>();
+    overrides.sort_by_key(|fact| {
+        (
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )
+    });
+    overrides.pop()
+}
+
+fn method_visibility_allowed(
+    engine: &crate::AnalysisEngine,
+    visibility: MethodVisibility,
+    owner: &FullyQualifiedName,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> bool {
+    match visibility {
+        MethodVisibility::Public => true,
+        MethodVisibility::Private => allow_private,
+        MethodVisibility::Protected => {
+            allow_private
+                || protected_caller
+                    .is_some_and(|caller| protected_method_visible_from(engine, owner, caller))
+        }
+    }
+}
+
+pub(super) fn protected_method_visible_from(
+    engine: &crate::AnalysisEngine,
+    protected_owner: &FullyQualifiedName,
+    caller_namespace: &FullyQualifiedName,
+) -> bool {
+    method_lookup_chain(engine, caller_namespace)
+        .iter()
+        .any(|ancestor| {
+            ancestor.namespace_parts() == protected_owner.namespace_parts()
+                && ancestor.namespace_kind() == protected_owner.namespace_kind()
+        })
+}
+
+fn receiver_only_callee(owner: FullyQualifiedName, method: &RubyMethod) -> ResolvedMethodCallee {
+    ResolvedMethodCallee {
+        owner,
+        method: *method,
+        resolution: MethodCalleeResolution::ReceiverOnly,
+        definition_ranges: Vec::new(),
+    }
+}
+
+fn method_missing_callee_in_chain(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+) -> Option<ResolvedMethodCallee> {
+    let method_missing = method_missing_method();
+    method_callee_in_chain(
+        engine,
+        ancestor_chain,
+        &method_missing,
+        MethodCalleeResolution::MethodMissing,
+        true,
+        None,
+    )
+}
+
+fn method_callee_after_owner(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+    owner: &FullyQualifiedName,
+    method: &RubyMethod,
+) -> Option<ResolvedMethodCallee> {
+    let mut seen_owner = false;
+    for ancestor in ancestor_chain {
+        if !seen_owner {
+            seen_owner = ancestor == owner;
+            continue;
+        }
+
+        let candidate_chain = std::slice::from_ref(ancestor);
+        if let Some(callee) = method_callee_in_chain(
+            engine,
+            candidate_chain,
+            method,
+            MethodCalleeResolution::Exact,
+            true,
+            None,
+        ) {
+            return Some(callee);
+        }
+    }
+
+    None
+}
+
+pub(super) fn method_missing_method() -> RubyMethod {
+    RubyMethod::new("method_missing").expect(
+        "INVARIANT VIOLATED: `method_missing` is not a valid Ruby method name. \
+         This is a bug because Ruby's fallback dispatch method must be representable. \
+         Fix: update RubyMethod validation to accept core Ruby method names.",
+    )
 }
 
 fn resolve_constant_fqn(

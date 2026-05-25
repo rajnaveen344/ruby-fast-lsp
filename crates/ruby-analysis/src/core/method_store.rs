@@ -14,6 +14,13 @@ pub enum MethodParamKind {
     Block,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MethodVisibility {
+    Public,
+    Protected,
+    Private,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodParamFact {
     pub name: String,
@@ -40,6 +47,8 @@ pub struct MethodFact {
     pub range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
+    pub delegate_receiver: Option<RubyMethod>,
+    pub visibility: MethodVisibility,
 }
 
 impl MethodFact {
@@ -50,6 +59,8 @@ impl MethodFact {
             range,
             params: Vec::new(),
             param_facts: Vec::new(),
+            delegate_receiver: None,
+            visibility: MethodVisibility::Public,
         }
     }
 
@@ -79,6 +90,54 @@ impl MethodFact {
             range,
             params,
             param_facts,
+            delegate_receiver: None,
+            visibility: MethodVisibility::Public,
+        }
+    }
+
+    pub fn with_delegate_receiver(
+        fqn: FullyQualifiedName,
+        owner: FullyQualifiedName,
+        range: TextRange,
+        delegate_receiver: RubyMethod,
+    ) -> Self {
+        Self {
+            fqn,
+            owner,
+            range,
+            params: Vec::new(),
+            param_facts: Vec::new(),
+            delegate_receiver: Some(delegate_receiver),
+            visibility: MethodVisibility::Public,
+        }
+    }
+
+    pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
+        self.visibility = visibility;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodVisibilityOverrideFact {
+    pub owner: FullyQualifiedName,
+    pub method: RubyMethod,
+    pub visibility: MethodVisibility,
+    pub range: TextRange,
+}
+
+impl MethodVisibilityOverrideFact {
+    pub fn new(
+        owner: FullyQualifiedName,
+        method: RubyMethod,
+        visibility: MethodVisibility,
+        range: TextRange,
+    ) -> Self {
+        Self {
+            owner,
+            method,
+            visibility,
+            range,
         }
     }
 }
@@ -91,6 +150,8 @@ pub struct StoredMethodFact {
     pub range: TextRange,
     pub params: Vec<String>,
     pub param_facts: Vec<MethodParamFact>,
+    pub delegate_receiver: Option<RubyMethod>,
+    pub visibility: MethodVisibility,
 }
 
 impl StoredMethodFact {
@@ -102,6 +163,8 @@ impl StoredMethodFact {
             range,
             params: Vec::new(),
             param_facts: Vec::new(),
+            delegate_receiver: None,
+            visibility: MethodVisibility::Public,
         }
     }
 
@@ -120,6 +183,8 @@ impl StoredMethodFact {
             range,
             params,
             param_facts,
+            delegate_receiver: None,
+            visibility: MethodVisibility::Public,
         }
     }
 }

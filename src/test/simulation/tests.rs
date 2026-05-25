@@ -1,1239 +1,2670 @@
-//! # Simulation Tests
-//!
-//! Comprehensive property-based testing for the LSP server.
-//!
-//! ## Philosophy
-//!
-//! Generate complex Ruby code structures using the Graph Growth strategy, then verify
-//! that all LSP features (goto definition, references, completion, symbols, etc.)
-//! work correctly on those structures. **Uses dynamic position resolution via SourceLocator.**
-//!
-//! Instead of tracking exact positions that become stale after edits, we store unique
-//! names and resolve positions dynamically using `SourceLocator`. This makes the simulation
-//! robust to edits.
-
-use super::*;
-use crate::test::simulation::generators::{tracked_code, SafeEdit, SourceLocator, TrackedCodeV2};
-use proptest::prelude::*;
-use proptest::test_runner::Config;
-use std::collections::HashSet;
-use tower_lsp::lsp_types::{GotoDefinitionResponse, TextDocumentIdentifier, Url};
+use super::{
+    large_scale_project, seeded_script, simulation_seeds_from_env, write_seed_artifact, CallShape,
+    EditOp, EditStep, EngineSimulationRunner, MethodTarget, OracleState, SimulationRunner,
+    SyntheticProject, LARGE_SCALE_METHOD_DEFS, LARGE_SCALE_MIN_GRAPH_EDGES, LARGE_SCALE_RUBY_FILES,
+};
+use crate::capabilities::indexing;
+use crate::indexer::file_processor::FileProcessor;
+use crate::server::RubyLanguageServer;
+use crate::test::harness::FakeEditor;
+use ruby_analysis::core::{FullyQualifiedName, SourceKind, TextRange};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use tower_lsp::lsp_types::{
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, HoverParams,
+    InlayHintParams, Location, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+    WorkDoneProgressParams,
+};
 use tower_lsp::LanguageServer;
 
-// =============================================================================
-// Configuration
-// =============================================================================
+use super::ruby_gen::{CallSite, SourcePos};
 
-/// Path for soak test failure logs (relative to workspace root)
-const SOAK_LOG_FILE: &str = "src/test/simulation/soak_failures.log";
+fn phase1_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_phase1");
 
-/// Check if verbose mode is enabled via SIM_VERBOSE=1 environment variable
-fn is_verbose() -> bool {
-    std::env::var("SIM_VERBOSE")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false)
-}
-
-fn get_config() -> Config {
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
-
-    Config {
-        cases,
-        max_shrink_iters: 10000,
-        // Use Direct persistence to write to src/test/simulation/regressions.txt
-        // NOTE: Regression seeds are only valid for the current test signature.
-        // If test parameters change, old seeds become invalid and should be cleared.
-        failure_persistence: Some(Box::new(
-            proptest::test_runner::FileFailurePersistence::Direct(
-                "src/test/simulation/regressions.txt",
-            ),
-        )),
-        ..Config::default()
-    }
-}
-
-// =============================================================================
-// Simulation Steps - Includes deterministic edit tracking
-// =============================================================================
-
-#[derive(Debug, Clone)]
-enum SimStep {
-    /// Apply a safe edit that won't destroy markers (position tracking)
-    Edit { edit_type: u8 },
-    /// Verify a definition marker resolves correctly (after edits)
-    VerifyDefinition { marker_idx: usize },
-    /// Verify completion at a marker includes expected methods
-    VerifyCompletion { marker_idx: usize },
-    /// Verify type inference is correct at specific marker positions
-    VerifyTypes { marker_idx: usize },
-    /// Query document symbols
-    QuerySymbols,
-    /// Query completion at a position
-    QueryCompletion { line: u32, character: u32 },
-    /// Query references at a position
-    QueryReferences { line: u32, character: u32 },
-    /// Query hover at a position
-    QueryHover { line: u32, character: u32 },
-    /// Query inlay hints for the file
-    QueryInlayHints,
-    /// Query semantic tokens for the file
-    QuerySemanticTokens,
-    /// Query folding ranges for the file
-    QueryFoldingRanges,
-    /// Query code lens for the file
-    QueryCodeLens,
-    /// Save the file (triggers re-indexing)
-    Save,
-}
-
-// =============================================================================
-// Simulation Report
-// =============================================================================
-
-#[derive(Debug, Default)]
-struct SimulationReport {
-    steps_executed: usize,
-    edits_applied: usize,
-    definitions_checked: usize,
-    definitions_correct: usize,
-    completions_checked: usize,
-    completions_correct: usize,
-    types_checked: usize,
-    types_correct: usize,
-    queries_executed: usize,
-    saves_executed: usize,
-    errors: Vec<(usize, String)>,
-    warnings: Vec<String>,
-}
-
-impl SimulationReport {
-    fn add_error(&mut self, step: usize, msg: String) {
-        self.errors.push((step, msg));
-    }
-
-    fn add_warning(&mut self, msg: String) {
-        self.warnings.push(msg);
-    }
-
-    fn is_success(&self) -> bool {
-        self.errors.is_empty()
-    }
-}
-
-// =============================================================================
-// Simulation Runner Core
-// =============================================================================
-
-/// Generate a safe edit based on the edit_type index
-fn generate_safe_edit(edit_type: u8, tracked: &TrackedCodeV2) -> SafeEdit {
-    let safe_line = tracked.find_safe_edit_line().unwrap_or(0);
-    match edit_type % 4 {
-        0 => SafeEdit::InsertBlankLine { line: safe_line },
-        1 => SafeEdit::InsertComment {
-            line: safe_line,
-            text: format!("edit_{}", tracked.edit_count),
-        },
-        2 => SafeEdit::AppendToFile {
-            text: format!("\n# appended_{}", tracked.edit_count),
-        },
-        _ => SafeEdit::InsertBlankLine {
-            line: safe_line.saturating_add(1),
-        },
-    }
-}
-
-async fn run_simulation(
-    tracked: &TrackedCodeV2,
-    steps: &[SimStep],
-) -> Result<SimulationReport, String> {
-    let mut harness = SimulationHarness::new().await;
-    let mut report = SimulationReport::default();
-
-    // Clone tracked code so we can modify it during edits
-    let mut tracked = tracked.clone();
-
-    // Open the tracked file
-    harness
-        .apply(&Transition::DidOpen {
-            filename: tracked.filename.clone(),
-            content: tracked.code.clone(),
+    project
+        .module("Audit::Trackable", |module| {
+            module.constant("LEVEL", "\"info\"");
+            module.method("audit").ref_const("Audit::Trackable::LEVEL");
+            module.method("record_event");
+            module.method("tagged");
         })
-        .await
-        .map_err(|e| format!("Failed to open file: {:?}", e))?;
-
-    let uri = Url::from_file_path(
-        harness
-            .file_paths
-            .get(&tracked.filename)
-            .expect("File should exist"),
-    )
-    .unwrap();
-
-    // ==========================================================================
-    // INITIAL VERIFICATION: Reference anchors resolve correctly
-    // ==========================================================================
-    // Use SourceLocator to find positions dynamically
-    let locator = SourceLocator::new(&tracked.code);
-
-    for (anchor_id, target_name) in &tracked.state.ref_ledger.anchors {
-        // Find where the reference is used (via anchor line)
-        let Some(anchor_line) = locator.find_anchor_line(anchor_id) else {
-            continue; // Anchor not found, skip
-        };
-
-        // Find the reference position on that line
-        let Some(usage_pos) = locator.find_token_on_line(target_name, anchor_line) else {
-            continue;
-        };
-
-        // Find where the target is defined
-        let Some(def_pos) = locator.find_token(target_name) else {
-            continue;
-        };
-
-        let result = harness
-            .server
-            .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
-                text_document_position_params: tower_lsp::lsp_types::TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: usage_pos,
-                },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-            })
-            .await;
-
-        let resolved = match &result {
-            Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
-                (loc.range.start.line as i32 - def_pos.line as i32).abs() <= 2
-            }
-            Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => locs
-                .iter()
-                .any(|loc| (loc.range.start.line as i32 - def_pos.line as i32).abs() <= 2),
-            Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
-                links.iter().any(|link| {
-                    (link.target_selection_range.start.line as i32 - def_pos.line as i32).abs() <= 2
-                })
-            }
-            _ => false,
-        };
-
-        if !resolved {
-            report.add_error(
-                0,
-                format!(
-                    "INITIAL CHECK FAILED: '{}' at line {} should resolve to line {}",
-                    target_name, usage_pos.line, def_pos.line
-                ),
+        .class("Payments::Gateway", |class| {
+            class.constant("DEFAULT_PROVIDER", "\"stripe\"");
+            class.method("capture").returns("String");
+            class.method("refund").returns("String");
+            class.method("void");
+            class.class_method("default").returns("Payments::Gateway");
+            class
+                .class_method("provider")
+                .returns("String")
+                .ref_const("Payments::Gateway::DEFAULT_PROVIDER");
+        })
+        .class("Payments::FallbackGateway", |class| {
+            class.superclass("Payments::Gateway");
+            class.include("Audit::Trackable");
+            class.method("capture").returns("String");
+            class.method("queue");
+            class.method("normalize");
+        })
+        .class("Billing::BaseInvoice", |class| {
+            class.constant("BASE_STATUS", "\"ready\"");
+            class.method("normalize");
+            class
+                .method("base_status")
+                .ref_const("Billing::BaseInvoice::BASE_STATUS");
+        })
+        .class("Billing::Account", |class| {
+            class.method("gateway").returns("Payments::Gateway");
+            class
+                .method("backup_gateway")
+                .returns("Payments::FallbackGateway");
+        })
+        .class("Billing::Invoice", |class| {
+            class.superclass("Billing::BaseInvoice");
+            class.include("Audit::Trackable");
+            class.constant("DEFAULT_CURRENCY", "\"USD\"");
+            class
+                .method("gateway_for_delegate")
+                .returns("Payments::Gateway");
+            class.delegate_instance_method("delegated_capture", "gateway_for_delegate");
+            class
+                .method("charge")
+                .returns("String")
+                .ref_const("Billing::Invoice::DEFAULT_CURRENCY")
+                .calls("Payments::Gateway#capture", CallShape::local("gateway"))
+                .calls(
+                    "Payments::Gateway#capture",
+                    CallShape::array_block_param("gateway_from_block"),
+                )
+                .calls(
+                    "Payments::Gateway#capture",
+                    CallShape::yield_block_param("gateway_from_yield"),
+                )
+                .calls("Payments::Gateway#refund", CallShape::ivar("gateway"))
+                .calls("Payments::Gateway.default", CallShape::ClassSend)
+                .calls("Audit::Trackable#audit", CallShape::Bare)
+                .calls("Billing::BaseInvoice#normalize", CallShape::Bare);
+            class
+                .method("block_scoped_audit")
+                .returns("String")
+                .calls("Audit::Trackable#audit", CallShape::BareInDoBlock)
+                .calls("Audit::Trackable#record_event", CallShape::BareInBraceBlock)
+                .calls("Audit::Trackable#tagged", CallShape::BareInLambda)
+                .calls("Billing::BaseInvoice#normalize", CallShape::BareInProc);
+            class.method("chain_charge").calls(
+                "Payments::Gateway#capture",
+                CallShape::one_hop("account", "Billing::Account", "gateway"),
             );
-        }
-    }
-
-    // If initial checks failed, return early
-    if !report.is_success() {
-        return Ok(report);
-    }
-
-    // ==========================================================================
-    // Execute steps - using dynamic position resolution via SourceLocator
-    // ==========================================================================
-    // Clone verification targets from ledgers upfront (to avoid borrow issues with edits)
-    let ref_anchors: Vec<_> = tracked
-        .state
-        .ref_ledger
-        .anchors
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let type_entries: Vec<_> = tracked
-        .state
-        .type_ledger
-        .var_types
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let completion_entries: Vec<_> = tracked
-        .state
-        .completion_ledger
-        .expected_completions
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-
-    for (step_idx, step) in steps.iter().enumerate() {
-        report.steps_executed += 1;
-
-        match step {
-            SimStep::Edit { edit_type } => {
-                // Generate a safe edit
-                let safe_edit = generate_safe_edit(*edit_type, &tracked);
-                let (range, new_text) = safe_edit.to_edit(&tracked.code);
-
-                // Apply edit to our tracked code
-                let edit_ok = tracked.apply_edit(&range, &new_text);
-                if !edit_ok {
-                    report
-                        .add_warning(format!("Edit at step {} skipped (out of bounds)", step_idx));
-                    continue;
-                }
-
-                // Apply edit to the LSP server via harness
-                let did_change_result = harness
-                    .apply(&Transition::DidChange {
-                        filename: tracked.filename.clone(),
-                        range,
-                        new_text: new_text.clone(),
-                    })
-                    .await;
-
-                if let Err(e) = did_change_result {
-                    report.add_error(step_idx, format!("Edit failed: {:?}", e));
-                    continue;
-                }
-
-                report.edits_applied += 1;
-
-                // Verify text sync after edit
-                if let Some(model_content) = harness.model.get_content(&tracked.filename) {
-                    if model_content != tracked.code {
-                        report.add_error(
-                            step_idx,
-                            format!(
-                                "TEXT SYNC MISMATCH after edit:\n  Tracked: {} bytes\n  Model: {} bytes",
-                                tracked.code.len(),
-                                model_content.len()
-                            ),
-                        );
-                    }
-                }
-
-                // After edit, save to trigger re-indexing
-                let _ = harness
-                    .apply(&Transition::DidSave {
-                        filename: tracked.filename.clone(),
-                    })
-                    .await;
-            }
-
-            SimStep::Save => {
-                let _ = harness
-                    .apply(&Transition::DidSave {
-                        filename: tracked.filename.clone(),
-                    })
-                    .await;
-                report.saves_executed += 1;
-            }
-
-            SimStep::VerifyDefinition { marker_idx } => {
-                if ref_anchors.is_empty() {
-                    continue;
-                }
-                // Use SourceLocator to find current positions (they may have shifted due to edits)
-                let locator = SourceLocator::new(&tracked.code);
-
-                let (anchor_id, target_name) = &ref_anchors[*marker_idx % ref_anchors.len()];
-                // Find the reference on the anchor line
-                let Some(anchor_line) = locator.find_anchor_line(anchor_id) else {
-                    continue;
-                };
-                let Some(usage_pos) = locator.find_token_on_line(target_name, anchor_line) else {
-                    continue;
-                };
-                let Some(def_pos) = locator.find_token(target_name) else {
-                    continue;
-                };
-
-                let result = harness
-                    .server
-                    .goto_definition(tower_lsp::lsp_types::GotoDefinitionParams {
-                        text_document_position_params:
-                            tower_lsp::lsp_types::TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: usage_pos,
-                            },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                    })
-                    .await;
-
-                report.definitions_checked += 1;
-                // Tolerance for position drift after edits
-                const TOLERANCE: i32 = 15;
-
-                match result {
-                    Ok(Some(GotoDefinitionResponse::Scalar(loc))) => {
-                        let line_diff = (loc.range.start.line as i32 - def_pos.line as i32).abs();
-                        if line_diff <= TOLERANCE {
-                            report.definitions_correct += 1;
-                        } else {
-                            report.add_error(
-                                step_idx,
-                                format!(
-                                    "DEFINITION WRONG: '{}' resolved to line {} (expected {})",
-                                    target_name, loc.range.start.line, def_pos.line
-                                ),
-                            );
-                        }
-                    }
-                    Ok(Some(GotoDefinitionResponse::Array(locs))) if !locs.is_empty() => {
-                        let any_close = locs.iter().any(|loc| {
-                            (loc.range.start.line as i32 - def_pos.line as i32).abs() <= TOLERANCE
-                        });
-                        if any_close {
-                            report.definitions_correct += 1;
-                        } else {
-                            report.add_error(
-                                step_idx,
-                                format!(
-                                    "DEFINITION WRONG: '{}' resolved to wrong lines",
-                                    target_name
-                                ),
-                            );
-                        }
-                    }
-                    Ok(Some(GotoDefinitionResponse::Link(links))) if !links.is_empty() => {
-                        let any_close = links.iter().any(|link| {
-                            (link.target_selection_range.start.line as i32 - def_pos.line as i32)
-                                .abs()
-                                <= TOLERANCE
-                        });
-                        if any_close {
-                            report.definitions_correct += 1;
-                        }
-                    }
-                    _ => {
-                        report.add_error(
-                            step_idx,
-                            format!("DEFINITION NOT FOUND: '{}'", target_name),
-                        );
-                    }
-                }
-            }
-
-            SimStep::VerifyCompletion { marker_idx } => {
-                if completion_entries.is_empty() {
-                    continue;
-                }
-                let locator = SourceLocator::new(&tracked.code);
-
-                let (anchor_id, expected_methods) =
-                    &completion_entries[*marker_idx % completion_entries.len()];
-                // Find completion position from anchor
-                let Some(comp_pos) = locator.find_completion_position(anchor_id) else {
-                    continue;
-                };
-
-                let result = harness
-                    .server
-                    .completion(tower_lsp::lsp_types::CompletionParams {
-                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri: uri.clone() },
-                            position: comp_pos,
-                        },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                        context: Some(tower_lsp::lsp_types::CompletionContext {
-                            trigger_kind:
-                                tower_lsp::lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
-                            trigger_character: Some(".".to_string()),
-                        }),
-                    })
-                    .await;
-
-                report.completions_checked += 1;
-
-                // Check if any of the expected methods are present (lenient check)
-                let check_items_and_get_labels =
-                    |items: &[tower_lsp::lsp_types::CompletionItem]| {
-                        let labels: HashSet<_> = items.iter().map(|i| i.label.as_str()).collect();
-                        let found = expected_methods.iter().any(|m| labels.contains(m.as_str()));
-                        (
-                            found,
-                            items
-                                .iter()
-                                .take(10)
-                                .map(|i| i.label.clone())
-                                .collect::<Vec<_>>(),
-                        )
-                    };
-
-                match &result {
-                    Ok(Some(tower_lsp::lsp_types::CompletionResponse::Array(items)))
-                        if !items.is_empty() =>
-                    {
-                        let (found, sample_labels) = check_items_and_get_labels(items);
-                        if found {
-                            report.completions_correct += 1;
-                        } else {
-                            report.add_error(
-                                    step_idx,
-                                    format!(
-                                        "COMPLETION MISMATCH at line {}: expected {:?} but got {:?} (total: {})",
-                                        comp_pos.line,
-                                        expected_methods,
-                                        sample_labels,
-                                        items.len()
-                                    ),
-                                );
-                        }
-                    }
-                    Ok(Some(tower_lsp::lsp_types::CompletionResponse::List(list)))
-                        if !list.items.is_empty() =>
-                    {
-                        let (found, sample_labels) = check_items_and_get_labels(&list.items);
-                        if found {
-                            report.completions_correct += 1;
-                        } else {
-                            report.add_error(
-                                    step_idx,
-                                    format!(
-                                        "COMPLETION MISMATCH at line {}: expected {:?} but got {:?} (total: {})",
-                                        comp_pos.line,
-                                        expected_methods,
-                                        sample_labels,
-                                        list.items.len()
-                                    ),
-                                );
-                        }
-                    }
-                    _ => {
-                        report.add_error(
-                            step_idx,
-                            format!(
-                                "NO COMPLETIONS at line {}: expected {:?} but got nothing",
-                                comp_pos.line, expected_methods
-                            ),
-                        );
-                    }
-                }
-            }
-
-            SimStep::VerifyTypes { marker_idx } => {
-                if type_entries.is_empty() {
-                    continue;
-                }
-                let locator = SourceLocator::new(&tracked.code);
-
-                let (var_name, expected_type) = &type_entries[*marker_idx % type_entries.len()];
-                // Find the variable position
-                let Some(var_pos) = locator.find_token(var_name) else {
-                    continue;
-                };
-
-                let result = harness
-                    .server
-                    .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        range: tower_lsp::lsp_types::Range {
-                            start: tower_lsp::lsp_types::Position {
-                                line: var_pos.line.saturating_sub(1),
-                                character: 0,
-                            },
-                            end: tower_lsp::lsp_types::Position {
-                                line: var_pos.line + 2,
-                                character: 100,
-                            },
-                        },
-                        work_done_progress_params: Default::default(),
-                    })
-                    .await;
-
-                report.types_checked += 1;
-
-                // Check if any hint contains the expected type
-                let (has_expected_type, actual_hint) = match &result {
-                    Ok(Some(hints)) => {
-                        // Find hint exactly on the variable's line (not with tolerance)
-                        // This prevents picking up hints from adjacent typed variable lines
-                        let near_hint =
-                            hints.iter().find(|hint| hint.position.line == var_pos.line);
-
-                        if let Some(hint) = near_hint {
-                            let hint_text = match &hint.label {
-                                tower_lsp::lsp_types::InlayHintLabel::String(s) => s.clone(),
-                                tower_lsp::lsp_types::InlayHintLabel::LabelParts(parts) => parts
-                                    .iter()
-                                    .map(|p| p.value.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(""),
-                            };
-                            (hint_text.contains(expected_type.as_str()), Some(hint_text))
-                        } else {
-                            (false, None)
-                        }
-                    }
-                    _ => (false, None),
-                };
-
-                if has_expected_type {
-                    report.types_correct += 1;
-                } else {
-                    // Type mismatches are errors - these indicate real bugs
-                    let actual = actual_hint.unwrap_or_else(|| "no hint".to_string());
-                    report.add_error(
-                        step_idx,
-                        format!(
-                            "TYPE MISMATCH at line {}: '{}' expected type '{}' but got '{}'",
-                            var_pos.line, var_name, expected_type, actual
-                        ),
-                    );
-                }
-            }
-
-            SimStep::QuerySymbols => {
-                let _ = harness
-                    .server
-                    .document_symbol(tower_lsp::lsp_types::DocumentSymbolParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryCompletion { line, character } => {
-                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
-                let line_count = content.lines().count().max(1);
-                let safe_line = (*line as usize) % line_count;
-
-                let _ = harness
-                    .server
-                    .completion(tower_lsp::lsp_types::CompletionParams {
-                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri: uri.clone() },
-                            position: tower_lsp::lsp_types::Position {
-                                line: safe_line as u32,
-                                character: *character,
-                            },
-                        },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                        context: None,
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryReferences { line, character } => {
-                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
-                let line_count = content.lines().count().max(1);
-                let safe_line = (*line as usize) % line_count;
-
-                let _ = harness
-                    .server
-                    .references(tower_lsp::lsp_types::ReferenceParams {
-                        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri: uri.clone() },
-                            position: tower_lsp::lsp_types::Position {
-                                line: safe_line as u32,
-                                character: *character,
-                            },
-                        },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                        context: tower_lsp::lsp_types::ReferenceContext {
-                            include_declaration: true,
-                        },
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryHover { line, character } => {
-                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
-                let line_count = content.lines().count().max(1);
-                let safe_line = (*line as usize) % line_count;
-
-                let _ = harness
-                    .server
-                    .hover(tower_lsp::lsp_types::HoverParams {
-                        text_document_position_params:
-                            tower_lsp::lsp_types::TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: tower_lsp::lsp_types::Position {
-                                    line: safe_line as u32,
-                                    character: *character,
-                                },
-                            },
-                        work_done_progress_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryInlayHints => {
-                let content = harness.model.get_content(&tracked.filename).unwrap_or("");
-                let line_count = content.lines().count().max(1) as u32;
-
-                let _ = harness
-                    .server
-                    .inlay_hint(tower_lsp::lsp_types::InlayHintParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        range: tower_lsp::lsp_types::Range {
-                            start: tower_lsp::lsp_types::Position {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: tower_lsp::lsp_types::Position {
-                                line: line_count,
-                                character: 0,
-                            },
-                        },
-                        work_done_progress_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QuerySemanticTokens => {
-                let _ = harness
-                    .server
-                    .semantic_tokens_full(tower_lsp::lsp_types::SemanticTokensParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryFoldingRanges => {
-                let _ = harness
-                    .server
-                    .folding_range(tower_lsp::lsp_types::FoldingRangeParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-
-            SimStep::QueryCodeLens => {
-                let _ = harness
-                    .server
-                    .code_lens(tower_lsp::lsp_types::CodeLensParams {
-                        text_document: TextDocumentIdentifier { uri: uri.clone() },
-                        work_done_progress_params: Default::default(),
-                        partial_result_params: Default::default(),
-                    })
-                    .await;
-                report.queries_executed += 1;
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-// =============================================================================
-// THE ONE SIMULATION RUNNER
-// =============================================================================
-
-proptest! {
-    #![proptest_config(get_config())]
-
-    /// Comprehensive simulation test for LSP features using Graph Growth strategy.
-    ///
-    /// This test:
-    /// 1. Generates tracked code with unique identifiers (Graph Growth)
-    /// 2. Verifies all references resolve correctly
-    /// 3. Applies safe edits (positions are re-resolved dynamically)
-    /// 4. Verifies references still resolve correctly AFTER edits
-    /// 5. Runs various LSP queries (completion, references, symbols, etc.)
-    ///
-    /// Run with: `cargo test sim`
-    /// More cases: `PROPTEST_CASES=1000 cargo test sim`
-    #[test]
-    #[ignore]
-    fn sim(
-        tracked in tracked_code(),
-        query_lines in prop::collection::vec(0..50u32, 0..15),
-        query_chars in prop::collection::vec(0..100u32, 0..15),
-        verify_indices in prop::collection::vec(0..20usize, 0..15),
-        edit_types in prop::collection::vec(0..4u8, 0..10),
-        step_order in prop::collection::vec(0..14u8, 15..40),
-    ) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut steps = Vec::new();
-            let mut verify_idx = 0;
-            let mut query_idx = 0;
-            let mut edit_idx = 0;
-
-            // Count verifiable items from ledgers
-            let has_refs = !tracked.state.ref_ledger.anchors.is_empty();
-            let has_completions = !tracked.state.completion_ledger.expected_completions.is_empty();
-            let has_types = !tracked.state.type_ledger.var_types.is_empty();
-
-            for &step_type in &step_order {
-                let step = match step_type {
-                    // Edit (15% weight) - safe edits
-                    0 | 1 if edit_idx < edit_types.len() => {
-                        let s = SimStep::Edit {
-                            edit_type: edit_types[edit_idx],
-                        };
-                        edit_idx += 1;
-                        s
-                    }
-                    // Verify definitions (20% weight) - tests reference resolution after edits
-                    2 | 3 if verify_idx < verify_indices.len() && has_refs => {
-                        let s = SimStep::VerifyDefinition {
-                            marker_idx: verify_indices[verify_idx],
-                        };
-                        verify_idx += 1;
-                        s
-                    }
-                    // Verify completions (7% weight)
-                    4 if verify_idx < verify_indices.len() && has_completions => {
-                        let s = SimStep::VerifyCompletion {
-                            marker_idx: verify_indices[verify_idx],
-                        };
-                        verify_idx += 1;
-                        s
-                    }
-                    // Verify types (5% weight) - test type inference survives edits
-                    5 if verify_idx < verify_indices.len() && has_types => {
-                        let s = SimStep::VerifyTypes {
-                            marker_idx: verify_indices[verify_idx],
-                        };
-                        verify_idx += 1;
-                        s
-                    }
-                    // Save (5% weight) - triggers re-indexing
-                    6 => SimStep::Save,
-                    // Query symbols (7% weight)
-                    7 => SimStep::QuerySymbols,
-                    // Query completion at random position (7% weight)
-                    8 if query_idx < query_lines.len() => {
-                        let s = SimStep::QueryCompletion {
-                            line: query_lines[query_idx],
-                            character: query_chars.get(query_idx).copied().unwrap_or(5),
-                        };
-                        query_idx += 1;
-                        s
-                    }
-                    // Query references at random position (7% weight)
-                    9 if query_idx < query_lines.len() => {
-                        let s = SimStep::QueryReferences {
-                            line: query_lines[query_idx],
-                            character: query_chars.get(query_idx).copied().unwrap_or(5),
-                        };
-                        query_idx += 1;
-                        s
-                    }
-                    // Query hover at random position (7% weight)
-                    10 if query_idx < query_lines.len() => {
-                        let s = SimStep::QueryHover {
-                            line: query_lines[query_idx],
-                            character: query_chars.get(query_idx).copied().unwrap_or(5),
-                        };
-                        query_idx += 1;
-                        s
-                    }
-                    // Query inlay hints (5% weight)
-                    11 => SimStep::QueryInlayHints,
-                    // Query semantic tokens (5% weight)
-                    12 => SimStep::QuerySemanticTokens,
-                    // Query folding ranges (5% weight)
-                    13 => SimStep::QueryFoldingRanges,
-                    // Query code lens (5% weight)
-                    _ => SimStep::QueryCodeLens,
-                };
-                steps.push(step);
-            }
-
-            let report = run_simulation(&tracked, &steps).await;
-
-            match report {
-                Ok(r) => {
-                    // Verbose mode: display code being tested and any warnings
-                    // Enable with: SIM_VERBOSE=1 cargo test sim -- --nocapture
-                    if is_verbose() {
-                        eprintln!("\n=== SIMULATION RUN ===");
-                        eprintln!("Code:\n{}", tracked.code);
-                        eprintln!("---");
-                        eprintln!(
-                            "Results: Defs {}/{} | Completions {}/{} | Types {}/{}",
-                            r.definitions_correct, r.definitions_checked,
-                            r.completions_correct, r.completions_checked,
-                            r.types_correct, r.types_checked
-                        );
-                        if !r.warnings.is_empty() {
-                            eprintln!("Warnings:");
-                            for warning in &r.warnings {
-                                eprintln!("  - {}", warning);
-                            }
-                        }
-                        eprintln!("======================\n");
-                    }
-
-                    assert!(
-                        r.is_success(),
-                        "Simulation failed!\n\
-                         Steps: {} | Edits: {} | Saves: {}\n\
-                         Definitions: {}/{} | Completions: {}/{} | Types: {}/{}\n\
-                         Queries: {}\n\
-                         Errors: {:?}\n\
-                         Warnings: {:?}\n\
-                         Code:\n{}",
-                        r.steps_executed,
-                        r.edits_applied,
-                        r.saves_executed,
-                        r.definitions_correct,
-                        r.definitions_checked,
-                        r.completions_correct,
-                        r.completions_checked,
-                        r.types_correct,
-                        r.types_checked,
-                        r.queries_executed,
-                        r.errors,
-                        r.warnings,
-                        tracked.code
-                    );
-                }
-                Err(e) => panic!("Simulation setup failed: {}", e),
-            }
-        });
-    }
-}
-
-// =============================================================================
-// SOAK TEST MODE - Run overnight to collect all failures
-// =============================================================================
-//
-// Run with: SOAK_TEST=1 PROPTEST_CASES=10000 cargo test soak_test --release -- --nocapture
-//
-// This test:
-// 1. Runs continuously without stopping on failures
-// 2. Records all failures to a file
-// 3. Prints a summary at the end
-
-#[cfg(test)]
-mod soak_test {
-    use super::*;
-    use crate::test::simulation::generators::{
-        graph_class_hierarchy, graph_class_references, graph_comprehensive_inheritance,
-        graph_comprehensive_mixin, graph_method_return_types, graph_mixin_relationships,
-    };
-    use proptest::strategy::ValueTree;
-    use std::collections::hash_map::DefaultHasher;
-    use std::fs::OpenOptions;
-    use std::hash::{Hash, Hasher};
-    use std::io::Write;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
-    use std::time::Instant;
-
-    static FAILURES: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    static TOTAL_RUNS: AtomicUsize = AtomicUsize::new(0);
-    static TOTAL_FAILURES: AtomicUsize = AtomicUsize::new(0);
-
-    fn record_failure(description: String) {
-        TOTAL_FAILURES.fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut failures) = FAILURES.lock() {
-            // Deduplicate by error type
-            let error_key = description
-                .lines()
-                .find(|l| l.starts_with("Error:"))
-                .unwrap_or(&description);
-            if !failures.iter().any(|f| f.contains(error_key)) {
-                failures.push(description);
-            }
-        }
-    }
-
-    /// Generate a seed from iteration number for reproducibility
-    fn make_seed(iteration: usize) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        iteration.hash(&mut hasher);
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-            .hash(&mut hasher);
-        hasher.finish()
-    }
-
-    /// Soak test - runs continuously until Ctrl+C and collects all unique failures
-    ///
-    /// Run with: `cargo test soak --release -- --nocapture --ignored`
-    /// Optional max limit: `PROPTEST_CASES=10000 cargo test soak --release -- --nocapture --ignored`
-    ///
-    /// Results are written to `src/test/simulation/soak_failures.log` on exit
-    #[test]
-    #[ignore] // Only run when explicitly requested with --ignored
-    fn soak() {
-        // Optional max limit, otherwise run forever
-        let max_cases: Option<usize> = std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok());
-
-        println!("🔥 SOAK TEST MODE");
-        if let Some(max) = max_cases {
-            println!("   Running up to {} iterations (or until Ctrl+C)", max);
-        } else {
-            println!("   Running indefinitely until Ctrl+C");
-        }
-        println!("   Failures will be collected (not stopped on first failure)");
-        println!("   Results will be written to {}\n", super::SOAK_LOG_FILE);
-
-        // Set up Ctrl+C handler
-        let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let r = running.clone();
-        ctrlc::set_handler(move || {
-            println!("\n\n⏹️  Ctrl+C received, finishing up...");
-            r.store(false, Ordering::SeqCst);
+            class
+                .method("constructor_charge")
+                .calls("Payments::Gateway#capture", CallShape::ConstructorSend);
         })
-        .ok();
+        .class("Catalog::Sku", |class| {
+            class.include("Audit::Trackable");
+            class.constant("PREFIX", "\"sku\"");
+            class
+                .method("format")
+                .returns("String")
+                .ref_const("Catalog::Sku::PREFIX");
+            class
+                .method("audit_sku")
+                .calls("Audit::Trackable#audit", CallShape::Bare);
+        })
+        .class("Catalog::Item", |class| {
+            class.method("sku").returns("Catalog::Sku");
+            class.method("publish").returns("String").calls(
+                "Catalog::Sku#format",
+                CallShape::one_hop("item", "Catalog::Item", "sku"),
+            );
+        })
+        .class("Reporting::Summary", |class| {
+            class
+                .method("render")
+                .returns("String")
+                .calls("Billing::Invoice#charge", CallShape::ConstructorSend)
+                .calls(
+                    "Billing::Invoice#delegated_capture",
+                    CallShape::ConstructorSend,
+                )
+                .calls("Catalog::Item#publish", CallShape::ConstructorSend);
+            class
+                .method("capture_total")
+                .calls("Payments::Gateway#capture", CallShape::local("gateway"));
+        })
+        .filler_classes(44)
+        .edit("delete gateway capture", |edit| {
+            edit.delete_method("Payments::Gateway#capture")
+                .expect_unresolved_method("billing/invoice.rb", "capture")
+                .expect_no_method_definition_target(
+                    "Payments::Gateway#capture",
+                    "Payments::Gateway#capture",
+                );
+        })
+        .edit("restore gateway capture", |edit| {
+            edit.restore_method("Payments::Gateway#capture")
+                .expect_no_unresolved_method("billing/invoice.rb", "capture");
+        })
+        .edit("delete invoice currency", |edit| {
+            edit.delete_constant("Billing::Invoice::DEFAULT_CURRENCY")
+                .expect_unresolved_constant("billing/invoice.rb", "DEFAULT_CURRENCY")
+                .expect_no_constant_definition_target(
+                    "Billing::Invoice::DEFAULT_CURRENCY",
+                    "Billing::Invoice::DEFAULT_CURRENCY",
+                );
+        })
+        .edit("restore invoice currency", |edit| {
+            edit.restore_constant("Billing::Invoice::DEFAULT_CURRENCY")
+                .expect_no_unresolved_constant("billing/invoice.rb", "DEFAULT_CURRENCY");
+        })
+        .edit("change inheritance and mixin", |edit| {
+            edit.remove_include("Billing::Invoice", "Audit::Trackable")
+                .change_superclass("Billing::Invoice", "Payments::FallbackGateway");
+        });
 
-        let start = Instant::now();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+    project
+}
 
-        let mut i: usize = 0;
-        while running.load(Ordering::SeqCst) {
-            // Check max limit
-            if let Some(max) = max_cases {
-                if i >= max {
-                    break;
-                }
-            }
-            TOTAL_RUNS.fetch_add(1, Ordering::SeqCst);
+fn mro_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_mro");
 
-            // Generate a reproducible seed for this iteration
-            let seed = make_seed(i);
+    project
+        .module("SimMro::First", |module| {
+            module.method("resolve_token").returns("String");
+        })
+        .module("SimMro::Second", |module| {
+            module.method("resolve_token").returns("String");
+        })
+        .class("SimMro::Base", |class| {
+            class.method("resolve_token").returns("String");
+        })
+        .class("SimMro::Child", |class| {
+            class.superclass("SimMro::Base");
+            class.include("SimMro::First");
+            class.include("SimMro::Second");
+        })
+        .class("SimMro::Caller", |class| {
+            class.method("run").calls(
+                "SimMro::Second#resolve_token",
+                CallShape::receiver_local("child", "SimMro::Child"),
+            );
+        });
 
-            // Use proptest's TestRunner for random generation
-            let config = proptest::test_runner::Config {
-                cases: 1,
-                ..Default::default()
-            };
-            let mut runner = proptest::test_runner::TestRunner::new(config);
+    project
+}
 
-            // Cycle through different Graph Growth generators
-            let generator_idx = i % 6;
-            let generator_name = match generator_idx {
-                0 => "graph_class_hierarchy",
-                1 => "graph_mixin_relationships",
-                2 => "graph_class_references",
-                3 => "graph_comprehensive_mixin",
-                4 => "graph_method_return_types",
-                _ => "graph_comprehensive_inheritance",
-            };
+fn mro_prepend_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_mro_prepend");
 
-            let tracked = match generator_idx {
-                0 => graph_class_hierarchy()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-                1 => graph_mixin_relationships()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-                2 => graph_class_references()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-                3 => graph_comprehensive_mixin()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-                4 => graph_method_return_types()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-                _ => graph_comprehensive_inheritance()
-                    .new_tree(&mut runner)
-                    .ok()
-                    .map(|t| t.current()),
-            };
+    project
+        .module("SimMroPrepend::First", |module| {
+            module.method("resolve_token").returns("String");
+        })
+        .module("SimMroPrepend::Second", |module| {
+            module.method("resolve_token").returns("String");
+        })
+        .class("SimMroPrepend::Base", |class| {
+            class.method("resolve_token").returns("String");
+        })
+        .class("SimMroPrepend::Child", |class| {
+            class.superclass("SimMroPrepend::Base");
+            class.prepend("SimMroPrepend::First");
+            class.prepend("SimMroPrepend::Second");
+            class.method("resolve_token").returns("String");
+        })
+        .class("SimMroPrepend::Caller", |class| {
+            class.method("run").calls(
+                "SimMroPrepend::Second#resolve_token",
+                CallShape::receiver_local("child", "SimMroPrepend::Child"),
+            );
+        });
 
-            if let Some(tracked) = tracked {
-                // Generate random steps including edits
-                let step_count = 15 + (i % 30);
-                let ref_count = tracked.state.ref_ledger.anchors.len().max(1);
-                let type_count = tracked.state.type_ledger.var_types.len().max(1);
-                let completion_count = tracked
-                    .state
-                    .completion_ledger
-                    .expected_completions
-                    .len()
-                    .max(1);
+    project
+}
 
-                let steps: Vec<SimStep> = (0..step_count)
-                    .map(|j| match (i + j) % 14 {
-                        // Edits with position tracking
-                        0 | 1 => SimStep::Edit {
-                            edit_type: (j % 4) as u8,
-                        },
-                        // Verify definitions after edits
-                        2 | 3 => SimStep::VerifyDefinition {
-                            marker_idx: j % ref_count,
-                        },
-                        // Verify completions
-                        4 => SimStep::VerifyCompletion {
-                            marker_idx: j % completion_count,
-                        },
-                        // Verify types (test type inference survives edits)
-                        5 => SimStep::VerifyTypes {
-                            marker_idx: j % type_count,
-                        },
-                        // Save (triggers re-indexing)
-                        6 => SimStep::Save,
-                        // Queries
-                        7 => SimStep::QuerySymbols,
-                        8 => SimStep::QueryCompletion {
-                            line: (j % 10) as u32,
-                            character: 5,
-                        },
-                        9 => SimStep::QueryReferences {
-                            line: (j % 10) as u32,
-                            character: 5,
-                        },
-                        10 => SimStep::QueryHover {
-                            line: (j % 10) as u32,
-                            character: 5,
-                        },
-                        11 => SimStep::QueryInlayHints,
-                        12 => SimStep::QuerySemanticTokens,
-                        13 => SimStep::QueryFoldingRanges,
-                        _ => SimStep::QueryCodeLens,
-                    })
-                    .collect();
+fn superclass_switch_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_superclass_switch");
 
-                let result = rt.block_on(run_simulation(&tracked, &steps));
+    project
+        .class("SimSuper::OldBase", |class| {
+            class.method("resolve_token").returns("String");
+        })
+        .class("SimSuper::NewBase", |class| {
+            class.method("resolve_token").returns("String");
+        })
+        .class("SimSuper::Child", |class| {
+            class.superclass("SimSuper::OldBase");
+        })
+        .class("SimSuper::Caller", |class| {
+            class.method("run").calls(
+                "SimSuper::OldBase#resolve_token",
+                CallShape::receiver_local("child", "SimSuper::Child"),
+            );
+        });
 
-                match result {
-                    Ok(report) if !report.is_success() => {
-                        let failure_desc = format!(
-                            "Seed: {:016x}\nIteration: {}\nGenerator: {}\nCode:\n{}\nError: {:?}\n---\n",
-                            seed,
-                            i,
-                            generator_name,
-                            tracked.code.lines().take(10).collect::<Vec<_>>().join("\n"),
-                            report.errors
-                        );
-                        record_failure(failure_desc);
-                    }
-                    Err(e) => {
-                        let failure_desc = format!("Iteration: {}\nSetup Error: {}\n---\n", i, e);
-                        record_failure(failure_desc);
-                    }
-                    _ => {}
-                }
-            }
+    project
+}
 
-            // Print progress every 100 runs
-            if (i + 1).is_multiple_of(100) {
-                let total = TOTAL_RUNS.load(Ordering::SeqCst);
-                let failures = TOTAL_FAILURES.load(Ordering::SeqCst);
-                let unique = FAILURES.lock().map(|f| f.len()).unwrap_or(0);
-                let elapsed = start.elapsed().as_secs();
-                let rate = total as f64 / elapsed.max(1) as f64;
-                if let Some(max) = max_cases {
-                    print!(
-                        "\r✓ Progress: {}/{} | {} failures ({} unique) | {}s | {:.0}/s    ",
-                        total, max, failures, unique, elapsed, rate
-                    );
-                } else {
-                    print!(
-                        "\r✓ Progress: {} | {} failures ({} unique) | {}s | {:.0}/s    ",
-                        total, failures, unique, elapsed, rate
-                    );
-                }
-                std::io::stdout().flush().ok();
-            }
+fn super_call_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_super_call");
 
-            i += 1;
+    project
+        .class("SimSuperCall::Parent", |class| {
+            class.method("process").returns("String");
+        })
+        .class("SimSuperCall::Child", |class| {
+            class
+                .superclass("SimSuperCall::Parent")
+                .method("process")
+                .calls("SimSuperCall::Parent#process", CallShape::Super)
+                .returns("String");
+        });
+
+    project
+}
+
+fn const_namespace_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_const_namespace");
+
+    project
+        .module("SimConst::Shared", |module| {
+            module.constant("TOKEN", "\"shared\"");
+        })
+        .module("SimConst::Outer", |module| {
+            module.constant("TOKEN", "\"outer\"");
+            module.constant("PARENT_TOKEN", "\"parent\"");
+        })
+        .module("SimConst::Outer::Inner", |module| {
+            module.constant("TOKEN", "\"inner\"");
+        })
+        .class("SimConst::Outer::Inner::Reader", |class| {
+            class
+                .method("read")
+                .ref_const_relative("SimConst::Outer::Inner::TOKEN", "TOKEN")
+                .ref_const_relative("SimConst::Outer::PARENT_TOKEN", "PARENT_TOKEN")
+                .ref_const_absolute("SimConst::Outer::TOKEN")
+                .ref_const_qualified("SimConst::Shared::TOKEN", "Shared::TOKEN");
+        });
+
+    project
+}
+
+fn reopened_namespace_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_reopened_namespace");
+
+    project
+        .class("SimReopen::Box", |class| {
+            class.file_path("sim_reopen/box_core.rb");
+            class.constant("TOKEN", "\"core\"");
+            class.method("core").returns("String");
+        })
+        .class("SimReopen::Box", |class| {
+            class.file_path("sim_reopen/box_extension.rb");
+            class
+                .method("extension")
+                .returns("String")
+                .calls("SimReopen::Box#core", CallShape::Bare)
+                .ref_const_relative("SimReopen::Box::TOKEN", "TOKEN");
+        })
+        .class("SimReopen::Caller", |class| {
+            class
+                .method("run")
+                .calls("SimReopen::Box#extension", CallShape::local("box"));
+        });
+
+    project
+}
+
+fn block_type_flow_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_block_type_flow");
+
+    project.class("SimBlockType::Builder", |class| {
+        class
+            .method("build")
+            .returns("String")
+            .with_block_type_asserts();
+    });
+
+    project
+}
+
+fn singleton_class_block_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_singleton_class_block");
+
+    project
+        .class("SimSingleton::Gateway", |class| {
+            class
+                .class_method("build")
+                .returns("SimSingleton::Gateway")
+                .in_singleton_class_block();
+            class.method("capture").returns("String");
+        })
+        .class("SimSingleton::Caller", |class| {
+            class
+                .method("run")
+                .returns("SimSingleton::Gateway")
+                .calls("SimSingleton::Gateway.build", CallShape::ClassSend);
+        });
+
+    project
+}
+
+fn class_eval_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_class_eval");
+
+    project
+        .class("SimClassEval::Target", |class| {
+            class
+                .method("patched")
+                .returns("String")
+                .in_class_eval_block();
+        })
+        .class("SimClassEval::Caller", |class| {
+            class
+                .method("run")
+                .calls("SimClassEval::Target#patched", CallShape::ConstructorSend);
+        });
+
+    project
+}
+
+fn define_method_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_define_method");
+
+    project
+        .class("SimDefineMethod::Target", |class| {
+            class.method("patched").returns("String").as_define_method();
+        })
+        .class("SimDefineMethod::Caller", |class| {
+            class.method("run").calls(
+                "SimDefineMethod::Target#patched",
+                CallShape::ConstructorSend,
+            );
+        });
+
+    project
+}
+
+fn const_get_define_method_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_const_get_define_method");
+
+    project
+        .class("SimConstGetDefineMethod::SMTP", |class| {
+            class
+                .method("tls?")
+                .returns("String")
+                .as_const_get_define_method();
+        })
+        .class("SimConstGetDefineMethod::Caller", |class| {
+            class.method("run").calls(
+                "SimConstGetDefineMethod::SMTP#tls?",
+                CallShape::ConstructorSend,
+            );
+        });
+
+    project
+}
+
+fn const_get_constant_ref_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_const_get_constant_ref");
+
+    project
+        .class("SimConstGetRef::TriggerHelpers", |class| {
+            class.constant("TOKEN", "\"trigger\"");
+        })
+        .class("SimConstGetRef::Caller", |class| {
+            class
+                .method("run")
+                .ref_const_const_get("SimConstGetRef::TriggerHelpers");
+        });
+
+    project
+}
+
+fn const_defined_constant_ref_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_const_defined_constant_ref");
+
+    project
+        .class("SimConstDefinedRef::PushUnit", |class| {
+            class.constant("TYPE", "\"push\"");
+        })
+        .class("SimConstDefinedRef::Caller", |class| {
+            class
+                .method("run")
+                .ref_const_const_defined("SimConstDefinedRef::PushUnit::TYPE")
+                .ref_const_const_get("SimConstDefinedRef::PushUnit::TYPE");
+        });
+
+    project
+}
+
+fn static_send_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_static_send");
+
+    project
+        .class("SimStaticSend::Target", |class| {
+            class.method("patched").returns("String");
+        })
+        .class("SimStaticSend::Caller", |class| {
+            class
+                .method("run")
+                .calls("SimStaticSend::Target#patched", CallShape::StaticSend);
+        });
+
+    project
+}
+
+fn visibility_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_visibility");
+
+    project
+        .class("SimVisibility::Vault", |class| {
+            class
+                .method("secret")
+                .returns("String")
+                .private()
+                .visibility_argument_list();
+            class
+                .method("semi_secret")
+                .returns("String")
+                .protected()
+                .visibility_argument_list();
+            class
+                .method("probe")
+                .returns("String")
+                .calls("SimVisibility::Vault#secret", CallShape::Bare)
+                .calls("SimVisibility::Vault#secret", CallShape::ConstructorSend)
+                .calls("SimVisibility::Vault#secret", CallShape::StaticSend);
+            class.method("protected_probe").returns("String").calls(
+                "SimVisibility::Vault#semi_secret",
+                CallShape::receiver_local("other", "SimVisibility::Vault"),
+            );
+        })
+        .class("SimVisibility::Caller", |class| {
+            class
+                .method("run")
+                .calls("SimVisibility::Vault#secret", CallShape::ConstructorSend);
+        })
+        .module("SimVisibility::HiddenMixin", |module| {
+            module.method("hidden").returns("String");
+        })
+        .class("SimVisibility::HiddenUser", |class| {
+            class.include("SimVisibility::HiddenMixin");
+            class.private_visibility("hidden");
+            class
+                .method("inside")
+                .calls("SimVisibility::HiddenMixin#hidden", CallShape::Bare);
+        })
+        .class("SimVisibility::HiddenCaller", |class| {
+            class.method("run").calls(
+                "SimVisibility::HiddenMixin#hidden",
+                CallShape::receiver_local("other", "SimVisibility::HiddenUser"),
+            );
+        })
+        .module("SimVisibility::PublicMixin", |module| {
+            module.method("visible_again").returns("String").private();
+        })
+        .class("SimVisibility::PublicUser", |class| {
+            class.include("SimVisibility::PublicMixin");
+            class.public_visibility("visible_again");
+        })
+        .class("SimVisibility::PublicCaller", |class| {
+            class.method("run").calls(
+                "SimVisibility::PublicMixin#visible_again",
+                CallShape::receiver_local("other", "SimVisibility::PublicUser"),
+            );
+        })
+        .module("SimVisibility::ProtectedMixin", |module| {
+            module.method("guarded").returns("String");
+        })
+        .class("SimVisibility::ProtectedUser", |class| {
+            class.include("SimVisibility::ProtectedMixin");
+            class.protected_visibility("guarded");
+        })
+        .class("SimVisibility::ProtectedChild", |class| {
+            class.superclass("SimVisibility::ProtectedUser");
+            class.method("run").calls(
+                "SimVisibility::ProtectedMixin#guarded",
+                CallShape::receiver_local("other", "SimVisibility::ProtectedUser"),
+            );
+        })
+        .class("SimVisibility::ProtectedCaller", |class| {
+            class.method("run").calls(
+                "SimVisibility::ProtectedMixin#guarded",
+                CallShape::receiver_local("other", "SimVisibility::ProtectedUser"),
+            );
+        });
+
+    project
+}
+
+fn module_function_mode_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_module_function_mode");
+
+    project
+        .module("SimModuleFunction::Utils", |module| {
+            module
+                .method("helper")
+                .returns("String")
+                .in_module_function_mode();
+        })
+        .class("SimModuleFunction::Caller", |class| {
+            class
+                .method("run")
+                .calls("SimModuleFunction::Utils#helper", CallShape::ClassSend);
+        });
+
+    project
+}
+
+fn extend_self_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_extend_self");
+
+    project
+        .module("SimExtendSelf::Utils", |module| {
+            module.extend_self();
+            module.method("helper").returns("String");
+        })
+        .class("SimExtendSelf::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls("SimExtendSelf::Utils#helper", CallShape::ClassSend);
+        });
+
+    project
+}
+
+fn extend_class_method_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_extend_class_method");
+
+    project
+        .module("SimExtend::ClassMethods", |module| {
+            module.method("configure").returns("String");
+            module.method("publish").returns("String");
+        })
+        .class("SimExtend::Base", |class| {
+            class.extend("SimExtend::ClassMethods");
+        })
+        .class("SimExtend::Child", |class| {
+            class.superclass("SimExtend::Base");
+        })
+        .class("SimExtend::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls(
+                    "SimExtend::ClassMethods#configure",
+                    CallShape::class_receiver("SimExtend::Child"),
+                )
+                .calls(
+                    "SimExtend::ClassMethods#publish",
+                    CallShape::class_receiver("SimExtend::Base"),
+                );
+        });
+
+    project
+}
+
+fn singleton_class_mixin_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_singleton_class_mixin");
+
+    project
+        .module("SimSingletonMixin::Included", |module| {
+            module.method("configure").returns("String");
+        })
+        .module("SimSingletonMixin::Prepended", |module| {
+            module.method("audit").returns("String");
+        })
+        .class("SimSingletonMixin::Gateway", |class| {
+            class
+                .singleton_include("SimSingletonMixin::Included")
+                .singleton_prepend("SimSingletonMixin::Prepended");
+        })
+        .class("SimSingletonMixin::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls(
+                    "SimSingletonMixin::Included#configure",
+                    CallShape::class_receiver("SimSingletonMixin::Gateway"),
+                )
+                .calls(
+                    "SimSingletonMixin::Prepended#audit",
+                    CallShape::class_receiver("SimSingletonMixin::Gateway"),
+                );
+        });
+
+    project
+}
+
+fn included_hook_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_included_hook");
+
+    project
+        .module("SimIncludedHook::FeatureFlags::ClassMethods", |module| {
+            module.method("enabled?").returns("String");
+        })
+        .module("SimIncludedHook::DailyTrends::SharedMethods", |module| {
+            module.method("get_html").returns("String");
+        })
+        .module("SimIncludedHook::AdminHelper::RequestHelpers", |module| {
+            module.method("api_get").returns("String");
+        })
+        .module("SimIncludedHook::FeatureFlags", |module| {
+            module.included_hook_extend("SimIncludedHook::FeatureFlags::ClassMethods");
+        })
+        .module("SimIncludedHook::DailyTrends", |module| {
+            module.included_hook_include("SimIncludedHook::DailyTrends::SharedMethods");
+        })
+        .module("SimIncludedHook::AdminHelper", |module| {
+            module.included_hook_class_eval_include("SimIncludedHook::AdminHelper::RequestHelpers");
+        })
+        .class("SimIncludedHook::Worker", |class| {
+            class.include("SimIncludedHook::FeatureFlags");
+        })
+        .class("SimIncludedHook::TrendWorker", |class| {
+            class.include("SimIncludedHook::DailyTrends");
+        })
+        .class("SimIncludedHook::SpecContext", |class| {
+            class.include("SimIncludedHook::AdminHelper");
+        })
+        .class("SimIncludedHook::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls(
+                    "SimIncludedHook::FeatureFlags::ClassMethods#enabled?",
+                    CallShape::class_receiver("SimIncludedHook::Worker"),
+                )
+                .calls(
+                    "SimIncludedHook::DailyTrends::SharedMethods#get_html",
+                    CallShape::receiver_local("trend_worker", "SimIncludedHook::TrendWorker"),
+                )
+                .calls(
+                    "SimIncludedHook::AdminHelper::RequestHelpers#api_get",
+                    CallShape::receiver_local("spec_context", "SimIncludedHook::SpecContext"),
+                );
+        });
+
+    project
+}
+
+fn concern_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_concern");
+
+    project
+        .module("SimConcern::Searchable::ClassMethods", |module| {
+            module.method("find_by_term").returns("String");
+        })
+        .module("SimConcern::Searchable", |module| {
+            module.concern_class_methods("SimConcern::Searchable::ClassMethods");
+        })
+        .class("SimConcern::Product", |class| {
+            class.include("SimConcern::Searchable");
+        })
+        .class("SimConcern::Caller", |class| {
+            class.method("run").returns("String").calls(
+                "SimConcern::Searchable::ClassMethods#find_by_term",
+                CallShape::class_receiver("SimConcern::Product"),
+            );
+        });
+
+    project
+}
+
+fn alias_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_alias");
+
+    project
+        .class("SimAlias::User", |class| {
+            class.method("name").returns("String");
+            class.alias_instance_method("full_name", "name");
+            class.alias_method_instance_method("display_name", "name");
+        })
+        .class("SimAlias::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls("SimAlias::User#full_name", CallShape::ConstructorSend)
+                .calls("SimAlias::User#display_name", CallShape::ConstructorSend);
+        });
+
+    project
+}
+
+fn delegate_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_delegate");
+
+    project
+        .class("SimDelegate::User", |class| {
+            class.method("name").returns("String");
+        })
+        .class("SimDelegate::Order", |class| {
+            class.method("user").returns("SimDelegate::User");
+            class.delegate_instance_method("name", "user");
+        })
+        .class("SimDelegate::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls("SimDelegate::Order#name", CallShape::ConstructorSend);
+        });
+
+    project
+}
+
+fn forwardable_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_forwardable");
+
+    project
+        .class("SimForwardable::Flags", |class| {
+            class.method("allow?").returns("String");
+        })
+        .class("SimForwardable::ServiceFlags", |class| {
+            class
+                .class_method("instance")
+                .returns("SimForwardable::Flags");
+            class.forwardable_class_method("allow?", "instance");
+        })
+        .class("SimForwardable::Caller", |class| {
+            class
+                .method("run")
+                .returns("String")
+                .calls("SimForwardable::ServiceFlags.allow?", CallShape::ClassSend);
+        });
+
+    project
+}
+
+fn class_attribute_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_class_attribute");
+
+    project
+        .class("SimClassAttribute::Worker", |class| {
+            class.class_attribute("queue_config");
+        })
+        .class("SimClassAttribute::Caller", |class| {
+            class.method("run").calls(
+                "SimClassAttribute::Worker.queue_config",
+                CallShape::ClassSend,
+            );
+        });
+
+    project
+}
+
+fn method_missing_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_method_missing");
+
+    project
+        .class("SimDynamic::Record", |class| {
+            class.method("method_missing").returns("String");
+        })
+        .class("SimDynamic::Caller", |class| {
+            class.method("run").calls(
+                "SimDynamic::Record#virtual_total",
+                CallShape::ConstructorSend,
+            );
+        });
+
+    project
+}
+
+fn method_object_project() -> SyntheticProject {
+    let mut project = SyntheticProject::new("synthetic_method_object");
+
+    project
+        .class("SimMethodObject::FeatureSettings", |class| {
+            class.class_method("get").returns("String");
+            class.method("copy_data").returns("String");
+        })
+        .class("SimMethodObject::SinatraBase", |class| {
+            class.method("health_checks").returns("String");
+            class
+                .method("run")
+                .returns("String")
+                .calls(
+                    "SimMethodObject::FeatureSettings.get",
+                    CallShape::MethodObject,
+                )
+                .calls(
+                    "SimMethodObject::FeatureSettings#copy_data",
+                    CallShape::InstanceMethodObject,
+                )
+                .calls(
+                    "SimMethodObject::SinatraBase#health_checks",
+                    CallShape::MethodObject,
+                );
+        });
+
+    project
+}
+
+fn resolved_signature(
+    oracle: &OracleState<'_>,
+    receiver_owner: &str,
+    method: &str,
+) -> Option<String> {
+    oracle
+        .resolve_instance_method(receiver_owner, method)
+        .map(|target| target.signature())
+}
+
+fn resolved_constant(
+    oracle: &OracleState<'_>,
+    project: &SyntheticProject,
+    text: &str,
+) -> Option<String> {
+    let render = project.render();
+    let constant_ref = render
+        .map
+        .constant_refs
+        .iter()
+        .find(|constant_ref| constant_ref.text == text)
+        .unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: generated constant ref `{}` is missing. This is a bug because test assertions must target generated refs. Fix: update const namespace fixture.",
+                text
+            )
+        });
+    oracle.resolve_constant_ref(constant_ref)
+}
+
+#[test]
+fn generated_project_emits_complex_ruby_graph() {
+    let project = phase1_project();
+    let render = project.render();
+
+    assert!(
+        (40..=60).contains(&render.files.len()),
+        "expected 40-60 files, got {}",
+        render.files.len()
+    );
+    assert!(
+        (100..=150).contains(&project.enabled_method_count()),
+        "expected 100-150 methods, got {}",
+        project.enabled_method_count()
+    );
+    assert!(
+        (30..=60).contains(&project.meaningful_edge_count()),
+        "expected 30-60 meaningful graph edges, got {}",
+        project.meaningful_edge_count()
+    );
+    assert!(render
+        .map
+        .calls
+        .iter()
+        .any(|call| call.shape_name == "ivar"));
+    assert!(render
+        .map
+        .calls
+        .iter()
+        .any(|call| call.shape_name == "one-hop"));
+    for shape in [
+        "bare-do-block",
+        "bare-brace-block",
+        "bare-lambda",
+        "bare-proc",
+        "array-block-param",
+        "yield-block-param",
+    ] {
+        assert!(
+            render.map.calls.iter().any(|call| call.shape_name == shape),
+            "expected generated call shape `{shape}`"
+        );
+    }
+    assert!(!render.map.constant_refs.is_empty());
+}
+
+#[test]
+fn generated_project_applies_graph_edits_to_files() {
+    let mut project = phase1_project();
+    let initial = project.render();
+
+    let step = project
+        .edits
+        .iter()
+        .find(|step| step.name == "delete invoice currency")
+        .expect("test edit must exist")
+        .clone();
+    project.apply_step(&step);
+    let after_constant_delete = project.render();
+    assert_ne!(
+        initial.files["billing/invoice.rb"],
+        after_constant_delete.files["billing/invoice.rb"]
+    );
+    assert_eq!(
+        initial.files["payments/gateway.rb"],
+        after_constant_delete.files["payments/gateway.rb"]
+    );
+
+    let step = project
+        .edits
+        .iter()
+        .find(|step| step.name == "change inheritance and mixin")
+        .expect("test edit must exist")
+        .clone();
+    project.apply_step(&step);
+    let after_inheritance = project.render();
+    assert!(after_inheritance.files["billing/invoice.rb"].contains("Payments::FallbackGateway"));
+    assert!(!after_inheritance.files["billing/invoice.rb"].contains("include Audit::Trackable"));
+}
+
+#[test]
+fn generated_project_oracle_resolves_mro_table() {
+    let mut project = mro_project();
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMro::Child", "resolve_token"),
+        Some("SimMro::Second#resolve_token".to_string())
+    );
+
+    project.apply_op(&EditOp::RemoveInclude {
+        owner: "SimMro::Child".to_string(),
+        included: "SimMro::Second".to_string(),
+    });
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMro::Child", "resolve_token"),
+        Some("SimMro::First#resolve_token".to_string())
+    );
+
+    project.apply_op(&EditOp::RemoveInclude {
+        owner: "SimMro::Child".to_string(),
+        included: "SimMro::First".to_string(),
+    });
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMro::Child", "resolve_token"),
+        Some("SimMro::Base#resolve_token".to_string())
+    );
+
+    project.apply_op(&EditOp::DeleteMethod(MethodTarget::parse(
+        "SimMro::Base#resolve_token",
+    )));
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMro::Child", "resolve_token"),
+        None
+    );
+}
+
+#[test]
+fn generated_project_oracle_resolves_prepend_before_own_method() {
+    let mut project = mro_prepend_project();
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMroPrepend::Child", "resolve_token"),
+        Some("SimMroPrepend::Second#resolve_token".to_string())
+    );
+
+    project.apply_op(&EditOp::RemovePrepend {
+        owner: "SimMroPrepend::Child".to_string(),
+        prepended: "SimMroPrepend::Second".to_string(),
+    });
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMroPrepend::Child", "resolve_token"),
+        Some("SimMroPrepend::First#resolve_token".to_string())
+    );
+
+    project.apply_op(&EditOp::RemovePrepend {
+        owner: "SimMroPrepend::Child".to_string(),
+        prepended: "SimMroPrepend::First".to_string(),
+    });
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+    assert_eq!(
+        resolved_signature(&oracle, "SimMroPrepend::Child", "resolve_token"),
+        Some("SimMroPrepend::Child#resolve_token".to_string())
+    );
+}
+
+#[test]
+fn generated_project_oracle_tracks_partial_namespace_visibility() {
+    let project = mro_project();
+    let render = project.render();
+    let indexed_files = ["sim_mro/child.rb", "sim_mro/caller.rb", "sim_mro/base.rb"]
+        .into_iter()
+        .map(String::from)
+        .collect::<BTreeSet<_>>();
+    let oracle = OracleState::with_indexed_files(&project, &render.map, indexed_files);
+
+    assert_eq!(
+        resolved_signature(&oracle, "SimMro::Child", "resolve_token"),
+        Some("SimMro::Base#resolve_token".to_string())
+    );
+}
+
+#[test]
+fn generated_project_oracle_resolves_constant_namespace_table() {
+    let project = const_namespace_project();
+    let render = project.render();
+    let oracle = OracleState::all_files(&project, &render.map);
+
+    assert_eq!(
+        resolved_constant(&oracle, &project, "TOKEN"),
+        Some("SimConst::Outer::Inner::TOKEN".to_string())
+    );
+    assert_eq!(
+        resolved_constant(&oracle, &project, "PARENT_TOKEN"),
+        Some("SimConst::Outer::PARENT_TOKEN".to_string())
+    );
+    assert_eq!(
+        resolved_constant(&oracle, &project, "::SimConst::Outer::TOKEN"),
+        Some("SimConst::Outer::TOKEN".to_string())
+    );
+    assert_eq!(
+        resolved_constant(&oracle, &project, "Shared::TOKEN"),
+        Some("SimConst::Shared::TOKEN".to_string())
+    );
+}
+
+#[tokio::test]
+async fn generated_project_resolves_reopened_namespace_fragments() {
+    let runner = SimulationRunner::start(reopened_namespace_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+    runner.check_types().await;
+}
+
+#[tokio::test]
+async fn generated_project_checks_block_type_flow_hover_and_hints() {
+    let runner = SimulationRunner::start(block_type_flow_project()).await;
+
+    runner.check_hover().await;
+    runner.check_types().await;
+}
+
+#[test]
+fn generated_project_oracle_tracks_partial_constant_visibility() {
+    let project = const_namespace_project();
+    let render = project.render();
+    let indexed_files = [
+        "sim_const/outer.rb",
+        "sim_const/outer/inner.rb",
+        "sim_const/outer/inner/reader.rb",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<BTreeSet<_>>();
+    let oracle = OracleState::with_indexed_files(&project, &render.map, indexed_files);
+
+    assert_eq!(resolved_constant(&oracle, &project, "Shared::TOKEN"), None);
+    assert_eq!(
+        resolved_constant(&oracle, &project, "PARENT_TOKEN"),
+        Some("SimConst::Outer::PARENT_TOKEN".to_string())
+    );
+}
+
+#[test]
+fn generated_project_seeded_generation_is_replayable() {
+    let seed = 20_260_524;
+    let first = seeded_script(seed);
+    let second = seeded_script(seed);
+    assert_eq!(first.project.render().files, second.project.render().files);
+    assert_eq!(first.initial_open_files, second.initial_open_files);
+    assert_eq!(first.steps, second.steps);
+    assert_eq!(
+        first
+            .project
+            .edits
+            .iter()
+            .map(|step| step.name.as_str())
+            .collect::<Vec<_>>(),
+        second
+            .project
+            .edits
+            .iter()
+            .map(|step| step.name.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let render = first.project.render();
+    let generated_source = render
+        .files
+        .values()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    for hardcoded_name in [
+        "Billing",
+        "Payments",
+        "Catalog",
+        "Audit",
+        "Reporting",
+        "Synthetic::Generated",
+        "account",
+        "audit",
+        "capture",
+        "charge",
+        "gateway",
+        "invoice",
+        "item",
+        "publish",
+        "refund",
+        "render",
+        "sku",
+        "summary",
+    ] {
+        assert!(
+            !generated_source.contains(hardcoded_name),
+            "seed {seed}: seeded source must not contain hardcoded fixture name `{hardcoded_name}`"
+        );
+    }
+    let edit_names = first
+        .project
+        .edits
+        .iter()
+        .map(|step| step.name.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for hardcoded_name in ["gateway", "capture", "invoice", "currency"] {
+        assert!(
+            !edit_names.contains(hardcoded_name),
+            "seed {seed}: seeded edit labels must not contain hardcoded fixture name `{hardcoded_name}`"
+        );
+    }
+    assert!(
+        (40..=60).contains(&render.files.len()),
+        "seed {seed}: expected 40-60 files, got {}",
+        render.files.len()
+    );
+    assert!(
+        (100..=150).contains(&first.project.enabled_method_count()),
+        "seed {seed}: expected 100-150 methods, got {}",
+        first.project.enabled_method_count()
+    );
+    assert!(
+        (30..=90).contains(&first.project.meaningful_edge_count()),
+        "seed {seed}: expected 30-90 meaningful graph edges, got {}",
+        first.project.meaningful_edge_count()
+    );
+    for shape in ["method-object", "instance-method-object"] {
+        assert!(
+            render.map.calls.iter().any(|call| call.shape_name == shape),
+            "seed {seed}: expected seeded generated call shape `{shape}`"
+        );
+    }
+}
+
+#[test]
+fn generated_project_seeded_generation_has_stable_fingerprint() {
+    let script = seeded_script(20_260_524);
+
+    assert_eq!(
+        seeded_script_fingerprint(&script),
+        "fnv1a64:2b7aab09bbb01f75"
+    );
+}
+
+#[tokio::test]
+async fn generated_project_tracks_navigation_support_gaps() {
+    let runner = SimulationRunner::start(phase1_project()).await;
+    let gaps = runner.known_gap_reasons();
+    let expected = [].into_iter().collect();
+
+    assert_eq!(gaps, expected);
+}
+
+#[tokio::test]
+async fn generated_project_checks_definitions_for_agent_navigation() {
+    let runner = SimulationRunner::start(phase1_project()).await;
+    runner.check_definitions().await;
+}
+
+#[tokio::test]
+async fn generated_project_checks_references_for_agent_navigation() {
+    let runner = SimulationRunner::start(phase1_project()).await;
+    runner.check_references().await;
+}
+
+#[tokio::test]
+async fn generated_project_checks_hover_for_agent_navigation() {
+    let runner = SimulationRunner::start(phase1_project()).await;
+    runner.check_hover().await;
+}
+
+#[test]
+fn generated_project_emits_singleton_class_block_methods() {
+    let render = singleton_class_block_project().render();
+    let source = render.files.get("sim_singleton/gateway.rb").unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: singleton class block project did not render gateway file. This is a bug because project file paths must be stable from FQNs. Fix: inspect file_for_namespace."
+        )
+    });
+
+    assert!(
+        source.contains("class << self\n      # @return [SimSingleton::Gateway]\n      def build"),
+        "expected generated source to use class << self block, got:\n{}",
+        source
+    );
+}
+
+#[tokio::test]
+async fn generated_project_resolves_singleton_class_block_class_method() {
+    let runner = SimulationRunner::start(singleton_class_block_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimSingleton::Gateway.build")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_class_eval_block_method() {
+    let runner = SimulationRunner::start(class_eval_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_define_method_method() {
+    let runner = SimulationRunner::start(define_method_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_const_get_define_method_method() {
+    let runner = SimulationRunner::start(const_get_define_method_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_const_get_constant_ref() {
+    let runner = SimulationRunner::start(const_get_constant_ref_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_const_defined_constant_ref() {
+    let runner = SimulationRunner::start(const_defined_constant_ref_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_static_send_method() {
+    let runner = SimulationRunner::start(static_send_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_filters_private_explicit_receiver_calls() {
+    let runner = SimulationRunner::start(visibility_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_bare_module_function_method() {
+    let runner = SimulationRunner::start(module_function_mode_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_extend_self_module_method() {
+    let runner = SimulationRunner::start(extend_self_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+    runner.check_types().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_extend_as_class_method() {
+    let runner = SimulationRunner::start(extend_class_method_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimExtend::ClassMethods#configure")
+        .await;
+    runner
+        .assert_call_resolves_to("SimExtend::ClassMethods#publish")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_singleton_class_mixins_as_class_methods() {
+    let runner = SimulationRunner::start(singleton_class_mixin_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimSingletonMixin::Included#configure")
+        .await;
+    runner
+        .assert_call_resolves_to("SimSingletonMixin::Prepended#audit")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_included_hook_class_methods() {
+    let runner = SimulationRunner::start(included_hook_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimIncludedHook::FeatureFlags::ClassMethods#enabled?")
+        .await;
+    runner
+        .assert_call_resolves_to("SimIncludedHook::DailyTrends::SharedMethods#get_html")
+        .await;
+    runner
+        .assert_call_resolves_to("SimIncludedHook::AdminHelper::RequestHelpers#api_get")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_concern_class_methods() {
+    let runner = SimulationRunner::start(concern_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimConcern::Searchable::ClassMethods#find_by_term")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_super_call() {
+    let runner = SimulationRunner::start(super_call_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimSuperCall::Parent#process")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_alias_method() {
+    let runner = SimulationRunner::start(alias_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimAlias::User#full_name")
+        .await;
+    runner
+        .assert_call_resolves_to("SimAlias::User#display_name")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_delegate_method() {
+    let runner = SimulationRunner::start(delegate_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimDelegate::Order#name")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_forwardable_delegate_method() {
+    let runner = SimulationRunner::start(forwardable_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimForwardable::ServiceFlags.allow?")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_class_attribute_methods() {
+    let runner = SimulationRunner::start(class_attribute_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimClassAttribute::Worker.queue_config")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_method_missing_fallback() {
+    let runner = SimulationRunner::start(method_missing_project()).await;
+
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_method_object_symbols() {
+    let runner = SimulationRunner::start(method_object_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimMethodObject::FeatureSettings.get")
+        .await;
+    runner
+        .assert_call_resolves_to("SimMethodObject::FeatureSettings#copy_data")
+        .await;
+    runner
+        .assert_call_resolves_to("SimMethodObject::SinatraBase#health_checks")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+    runner.check_hover().await;
+}
+
+#[tokio::test]
+async fn generated_project_resolves_partial_namespace_open_order() {
+    let mut runner = SimulationRunner::start_with_open_files(
+        mro_project(),
+        &["sim_mro/child.rb", "sim_mro/caller.rb"],
+    )
+    .await;
+
+    runner
+        .assert_call_does_not_resolve_to("SimMro::Second#resolve_token")
+        .await;
+
+    for file in ["sim_mro/base.rb", "sim_mro/second.rb", "sim_mro/first.rb"] {
+        runner.open_file(file).await;
+    }
+
+    runner
+        .assert_call_resolves_to("SimMro::Second#resolve_token")
+        .await;
+    runner.check_definitions().await;
+}
+
+#[tokio::test]
+async fn generated_project_oracles_method_resolution_order() {
+    let runner = SimulationRunner::start(mro_project()).await;
+
+    runner
+        .assert_call_resolves_to("SimMro::Second#resolve_token")
+        .await;
+    runner.check_definitions().await;
+    runner.check_references().await;
+}
+
+#[tokio::test]
+async fn generated_project_rejects_stale_include_method_target() {
+    let mut runner = SimulationRunner::start(mro_project()).await;
+    runner
+        .assert_call_resolves_to("SimMro::Second#resolve_token")
+        .await;
+
+    let step = EditStep::new("remove second include", |edit| {
+        edit.remove_include("SimMro::Child", "SimMro::Second")
+            .expect_no_method_definition_target(
+                "SimMro::Second#resolve_token",
+                "SimMro::Second#resolve_token",
+            );
+    });
+    runner.apply_step(&step).await;
+}
+
+#[tokio::test]
+async fn generated_project_rejects_stale_prepend_method_target() {
+    let mut runner = SimulationRunner::start(mro_prepend_project()).await;
+    runner
+        .assert_call_resolves_to("SimMroPrepend::Second#resolve_token")
+        .await;
+
+    let step = EditStep::new("remove second prepend", |edit| {
+        edit.remove_prepend("SimMroPrepend::Child", "SimMroPrepend::Second")
+            .expect_no_method_definition_target(
+                "SimMroPrepend::Second#resolve_token",
+                "SimMroPrepend::Second#resolve_token",
+            );
+    });
+    runner.apply_step(&step).await;
+}
+
+#[tokio::test]
+async fn generated_project_rejects_stale_superclass_method_target() {
+    let mut runner = SimulationRunner::start(superclass_switch_project()).await;
+    runner
+        .assert_call_resolves_to("SimSuper::OldBase#resolve_token")
+        .await;
+
+    let step = EditStep::new("switch superclass", |edit| {
+        edit.change_superclass("SimSuper::Child", "SimSuper::NewBase")
+            .expect_no_method_definition_target(
+                "SimSuper::OldBase#resolve_token",
+                "SimSuper::OldBase#resolve_token",
+            );
+    });
+    runner.apply_step(&step).await;
+}
+
+#[test]
+fn generated_project_engine_oracle_checks_definitions_and_references() {
+    let runner = EngineSimulationRunner::start(phase1_project());
+    runner.check_definitions();
+    runner.check_references();
+    runner.check_types();
+}
+
+#[test]
+fn generated_project_engine_oracle_updates_after_graph_edits() {
+    let project = phase1_project();
+    let mut runner = EngineSimulationRunner::start(project.clone());
+    runner.check_definitions();
+    runner.check_references();
+    runner.check_types();
+
+    for step in &project.edits {
+        runner.apply_step(step);
+        runner.check_definitions();
+        runner.check_references();
+        runner.check_types();
+    }
+}
+
+#[tokio::test]
+async fn generated_project_updates_method_diagnostics() {
+    let project = phase1_project();
+    let mut runner = SimulationRunner::start(project.clone()).await;
+    runner.check_initial().await;
+
+    runner
+        .apply_step(
+            project
+                .edits
+                .iter()
+                .find(|step| step.name == "delete gateway capture")
+                .expect("test edit must exist"),
+        )
+        .await;
+    runner
+        .apply_step(
+            project
+                .edits
+                .iter()
+                .find(|step| step.name == "restore gateway capture")
+                .expect("test edit must exist"),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn generated_project_updates_constant_diagnostics() {
+    let project = phase1_project();
+    let mut runner = SimulationRunner::start(project.clone()).await;
+    runner.check_initial().await;
+
+    runner
+        .apply_step(
+            project
+                .edits
+                .iter()
+                .find(|step| step.name == "delete invoice currency")
+                .expect("test edit must exist"),
+        )
+        .await;
+    runner
+        .apply_step(
+            project
+                .edits
+                .iter()
+                .find(|step| step.name == "restore invoice currency")
+                .expect("test edit must exist"),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn generated_project_runs_deterministic_edit_scenario() {
+    let project = phase1_project();
+    let mut runner = SimulationRunner::start(project.clone()).await;
+    runner.check_initial().await;
+
+    for step in &project.edits {
+        runner.apply_step(step).await;
+    }
+
+    runner.close_and_reopen("billing/invoice.rb").await;
+}
+
+#[tokio::test]
+async fn generated_project_runs_seeded_edit_sequence() {
+    let seeds = simulation_seeds_from_env();
+
+    for seed in seeds {
+        let script = seeded_script(seed);
+        let artifact = write_seed_artifact(&script);
+        eprintln!(
+            "running simulation seed {seed}; replay with SIM_SEED={seed}; artifact {}",
+            artifact.display()
+        );
+        let initial_open_files = script
+            .initial_open_files
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut runner =
+            SimulationRunner::start_with_open_files(script.project.clone(), &initial_open_files)
+                .await;
+        runner.check_initial().await;
+
+        for (step_index, step) in script.steps.iter().enumerate() {
+            eprintln!("simulation seed {seed} step {step_index}: {step:?}");
+            runner.run_edit_script_step(step).await;
         }
+    }
+}
 
-        // Write results to file
-        let total = TOTAL_RUNS.load(Ordering::SeqCst);
-        let failures = TOTAL_FAILURES.load(Ordering::SeqCst);
-        let elapsed = start.elapsed();
+#[tokio::test]
+async fn generated_project_large_scale_smoke() {
+    if std::env::var("SIM_LARGE_SCALE").ok().as_deref() != Some("1") {
+        eprintln!(
+            "skipping large-scale smoke; run with SIM_LARGE_SCALE=1 cargo test generated_project_large_scale_smoke -- --nocapture"
+        );
+        return;
+    }
 
-        println!("\n\n📊 SOAK TEST COMPLETE");
-        println!("   Duration: {:.1}s", elapsed.as_secs_f64());
-        println!("   Total runs: {}", total);
-        println!(
-            "   Total failures: {} ({:.1}%)",
-            failures,
-            (failures as f64 / total as f64) * 100.0
+    let seed = std::env::var("SIM_LARGE_SCALE_SEED")
+        .ok()
+        .map(|value| {
+            value.parse::<u64>().unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: SIM_LARGE_SCALE_SEED `{}` is not a u64: {}. This is a bug because scale replay needs a numeric seed. Fix: pass SIM_LARGE_SCALE_SEED=<u64>.",
+                    value, err
+                )
+            })
+        })
+        .unwrap_or(20_260_524);
+    let project = large_scale_project(seed);
+    let render = project.render();
+
+    assert_eq!(render.files.len(), LARGE_SCALE_RUBY_FILES);
+    assert_eq!(project.enabled_method_count(), LARGE_SCALE_METHOD_DEFS);
+    assert!(project.meaningful_edge_count() >= LARGE_SCALE_MIN_GRAPH_EDGES);
+
+    let engine_start = Instant::now();
+    let engine_runner = EngineSimulationRunner::start(project.clone());
+    let engine_elapsed = engine_start.elapsed();
+    let stats = engine_runner.stats();
+    eprintln!(
+        "large-scale engine index: elapsed={:?} files={} methods={} refs={} types={} graph_edges={}",
+        engine_elapsed, stats.files, stats.methods, stats.references, stats.types, stats.graph_edges
+    );
+    assert_elapsed_under_env_budget(
+        "SIM_LARGE_SCALE_ENGINE_MAX_MS",
+        Duration::from_secs(120),
+        engine_elapsed,
+        "large-scale engine index",
+    );
+    assert!(
+        stats.files >= LARGE_SCALE_RUBY_FILES,
+        "expected at least {} indexed files, got {:?}",
+        LARGE_SCALE_RUBY_FILES,
+        stats
+    );
+    assert!(
+        stats.methods >= LARGE_SCALE_METHOD_DEFS,
+        "expected at least {} indexed methods, got {:?}",
+        LARGE_SCALE_METHOD_DEFS,
+        stats
+    );
+
+    let samples = sample_call_shapes(&render.map.calls);
+    let lsp_start = Instant::now();
+    let mut editor = FakeEditor::new().await;
+    let mut opened = BTreeSet::new();
+    for call in &samples {
+        let def = render.map.defs.get(&call.target).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: generated sample target `{}` has no def. This is a bug because source map should contain every generated target. Fix: inspect large_scale_project.",
+                call.target.signature()
+            )
+        });
+        open_once(&mut editor, &render.files, &mut opened, &def.file).await;
+    }
+    for call in &samples {
+        if opened.contains(&call.pos.file) {
+            editor.close(&call.pos.file).await;
+            opened.remove(&call.pos.file);
+        }
+        open_once(&mut editor, &render.files, &mut opened, &call.pos.file).await;
+    }
+
+    for call in &samples {
+        let def = render.map.defs.get(&call.target).unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: generated sample target `{}` has no def. This is a bug because source map should contain every generated target. Fix: inspect large_scale_project.",
+                call.target.signature()
+            )
+        });
+
+        let defs = editor
+            .goto_def_at(&call.pos.file, call.pos.line, call.pos.character)
+            .await;
+        assert!(
+            defs.iter()
+                .any(|location| location_matches_pos(location, def)),
+            "expected scale goto for `{}` shape `{}` from {}:{} to include {}:{}, got {:?}",
+            call.target.signature(),
+            call.shape_name,
+            call.pos.file,
+            call.pos.line,
+            def.file,
+            def.line,
+            defs
         );
 
-        if let Ok(failures_list) = FAILURES.lock() {
-            println!("   Unique failure types: {}", failures_list.len());
+        let refs = editor
+            .references_at(&def.file, def.line, def.character)
+            .await;
+        assert!(
+            refs.iter()
+                .any(|location| location_matches_pos(location, &call.pos)),
+            "expected scale refs for `{}` shape `{}` to include {}:{}, got {:?}",
+            call.target.signature(),
+            call.shape_name,
+            call.pos.file,
+            call.pos.line,
+            refs
+        );
 
-            if !failures_list.is_empty() {
-                let mut file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(super::SOAK_LOG_FILE)
-                    .expect("Failed to create log file");
+        let hover = editor
+            .hover_at(&call.pos.file, call.pos.line, call.pos.character)
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected scale hover for `{}` shape `{}` at {}:{}",
+                    call.target.signature(),
+                    call.shape_name,
+                    call.pos.file,
+                    call.pos.line
+                )
+            });
+        let hover_text = format!("{hover:?}");
+        assert!(
+            !hover_text.trim().is_empty(),
+            "expected non-empty scale hover for `{}` shape `{}`, got {}",
+            call.target.signature(),
+            call.shape_name,
+            hover_text
+        );
+    }
 
-                writeln!(file, "# Simulation Soak Test Failures").ok();
-                writeln!(file, "# Date: {:?}", std::time::SystemTime::now()).ok();
-                writeln!(file, "# Duration: {:.1}s", elapsed.as_secs_f64()).ok();
-                writeln!(file, "# Total runs: {}", total).ok();
-                writeln!(file, "# Total failures: {}", failures).ok();
-                writeln!(file, "# Unique failure types: {}\n", failures_list.len()).ok();
+    let local_call = render
+        .map
+        .calls
+        .iter()
+        .find(|call| call.shape_name == "local")
+        .expect("scale project must generate a local receiver call");
+    let hints = editor.inlay_hints(&local_call.pos.file).await;
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint.position.line + 1 == local_call.pos.line),
+        "expected constructor local receiver type hint before scale call {}:{}, got {:?}",
+        local_call.pos.file,
+        local_call.pos.line,
+        hints
+    );
+    let lsp_elapsed = lsp_start.elapsed();
+    eprintln!(
+        "large-scale sampled LSP checks: elapsed={:?} samples={}",
+        lsp_elapsed,
+        samples.len()
+    );
+    assert_elapsed_under_env_budget(
+        "SIM_LARGE_SCALE_LSP_MAX_MS",
+        Duration::from_secs(120),
+        lsp_elapsed,
+        "large-scale sampled LSP checks",
+    );
+}
 
-                for (i, failure) in failures_list.iter().enumerate() {
-                    writeln!(file, "## Failure #{}\n{}", i + 1, failure).ok();
-                }
+#[test]
+fn generated_project_large_scale_engine_checks_all_edges() {
+    if std::env::var("SIM_LARGE_SCALE_ALL_EDGES").ok().as_deref() != Some("1") {
+        eprintln!(
+            "skipping large-scale all-edge engine smoke; run with SIM_LARGE_SCALE_ALL_EDGES=1 cargo test generated_project_large_scale_engine_checks_all_edges -- --nocapture"
+        );
+        return;
+    }
 
-                println!("\n   📝 Results written to: {}", super::SOAK_LOG_FILE);
-            }
+    let seed = std::env::var("SIM_LARGE_SCALE_SEED")
+        .ok()
+        .map(|value| {
+            value.parse::<u64>().unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: SIM_LARGE_SCALE_SEED `{}` is not a u64: {}. This is a bug because scale replay needs a numeric seed. Fix: pass SIM_LARGE_SCALE_SEED=<u64>.",
+                    value, err
+                )
+            })
+        })
+        .unwrap_or(20_260_524);
+    let project = large_scale_project(seed);
+    let render = project.render();
+    eprintln!(
+        "large-scale all-edge shape: files={} methods={} edges={} calls={} const_refs={}",
+        render.files.len(),
+        project.enabled_method_count(),
+        project.meaningful_edge_count(),
+        render.map.calls.len(),
+        render.map.constant_refs.len()
+    );
+
+    let engine_start = Instant::now();
+    let runner = EngineSimulationRunner::start(project);
+    let stats = runner.stats();
+    let engine_elapsed = engine_start.elapsed();
+    eprintln!(
+        "large-scale all-edge index stats: elapsed={:?} files={} methods={} refs={} types={} graph_edges={}",
+        engine_elapsed, stats.files, stats.methods, stats.references, stats.types, stats.graph_edges
+    );
+    assert_elapsed_under_env_budget(
+        "SIM_LARGE_SCALE_ALL_EDGES_INDEX_MAX_MS",
+        Duration::from_secs(120),
+        engine_elapsed,
+        "large-scale all-edge engine index",
+    );
+    assert_eq!(render.files.len(), LARGE_SCALE_RUBY_FILES);
+    assert_eq!(stats.methods, LARGE_SCALE_METHOD_DEFS);
+
+    let check_start = Instant::now();
+    runner.check_definitions();
+    runner.check_references();
+    runner.check_types();
+    let check_elapsed = check_start.elapsed();
+    eprintln!(
+        "large-scale all-edge oracle checks: elapsed={:?}",
+        check_elapsed
+    );
+    assert_elapsed_under_env_budget(
+        "SIM_LARGE_SCALE_ALL_EDGES_CHECK_MAX_MS",
+        Duration::from_secs(300),
+        check_elapsed,
+        "large-scale all-edge oracle checks",
+    );
+}
+
+#[tokio::test]
+async fn generated_project_real_corpus_smoke() {
+    if std::env::var("SIM_REAL_CORPUS").ok().as_deref() != Some("1") {
+        eprintln!(
+            "skipping real corpus smoke; run with SIM_REAL_CORPUS=1 SIM_REAL_CORPUS_ROOT=/path/to/app cargo test generated_project_real_corpus_smoke -- --nocapture"
+        );
+        return;
+    }
+
+    let Some(root) = real_corpus_root() else {
+        eprintln!("skipping real corpus smoke; set SIM_REAL_CORPUS_ROOT=/path/to/app");
+        return;
+    };
+    if !root.is_dir() {
+        eprintln!("skipping real corpus smoke; missing {}", root.display());
+        return;
+    }
+
+    let files = collect_real_corpus_ruby_files(&root);
+    let shape = CorpusShape::from_files(&files);
+    eprintln!(
+        "real corpus shape: files={} loc={} bytes={} namespace_defs={} method_defs={} rough_call_refs={}",
+        shape.files,
+        shape.loc,
+        shape.bytes,
+        shape.namespace_defs,
+        shape.method_defs,
+        shape.rough_call_refs
+    );
+    assert!(
+        shape.files >= 2_000,
+        "expected large-scale Ruby files, got {:?}",
+        shape
+    );
+    assert!(
+        shape.method_defs >= 20_000,
+        "expected large-scale method defs, got {:?}",
+        shape
+    );
+    assert!(
+        shape.rough_call_refs >= 200_000,
+        "expected large-scale call/ref density, got {:?}",
+        shape
+    );
+
+    let server = RubyLanguageServer::default();
+    let workspace_uri = tower_lsp::lsp_types::Url::from_file_path(&root).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: real corpus root `{}` is not file-URI convertible. This is a bug because LSP smoke needs local file URIs. Fix: pass a canonical filesystem path.",
+            root.display()
+        )
+    });
+    server.add_workspace(workspace_uri);
+
+    let index_start = Instant::now();
+    index_project_files_for_smoke(&server, &files);
+    let index_elapsed = index_start.elapsed();
+    let stats = server.analysis_engine.lock().stats();
+    eprintln!(
+        "real corpus index: elapsed={:?} files={} methods={} refs={} types={} graph_edges={} diagnostics={}",
+        index_elapsed,
+        stats.files,
+        stats.methods,
+        stats.references,
+        stats.types,
+        stats.graph_edges,
+        stats.diagnostics
+    );
+    assert_elapsed_under_env_budget(
+        "SIM_REAL_CORPUS_INDEX_MAX_MS",
+        Duration::from_secs(1_200),
+        index_elapsed,
+        "real corpus index",
+    );
+    assert!(
+        stats.files >= shape.files,
+        "expected all project files indexed, shape={:?}, stats={:?}",
+        shape,
+        stats
+    );
+    assert!(
+        stats.methods >= 15_000,
+        "expected substantial real method facts, shape={:?}, stats={:?}",
+        shape,
+        stats
+    );
+    assert!(
+        stats.references >= 10_000,
+        "expected substantial real resolved refs, shape={:?}, stats={:?}",
+        shape,
+        stats
+    );
+    assert!(
+        stats.types >= 1_000,
+        "expected substantial real type facts, shape={:?}, stats={:?}",
+        shape,
+        stats
+    );
+
+    let samples = select_real_method_reference_samples(&server, 12);
+    assert!(
+        samples.len() >= 8,
+        "expected at least 8 real method reference samples after indexing {}, got {} samples, stats={:?}",
+        root.display(),
+        samples.len(),
+        stats
+    );
+    for sample in &samples {
+        open_real_document(&server, &sample.definition.path).await;
+        if sample.reference.path != sample.definition.path {
+            open_real_document(&server, &sample.reference.path).await;
         }
 
-        // Don't fail the test - we just collected data
-        println!("\n   ✅ Soak test completed successfully (failures are expected)");
+        let defs = goto_def_locations(&server, &sample.reference).await;
+        assert!(
+            defs.iter()
+                .any(|location| location_start_matches(location, &sample.definition)),
+            "expected real goto for {} from {}:{} to include {}:{}, got {:?}",
+            sample.label,
+            sample.reference.path.display(),
+            sample.reference.position.line,
+            sample.definition.path.display(),
+            sample.definition.position.line,
+            defs
+        );
+
+        let refs = reference_locations(&server, &sample.reference).await;
+        assert!(
+            refs.iter()
+                .any(|location| location_start_matches(location, &sample.reference))
+                && refs.len() >= sample.reference_count.min(3),
+            "expected real refs for {} at usage {}:{} to include usage and at least {} refs, got {:?}",
+            sample.label,
+            sample.reference.path.display(),
+            sample.reference.position.line,
+            sample.reference_count.min(3),
+            refs
+        );
+
+        let hover = hover_at(&server, &sample.reference)
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected real hover for {} at {}:{}",
+                    sample.label,
+                    sample.reference.path.display(),
+                    sample.reference.position.line
+                )
+            });
+        assert!(
+            !format!("{hover:?}").trim().is_empty(),
+            "expected non-empty real hover for {}, got {:?}",
+            sample.label,
+            hover
+        );
+    }
+
+    let hinted = assert_real_type_inlay_samples(&server, 3).await;
+    eprintln!(
+        "real corpus semantic samples: goto/refs/hover={} type_hint_files={}",
+        samples.len(),
+        hinted
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+}
+
+fn assert_elapsed_under_env_budget(
+    env_name: &str,
+    default_budget: Duration,
+    elapsed: Duration,
+    label: &str,
+) {
+    let budget = std::env::var(env_name)
+        .ok()
+        .map(|value| {
+            let millis = value.parse::<u64>().unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: {} `{}` is not a u64 millisecond budget: {}. \
+                     This is a bug because perf budgets must be numeric. \
+                     Fix: pass {}=<milliseconds>.",
+                    env_name, value, err, env_name
+                )
+            });
+            Duration::from_millis(millis)
+        })
+        .unwrap_or(default_budget);
+
+    assert!(
+        elapsed <= budget,
+        "{} exceeded perf budget {:?}: elapsed {:?}. Override with {}=<milliseconds> if this machine is intentionally slower.",
+        label,
+        budget,
+        elapsed,
+        env_name
+    );
+}
+
+fn sample_call_shapes(calls: &[CallSite]) -> Vec<&CallSite> {
+    let required = [
+        "bare",
+        "local",
+        "ivar",
+        "class",
+        "constructor",
+        "one-hop",
+        "receiver-local",
+        "super",
+    ];
+    required
+        .iter()
+        .map(|shape| {
+            calls
+                .iter()
+                .find(|call| {
+                    call.shape_name == *shape
+                        && call.definition_support.is_supported()
+                        && call.reference_support.is_supported()
+                        && call.hover_support.is_supported()
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INVARIANT VIOLATED: scale project did not generate supported `{}` call. This is a bug because scale smoke must cover every agent navigation call shape. Fix: inspect large_scale_project.",
+                        shape
+                    )
+                })
+        })
+        .collect()
+}
+
+async fn open_once(
+    editor: &mut FakeEditor,
+    files: &std::collections::BTreeMap<String, String>,
+    opened: &mut BTreeSet<String>,
+    file: &str,
+) {
+    if opened.contains(file) {
+        return;
+    }
+    let content = files.get(file).unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: scale smoke tried to open missing file `{}`. This is a bug because source map positions must point at rendered files. Fix: inspect render_project.",
+            file
+        )
+    });
+    editor.open(file, content).await;
+    opened.insert(file.to_string());
+}
+
+fn location_matches_pos(location: &tower_lsp::lsp_types::Location, pos: &SourcePos) -> bool {
+    location.uri.path().ends_with(&pos.file) && location.range.start.line == pos.line
+}
+
+fn seeded_script_fingerprint(script: &super::seeded::SeededScript) -> String {
+    let mut hasher = StableHasher::new();
+    let render = script.project.render();
+
+    hasher.write_str("seed:");
+    hasher.write_str(&script.seed.to_string());
+    hasher.write_str("\nproject:");
+    hasher.write_str(&script.project.name);
+    hasher.write_str("\nfiles:\n");
+    for (file, content) in &render.files {
+        hasher.write_str(file);
+        hasher.write_str("\0");
+        hasher.write_str(content);
+        hasher.write_str("\0");
+    }
+    hasher.write_str("\ninitial_open_files:\n");
+    for file in &script.initial_open_files {
+        hasher.write_str(file);
+        hasher.write_str("\0");
+    }
+    hasher.write_str("\nedits:\n");
+    for edit in &script.project.edits {
+        hasher.write_str(&edit.name);
+        hasher.write_str("\0");
+        hasher.write_str(&format!("{:?}", edit.ops));
+        hasher.write_str("\0");
+        hasher.write_str(&format!("{:?}", edit.expected));
+        hasher.write_str("\0");
+    }
+    hasher.write_str("\nsteps:\n");
+    for step in &script.steps {
+        hasher.write_str(&format!("{step:?}"));
+        hasher.write_str("\0");
+    }
+
+    format!("fnv1a64:{:016x}", hasher.finish())
+}
+
+struct StableHasher {
+    hash: u64,
+}
+
+impl StableHasher {
+    fn new() -> Self {
+        Self {
+            hash: 0xcbf2_9ce4_8422_2325,
+        }
+    }
+
+    fn write_str(&mut self, value: &str) {
+        for byte in value.as_bytes() {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.hash
     }
 }
 
-// =============================================================================
-// Model Unit Tests (minimal - just for the model logic)
-// =============================================================================
+#[derive(Debug)]
+struct CorpusShape {
+    files: usize,
+    loc: usize,
+    bytes: usize,
+    namespace_defs: usize,
+    method_defs: usize,
+    rough_call_refs: usize,
+}
 
-#[cfg(test)]
-mod model_tests {
-    use super::*;
-
-    #[test]
-    fn test_model_open_close() {
-        let mut model = LspModel::new();
-        assert!(!model.is_open("test.rb"));
-
-        model.open("test.rb".to_string(), "class Foo; end".to_string());
-        assert!(model.is_open("test.rb"));
-        assert_eq!(model.get_content("test.rb"), Some("class Foo; end"));
-
-        model.close("test.rb");
-        assert!(!model.is_open("test.rb"));
-    }
-
-    #[test]
-    fn test_model_edit() {
-        let mut model = LspModel::new();
-        model.open("test.rb".to_string(), "class Foo\nend".to_string());
-
-        let range = tower_lsp::lsp_types::Range {
-            start: tower_lsp::lsp_types::Position {
-                line: 0,
-                character: 6,
-            },
-            end: tower_lsp::lsp_types::Position {
-                line: 0,
-                character: 9,
-            },
+impl CorpusShape {
+    fn from_files(files: &[PathBuf]) -> Self {
+        let mut shape = Self {
+            files: files.len(),
+            loc: 0,
+            bytes: 0,
+            namespace_defs: 0,
+            method_defs: 0,
+            rough_call_refs: 0,
         };
 
-        model.edit("test.rb", &range, "Bar");
-        assert_eq!(model.get_content("test.rb"), Some("class Bar\nend"));
+        for file in files {
+            let content = std::fs::read_to_string(file).unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: failed to read real corpus file `{}`: {}. This is a bug because corpus shape requires readable Ruby files. Fix: inspect file permissions.",
+                    file.display(),
+                    err
+                )
+            });
+            shape.bytes += content.len();
+            for line in content.lines() {
+                shape.loc += 1;
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("class ") || trimmed.starts_with("module ") {
+                    shape.namespace_defs += 1;
+                }
+                if trimmed.starts_with("def ") {
+                    shape.method_defs += 1;
+                }
+                if !trimmed.starts_with('#')
+                    && (trimmed.contains('.') || trimmed.contains("::") || trimmed.contains('('))
+                {
+                    shape.rough_call_refs += 1;
+                }
+            }
+        }
+
+        shape
     }
+}
+
+#[derive(Debug, Clone)]
+struct LspPoint {
+    path: PathBuf,
+    position: Position,
+}
+
+#[derive(Debug, Clone)]
+struct RealMethodSample {
+    label: String,
+    definition: LspPoint,
+    reference: LspPoint,
+    reference_count: usize,
+}
+
+fn real_corpus_root() -> Option<PathBuf> {
+    std::env::var("SIM_REAL_CORPUS_ROOT")
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn collect_real_corpus_ruby_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_real_corpus_ruby_files_into(root, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_real_corpus_ruby_files_into(dir: &Path, files: &mut Vec<PathBuf>) {
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: failed to read corpus dir `{}`: {}. This is a bug because corpus smoke needs readable dirs. Fix: inspect path/permissions.",
+            dir.display(),
+            err
+        )
+    });
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if matches!(name, ".git" | "vendor" | ".bundle" | "tmp" | "log") {
+                continue;
+            }
+            collect_real_corpus_ruby_files_into(&path, files);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rb") {
+            files.push(path);
+        }
+    }
+}
+
+fn index_project_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf]) {
+    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    for file in files {
+        let content = std::fs::read_to_string(file).unwrap_or_else(|err| {
+            panic!(
+                "INVARIANT VIOLATED: failed to read real corpus file `{}` during indexing: {}. This is a bug because indexed files must be readable. Fix: inspect file permissions.",
+                file.display(),
+                err
+            )
+        });
+        let uri = tower_lsp::lsp_types::Url::from_file_path(file).unwrap_or_else(|_| {
+            panic!(
+                "INVARIANT VIOLATED: real corpus file `{}` is not file-URI convertible. This is a bug because LSP indexing requires file URIs. Fix: inspect path.",
+                file.display()
+            )
+        });
+        processor
+            .collect_file_facts_as_deferred_resolution(&uri, &content, server, SourceKind::Project)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "INVARIANT VIOLATED: failed to index real corpus file `{}`: {}. This is a bug because smoke indexing should tolerate valid Ruby project files. Fix: inspect parser/fact collector failure.",
+                    file.display(),
+                    err
+                )
+            });
+    }
+    server.analysis_engine.lock().resolve();
+}
+
+fn select_real_method_reference_samples(
+    server: &RubyLanguageServer,
+    limit: usize,
+) -> Vec<RealMethodSample> {
+    let engine = server.analysis_engine.lock();
+    let query = engine.query();
+    let mut methods = engine.all_method_facts();
+    methods.sort_by_key(|method| {
+        (
+            method.range.file_id,
+            method.range.start_byte,
+            method.fqn.to_string(),
+        )
+    });
+
+    let mut samples = Vec::new();
+    let mut seen_labels = BTreeSet::new();
+    let mut seen_reference_files = BTreeSet::new();
+
+    for method in methods {
+        let FullyQualifiedName::Method(_, ruby_method) = &method.fqn else {
+            continue;
+        };
+        if matches!(ruby_method.to_string().as_str(), "new" | "initialize") {
+            continue;
+        }
+        let label = method.fqn.to_string();
+        if seen_labels.contains(&label) {
+            continue;
+        }
+        let mut refs = query.method_reference_ranges(&method.owner, ruby_method);
+        refs.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        let reference_count = refs.len();
+        for reference_range in refs {
+            if reference_range == method.range {
+                continue;
+            }
+            let Some(definition) = lsp_point_for_range(&engine, method.range) else {
+                continue;
+            };
+            let Some(reference) = lsp_point_for_range(&engine, reference_range) else {
+                continue;
+            };
+            if !is_preferred_real_sample_path(&definition.path)
+                || !is_preferred_real_sample_path(&reference.path)
+            {
+                continue;
+            }
+            let reference_file = reference.path.clone();
+            if !seen_reference_files.insert(reference_file) && samples.len() < limit / 2 {
+                continue;
+            }
+            seen_labels.insert(label.clone());
+            samples.push(RealMethodSample {
+                label: label.clone(),
+                definition,
+                reference,
+                reference_count,
+            });
+            if samples.len() >= limit {
+                return samples;
+            }
+            break;
+        }
+    }
+
+    samples
+}
+
+fn is_preferred_real_sample_path(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    !path.contains("/.ai-docs/") && !path.contains("/spec/")
+}
+
+fn lsp_point_for_range(
+    engine: &ruby_analysis::engine::AnalysisEngine,
+    range: TextRange,
+) -> Option<LspPoint> {
+    let file = engine.file(range.file_id)?;
+    let (line, character) = file.byte_offset_to_line_character(range.start_byte)?;
+    Some(LspPoint {
+        path: file.path.clone(),
+        position: Position::new(line, character),
+    })
+}
+
+async fn open_real_document(server: &RubyLanguageServer, path: &Path) {
+    let uri = tower_lsp::lsp_types::Url::from_file_path(path).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: real document `{}` is not file-URI convertible. This is a bug because didOpen requires a valid file URI. Fix: inspect path.",
+            path.display()
+        )
+    });
+    if server.docs.lock().contains_key(&uri) {
+        return;
+    }
+    let content = std::fs::read_to_string(path).unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: failed to open real document `{}`: {}. This is a bug because LSP smoke samples must be readable. Fix: inspect file permissions.",
+            path.display(),
+            err
+        )
+    });
+    indexing::handle_did_open(
+        server,
+        DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri,
+                language_id: "ruby".to_string(),
+                version: 1,
+                text: content,
+            },
+        },
+    )
+    .await;
+}
+
+async fn goto_def_locations(server: &RubyLanguageServer, point: &LspPoint) -> Vec<Location> {
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&point.path).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: goto point path `{}` is not file-URI convertible. This is a bug because LSP queries need file URIs. Fix: inspect sample selection.",
+            point.path.display()
+        )
+    });
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: point.position,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    match server.goto_definition(params).await {
+        Ok(Some(GotoDefinitionResponse::Scalar(location))) => vec![location],
+        Ok(Some(GotoDefinitionResponse::Array(locations))) => locations,
+        Ok(Some(GotoDefinitionResponse::Link(links))) => links
+            .into_iter()
+            .map(|link| Location {
+                uri: link.target_uri,
+                range: link.target_range,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(err) => panic!(
+            "INVARIANT VIOLATED: real corpus goto request failed at `{}`:{}:{}: {}. This is a bug because LSP requests should return JSON-RPC success. Fix: inspect goto handler.",
+            point.path.display(),
+            point.position.line,
+            point.position.character,
+            err
+        ),
+    }
+}
+
+async fn reference_locations(server: &RubyLanguageServer, point: &LspPoint) -> Vec<Location> {
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&point.path).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: reference point path `{}` is not file-URI convertible. This is a bug because LSP queries need file URIs. Fix: inspect sample selection.",
+            point.path.display()
+        )
+    });
+    let params = ReferenceParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: point.position,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: ReferenceContext {
+            include_declaration: true,
+        },
+    };
+    server
+        .references(params)
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "INVARIANT VIOLATED: real corpus references request failed at `{}`:{}:{}: {}. This is a bug because LSP requests should return JSON-RPC success. Fix: inspect references handler.",
+                point.path.display(),
+                point.position.line,
+                point.position.character,
+                err
+            )
+        })
+        .unwrap_or_default()
+}
+
+async fn hover_at(
+    server: &RubyLanguageServer,
+    point: &LspPoint,
+) -> Option<tower_lsp::lsp_types::Hover> {
+    let uri = tower_lsp::lsp_types::Url::from_file_path(&point.path).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: hover point path `{}` is not file-URI convertible. This is a bug because LSP queries need file URIs. Fix: inspect sample selection.",
+            point.path.display()
+        )
+    });
+    let params = HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: point.position,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    server.hover(params).await.unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: real corpus hover request failed at `{}`:{}:{}: {}. This is a bug because LSP requests should return JSON-RPC success. Fix: inspect hover handler.",
+            point.path.display(),
+            point.position.line,
+            point.position.character,
+            err
+        )
+    })
+}
+
+async fn assert_real_type_inlay_samples(server: &RubyLanguageServer, limit: usize) -> Vec<PathBuf> {
+    let candidates = {
+        let engine = server.analysis_engine.lock();
+        let mut counts = BTreeMap::new();
+        for fact in engine.type_store().all_facts() {
+            *counts.entry(fact.range.file_id).or_insert(0usize) += 1;
+        }
+        let mut candidates = counts
+            .into_iter()
+            .filter_map(|(file_id, count)| {
+                engine.file(file_id).map(|file| (count, file.path.clone()))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        candidates
+    };
+
+    let mut samples = Vec::new();
+    for (_count, path) in candidates.into_iter().take(50) {
+        open_real_document(server, &path).await;
+        let hints = inlay_hints_for_path(server, &path).await;
+        if !hints.is_empty() {
+            samples.push(path);
+            if samples.len() >= limit {
+                return samples;
+            }
+        }
+    }
+
+    assert!(
+        !samples.is_empty(),
+        "expected at least one real corpus file to produce type inlay hints from indexed type facts"
+    );
+    samples
+}
+
+async fn inlay_hints_for_path(
+    server: &RubyLanguageServer,
+    path: &Path,
+) -> Vec<tower_lsp::lsp_types::InlayHint> {
+    let uri = tower_lsp::lsp_types::Url::from_file_path(path).unwrap_or_else(|_| {
+        panic!(
+            "INVARIANT VIOLATED: inlay hint path `{}` is not file-URI convertible. This is a bug because LSP queries need file URIs. Fix: inspect sample selection.",
+            path.display()
+        )
+    });
+    let content = std::fs::read_to_string(path).unwrap_or_else(|err| {
+        panic!(
+            "INVARIANT VIOLATED: failed to read inlay hint sample `{}`: {}. This is a bug because sampled file must be readable. Fix: inspect file permissions.",
+            path.display(),
+            err
+        )
+    });
+    let line_count = content.lines().count() as u32;
+    let params = InlayHintParams {
+        text_document: TextDocumentIdentifier { uri },
+        range: Range::new(Position::new(0, 0), Position::new(line_count, 0)),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    server
+        .inlay_hint(params)
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "INVARIANT VIOLATED: real corpus inlay hint request failed for `{}`: {}. This is a bug because LSP requests should return JSON-RPC success. Fix: inspect inlay hint handler.",
+                path.display(),
+                err
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn location_start_matches(location: &Location, point: &LspPoint) -> bool {
+    location
+        .uri
+        .to_file_path()
+        .ok()
+        .as_deref()
+        .is_some_and(|path| path == point.path)
+        && location.range.start == point.position
 }

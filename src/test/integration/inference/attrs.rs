@@ -62,6 +62,42 @@ end
 }
 
 #[tokio::test]
+async fn test_class_attribute_class_and_instance_accessors() {
+    check(
+        r#"
+class Worker
+  class_attribute <def>:queue_config</def>
+end
+
+Worker.queue_con$0fig
+"#,
+    )
+    .await;
+
+    check(
+        r#"
+class Worker
+  class_attribute <def>:queue_config</def>
+end
+
+Worker.queue_con$0fig = {}
+"#,
+    )
+    .await;
+
+    check(
+        r#"
+class Worker
+  class_attribute <def>:queue_config</def>
+end
+
+Worker.new.queue_con$0fig
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_attr_reader_singleton() {
     check(
         r#"
@@ -195,18 +231,28 @@ Foo.new.PossibleConsta$0nts
 
 #[tokio::test]
 async fn test_private_attr() {
-    // Visibility might not be tracked yet, but definition should still be found
-    check(
-        r#"
+    use crate::test::harness::FakeEditor;
+
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "private_attr.rb",
+            r#"
 class Foo
   private
-  attr_reader <def>:secret</def>
+  attr_reader :secret
 end
 
-Foo.new.sec$0ret
+Foo.new.secret
 "#,
-    )
-    .await;
+        )
+        .await;
+
+    let defs = editor.goto_def_at("private_attr.rb", 5, 8).await;
+    assert!(
+        defs.is_empty(),
+        "private attr reader must not resolve through explicit receiver, got {defs:?}"
+    );
 }
 
 #[tokio::test]

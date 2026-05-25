@@ -10,6 +10,8 @@ pub enum MethodReceiver {
     None,
     /// Self receiver, e.g., `self.method_a`
     SelfReceiver,
+    /// Super receiver, e.g., `super` inside an overriding method.
+    Super,
     /// Constant receiver with path, e.g., `Foo::Bar` in `Foo::Bar.method`
     Constant(Vec<RubyConstant>),
     /// Local variable receiver, e.g., `a` in `a.method`

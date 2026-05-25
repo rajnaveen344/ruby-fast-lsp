@@ -66,10 +66,83 @@ impl EngineQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> Option<Vec<Location>> {
+        self.find_method_definitions_with_private(
+            receiver,
+            method,
+            namespace,
+            namespace_kind,
+            position,
+            true,
+            None,
+        )
+    }
+
+    pub fn find_public_method_definitions(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+    ) -> Option<Vec<Location>> {
+        self.find_method_definitions_with_private(
+            receiver,
+            method,
+            namespace,
+            namespace_kind,
+            position,
+            false,
+            None,
+        )
+    }
+
+    pub fn find_protected_method_definitions(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Option<Vec<Location>> {
+        self.find_method_definitions_with_private(
+            receiver,
+            method,
+            namespace,
+            namespace_kind,
+            position,
+            false,
+            Some(caller_namespace_fqn),
+        )
+    }
+
+    fn find_method_definitions_with_private(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Option<Vec<Location>> {
         let locations = self
-            .resolve_method_callees(receiver, method, namespace, namespace_kind, position)
+            .resolve_method_callees_with_private(
+                receiver,
+                method,
+                namespace,
+                namespace_kind,
+                position,
+                allow_private,
+                protected_caller,
+            )
             .into_iter()
-            .filter(|callee| callee.resolution == MethodCalleeResolution::Exact)
+            .filter(|callee| {
+                matches!(
+                    callee.resolution,
+                    MethodCalleeResolution::Exact | MethodCalleeResolution::MethodMissing
+                )
+            })
             .flat_map(|callee| callee.definition_locations)
             .collect::<Vec<_>>();
 
@@ -88,6 +161,38 @@ impl EngineQuery {
         namespace_kind: NamespaceKind,
         position: Position,
     ) -> Vec<ResolvedMethodCallee> {
+        self.resolve_method_callees_with_private(
+            receiver,
+            method,
+            namespace,
+            namespace_kind,
+            position,
+            true,
+            None,
+        )
+    }
+
+    fn resolve_method_callees_with_private(
+        &self,
+        receiver: &MethodReceiver,
+        method: &RubyMethod,
+        namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Vec<ResolvedMethodCallee> {
+        if matches!(receiver, MethodReceiver::Super) {
+            let namespace_fqn =
+                FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
+            if let Some(callee) =
+                analysis::resolve_super_method_callee(self, &namespace_fqn, method)
+            {
+                return vec![callee];
+            }
+            return Vec::new();
+        }
+
         let namespace_fqn =
             match self.resolve_receiver_to_namespace(receiver, namespace, namespace_kind, position)
             {
@@ -95,7 +200,14 @@ impl EngineQuery {
                 None => return Vec::new(),
             };
 
-        if let Some(callees) = analysis::resolve_method_callees(self, &namespace_fqn, method) {
+        let callees = if allow_private {
+            analysis::resolve_method_callees(self, &namespace_fqn, method)
+        } else if let Some(caller) = protected_caller {
+            analysis::resolve_protected_method_callees(self, &namespace_fqn, method, caller)
+        } else {
+            analysis::resolve_public_method_callees(self, &namespace_fqn, method)
+        };
+        if let Some(callees) = callees {
             return callees;
         }
 

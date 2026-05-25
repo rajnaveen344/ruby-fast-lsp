@@ -15,11 +15,14 @@ impl FactCollector {
         name: &[u8],
         name_loc: Location,
         value_node: Option<&Node>,
+        explicit_type: Option<RubyType>,
     ) {
         let variable_name = String::from_utf8_lossy(name).to_string();
 
         // Infer type from value if available
-        let inferred_type = if let Some(value) = value_node {
+        let inferred_type = if let Some(ty) = explicit_type {
+            ty
+        } else if let Some(value) = value_node {
             self.infer_assignment_type_from_value(value)
         } else {
             RubyType::Unknown
@@ -53,6 +56,14 @@ impl FactCollector {
                 variable_name
             );
             return;
+        }
+        if let Some(value) = value_node {
+            if let Some(return_type) = self.infer_proc_literal_return_type(value) {
+                self.proc_return_types_by_local
+                    .insert(variable_name.clone(), return_type);
+            } else {
+                self.proc_return_types_by_local.remove(&variable_name);
+            }
         }
 
         // Get location for both index entry and VariableScopes
@@ -103,6 +114,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            None,
         );
     }
 
@@ -112,7 +124,18 @@ impl FactCollector {
 
     // LocalVariableTargetNode
     pub fn process_local_variable_target_node_entry(&mut self, node: &LocalVariableTargetNode) {
-        self.process_local_variable_write(node.name().as_slice(), node.location(), None);
+        let variable_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+        let pattern_capture_type = self
+            .pattern_capture_type_stack
+            .last()
+            .and_then(|captures| captures.get(&variable_name))
+            .cloned();
+        self.process_local_variable_write(
+            node.name().as_slice(),
+            node.location(),
+            None,
+            pattern_capture_type,
+        );
     }
 
     pub fn process_local_variable_target_node_exit(&mut self, _node: &LocalVariableTargetNode) {
@@ -125,6 +148,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            None,
         );
     }
 
@@ -141,6 +165,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            None,
         );
     }
 
@@ -160,6 +185,7 @@ impl FactCollector {
             node.name().as_slice(),
             node.name_loc(),
             Some(&node.value()),
+            None,
         );
     }
 

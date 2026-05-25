@@ -1,4 +1,18 @@
+use crate::test::harness::check;
 use crate::test::harness::FakeEditor;
+
+#[tokio::test]
+async fn goto_pattern_capture_definition() {
+    check(
+        r#"
+case {user: "Ada"}
+in {user: <def>user</def>}
+  puts user$0
+end
+"#,
+    )
+    .await;
+}
 
 #[tokio::test]
 async fn local_definition_survives_reopen_without_reindex() {

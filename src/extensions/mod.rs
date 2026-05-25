@@ -1120,7 +1120,7 @@ fn resolved_callees_for_call_analysis(
         CoreMethodReceiver::Constant(path) => {
             query.resolve_constant_receiver(path, current_namespace)
         }
-        CoreMethodReceiver::None | CoreMethodReceiver::SelfReceiver => {
+        CoreMethodReceiver::None | CoreMethodReceiver::SelfReceiver | CoreMethodReceiver::Super => {
             FullyQualifiedName::namespace_with_kind(current_namespace.to_vec(), namespace_kind)
         }
         CoreMethodReceiver::LocalVariable(_)
@@ -1206,7 +1206,9 @@ fn callee_resolution_to_abi(
     resolution: MethodCalleeResolution,
 ) -> ruby_fast_lsp_extension_api::CalleeResolution {
     match resolution {
-        MethodCalleeResolution::Exact => ruby_fast_lsp_extension_api::CalleeResolution::Exact,
+        MethodCalleeResolution::Exact | MethodCalleeResolution::MethodMissing => {
+            ruby_fast_lsp_extension_api::CalleeResolution::Exact
+        }
         MethodCalleeResolution::ReceiverOnly => {
             ruby_fast_lsp_extension_api::CalleeResolution::ReceiverOnly
         }

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::core::{
-    DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName, GraphEdgeKind,
-    MethodCallSignatureCandidate, MethodFact, RaiseArgCandidate, ReferenceFact, RubyConstant,
-    RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateRef, TextRange,
+    DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName,
+    GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, RaiseArgCandidate, ReferenceFact,
+    RubyConstant, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
+    StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
@@ -22,8 +23,10 @@ impl AnalysisEngine {
 
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
-        let mut method_fact_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<MethodFact>> =
-            HashMap::new();
+        let mut method_fact_cache: HashMap<
+            (FullyQualifiedName, RubyMethod, bool),
+            Option<MethodFact>,
+        > = HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
@@ -89,30 +92,48 @@ impl AnalysisEngine {
                     let owner_fqn =
                         FullyQualifiedName::namespace_with_kind(owner, candidate.owner_kind);
                     let fact = method_fact_cache
-                        .entry((owner_fqn.clone(), candidate.method))
+                        .entry((owner_fqn.clone(), candidate.method, candidate.is_super))
                         .or_insert_with(|| {
-                            AnalysisQuery::new(self)
-                                .method_fact_for_receiver(&owner_fqn, &candidate.method)
+                            let query = AnalysisQuery::new(self);
+                            if candidate.is_super {
+                                query
+                                    .resolve_super_method_callee(&owner_fqn, &candidate.method)
+                                    .and_then(|callee| {
+                                        self.method_facts_matching_owner_name(
+                                            &callee.owner,
+                                            &candidate.method,
+                                        )
+                                        .into_iter()
+                                        .next()
+                                    })
+                            } else {
+                                query.method_fact_for_receiver(&owner_fqn, &candidate.method)
+                            }
                         })
                         .clone();
                     if let Some(fact) = fact {
-                        let target = FullyQualifiedName::method(
-                            fact.owner.namespace_parts(),
-                            candidate.method,
-                        );
+                        let fact_method = method_name_from_fact(&fact);
+                        let target =
+                            FullyQualifiedName::method(fact.owner.namespace_parts(), fact_method);
                         let target = self.names.intern_fqn(target);
                         self.facts.references.resolved.add(
                             target,
-                            ReferenceFact::new(candidate.range, candidate.caller),
+                            ReferenceFact::method(
+                                candidate.range,
+                                candidate.caller,
+                                candidate.access,
+                            ),
                         );
-                        if let Some(diagnostics) = candidate.diagnostics.as_deref() {
-                            self.push_signature_diagnostics(
-                                &fact,
-                                &candidate.method,
-                                &diagnostics.signature,
-                                diagnostics.diagnostic_range,
-                                &mut unresolved_constants,
-                            );
+                        if fact_method == candidate.method {
+                            if let Some(diagnostics) = candidate.diagnostics.as_deref() {
+                                self.push_signature_diagnostics(
+                                    &fact,
+                                    &candidate.method,
+                                    &diagnostics.signature,
+                                    diagnostics.diagnostic_range,
+                                    &mut unresolved_constants,
+                                );
+                            }
                         }
                     } else if *method_namespace_exists_cache
                         .entry(owner_fqn.clone())
@@ -125,7 +146,11 @@ impl AnalysisEngine {
                         let target = self.names.intern_fqn(target);
                         self.facts.references.resolved.add(
                             target,
-                            ReferenceFact::new(candidate.range, candidate.caller),
+                            ReferenceFact::method(
+                                candidate.range,
+                                candidate.caller,
+                                candidate.access,
+                            ),
                         );
 
                         if let Some(diagnostics) = candidate.diagnostics.as_deref() {
@@ -192,6 +217,189 @@ impl AnalysisEngine {
                 .resolved
                 .replace_file(file_id, diagnostics);
         }
+    }
+
+    pub(super) fn resolve_reference_candidates_in_file(&mut self, file_id: SourceFileId) {
+        let reference_candidates = self.facts.references.candidates.candidates_in_file(file_id);
+        let mut unresolved =
+            HashMap::from([(file_id, self.resolve_diagnostic_candidates_in_file(file_id))]);
+        let mut method_fact_cache: HashMap<
+            (FullyQualifiedName, RubyMethod, bool),
+            Option<MethodFact>,
+        > = HashMap::new();
+        let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
+        let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
+            HashMap::new();
+        let mut resolved_refs = Vec::new();
+
+        for candidate in reference_candidates {
+            match candidate.kind {
+                StoredReferenceCandidateKind::Resolved { target, caller } => {
+                    resolved_refs.push((target, ReferenceFact::new(candidate.range, caller)));
+                }
+                StoredReferenceCandidateKind::Constant { lookup } => {
+                    let lookup = self.names.const_lookup(lookup).expect(
+                        "INVARIANT VIOLATED: reference candidate points to missing constant lookup. \
+                         This is a bug because stored reference candidates must only contain interned lookup ids. \
+                         Fix: intern constant lookups before inserting candidates.",
+                    );
+                    let parts = lookup.path.to_vec();
+                    let context = self.names.fqn(lookup.context).expect(
+                        "INVARIANT VIOLATED: constant lookup points to missing context FQN id. \
+                         This is a bug because constant lookups must only store interned context FQN ids. \
+                         Fix: intern lookup contexts before inserting candidates.",
+                    );
+                    if let Some(target) = self.resolve_constant_reference(
+                        &parts,
+                        &if lookup.absolute {
+                            Vec::new()
+                        } else {
+                            context.namespace_parts()
+                        },
+                    ) {
+                        let target = self.names.intern_fqn(target);
+                        resolved_refs.push((target, ReferenceFact::new(candidate.range, None)));
+                    } else {
+                        unresolved
+                            .entry(file_id)
+                            .or_default()
+                            .push(DiagnosticFact::new(
+                                candidate.range,
+                                crate::core::DiagnosticSeverity::Error,
+                                "unresolved-constant",
+                                format!("Unresolved constant `{}`", constant_name(&parts)),
+                            ));
+                    }
+                }
+                StoredReferenceCandidateKind::Method {
+                    owner,
+                    owner_kind,
+                    method,
+                    is_super,
+                    access,
+                    caller,
+                    diagnostics,
+                } => {
+                    let owner_lookup = self.names.const_lookup(owner).expect(
+                        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
+                         This is a bug because stored reference candidates must only contain interned lookup ids. \
+                         Fix: intern constant lookups before inserting candidates.",
+                    );
+                    let owner = owner_lookup.path.to_vec();
+                    let owner_fqn = FullyQualifiedName::namespace_with_kind(owner, owner_kind);
+                    let fact = method_fact_cache
+                        .entry((owner_fqn.clone(), method, is_super))
+                        .or_insert_with(|| {
+                            let query = AnalysisQuery::new(self);
+                            if is_super {
+                                query
+                                    .resolve_super_method_callee(&owner_fqn, &method)
+                                    .and_then(|callee| {
+                                        self.method_facts_matching_owner_name(
+                                            &callee.owner,
+                                            &method,
+                                        )
+                                        .into_iter()
+                                        .next()
+                                    })
+                            } else {
+                                query.method_fact_for_receiver(&owner_fqn, &method)
+                            }
+                        })
+                        .clone();
+                    if let Some(fact) = fact {
+                        let fact_method = method_name_from_fact(&fact);
+                        let target =
+                            FullyQualifiedName::method(fact.owner.namespace_parts(), fact_method);
+                        let target = self.names.intern_fqn(target);
+                        resolved_refs.push((
+                            target,
+                            ReferenceFact::method(candidate.range, caller, access),
+                        ));
+                        if fact_method == method {
+                            if let Some(diagnostics) = diagnostics.as_deref() {
+                                self.push_signature_diagnostics(
+                                    &fact,
+                                    &method,
+                                    &diagnostics.signature,
+                                    diagnostics.diagnostic_range,
+                                    &mut unresolved,
+                                );
+                            }
+                        }
+                    } else if *method_namespace_exists_cache
+                        .entry(owner_fqn.clone())
+                        .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn))
+                    {
+                        let target =
+                            FullyQualifiedName::method(owner_fqn.namespace_parts(), method);
+                        let target = self.names.intern_fqn(target);
+                        resolved_refs.push((
+                            target,
+                            ReferenceFact::method(candidate.range, caller, access),
+                        ));
+
+                        if let Some(diagnostics) = diagnostics.as_deref() {
+                            if !diagnostics.diagnose_unresolved {
+                                continue;
+                            }
+                            let suggestion = method_suggestion_cache
+                                .entry((owner_fqn.clone(), method))
+                                .or_insert_with(|| {
+                                    self.find_method_suggestion(&owner_fqn, method.as_str())
+                                })
+                                .clone();
+                            let mut message = match &diagnostics.receiver_label {
+                                Some(label) => {
+                                    format!(
+                                        "Unresolved method `{}` on `{}`",
+                                        method.as_str(),
+                                        label
+                                    )
+                                }
+                                None => format!("Unresolved method `{}`", method.as_str()),
+                            };
+                            if let Some(suggestion) = suggestion {
+                                message.push_str(&format!(". Did you mean `{}`?", suggestion));
+                            }
+                            unresolved
+                                .entry(file_id)
+                                .or_default()
+                                .push(DiagnosticFact::new(
+                                    diagnostics.diagnostic_range,
+                                    crate::core::DiagnosticSeverity::Warning,
+                                    "unresolved-method",
+                                    message,
+                                ));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.facts
+            .references
+            .resolved
+            .replace_file(file_id, resolved_refs);
+        let mut diagnostics = self
+            .facts
+            .diagnostics
+            .resolved
+            .facts_in_file(file_id)
+            .into_iter()
+            .filter(|fact| fact.code != "unresolved-constant")
+            .filter(|fact| fact.code != "unresolved-method")
+            .filter(|fact| fact.code != "wrong-arity")
+            .filter(|fact| fact.code != "unknown-kwarg")
+            .filter(|fact| fact.code != "missing-kwarg")
+            .filter(|fact| fact.code != "raise-non-exception")
+            .filter(|fact| fact.code != "bad-splat")
+            .collect::<Vec<_>>();
+        diagnostics.extend(unresolved.remove(&file_id).unwrap_or_default());
+        self.facts
+            .diagnostics
+            .resolved
+            .replace_file(file_id, diagnostics);
     }
 
     fn push_signature_diagnostics(
@@ -296,45 +504,60 @@ impl AnalysisEngine {
     fn resolve_diagnostic_candidates(&self) -> HashMap<SourceFileId, Vec<DiagnosticFact>> {
         let mut diagnostics = HashMap::new();
         for candidate in self.facts.diagnostics.candidates.iter_candidates() {
-            match &candidate.kind {
-                DiagnosticCandidateKind::BadSplat {
-                    operator,
-                    arg_repr,
-                    expected,
-                } => {
-                    diagnostics
-                        .entry(candidate.range.file_id)
-                        .or_insert_with(Vec::new)
-                        .push(DiagnosticFact::new(
-                            candidate.range,
-                            crate::core::DiagnosticSeverity::Warning,
-                            "bad-splat",
-                            format!(
-                                "`{}{}` expected {} but got non-{} value",
-                                operator, arg_repr, expected, expected
-                            ),
-                        ));
-                }
-                DiagnosticCandidateKind::RaiseNonException { arg_repr, arg } => {
-                    if self.raise_arg_is_exception(arg.clone()) {
-                        continue;
-                    }
-                    diagnostics
-                        .entry(candidate.range.file_id)
-                        .or_insert_with(Vec::new)
-                        .push(DiagnosticFact::new(
-                            candidate.range,
-                            crate::core::DiagnosticSeverity::Warning,
-                            "raise-non-exception",
-                            format!(
-                                "`raise` argument `{}` is not an Exception subclass",
-                                arg_repr
-                            ),
-                        ));
-                }
+            if let Some(diagnostic) = self.resolve_diagnostic_candidate(candidate) {
+                diagnostics
+                    .entry(diagnostic.range.file_id)
+                    .or_insert_with(Vec::new)
+                    .push(diagnostic);
             }
         }
         diagnostics
+    }
+
+    fn resolve_diagnostic_candidates_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticFact> {
+        self.facts
+            .diagnostics
+            .candidates
+            .candidates_in_file(file_id)
+            .iter()
+            .filter_map(|candidate| self.resolve_diagnostic_candidate(candidate))
+            .collect()
+    }
+
+    fn resolve_diagnostic_candidate(
+        &self,
+        candidate: &DiagnosticCandidate,
+    ) -> Option<DiagnosticFact> {
+        match &candidate.kind {
+            DiagnosticCandidateKind::BadSplat {
+                operator,
+                arg_repr,
+                expected,
+            } => Some(DiagnosticFact::new(
+                candidate.range,
+                crate::core::DiagnosticSeverity::Warning,
+                "bad-splat",
+                format!(
+                    "`{}{}` expected {} but got non-{} value",
+                    operator, arg_repr, expected, expected
+                ),
+            )),
+            DiagnosticCandidateKind::RaiseNonException { arg_repr, arg } => {
+                if self.raise_arg_is_exception(arg.clone()) {
+                    None
+                } else {
+                    Some(DiagnosticFact::new(
+                        candidate.range,
+                        crate::core::DiagnosticSeverity::Warning,
+                        "raise-non-exception",
+                        format!(
+                            "`raise` argument `{}` is not an Exception subclass",
+                            arg_repr
+                        ),
+                    ))
+                }
+            }
+        }
     }
 
     fn raise_arg_is_exception(&self, arg: RaiseArgCandidate) -> bool {
@@ -524,6 +747,18 @@ impl AnalysisEngine {
 
         None
     }
+}
+
+fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
+    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+        panic!(
+            "INVARIANT VIOLATED: method fact has non-method FQN `{}`. \
+             This is a bug because method facts must be keyed by method FQNs. \
+             Fix: only insert MethodFact values built from FullyQualifiedName::Method.",
+            fact.fqn
+        );
+    };
+    *method
 }
 
 fn constant_name(parts: &[RubyConstant]) -> String {

@@ -114,6 +114,22 @@ args = ["a", "b", "c"]
 }
 
 #[tokio::test]
+async fn forwarding_args_at_callsite_skips_check() {
+    check(
+        r#"
+def target(name, age)
+  name
+end
+
+def wrapper(...)
+  <warn none code="wrong-arity">target(...)</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn unresolved_method_no_arity_warn() {
     // Method doesn't exist → unresolved-method handles it; no double-warn.
     check(

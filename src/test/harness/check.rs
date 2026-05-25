@@ -764,7 +764,8 @@ async fn run_type_check(
                     } else {
                         let receiver_type = match receiver {
                             ruby_analysis::indexer::MethodReceiver::None
-                            | ruby_analysis::indexer::MethodReceiver::SelfReceiver => {
+                            | ruby_analysis::indexer::MethodReceiver::SelfReceiver
+                            | ruby_analysis::indexer::MethodReceiver::Super => {
                                 if namespace.is_empty() {
                                     RubyType::class("Object")
                                 } else {
@@ -1030,6 +1031,7 @@ async fn run_diagnostics_check(
         let facts = ruby_analysis::engine::FileFacts {
             symbols: query.symbol_facts_in_file(file_id),
             methods: query.method_facts_in_file(file_id),
+            method_visibility_overrides: query.method_visibility_overrides_in_file(file_id),
             types: query.type_facts_in_file(file_id),
             graph_nodes: query.graph_nodes_in_file(file_id),
             graph_edges: query.graph_edges_in_file(file_id),

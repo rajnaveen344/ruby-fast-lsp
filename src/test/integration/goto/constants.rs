@@ -81,3 +81,38 @@ end
     )
     .await;
 }
+
+#[tokio::test]
+async fn goto_const_get_literal_symbol_constant() {
+    check(
+        r#"
+module SampleApp
+  module Platform
+    module Util
+      <def>class TriggerHelpers
+      end</def>
+    end
+  end
+end
+
+helper = SampleApp::Platform::Util.const_get(:TriggerHelpers$0)
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn goto_self_const_defined_literal_symbol_constant() {
+    check(
+        r#"
+class PushUnit
+  <def>TYPE = "push"</def>
+
+  def self.type
+    self.const_defined?(:TYPE$0) ? self.const_get(:TYPE) : nil
+  end
+end
+"#,
+    )
+    .await;
+}

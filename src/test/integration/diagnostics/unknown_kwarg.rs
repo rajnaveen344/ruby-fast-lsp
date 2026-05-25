@@ -65,6 +65,22 @@ opts = { name: "x", agee: 30 }
 }
 
 #[tokio::test]
+async fn forwarding_args_at_callsite_skips_check() {
+    check(
+        r#"
+def target(name:)
+  name
+end
+
+def wrapper(...)
+  <warn none code="unknown-kwarg">target(...)</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn unknown_kwarg_constant_receiver_warns() {
     check(
         r#"

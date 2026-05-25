@@ -56,7 +56,13 @@ impl EngineQuery {
             identifier,
         );
 
-        self.find_definitions_for_identifier(&identifier, &ancestors, namespace_kind, position)
+        self.find_definitions_for_identifier(
+            &identifier,
+            &ancestors,
+            namespace_kind,
+            position,
+            content,
+        )
     }
 
     /// Find definitions for a local variable using VariableScopes (position-based lookup)
@@ -98,6 +104,28 @@ impl EngineQuery {
     }
 }
 
+fn method_receiver_allows_private(
+    receiver: &ruby_analysis::indexer::MethodReceiver,
+    content: &str,
+    position: Position,
+) -> bool {
+    matches!(
+        receiver,
+        ruby_analysis::indexer::MethodReceiver::None
+            | ruby_analysis::indexer::MethodReceiver::Super
+    ) || static_send_symbol_at_position(content, position)
+}
+
+fn static_send_symbol_at_position(content: &str, position: Position) -> bool {
+    let Some(line) = content.lines().nth(position.line as usize) else {
+        return false;
+    };
+    line.contains(".send(:")
+        || line.contains(".__send__(:")
+        || line.contains(".send(\"")
+        || line.contains(".__send__(\"")
+}
+
 // Private helpers
 impl EngineQuery {
     /// Find definitions for a given identifier.
@@ -107,6 +135,7 @@ impl EngineQuery {
         ancestors: &[RubyConstant],
         namespace_kind: NamespaceKind,
         position: Position,
+        content: &str,
     ) -> Option<Vec<Location>> {
         match identifier {
             Identifier::RubyConstant { namespace: _, iden } => {
@@ -117,7 +146,28 @@ impl EngineQuery {
                 namespace,
                 receiver,
                 iden,
-            } => self.find_method_definitions(receiver, iden, namespace, namespace_kind, position),
+            } => {
+                if method_receiver_allows_private(receiver, content, position) {
+                    self.find_method_definitions(
+                        receiver,
+                        iden,
+                        namespace,
+                        namespace_kind,
+                        position,
+                    )
+                } else {
+                    let caller_namespace_fqn =
+                        FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
+                    self.find_protected_method_definitions(
+                        receiver,
+                        iden,
+                        namespace,
+                        namespace_kind,
+                        position,
+                        &caller_namespace_fqn,
+                    )
+                }
+            }
             Identifier::RubyInstanceVariable { name, .. } => {
                 self.find_instance_variable_definitions(name)
             }

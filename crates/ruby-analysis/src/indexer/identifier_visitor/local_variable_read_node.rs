@@ -1,7 +1,7 @@
 use ruby_prism::{
     ClassVariableReadNode, ClassVariableWriteNode, GlobalVariableReadNode, GlobalVariableWriteNode,
     InstanceVariableReadNode, InstanceVariableWriteNode, LocalVariableReadNode,
-    LocalVariableWriteNode,
+    LocalVariableTargetNode, LocalVariableWriteNode,
 };
 
 use crate::Identifier;
@@ -53,6 +53,28 @@ impl IdentifierVisitor {
     }
 
     pub fn process_local_variable_write_node_exit(&mut self, _node: &LocalVariableWriteNode) {
+        // No cleanup needed
+    }
+
+    pub fn process_local_variable_target_node_entry(&mut self, node: &LocalVariableTargetNode) {
+        if self.is_result_set() || !self.is_position_in_location(&node.location()) {
+            return;
+        }
+
+        let var_name = String::from_utf8_lossy(node.name().as_slice()).to_string();
+
+        self.set_result(
+            Some(Identifier::RubyLocalVariable {
+                namespace: self.scope_tracker.get_ns_stack(),
+                name: var_name,
+            }),
+            Some(IdentifierType::LVarDef),
+            self.scope_tracker.get_ns_stack(),
+            Some(0),
+        );
+    }
+
+    pub fn process_local_variable_target_node_exit(&mut self, _node: &LocalVariableTargetNode) {
         // No cleanup needed
     }
 

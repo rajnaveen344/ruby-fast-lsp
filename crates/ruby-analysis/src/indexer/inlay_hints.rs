@@ -389,6 +389,8 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
                 name_end_offset,
             });
         }
+
+        ruby_prism::visit_local_variable_write_node(self, node);
     }
 
     fn visit_instance_variable_write_node(
@@ -405,6 +407,8 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
                 name_end_offset,
             });
         }
+
+        ruby_prism::visit_instance_variable_write_node(self, node);
     }
 
     fn visit_class_variable_write_node(&mut self, node: &ruby_prism::ClassVariableWriteNode<'a>) {
@@ -418,6 +422,8 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
                 name_end_offset,
             });
         }
+
+        ruby_prism::visit_class_variable_write_node(self, node);
     }
 
     fn visit_global_variable_write_node(&mut self, node: &ruby_prism::GlobalVariableWriteNode<'a>) {
@@ -431,6 +437,8 @@ impl<'a> Visit<'a> for InlayNodeCollector<'a> {
                 name_end_offset,
             });
         }
+
+        ruby_prism::visit_global_variable_write_node(self, node);
     }
 
     fn visit_constant_write_node(&mut self, node: &ConstantWriteNode<'a>) {

@@ -2,6 +2,7 @@
 //!
 //! Tests hover behavior when cursor is on a local variable identifier.
 
+pub mod exception_flow;
 pub mod flow;
 pub mod literals;
 pub mod scope;

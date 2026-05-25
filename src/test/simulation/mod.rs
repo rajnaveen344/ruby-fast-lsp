@@ -1,47 +1,21 @@
-//! # Deterministic Simulation Testing for Ruby Fast LSP
+//! Deterministic project simulation tests.
 //!
-//! This module implements stateful property-based testing using `proptest`.
-//! The core idea: define an abstract Model (perfect simplification) and verify
-//! that the real LSP implementation never diverges from it.
-//!
-//! ## Architecture
-//!
-//! - `model.rs`: The Model (Oracle) - a simple HashMap tracking expected state
-//! - `transitions.rs`: All possible LSP operations (DidOpen, DidChange, etc.)
-//! - `generators.rs`: Strategies for generating Ruby content and valid edits
-//! - `harness.rs`: Test harness connecting Model to real LSP server
-//! - `tests.rs`: Property-based tests using proptest
-//!
-//! ## Assertion Levels
-//!
-//! - Level 1: No panics, text synchronization (Model.text == LSP.text)
-//! - Level 2: Semantic correctness via marker strategy (constructed inputs)
-//! - Level 3: Mathematical properties (idempotency, determinism)
-//!
-//! ## Usage
-//!
-//! ```bash
-//! # Run simulation tests
-//! cargo test simulation
-//!
-//! # Reproduce a specific failure
-//! PROPTEST_SEED=0x1234 cargo test simulation
-//!
-//! # Run with more iterations
-//! PROPTEST_CASES=500 cargo test simulation
-//! ```
+//! The simulation model describes a Ruby project graph in Rust, generates Ruby
+//! files, drives all edits through `FakeEditor`, then compares LSP/index
+//! observations against the model oracle.
 
-mod generators;
-mod harness;
-mod model;
+mod engine_runner;
+mod graph;
+mod oracle;
+mod project;
+mod ruby_gen;
+mod runner;
+mod seeded;
 mod tests;
-mod transitions;
 
-pub use generators::*;
-pub use harness::*;
-pub use model::*;
-pub use transitions::*;
-
-/// Model version for seed compatibility tracking.
-/// Bump this when changing transitions, generators, or weights.
-pub const MODEL_VERSION: &str = "v1";
+pub use engine_runner::*;
+pub use graph::*;
+pub use oracle::*;
+pub use project::*;
+pub use runner::*;
+pub use seeded::*;

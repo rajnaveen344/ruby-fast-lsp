@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::core::method_store::MethodVisibility;
 use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant};
 use ruby_prism::{ConstantPathNode, Node};
 
@@ -43,6 +44,8 @@ pub struct ScopeTracker {
     frames: Vec<ScopeFrame>,
     scope_kind_stack: Vec<LocalScopeKind>,
     method_fqn_stack: Vec<Option<FullyQualifiedName>>,
+    module_function_mode_stack: Vec<bool>,
+    visibility_stack: Vec<MethodVisibility>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,20 +66,36 @@ impl ScopeTracker {
             frames: Vec::new(),
             scope_kind_stack: vec![LocalScopeKind::Constant],
             method_fqn_stack: Vec::new(),
+            module_function_mode_stack: Vec::new(),
+            visibility_stack: vec![MethodVisibility::Public],
         }
     }
 
     pub fn push_ns_scope(&mut self, ns: RubyConstant) {
         self.frames.push(ScopeFrame::Namespace(vec![ns]));
+        self.module_function_mode_stack.push(false);
+        self.visibility_stack.push(MethodVisibility::Public);
     }
 
     pub fn push_ns_scopes(&mut self, namespaces: Vec<RubyConstant>) {
         self.frames.push(ScopeFrame::Namespace(namespaces));
+        self.module_function_mode_stack.push(false);
+        self.visibility_stack.push(MethodVisibility::Public);
     }
 
     pub fn pop_ns_scope(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Namespace(_))) {
             self.frames.pop();
+            self.module_function_mode_stack.pop().expect(
+                "INVARIANT VIOLATED: module_function mode stack underflow. \
+                 This is a bug because every namespace frame must own one module_function mode flag. \
+                 Fix: keep namespace frame push/pop balanced.",
+            );
+            self.visibility_stack.pop().expect(
+                "INVARIANT VIOLATED: visibility stack underflow. \
+                 This is a bug because every namespace frame must own one visibility flag. \
+                 Fix: keep namespace frame push/pop balanced.",
+            );
         }
     }
 
@@ -132,13 +151,54 @@ impl ScopeTracker {
             .find_map(|entry| entry.as_ref())
     }
 
+    pub fn enable_module_function_mode(&mut self) {
+        let Some(mode) = self.module_function_mode_stack.last_mut() else {
+            return;
+        };
+        *mode = true;
+    }
+
+    pub fn module_function_mode_enabled(&self) -> bool {
+        self.module_function_mode_stack
+            .last()
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn set_current_visibility(&mut self, visibility: MethodVisibility) {
+        let Some(current) = self.visibility_stack.last_mut() else {
+            panic!(
+                "INVARIANT VIOLATED: visibility stack is empty. \
+                 This is a bug because ScopeTracker always starts with public visibility. \
+                 Fix: initialize ScopeTracker with a root visibility frame."
+            );
+        };
+        *current = visibility;
+    }
+
+    pub fn current_visibility(&self) -> MethodVisibility {
+        self.visibility_stack.last().copied().unwrap_or_else(|| {
+            panic!(
+                "INVARIANT VIOLATED: visibility stack is empty. \
+                 This is a bug because ScopeTracker always starts with public visibility. \
+                 Fix: initialize ScopeTracker with a root visibility frame."
+            )
+        })
+    }
+
     pub fn enter_singleton(&mut self) {
         self.frames.push(ScopeFrame::Singleton);
+        self.visibility_stack.push(MethodVisibility::Public);
     }
 
     pub fn exit_singleton(&mut self) {
         if matches!(self.frames.last(), Some(ScopeFrame::Singleton)) {
             self.frames.pop();
+            self.visibility_stack.pop().expect(
+                "INVARIANT VIOLATED: visibility stack underflow on singleton exit. \
+                 This is a bug because every singleton frame must own one visibility flag. \
+                 Fix: keep singleton enter/exit balanced.",
+            );
         }
     }
 
@@ -159,6 +219,25 @@ impl ScopeTracker {
         }
 
         if self.in_singleton() || !self.get_ns_stack().is_empty() {
+            return NamespaceKind::Singleton;
+        }
+
+        NamespaceKind::Instance
+    }
+
+    pub fn current_macro_definition_context(&self) -> NamespaceKind {
+        for kind in self.scope_kind_stack.iter().rev() {
+            match kind {
+                LocalScopeKind::InstanceMethod => return NamespaceKind::Instance,
+                LocalScopeKind::ClassMethod => return NamespaceKind::Singleton,
+                LocalScopeKind::Constant => break,
+                LocalScopeKind::Block
+                | LocalScopeKind::Rescue
+                | LocalScopeKind::ExplicitBlockLocal => continue,
+            }
+        }
+
+        if self.in_singleton() {
             return NamespaceKind::Singleton;
         }
 

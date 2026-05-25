@@ -235,6 +235,8 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                     owner: user.namespace_parts(),
                     owner_kind: crate::core::NamespaceKind::Instance,
                     method,
+                    is_super: false,
+                    access: crate::core::MethodReferenceAccess::ExplicitReceiver,
                     caller: None,
                     diagnostics: crate::core::MethodReferenceDiagnostics {
                         diagnostic_range: TextRange::new(ref_file, 5, 9),

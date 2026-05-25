@@ -43,6 +43,80 @@ end
     .await;
 }
 
+#[tokio::test]
+async fn array_each_block_param_has_element_type() {
+    check(
+        r#"
+class Processor
+  def process
+    [1, 2, 3].each do |item|
+      item<hover label="Integer">.to_s
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hash_each_block_params_have_key_and_value_types() {
+    check(
+        r#"
+class Processor
+  def process
+    { name: "Ada" }.each do |key, value|
+      key<hover label="Symbol">.to_s
+      value<hover label="String">.upcase
+    end
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hash_pattern_capture_has_matched_value_type() {
+    check(
+        r#"
+class User
+  def name
+    "Ada"
+  end
+end
+
+case {user: User.new}
+in {user: user}
+  user<hover label="User">.name
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn yield_block_param_has_yield_argument_type() {
+    check(
+        r#"
+class User
+  def name
+    "Ada"
+  end
+end
+
+def with_user
+  yield User.new
+end
+
+with_user do |user|
+  user<hover label="User">.name
+end
+"#,
+    )
+    .await;
+}
+
 /// Variables don't cross method boundaries (hard scope)
 /// Ruby treats a name without prior assignment in scope as a method call.
 #[tokio::test]

@@ -45,6 +45,13 @@ pub struct ProcessResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileResolution {
+    Full,
+    CurrentFile,
+    Deferred,
+}
+
 // ============================================================================
 // FileProcessor
 // ============================================================================
@@ -74,7 +81,16 @@ impl FileProcessor {
         content: &str,
         server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, server, true)
+        self.process_file_with_resolution(uri, content, server, FileResolution::Full)
+    }
+
+    pub fn process_file_current_file_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<ProcessResult> {
+        self.process_file_with_resolution(uri, content, server, FileResolution::CurrentFile)
     }
 
     pub fn process_file_deferred_resolution(
@@ -83,7 +99,7 @@ impl FileProcessor {
         content: &str,
         server: &RubyLanguageServer,
     ) -> Result<ProcessResult> {
-        self.process_file_with_resolution(uri, content, server, false)
+        self.process_file_with_resolution(uri, content, server, FileResolution::Deferred)
     }
 
     fn process_file_with_resolution(
@@ -91,7 +107,7 @@ impl FileProcessor {
         uri: &Url,
         content: &str,
         server: &RubyLanguageServer,
-        resolve_references: bool,
+        resolution: FileResolution,
     ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
         let already_indexed = {
@@ -148,11 +164,7 @@ impl FileProcessor {
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
-            server.analysis_engine.lock().replace_facts(
-                analysis_file_id,
-                FileFacts::default(),
-                ResolveMode::Immediate,
-            );
+            replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
@@ -201,11 +213,13 @@ impl FileProcessor {
                 .into_iter()
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
-        server.analysis_engine.lock().replace_facts(
+        replace_file_analysis(
+            server,
             updated_document.analysis_file_id(),
             FileFacts {
                 symbols: symbol_facts,
                 methods: method_facts,
+                method_visibility_overrides: direct_facts.method_visibility_overrides,
                 types: type_facts,
                 graph_nodes: direct_facts.graph_nodes,
                 graph_edges: direct_facts.graph_edges,
@@ -214,11 +228,7 @@ impl FileProcessor {
                 diagnostic_candidates: visitor.diagnostic_candidates,
                 diagnostics: visitor.analysis_diagnostics,
             },
-            if resolve_references {
-                ResolveMode::Immediate
-            } else {
-                ResolveMode::Deferred
-            },
+            resolution,
         );
 
         {
@@ -391,6 +401,7 @@ impl FileProcessor {
             FileFacts {
                 symbols: direct_facts.symbols,
                 methods: direct_facts.methods,
+                method_visibility_overrides: direct_facts.method_visibility_overrides,
                 types: direct_facts.types,
                 graph_nodes: direct_facts.graph_nodes,
                 graph_edges: direct_facts.graph_edges,
@@ -399,7 +410,11 @@ impl FileProcessor {
                 diagnostic_candidates,
                 diagnostics,
             },
-            resolve_references,
+            if resolve_references {
+                FileResolution::Full
+            } else {
+                FileResolution::Deferred
+            },
         );
         let replace_elapsed = replace_start.elapsed();
         let elapsed = start.elapsed();
@@ -488,7 +503,11 @@ fn replace_analysis_facts_for_file(
         server,
         file_id,
         file_analysis_facts_from_index(facts),
-        resolve_references,
+        if resolve_references {
+            FileResolution::Full
+        } else {
+            FileResolution::Deferred
+        },
     );
 }
 
@@ -496,24 +515,24 @@ fn replace_file_analysis(
     server: &RubyLanguageServer,
     file_id: ruby_analysis::core::SourceFileId,
     facts: FileFacts,
-    resolve_references: bool,
+    resolution: FileResolution,
 ) {
     let mut engine = server.analysis_engine.lock();
-    engine.replace_facts(
-        file_id,
-        facts,
-        if resolve_references {
-            ResolveMode::Immediate
-        } else {
-            ResolveMode::Deferred
-        },
-    );
+    match resolution {
+        FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
+        FileResolution::CurrentFile => {
+            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            engine.resolve_file(file_id);
+        }
+        FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
+    }
 }
 
 fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex) -> FileFacts {
     FileFacts {
         symbols: facts.symbols.clone(),
         methods: facts.methods.clone(),
+        method_visibility_overrides: facts.method_visibility_overrides.clone(),
         types: facts.types.clone(),
         graph_nodes: facts.graph_nodes.clone(),
         graph_edges: facts.graph_edges.clone(),

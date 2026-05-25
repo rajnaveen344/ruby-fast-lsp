@@ -120,6 +120,42 @@ arr.f$0
 }
 
 #[tokio::test]
+async fn array_each_block_param_completion() {
+    check(
+        r#"
+[1, 2, 3].each do |item|
+  item.e$0
+end
+<complete items="even?">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn yield_block_param_completion() {
+    check(
+        r#"
+class User
+  def name
+    "Ada"
+  end
+end
+
+def with_user
+  yield User.new
+end
+
+with_user do |user|
+  user.n$0
+end
+<complete items="name">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn variable_from_hash_literal() {
     check(
         r#"

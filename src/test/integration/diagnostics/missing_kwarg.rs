@@ -64,6 +64,22 @@ opts = { name: "x" }
 }
 
 #[tokio::test]
+async fn forwarding_args_at_callsite_skips_check() {
+    check(
+        r#"
+def target(name:, role:)
+  name
+end
+
+def wrapper(...)
+  <warn none code="missing-kwarg">target(...)</warn>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn multiple_missing_grouped() {
     // All missing required kwargs reported in one warning.
     check(

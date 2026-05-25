@@ -1,6 +1,6 @@
 //! Hover target classification.
 
-use crate::core::RubyConstant;
+use crate::core::{NamespaceKind, RubyConstant};
 use crate::indexer::{Identifier, IdentifierType, LVScopeId, MethodReceiver};
 use tower_lsp::lsp_types::Position;
 
@@ -20,6 +20,7 @@ pub enum HoverTarget {
         position: Position,
         receiver: MethodReceiver,
         namespace: Vec<RubyConstant>,
+        namespace_kind: NamespaceKind,
         is_definition: bool,
     },
     InstanceVariable {
@@ -40,6 +41,7 @@ pub fn identifier_to_hover_target(
     identifier: Identifier,
     identifier_type: Option<IdentifierType>,
     namespace: Vec<RubyConstant>,
+    namespace_kind: NamespaceKind,
     scope_id: LVScopeId,
     position: Position,
 ) -> HoverTarget {
@@ -55,6 +57,12 @@ pub fn identifier_to_hover_target(
             receiver,
             namespace: method_namespace,
         } => {
+            let is_definition = identifier_type == Some(IdentifierType::MethodDef);
+            let method_namespace_kind = if is_definition && receiver != MethodReceiver::None {
+                NamespaceKind::Singleton
+            } else {
+                namespace_kind
+            };
             let namespace = if method_namespace.is_empty() {
                 namespace
             } else {
@@ -65,7 +73,8 @@ pub fn identifier_to_hover_target(
                 position,
                 receiver,
                 namespace,
-                is_definition: identifier_type == Some(IdentifierType::MethodDef),
+                namespace_kind: method_namespace_kind,
+                is_definition,
             }
         }
         Identifier::RubyInstanceVariable { name, .. } => HoverTarget::InstanceVariable { name },

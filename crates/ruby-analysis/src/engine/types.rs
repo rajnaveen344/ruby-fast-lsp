@@ -1,17 +1,48 @@
 use std::collections::HashSet;
 
+use crate::core::method_store::MethodVisibility;
 use crate::core::{
-    FullyQualifiedName, GraphNodeKind, MethodFact, RubyConstant, RubyMethod, RubyType,
-    SourceFileId, TypeFact, TypeResolution, TypeSubject,
+    FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, RubyConstant, RubyMethod,
+    RubyType, SourceFileId, TypeFact, TypeResolution, TypeSubject,
 };
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
-use crate::engine::resolution::{method_lookup_chain, namespace_target_exists};
+use crate::engine::resolution::{
+    effective_method_visibility_for_chain, method_lookup_chain, method_missing_method,
+    namespace_target_exists, protected_method_visible_from,
+};
+
+type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
 
 impl<'a> AnalysisQuery<'a> {
     pub fn method_return_type_at(
         &self,
         name: &str,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.method_return_type_at_with_kind_filter(name, None, file_id, byte_offset)
+    }
+
+    pub fn method_return_type_at_with_kind(
+        &self,
+        name: &str,
+        namespace_kind: NamespaceKind,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Option<RubyType> {
+        self.method_return_type_at_with_kind_filter(
+            name,
+            Some(namespace_kind),
+            file_id,
+            byte_offset,
+        )
+    }
+
+    fn method_return_type_at_with_kind_filter(
+        &self,
+        name: &str,
+        namespace_kind: Option<NamespaceKind>,
         file_id: SourceFileId,
         byte_offset: u32,
     ) -> Option<RubyType> {
@@ -24,6 +55,9 @@ impl<'a> AnalysisQuery<'a> {
                     return false;
                 };
                 method.as_str() == name
+                    && namespace_kind
+                        .map(|kind| fact.owner.namespace_kind() == Some(kind))
+                        .unwrap_or(true)
                     && fact.range.start_byte <= byte_offset
                     && byte_offset <= fact.range.end_byte
             })?;
@@ -43,8 +77,14 @@ impl<'a> AnalysisQuery<'a> {
                 | TypeSubject::Parameter { .. }
                 | TypeSubject::Expression(_) => None,
             })
+            .filter(|fact| {
+                method_fact.range.file_id == fact.range.file_id
+                    && method_fact.range.start_byte <= fact.range.start_byte
+                    && fact.range.end_byte <= method_fact.range.end_byte
+            })
             .max_by_key(|fact| fact.range.start_byte)
             .map(|fact| fact.ruby_type)
+            .or_else(|| self.method_return_type(&method_fact))
     }
 
     pub fn parameter_type_at(
@@ -420,24 +460,85 @@ impl<'a> AnalysisQuery<'a> {
             }
         }
 
+        if *method != method_missing_method() {
+            return self.method_fact_for_receiver(namespace_fqn, &method_missing_method());
+        }
+
         None
     }
 
     pub fn method_return_type(&self, fact: &MethodFact) -> Option<crate::core::RubyType> {
+        let mut seen = HashSet::new();
+        self.method_return_type_inner(fact, &mut seen)
+    }
+
+    fn method_return_type_inner(
+        &self,
+        fact: &MethodFact,
+        seen: &mut HashSet<MethodVisitKey>,
+    ) -> Option<crate::core::RubyType> {
+        if !seen.insert((
+            fact.fqn.clone(),
+            fact.range.file_id,
+            fact.range.start_byte,
+            fact.range.end_byte,
+        )) {
+            return None;
+        }
+
         match self.engine.type_at(
             &TypeSubject::MethodReturn(fact.fqn.clone()),
             fact.range.file_id,
             fact.range.end_byte,
         ) {
-            TypeResolution::Resolved(type_fact) => Some(type_fact.ruby_type),
-            TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+            TypeResolution::Resolved(type_fact) => return Some(type_fact.ruby_type),
+            TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => {}
         }
+
+        self.delegate_method_return_type(fact, seen)
     }
 
     pub fn method_return_type_for_receiver(
         &self,
         namespace_fqn: &FullyQualifiedName,
         method: &RubyMethod,
+    ) -> Option<crate::core::RubyType> {
+        let mut seen = HashSet::new();
+        self.method_return_type_for_receiver_inner(namespace_fqn, method, true, None, &mut seen)
+    }
+
+    pub fn method_return_type_for_public_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Option<crate::core::RubyType> {
+        let mut seen = HashSet::new();
+        self.method_return_type_for_receiver_inner(namespace_fqn, method, false, None, &mut seen)
+    }
+
+    pub fn method_return_type_for_protected_receiver(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Option<crate::core::RubyType> {
+        let mut seen = HashSet::new();
+        self.method_return_type_for_receiver_inner(
+            namespace_fqn,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+            &mut seen,
+        )
+    }
+
+    fn method_return_type_for_receiver_inner(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+        seen: &mut HashSet<MethodVisitKey>,
     ) -> Option<crate::core::RubyType> {
         if !namespace_target_exists(self.engine, namespace_fqn) {
             return None;
@@ -451,6 +552,28 @@ impl<'a> AnalysisQuery<'a> {
                 .filter(|fact| {
                     fact.owner.namespace_parts() == ancestor.namespace_parts()
                         && fact.owner.namespace_kind() == ancestor.namespace_kind()
+                        && {
+                            let (visibility, owner) = effective_method_visibility_for_chain(
+                                self.engine,
+                                &method_lookup_chain(self.engine, namespace_fqn),
+                                fact,
+                                method,
+                            );
+                            match visibility {
+                                MethodVisibility::Public => true,
+                                MethodVisibility::Private => allow_private,
+                                MethodVisibility::Protected => {
+                                    allow_private
+                                        || protected_caller.is_some_and(|caller| {
+                                            protected_method_visible_from(
+                                                self.engine,
+                                                &owner,
+                                                caller,
+                                            )
+                                        })
+                                }
+                            }
+                        }
                 })
                 .collect::<Vec<_>>();
 
@@ -460,7 +583,7 @@ impl<'a> AnalysisQuery<'a> {
 
             let mut return_types = facts
                 .into_iter()
-                .filter_map(|fact| self.method_return_type(fact))
+                .filter_map(|fact| self.method_return_type_inner(fact, seen))
                 .collect::<Vec<_>>();
 
             if return_types.is_empty() {
@@ -475,7 +598,55 @@ impl<'a> AnalysisQuery<'a> {
             };
         }
 
+        if *method != method_missing_method() {
+            return self.method_return_type_for_receiver_inner(
+                namespace_fqn,
+                &method_missing_method(),
+                allow_private,
+                protected_caller,
+                seen,
+            );
+        }
+
         None
+    }
+
+    fn delegate_method_return_type(
+        &self,
+        fact: &MethodFact,
+        seen: &mut HashSet<MethodVisitKey>,
+    ) -> Option<RubyType> {
+        let FullyQualifiedName::Method(_, delegated_method) = &fact.fqn else {
+            return None;
+        };
+        let receiver_method = fact.delegate_receiver?;
+        let receiver_type = self.method_return_type_for_receiver_inner(
+            &fact.owner,
+            &receiver_method,
+            true,
+            None,
+            seen,
+        )?;
+
+        let mut return_types = AnalysisQuery::receiver_type_to_method_namespaces(&receiver_type)
+            .into_iter()
+            .filter_map(|namespace| {
+                self.method_return_type_for_receiver_inner(
+                    &namespace,
+                    delegated_method,
+                    true,
+                    None,
+                    seen,
+                )
+            })
+            .collect::<Vec<_>>();
+        return_types.sort_by_key(|ruby_type| ruby_type.to_string());
+        return_types.dedup();
+        match return_types.len() {
+            0 => None,
+            1 => return_types.pop(),
+            _ => Some(RubyType::union(return_types)),
+        }
     }
 
     fn variable_type_fact_match(

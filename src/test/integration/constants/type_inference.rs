@@ -36,6 +36,41 @@ MODEL<type label="Class<User>" kind="const"> = User
 }
 
 #[tokio::test]
+async fn const_get_literal_symbol_type_is_class_reference() {
+    check(
+        r#"
+module SampleApp
+  module Platform
+    module Util
+      class TriggerHelpers
+      end
+    end
+  end
+end
+
+helper<type label="Class<SampleApp::Platform::Util::TriggerHelpers>" kind="var"> = SampleApp::Platform::Util.const_get(:TriggerHelpers)
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn self_const_get_literal_symbol_type_is_constant_value() {
+    check(
+        r#"
+class PushUnit
+  TYPE = "push"
+
+  def self.type
+    value<type label="String" kind="var"> = self.const_get(:TYPE)
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn constant_path_literal_type_is_value_type() {
     check(
         r#"

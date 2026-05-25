@@ -21,7 +21,7 @@ pub fn resolve_receiver_to_namespace(
 ) -> Option<FullyQualifiedName> {
     match receiver {
         MethodReceiver::Constant(path) => resolve_constant_receiver(path, context),
-        MethodReceiver::None | MethodReceiver::SelfReceiver => {
+        MethodReceiver::None | MethodReceiver::SelfReceiver | MethodReceiver::Super => {
             Some(FullyQualifiedName::namespace_with_kind(
                 context.current_namespace.to_vec(),
                 context.namespace_kind,
@@ -51,7 +51,7 @@ pub fn resolve_receiver_type(
     context: &ReceiverResolutionContext<'_, '_>,
 ) -> RubyType {
     match receiver {
-        MethodReceiver::None | MethodReceiver::SelfReceiver => {
+        MethodReceiver::None | MethodReceiver::SelfReceiver | MethodReceiver::Super => {
             if context.current_namespace.is_empty() {
                 RubyType::class("Object")
             } else {

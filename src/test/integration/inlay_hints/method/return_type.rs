@@ -71,6 +71,84 @@ end
     .await;
 }
 
+#[tokio::test]
+async fn inferred_from_yielding_block_return() {
+    check(
+        r#"
+class User
+  def name
+    "Ada"
+  end
+end
+
+def with_user
+  yield User.new
+end
+
+def label<hint label=" -> String">
+  with_user do |user|
+    user.name
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn inferred_from_lambda_call_return() {
+    check(
+        r#"
+def label<hint label=" -> String">
+  builder = -> { "ready" }
+  builder.call
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn inferred_from_proc_call_return() {
+    check(
+        r#"
+def label<hint label=" -> Integer">
+  builder = Proc.new { 1 }
+  builder.call
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn inferred_from_begin_rescue_return() {
+    check(
+        r#"
+def label<hint label=" -> (Integer | String)">
+  begin
+    1
+  rescue StandardError
+    "fallback"
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn inferred_from_rescue_modifier_return() {
+    check(
+        r#"
+def label<hint label=" -> (Integer | String)">
+  1 rescue "fallback"
+end
+"#,
+    )
+    .await;
+}
+
 // =============================================================================
 // Unknown Return Type
 // =============================================================================

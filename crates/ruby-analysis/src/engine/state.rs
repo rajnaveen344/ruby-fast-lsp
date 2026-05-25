@@ -7,11 +7,12 @@ use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
     ConstLookup, ConstLookupId, ConstantPath, DiagnosticCandidate, DiagnosticCandidateStore,
     DiagnosticFact, DiagnosticStore, FqnId, FullyQualifiedName, GraphEdgeFact, GraphNodeFact,
-    MethodFact, MethodStore, ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore,
-    ReferenceFact, ReferenceStore, RubyConstant, SemanticGraph, SourceFileId, SourceKind,
-    StoredGraphEdgeFact, StoredGraphNodeFact, StoredMethodFact, StoredReferenceCandidate,
-    StoredSymbolFact, StoredUnresolvedGraphEdgeFact, SymbolFact, SymbolStore, TextRange, TypeFact,
-    TypeResolution, TypeStore, TypeSubject, UnresolvedGraphEdgeFact,
+    MethodFact, MethodStore, MethodVisibilityOverrideFact, ReferenceCandidate,
+    ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant,
+    SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact,
+    StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact,
+    SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -112,6 +113,7 @@ impl SourceFile {
 pub struct FileFacts {
     pub symbols: Vec<SymbolFact>,
     pub methods: Vec<MethodFact>,
+    pub method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
     pub types: Vec<TypeFact>,
     pub graph_nodes: Vec<GraphNodeFact>,
     pub graph_edges: Vec<GraphEdgeFact>,
@@ -307,6 +309,7 @@ pub struct AnalysisEngine {
     pub(super) names: NameRegistry,
     pub(super) facts: FactArena,
     pub(super) graph: SemanticGraph,
+    pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
 }
 
 impl AnalysisEngine {
@@ -348,6 +351,15 @@ impl AnalysisEngine {
     pub fn resolve(&mut self) {
         self.retry_unresolved_graph_edges();
         self.resolve_reference_candidates();
+    }
+
+    pub fn resolve_file(&mut self, file_id: SourceFileId) {
+        self.assert_known_file_id(
+            file_id,
+            "file-local resolve references unknown source file id",
+        );
+        self.retry_unresolved_graph_edges();
+        self.resolve_reference_candidates_in_file(file_id);
     }
 
     pub fn shrink_to_fit(&mut self) {
@@ -446,6 +458,10 @@ impl AnalysisEngine {
         self.sources.files.get(&id)
     }
 
+    pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
+        self.sources.files.values()
+    }
+
     fn replace_facts_deferred(&mut self, file_id: SourceFileId, facts: FileFacts) {
         self.assert_known_file_id(file_id, "file analysis references unknown source file id");
         let symbols = self.intern_symbol_facts(facts.symbols);
@@ -458,6 +474,10 @@ impl AnalysisEngine {
             .definitions
             .methods
             .replace_file(file_id, methods);
+        self.method_visibility_overrides
+            .retain(|fact| fact.range.file_id != file_id);
+        self.method_visibility_overrides
+            .extend(facts.method_visibility_overrides);
         self.facts.types.replace_file(file_id, facts.types);
         let graph_nodes = self.intern_graph_node_facts(facts.graph_nodes);
         let graph_edges = self.intern_graph_edge_facts(facts.graph_edges);
@@ -593,6 +613,37 @@ impl AnalysisEngine {
             .into_iter()
             .map(|fact| self.expand_method_fact(fact))
             .collect()
+    }
+
+    pub fn method_visibility_overrides_matching_owner_name(
+        &self,
+        owner: &FullyQualifiedName,
+        method: &crate::core::RubyMethod,
+    ) -> Vec<MethodVisibilityOverrideFact> {
+        self.method_visibility_overrides
+            .iter()
+            .filter(|fact| {
+                fact.method == *method
+                    && fact.owner.namespace_parts() == owner.namespace_parts()
+                    && fact.owner.namespace_kind() == owner.namespace_kind()
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn method_visibility_overrides_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Vec<MethodVisibilityOverrideFact> {
+        self.method_visibility_overrides
+            .iter()
+            .filter(|fact| fact.range.file_id == file_id)
+            .cloned()
+            .collect()
+    }
+
+    pub fn all_method_visibility_overrides(&self) -> Vec<MethodVisibilityOverrideFact> {
+        self.method_visibility_overrides.clone()
     }
 
     pub fn method_names_for_owner(&self, owner: &FullyQualifiedName) -> Vec<&'static str> {
@@ -761,6 +812,8 @@ impl AnalysisEngine {
                     owner,
                     owner_kind,
                     method,
+                    is_super,
+                    access,
                     caller,
                     diagnostics,
                 } => {
@@ -776,6 +829,8 @@ impl AnalysisEngine {
                         owner,
                         owner_kind,
                         method,
+                        is_super,
+                        access,
                         caller,
                         diagnostics,
                     )
@@ -821,6 +876,8 @@ impl AnalysisEngine {
                     range: fact.range,
                     params: fact.params,
                     param_facts: fact.param_facts,
+                    delegate_receiver: fact.delegate_receiver,
+                    visibility: fact.visibility,
                 }
             })
             .collect()
@@ -904,6 +961,8 @@ impl AnalysisEngine {
             range: fact.range,
             params: fact.params,
             param_facts: fact.param_facts,
+            delegate_receiver: fact.delegate_receiver,
+            visibility: fact.visibility,
         }
     }
 

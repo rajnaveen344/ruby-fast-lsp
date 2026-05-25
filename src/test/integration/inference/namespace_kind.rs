@@ -332,6 +332,27 @@ Builder.start<hover label="Builder" substring="@return [Builder]">
     .await;
 }
 
+/// Hover on definitions with the same method name respects namespace kind.
+#[tokio::test]
+async fn hover_same_name_instance_and_class_method_definitions() {
+    check(
+        r#"
+class Factory
+  # @return [Factory]
+  def self.<hover label="Factory">create
+    new
+  end
+
+  # @return [String]
+  def <hover label="String">create
+    "created"
+  end
+end
+"#,
+    )
+    .await;
+}
+
 // ============================================================================
 // Self Receiver in Different Contexts
 // ============================================================================
@@ -393,6 +414,25 @@ module Utils
 end
 
 # Can call as module method
+Utils.helper$0
+"#,
+    )
+    .await;
+}
+
+/// Bare module_function switches following methods into module-function mode.
+#[tokio::test]
+async fn bare_module_function_makes_following_defs_class_methods() {
+    check(
+        r#"
+module Utils
+  module_function
+
+  <def>def helper
+    "helping"
+  end</def>
+end
+
 Utils.helper$0
 "#,
     )

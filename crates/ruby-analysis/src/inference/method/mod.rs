@@ -5,5 +5,8 @@
 pub mod return_type;
 pub mod signature;
 
-pub use return_type::method_call_return_type;
+pub use return_type::{
+    method_call_return_type, method_call_return_type_with_private,
+    method_call_return_type_with_visibility,
+};
 pub use signature::{MethodSignature, MethodSignatureContext, MethodVisibility, Parameter};

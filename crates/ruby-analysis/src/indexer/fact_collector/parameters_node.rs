@@ -15,12 +15,20 @@ impl FactCollector {
     /// 6. Keyword rest parameters
     /// 7. Block parameter
     pub fn process_parameters_node_entry(&mut self, node: &ParametersNode) {
+        let mut positional_index = 0usize;
+
         // Process required parameters
         let requireds = node.requireds();
         for required in requireds.iter() {
             if let Some(param) = required.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 self.add_parameter_to_index(&param_name, param.location());
+                self.assign_current_block_parameter_type(
+                    &param_name,
+                    &param.location(),
+                    positional_index,
+                );
+                positional_index += 1;
             }
         }
 
@@ -30,6 +38,12 @@ impl FactCollector {
             if let Some(param) = optional.as_optional_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 self.add_parameter_to_index(&param_name, param.location());
+                self.assign_current_block_parameter_type(
+                    &param_name,
+                    &param.location(),
+                    positional_index,
+                );
+                positional_index += 1;
             }
         }
 
@@ -39,6 +53,12 @@ impl FactCollector {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
                     self.add_parameter_to_index(&param_name, param.location());
+                    self.assign_current_block_parameter_type(
+                        &param_name,
+                        &param.location(),
+                        positional_index,
+                    );
+                    positional_index += 1;
                 }
             }
         }
@@ -49,6 +69,12 @@ impl FactCollector {
             if let Some(param) = post.as_required_parameter_node() {
                 let param_name = String::from_utf8_lossy(param.name().as_slice()).to_string();
                 self.add_parameter_to_index(&param_name, param.location());
+                self.assign_current_block_parameter_type(
+                    &param_name,
+                    &param.location(),
+                    positional_index,
+                );
+                positional_index += 1;
             }
         }
 

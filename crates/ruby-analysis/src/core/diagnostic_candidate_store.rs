@@ -89,6 +89,13 @@ impl DiagnosticCandidateStore {
             .collect()
     }
 
+    pub fn candidates_in_file(&self, file_id: SourceFileId) -> Vec<DiagnosticCandidate> {
+        self.candidates_by_file
+            .get(&file_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     pub fn iter_candidates(&self) -> impl Iterator<Item = &DiagnosticCandidate> {
         self.candidates_by_file
             .values()

@@ -1,4 +1,4 @@
-use crate::core::{NamespaceKind, RubyMethod};
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyMethod};
 use log::warn;
 use ruby_prism::DefNode;
 
@@ -39,6 +39,11 @@ impl IdentifierVisitor {
             NamespaceKind::Instance => LVScopeKind::InstanceMethod,
         };
         self.scope_tracker.push_scope_kind(scope_kind);
+        self.scope_tracker
+            .push_method_fqn(Some(FullyQualifiedName::method(
+                self.scope_tracker.get_ns_stack(),
+                method,
+            )));
 
         // Is position on method name
         let name_loc = node.name_loc();
@@ -76,6 +81,7 @@ impl IdentifierVisitor {
 
         if !(self.position >= body_loc.range.start && self.position <= body_loc.range.end) {
             self.scope_tracker.pop_scope_kind();
+            self.scope_tracker.pop_method_fqn();
         }
     }
 }

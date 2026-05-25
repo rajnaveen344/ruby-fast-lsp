@@ -13,7 +13,7 @@
 mod narrow;
 
 use crate::control_flow;
-use crate::core::{FullyQualifiedName, RubyConstant};
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
 use crate::engine::{AnalysisEngine, AnalysisQuery};
 use crate::r#type::literal::LiteralAnalyzer;
 use crate::r#type::ruby::RubyType;
@@ -50,6 +50,21 @@ pub struct TypeTracker<'a> {
 
     /// Current class/module context for resolving implicit self
     current_class: Option<FullyQualifiedName>,
+
+    /// Current method context for resolving `super`.
+    current_method: Option<RubyMethod>,
+
+    /// Same-file method return facts already collected before this method.
+    local_method_returns: HashMap<FullyQualifiedName, RubyType>,
+
+    /// Same-file superclass edges already collected before this method.
+    local_superclasses: HashMap<FullyQualifiedName, FullyQualifiedName>,
+
+    /// Same-file methods that contain `yield`, keyed by method FQN.
+    yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
+
+    /// Local variables assigned lambda/proc literals, keyed by local name.
+    proc_return_types_by_local: HashMap<String, RubyType>,
 }
 
 impl<'a> TypeTracker<'a> {
@@ -63,11 +78,40 @@ impl<'a> TypeTracker<'a> {
             analysis_engine: None,
             max_loop_iterations: 10,
             current_class: None,
+            current_method: None,
+            local_method_returns: HashMap::new(),
+            local_superclasses: HashMap::new(),
+            yield_param_types_by_method: HashMap::new(),
+            proc_return_types_by_local: HashMap::new(),
         }
     }
 
     pub fn with_analysis_engine(mut self, analysis_engine: Arc<Mutex<AnalysisEngine>>) -> Self {
         self.analysis_engine = Some(analysis_engine);
+        self
+    }
+
+    pub fn with_local_method_returns(
+        mut self,
+        local_method_returns: HashMap<FullyQualifiedName, RubyType>,
+    ) -> Self {
+        self.local_method_returns = local_method_returns;
+        self
+    }
+
+    pub fn with_local_superclasses(
+        mut self,
+        local_superclasses: HashMap<FullyQualifiedName, FullyQualifiedName>,
+    ) -> Self {
+        self.local_superclasses = local_superclasses;
+        self
+    }
+
+    pub fn with_yield_param_types(
+        mut self,
+        yield_param_types_by_method: HashMap<FullyQualifiedName, Vec<RubyType>>,
+    ) -> Self {
+        self.yield_param_types_by_method = yield_param_types_by_method;
         self
     }
 
@@ -104,6 +148,15 @@ impl<'a> TypeTracker<'a> {
     /// 2. Tracks the method body, creating snapshots along the way
     /// 3. Returns the inferred return type (type of last expression)
     pub fn track_method(&mut self, method: &DefNode) -> RubyType {
+        let previous_method = self.current_method.clone();
+        let method_name = String::from_utf8_lossy(method.name().as_slice());
+        let method_name = if method_name.as_ref() == "initialize" {
+            "new"
+        } else {
+            method_name.as_ref()
+        };
+        self.current_method = RubyMethod::new(method_name).ok();
+
         // Add parameters to environment
         if let Some(params) = method.parameters() {
             self.add_parameters(&params);
@@ -122,6 +175,7 @@ impl<'a> TypeTracker<'a> {
             self.record_state(end_offset);
         }
 
+        self.current_method = previous_method;
         return_type
     }
 
@@ -166,6 +220,26 @@ impl<'a> TypeTracker<'a> {
                 self.track_case(&case_node)
             }
 
+            _ if node.as_case_match_node().is_some() => {
+                let case_match_node = node.as_case_match_node().unwrap();
+                self.track_case_match(&case_match_node)
+            }
+
+            _ if node.as_super_node().is_some() || node.as_forwarding_super_node().is_some() => {
+                self.infer_super_return_type()
+            }
+
+            // Begin/rescue/ensure expressions
+            _ if node.as_begin_node().is_some() => {
+                let begin_node = node.as_begin_node().unwrap();
+                self.track_begin(&begin_node)
+            }
+
+            _ if node.as_rescue_modifier_node().is_some() => {
+                let rescue_modifier = node.as_rescue_modifier_node().unwrap();
+                self.track_rescue_modifier(&rescue_modifier)
+            }
+
             // Loops
             _ if node.as_while_node().is_some() => {
                 let while_node = node.as_while_node().unwrap();
@@ -208,6 +282,12 @@ impl<'a> TypeTracker<'a> {
         // Infer type from value
         let value = write.value();
         let var_type = self.track_node(&value);
+        if let Some(return_type) = self.infer_proc_literal_return_type(&value) {
+            self.proc_return_types_by_local
+                .insert(var_name.clone(), return_type);
+        } else {
+            self.proc_return_types_by_local.remove(&var_name);
+        }
 
         // Update environment
         self.vars.insert(var_name, var_type.clone());
@@ -368,6 +448,248 @@ impl<'a> TypeTracker<'a> {
         let typed_branches: Vec<(RubyType, bool)> =
             branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
         join_branch_types(&typed_branches)
+    }
+
+    fn track_case_match(&mut self, case_node: &CaseMatchNode) -> RubyType {
+        let predicate = case_node.predicate();
+        if let Some(predicate) = &predicate {
+            self.track_node(predicate);
+        }
+
+        let env_before = self.vars.clone();
+        let mut branches: Vec<(HashMap<String, RubyType>, RubyType, bool)> = Vec::new();
+
+        for condition in case_node.conditions().iter() {
+            let Some(in_node) = condition.as_in_node() else {
+                continue;
+            };
+
+            self.vars = env_before.clone();
+            if let Some(predicate) = &predicate {
+                let captures = self.pattern_capture_types_for_value(&in_node.pattern(), predicate);
+                for (name, ty) in captures {
+                    if ty != RubyType::Unknown {
+                        self.vars.insert(name, ty);
+                    }
+                }
+            }
+
+            let diverges = in_node
+                .statements()
+                .map(|s| control_flow::diverges(&s.as_node()))
+                .unwrap_or(false);
+            let branch_type = if let Some(statements) = in_node.statements() {
+                self.track_node(&statements.as_node())
+            } else {
+                RubyType::nil_class()
+            };
+            branches.push((self.vars.clone(), branch_type, diverges));
+        }
+
+        let has_else = case_node.else_clause().is_some();
+        if has_else {
+            self.vars = env_before.clone();
+            let else_clause = case_node.else_clause().unwrap();
+            let diverges = else_clause
+                .statements()
+                .map(|s| control_flow::diverges(&s.as_node()))
+                .unwrap_or(false);
+            let else_type = if let Some(statements) = else_clause.statements() {
+                self.track_node(&statements.as_node())
+            } else {
+                RubyType::nil_class()
+            };
+            branches.push((self.vars.clone(), else_type, diverges));
+        }
+
+        if branches.is_empty() {
+            return RubyType::nil_class();
+        }
+
+        let surviving_envs: Vec<&HashMap<String, RubyType>> = branches
+            .iter()
+            .filter(|(_, _, d)| !*d)
+            .map(|(env, _, _)| env)
+            .collect();
+
+        if surviving_envs.is_empty() {
+            self.vars = env_before;
+        } else {
+            self.vars = surviving_envs[0].clone();
+            for env in &surviving_envs[1..] {
+                self.merge_env(env, false);
+            }
+            if !has_else {
+                for (var, ty) in self.vars.clone() {
+                    let union = RubyType::union(vec![ty, RubyType::nil_class()]);
+                    self.vars.insert(var, union);
+                }
+            }
+        }
+
+        let typed_branches: Vec<(RubyType, bool)> =
+            branches.into_iter().map(|(_, ty, d)| (ty, d)).collect();
+        join_branch_types(&typed_branches)
+    }
+
+    fn pattern_capture_types_for_value(
+        &mut self,
+        pattern: &Node<'_>,
+        value: &Node<'_>,
+    ) -> HashMap<String, RubyType> {
+        let mut captures = HashMap::new();
+        self.collect_pattern_capture_types(pattern, value, &mut captures);
+        captures
+    }
+
+    fn collect_pattern_capture_types(
+        &mut self,
+        pattern: &Node<'_>,
+        value: &Node<'_>,
+        captures: &mut HashMap<String, RubyType>,
+    ) {
+        if let Some(target) = pattern.as_local_variable_target_node() {
+            let name = String::from_utf8_lossy(target.name().as_slice()).to_string();
+            captures.insert(name, self.infer_expression(value));
+            return;
+        }
+
+        if let Some(pattern_hash) = pattern.as_hash_pattern_node() {
+            let Some(value_hash) = value.as_hash_node() else {
+                return;
+            };
+            let value_elements = value_hash
+                .elements()
+                .iter()
+                .filter_map(|element| {
+                    let assoc = element.as_assoc_node()?;
+                    Some((pattern_symbol_key(&assoc.key())?, assoc.value()))
+                })
+                .collect::<Vec<_>>();
+
+            for element in pattern_hash.elements().iter() {
+                let Some(assoc) = element.as_assoc_node() else {
+                    continue;
+                };
+                let Some(key) = pattern_symbol_key(&assoc.key()) else {
+                    continue;
+                };
+                let Some((_, value_node)) = value_elements
+                    .iter()
+                    .find(|(value_key, _)| value_key == &key)
+                else {
+                    continue;
+                };
+                self.collect_pattern_capture_types(&assoc.value(), value_node, captures);
+            }
+            return;
+        }
+
+        if let Some(pattern_array) = pattern.as_array_pattern_node() {
+            let Some(value_array) = value.as_array_node() else {
+                return;
+            };
+            let value_elements = value_array.elements().iter().collect::<Vec<_>>();
+            for (index, required) in pattern_array.requireds().iter().enumerate() {
+                let Some(value_node) = value_elements.get(index) else {
+                    continue;
+                };
+                self.collect_pattern_capture_types(&required, value_node, captures);
+            }
+        }
+    }
+
+    fn track_begin(&mut self, begin_node: &BeginNode) -> RubyType {
+        let env_before = self.vars.clone();
+
+        self.vars = env_before.clone();
+        let body_diverges = begin_node
+            .statements()
+            .map(|statements| control_flow::diverges(&statements.as_node()))
+            .unwrap_or(false);
+        let body_type = begin_node
+            .statements()
+            .map(|statements| self.track_node(&statements.as_node()))
+            .unwrap_or_else(RubyType::nil_class);
+        let body_env = self.vars.clone();
+
+        self.vars = body_env;
+        let else_diverges = begin_node
+            .else_clause()
+            .and_then(|else_node| else_node.statements())
+            .map(|statements| control_flow::diverges(&statements.as_node()))
+            .unwrap_or(false);
+        let normal_type = begin_node
+            .else_clause()
+            .and_then(|else_node| else_node.statements())
+            .map(|statements| self.track_node(&statements.as_node()))
+            .unwrap_or(body_type);
+        let normal_env = self.vars.clone();
+        let normal_diverges = body_diverges || else_diverges;
+
+        let mut branches = vec![(normal_env, normal_type, normal_diverges)];
+        let mut rescue_clause = begin_node.rescue_clause();
+        while let Some(rescue_node) = rescue_clause {
+            self.vars = env_before.clone();
+            let diverges = rescue_node
+                .statements()
+                .map(|statements| control_flow::diverges(&statements.as_node()))
+                .unwrap_or(false);
+            let branch_type = rescue_node
+                .statements()
+                .map(|statements| self.track_node(&statements.as_node()))
+                .unwrap_or_else(RubyType::nil_class);
+            branches.push((self.vars.clone(), branch_type, diverges));
+            rescue_clause = rescue_node.subsequent();
+        }
+
+        let surviving_envs = branches
+            .iter()
+            .filter(|(_, _, diverges)| !*diverges)
+            .map(|(env, _, _)| env)
+            .collect::<Vec<_>>();
+        if surviving_envs.is_empty() {
+            self.vars = env_before;
+        } else {
+            self.vars = surviving_envs[0].clone();
+            for env in &surviving_envs[1..] {
+                self.merge_env(env, false);
+            }
+        }
+
+        if let Some(ensure_clause) = begin_node.ensure_clause() {
+            if let Some(statements) = ensure_clause.statements() {
+                self.track_node(&statements.as_node());
+            }
+        }
+
+        let typed_branches = branches
+            .into_iter()
+            .map(|(_, ty, diverges)| (ty, diverges))
+            .collect::<Vec<_>>();
+        join_branch_types(&typed_branches)
+    }
+
+    fn track_rescue_modifier(&mut self, rescue_modifier: &RescueModifierNode) -> RubyType {
+        let env_before = self.vars.clone();
+
+        let expression = rescue_modifier.expression();
+        self.vars = env_before.clone();
+        let expression_type = self.track_node(&expression);
+        let expression_env = self.vars.clone();
+
+        let rescue_expression = rescue_modifier.rescue_expression();
+        self.vars = env_before;
+        let rescue_type = self.track_node(&rescue_expression);
+        let rescue_env = self.vars.clone();
+
+        self.vars = expression_env;
+        self.merge_env(&rescue_env, false);
+
+        join_branch_types(&[
+            (expression_type, control_flow::diverges(&expression)),
+            (rescue_type, control_flow::diverges(&rescue_expression)),
+        ])
     }
 
     /// Track a while loop with limited iterations
@@ -551,6 +873,13 @@ impl<'a> TypeTracker<'a> {
     fn infer_call(&mut self, call: &CallNode) -> RubyType {
         let method_name = String::from_utf8_lossy(call.name().as_slice()).to_string();
 
+        if let Some(block_return_type) = self.infer_yielding_block_return_type(call, &method_name) {
+            return block_return_type;
+        }
+        if let Some(proc_return_type) = self.infer_proc_call_return_type(call, &method_name) {
+            return proc_return_type;
+        }
+
         // Handle .new specially - it returns an instance of the class
         if method_name == "new" {
             if let Some(receiver) = call.receiver() {
@@ -588,14 +917,57 @@ impl<'a> TypeTracker<'a> {
             return RubyType::Unknown;
         }
 
-        if let Some(return_type) =
-            self.resolve_method_return_type_from_analysis(&receiver_type, &method_name)
-        {
+        let allow_private = call.receiver().is_none();
+        if let Some(return_type) = self.resolve_method_return_type_from_analysis(
+            &receiver_type,
+            &method_name,
+            allow_private,
+        ) {
             return return_type;
         }
 
         self.resolve_rbs_method_return_type(&receiver_type, &method_name)
             .unwrap_or(RubyType::Unknown)
+    }
+
+    fn infer_proc_call_return_type(&self, call: &CallNode, method_name: &str) -> Option<RubyType> {
+        if method_name != "call" {
+            return None;
+        }
+        let receiver = call.receiver()?;
+        let local = receiver.as_local_variable_read_node()?;
+        let name = String::from_utf8_lossy(local.name().as_slice()).to_string();
+        self.proc_return_types_by_local
+            .get(&name)
+            .filter(|ty| **ty != RubyType::Unknown)
+            .cloned()
+    }
+
+    fn infer_proc_literal_return_type(&mut self, value: &Node) -> Option<RubyType> {
+        if let Some(lambda) = value.as_lambda_node() {
+            return self.infer_isolated_proc_body(lambda.body());
+        }
+
+        let call = value.as_call_node()?;
+        if call.name().as_slice() != b"new" {
+            return None;
+        }
+        let receiver = call.receiver()?;
+        let constant = receiver.as_constant_read_node()?;
+        if constant.name().as_slice() != b"Proc" {
+            return None;
+        }
+        let block = call.block()?.as_block_node()?;
+        self.infer_isolated_proc_body(block.body())
+    }
+
+    fn infer_isolated_proc_body(&mut self, body: Option<Node<'_>>) -> Option<RubyType> {
+        let previous_vars = self.vars.clone();
+        let return_type = body
+            .map(|body| self.track_node(&body))
+            .unwrap_or_else(RubyType::nil_class);
+        self.vars = previous_vars;
+        (return_type != RubyType::Unknown).then_some(return_type)
     }
 
     fn resolve_rbs_method_return_type(
@@ -623,9 +995,17 @@ impl<'a> TypeTracker<'a> {
         &self,
         receiver_type: &RubyType,
         method_name: &str,
+        allow_private: bool,
     ) -> Option<RubyType> {
         let analysis_engine = self.analysis_engine.as_ref()?;
         let method = crate::core::RubyMethod::new(method_name).ok()?;
+        if allow_private {
+            if let Some(return_type) =
+                self.local_method_return_type_for_receiver(receiver_type, &method)
+            {
+                return Some(return_type);
+            }
+        }
         let (receiver_fqn, namespace_kind) = match receiver_type {
             RubyType::Class(fqn) | RubyType::Module(fqn) => {
                 (fqn.clone(), crate::core::NamespaceKind::Instance)
@@ -641,7 +1021,145 @@ impl<'a> TypeTracker<'a> {
             FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
         let engine = analysis_engine.lock();
         let query = AnalysisQuery::new(&engine);
-        query.method_return_type_for_receiver(&namespace, &method)
+        if allow_private {
+            query.method_return_type_for_receiver(&namespace, &method)
+        } else if let Some(current_class) = self.current_class.as_ref() {
+            let caller_namespace = FullyQualifiedName::namespace_with_kind(
+                current_class.namespace_parts(),
+                crate::core::NamespaceKind::Instance,
+            );
+            query.method_return_type_for_protected_receiver(&namespace, &method, &caller_namespace)
+        } else {
+            query.method_return_type_for_public_receiver(&namespace, &method)
+        }
+    }
+
+    fn infer_yielding_block_return_type(
+        &mut self,
+        call: &CallNode,
+        method_name: &str,
+    ) -> Option<RubyType> {
+        let block = call.block()?.as_block_node()?;
+        let method = RubyMethod::new(method_name).ok()?;
+        let method_fqn = match call.receiver() {
+            None => FullyQualifiedName::method(
+                self.current_class
+                    .as_ref()
+                    .map(|fqn| fqn.namespace_parts())
+                    .unwrap_or_default(),
+                method,
+            ),
+            Some(receiver) if receiver.as_self_node().is_some() => FullyQualifiedName::method(
+                self.current_class
+                    .as_ref()
+                    .map(|fqn| fqn.namespace_parts())
+                    .unwrap_or_default(),
+                method,
+            ),
+            Some(receiver) => {
+                let receiver_type = self.infer_expression(&receiver);
+                let parts = match receiver_type {
+                    RubyType::Class(fqn)
+                    | RubyType::Module(fqn)
+                    | RubyType::ClassReference(fqn)
+                    | RubyType::ModuleReference(fqn) => fqn.namespace_parts(),
+                    RubyType::Array(_)
+                    | RubyType::Hash(_, _)
+                    | RubyType::Union(_)
+                    | RubyType::Unknown => {
+                        return None;
+                    }
+                };
+                FullyQualifiedName::method(parts, method)
+            }
+        };
+        let param_types = self.yield_param_types_by_method.get(&method_fqn)?.clone();
+        if param_types.iter().all(|ty| *ty == RubyType::Unknown) {
+            return None;
+        }
+        let param_names = block_parameter_names(&block);
+
+        let env_before = self.vars.clone();
+        for (index, name) in param_names.iter().enumerate() {
+            if let Some(param_type) = param_types.get(index) {
+                if *param_type != RubyType::Unknown {
+                    self.vars.insert(name.clone(), param_type.clone());
+                }
+            }
+        }
+        let return_type = block
+            .body()
+            .map(|body| self.track_node(&body))
+            .unwrap_or_else(RubyType::nil_class);
+        self.vars = env_before;
+
+        (return_type != RubyType::Unknown).then_some(return_type)
+    }
+
+    fn local_method_return_type_for_receiver(
+        &self,
+        receiver_type: &RubyType,
+        method: &RubyMethod,
+    ) -> Option<RubyType> {
+        let parts = match receiver_type {
+            RubyType::Class(fqn)
+            | RubyType::Module(fqn)
+            | RubyType::ClassReference(fqn)
+            | RubyType::ModuleReference(fqn) => fqn.namespace_parts(),
+            RubyType::Array(_) | RubyType::Hash(_, _) | RubyType::Union(_) | RubyType::Unknown => {
+                return None;
+            }
+        };
+        self.local_method_returns
+            .get(&FullyQualifiedName::method(parts, method.clone()))
+            .filter(|ty| **ty != RubyType::Unknown)
+            .cloned()
+    }
+
+    fn infer_super_return_type(&self) -> RubyType {
+        let Some(current_class) = self.current_class.as_ref() else {
+            return RubyType::Unknown;
+        };
+        let Some(method) = self.current_method.as_ref() else {
+            return RubyType::Unknown;
+        };
+        let namespace = FullyQualifiedName::namespace_with_kind(
+            current_class.namespace_parts(),
+            NamespaceKind::Instance,
+        );
+
+        if let Some(superclass) = self.local_superclasses.get(&namespace) {
+            let super_method =
+                FullyQualifiedName::method(superclass.namespace_parts(), method.clone());
+            if let Some(return_type) = self
+                .local_method_returns
+                .get(&super_method)
+                .filter(|ty| **ty != RubyType::Unknown)
+            {
+                return return_type.clone();
+            }
+        }
+
+        let Some(analysis_engine) = self.analysis_engine.as_ref() else {
+            return RubyType::Unknown;
+        };
+        let engine = analysis_engine.lock();
+        let query = AnalysisQuery::new(&engine);
+        let Some(callee) = query.resolve_super_method_callee(&namespace, method) else {
+            return RubyType::Unknown;
+        };
+        let super_method =
+            FullyQualifiedName::method(callee.owner.namespace_parts(), method.clone());
+        if let Some(return_type) = self
+            .local_method_returns
+            .get(&super_method)
+            .filter(|ty| **ty != RubyType::Unknown)
+        {
+            return return_type.clone();
+        }
+        query
+            .method_return_type_for_receiver(&callee.owner, method)
+            .unwrap_or(RubyType::Unknown)
     }
 
     /// Infer the type of a return statement
@@ -766,6 +1284,57 @@ fn join_branch_types(branches: &[(RubyType, bool)]) -> RubyType {
     } else {
         RubyType::union(surviving)
     }
+}
+
+fn block_parameter_names(block: &BlockNode<'_>) -> Vec<String> {
+    let Some(parameters_node) = block.parameters() else {
+        return Vec::new();
+    };
+    if let Some(numbered) = parameters_node.as_numbered_parameters_node() {
+        return numbered_parameter_names(numbered);
+    }
+    let Some(parameters) = parameters_node
+        .as_block_parameters_node()
+        .and_then(|node| node.parameters())
+    else {
+        return Vec::new();
+    };
+
+    let mut names = Vec::new();
+    for required in parameters.requireds().iter() {
+        if let Some(param) = required.as_required_parameter_node() {
+            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+        }
+    }
+    for optional in parameters.optionals().iter() {
+        if let Some(param) = optional.as_optional_parameter_node() {
+            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+        }
+    }
+    if let Some(rest) = parameters.rest() {
+        if let Some(param) = rest.as_rest_parameter_node() {
+            if let Some(name) = param.name() {
+                names.push(String::from_utf8_lossy(name.as_slice()).to_string());
+            }
+        }
+    }
+    for post in parameters.posts().iter() {
+        if let Some(param) = post.as_required_parameter_node() {
+            names.push(String::from_utf8_lossy(param.name().as_slice()).to_string());
+        }
+    }
+    names
+}
+
+fn numbered_parameter_names(params: NumberedParametersNode<'_>) -> Vec<String> {
+    (1..=usize::from(params.maximum()))
+        .map(|index| format!("_{index}"))
+        .collect()
+}
+
+fn pattern_symbol_key(node: &Node<'_>) -> Option<String> {
+    node.as_symbol_node()
+        .map(|symbol| String::from_utf8_lossy(symbol.unescaped()).to_string())
 }
 
 /// Helper to get type at offset from var_types BTreeMap

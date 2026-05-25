@@ -73,6 +73,19 @@ puts <ref>x</ref>
 }
 
 #[tokio::test]
+async fn references_pattern_capture() {
+    check(
+        r#"
+case {user: "Ada"}
+in {user: <ref>user$0</ref>}
+  puts <ref>user</ref>
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn references_local_variable_survives_reopen_without_reindex() {
     let mut editor = FakeEditor::new().await;
     let content = "def work\n  user = 1\n  puts user\nend\n";

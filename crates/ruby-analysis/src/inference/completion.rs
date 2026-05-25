@@ -103,6 +103,7 @@ pub fn receiver_type_from_context(
             }
             MethodReceiver::None
             | MethodReceiver::SelfReceiver
+            | MethodReceiver::Super
             | MethodReceiver::Constant(_)
             | MethodReceiver::LocalVariable(_)
             | MethodReceiver::MethodCall { .. }
@@ -256,7 +257,7 @@ fn resolve_method_receiver_type(
             }
             infer_constructor_assignment_type(content, name)
         }
-        MethodReceiver::SelfReceiver => None,
+        MethodReceiver::SelfReceiver | MethodReceiver::Super => None,
         MethodReceiver::InstanceVariable(name)
         | MethodReceiver::ClassVariable(name)
         | MethodReceiver::GlobalVariable(name) => {
@@ -498,6 +499,7 @@ fn lookup_variable_type(
         MethodReceiver::GlobalVariable(_) => CompletionVariableKind::Global,
         MethodReceiver::None
         | MethodReceiver::SelfReceiver
+        | MethodReceiver::Super
         | MethodReceiver::Constant(_)
         | MethodReceiver::LocalVariable(_)
         | MethodReceiver::MethodCall { .. }

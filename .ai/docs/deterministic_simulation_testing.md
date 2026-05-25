@@ -1,5 +1,147 @@
 # Deterministic Simulation Testing (DST) for Ruby Fast LSP
 
+## Current Task Ladder
+
+Goal: graph-driven deterministic sim, then seeded generation.
+
+1. Keep current `ProjectGraph -> RubyGenerator -> SourceMap -> FakeEditor` infra.
+2. Add table MRO oracle: own method, prepend, last include, superclass fallback, partial-file visibility.
+3. Add state-machine sim: deterministic lifecycle/edit/query steps, oracle updated after each step.
+4. Add seeded project/edit generation after table cases pass. Failed seed must replay.
+5. Add engine-level oracle tests beside FakeEditor tests for faster, sharper failures.
+6. Keep seed behavior independent from implementation changes: a fixed seed must keep the same generated Ruby files, edit script, and lifecycle script unless the simulator generator changes intentionally.
+
+Core shape:
+
+```text
+seed -> ProjectGraph -> Ruby files + SourceMap + Oracle
+     -> edit/query script -> FakeEditor lifecycle
+     -> assert defs/refs/hover/diagnostics after each step
+```
+
+Current replay:
+
+```bash
+SIM_SEED=20260524 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
+```
+
+Failure seed ledger:
+
+```text
+src/test/simulation/regression_seeds.txt
+```
+
+Normal simulation test runs include fixed seeds plus all seeds in that ledger. For random exploration:
+
+```bash
+SIM_RANDOM_SEEDS=20 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
+```
+
+If a random seed fails, replay it with `SIM_SEED=<seed>`, reduce if needed, then add the seed to `regression_seeds.txt`.
+
+Seed stability contract:
+
+- `generated_project_seeded_generation_is_replayable` checks same seed -> same files, edits, and lifecycle.
+- `generated_project_seeded_generation_has_stable_fingerprint` is a golden hash for seed `20260524`. Normal product code changes should not change it. Simulator generator changes may update it deliberately. Current generator version is `37`; version `10` added static `define_method` definitions, version `11` added static `send(:method)` calls, version `12` added Forwardable delegate forms, version `13` added Ruby method-object reflection (`method(:name)` / `instance_method(:name)`), version `14` added `def self.included(base); base.extend(...)` include hooks, version `15` added `base.send(:include, ...)` include hooks, version `16` added `base.class_eval { include ... }` include hooks, version `17` added `Namespace.const_get(:Child).send(:define_method, :name)` methods, version `18` replaced seeded semantic role names with neutral PRNG identifiers, version `19` added `Namespace.const_get(:Child)` constant refs, version `20` added `Namespace.const_defined?(:Child)` constant refs, version `21` added array block parameter receiver calls, version `22` added yield block parameter receiver calls, version `23` added generated type assertion sites plus seeded `CheckTypes` steps, version `24` added generated `if`/`unless`/`case` expression assignment type assertions, version `25` added generated `begin`/`rescue`/`ensure` expression assignment type assertions, version `26` added inline rescue modifier expression assignment type assertions, version `27` added seeded `method_missing` fallback calls, version `28` added seeded `extend self` module singleton dispatch, version `29` added seeded visibility probes, version `30` added seeded ActiveSupport::Concern `class_methods do` dispatch, version `31` added seeded visibility overrides on included methods through local receivers, version `32` added seeded reopened namespace fragments in separate files, version `33` added seeded block/proc/lambda/yield return-flow type assertions plus local type hover assertions, version `34` added numbered block parameter type-flow assertions, version `35` added hash pattern-capture type-flow assertions, version `36` added anonymous block-forwarding type-flow assertions, and version `37` added `...` argument-forwarding block type-flow assertions, so symbol-named dynamic dispatch, generated delegate methods, reflected method objects, include-time methods, static const-get metaprogramming, const-get/const-defined constant lookup, named, numbered, anonymous-forwarded, and dot-forwarded block parameter type flow, pattern capture type flow, control-flow and exception-flow expression type flow, block/proc/lambda/yield return type flow, `method_missing` fallback dispatch, `extend self` dispatch, visibility override dispatch, Concern class-method dispatch, reopened namespace dispatch, local assignment type facts, local assignment hovers, method return inlay hints, and seed/name independence are checked through goto/refs/hover/type.
+- Generated names come from the simulator PRNG/name allocator, not hardcoded domain strings. The replayability test rejects old fixture names like `Billing`, `Payments`, `Catalog`, `Audit`, `Reporting`, plus old role words like `gateway`, `invoice`, `capture`, and `refund`.
+
+Semantic table coverage now includes:
+
+- method resolution order: own method, prepend, include, superclass, partial-file visibility
+- constant namespace resolution: local, parent, absolute, qualified, partial-file visibility
+- reopened namespaces in separate files: duplicate class/module FQNs merge methods/constants for goto, refs, hover, and type checks
+- class methods emitted both as `def self.name` and `class << self; def name`
+- method aliases emitted with Ruby `alias` and `alias_method`, including definition/call hover
+- delegate method definitions emitted with Rails-style `delegate` and stdlib `Forwardable` `def_delegator`/`def_delegators`, including refs from definition/call sites and late-open cross-file hover/type resolution
+- bare `module_function` mode, where following instance method definitions are also callable as module singleton methods
+- `extend self` module methods callable as singleton methods, including seeded class-send dispatch
+- `extend`-based class methods, including inherited class receivers
+- singleton-class `include`/`prepend` class methods through `class << self`
+- static `class_eval`/`module_eval` block methods with constant receivers
+- static `define_method(:name)` and `Receiver.send(:define_method, :name)` forms with literal method names
+- static `Namespace.const_get(:Child).send(:define_method, :name)` forms with literal constants and method names
+- static `Namespace.const_get(:Child)` constant refs with literal constants, including goto/refs/hover/type on the symbol literal
+- static `Namespace.const_defined?(:Child)` constant refs with literal constants, including goto/refs/hover/type on the symbol literal
+- static `send(:name)`, `public_send(:name)`, and `__send__(:name)` calls with literal method names
+- method-object reflection with `method(:name)`, `Receiver.method(:name)`, and `Receiver.instance_method(:name)`
+- include hooks with `def self.included(base); base.extend(ClassMethods); base.send(:include, SharedMethods); base.class_eval { include RequestHelpers }; end`, where including classes receive class methods from the extended module and instance methods from included hook modules
+- Rails `class_attribute :name` macro-generated class and instance accessor methods
+- `super` calls from an overriding method to the next parent method
+- `method_missing` fallback dispatch for missing receiver methods, including goto/refs/hover/type and suppression of unresolved-method diagnostics
+- method visibility filtering: explicit receiver/private calls no longer feed goto, refs, hover, or local type inference, including cross-file invalid refs; protected explicit receivers are allowed from same-family callers; visibility overrides on included methods now feed goto, refs, hover, type inference, and private/protected ref filtering; bare private calls and `send` remain allowed; seeded projects include `private :name` and `protected :name` probes
+- ActiveSupport::Concern `class_methods do` blocks: block methods are indexed as implicit `ClassMethods` module methods, including classes receive them as class methods, and focused plus seeded simulator tests assert goto, refs, hover, and type inference
+- call shapes: bare, bare inside do-block, bare inside brace block, bare inside lambda, bare inside `Proc.new`, `super`, local receiver, ivar receiver, class send, method object, instance method object, class receiver for extended module methods, constructor send, static send, one-hop chain, receiver-local, array block parameter receiver, yield block parameter receiver, anonymous block-forwarding receiver, `...` argument-forwarding receiver
+- type assertion sites: declared method returns now emit generated direct, `if`, `unless`, `case`, `case/in` hash pattern capture, `begin`/`rescue`/`ensure`, inline `expr rescue fallback`, named and numbered array block-param copies, lambda `.call`, `Proc.new.call`, named user-yield block-param copy, numbered user-yield block result, yielding-block-result local assignments, anonymous block-forwarding local assignments, `...` argument-forwarding local assignments, plus method return hint anchors; FakeEditor checks inlay hints and hovers, and engine-only checks local assignment type facts.
+
+## Scale Target: Local Large Ruby App
+
+Measured May 24 2026, excluding `vendor`, `.bundle`, `tmp`, and `log`:
+
+| Metric | Count |
+| ------ | ----- |
+| Ruby files | 2,284 |
+| LOC | 718,914 |
+| namespace defs (`class`/`module`) | 9,670 |
+| method defs | 23,328 |
+| rough call/ref-ish lines | 247,630 |
+
+Normal sim stays correctness-first: 40-60 files, 100-150 methods, 30-90 graph edges per seeded project. A separate opt-in large-scale-shape smoke keeps normal `cargo test` fast while checking scale-sensitive indexing and sampled agent semantics:
+
+```bash
+SIM_LARGE_SCALE=1 cargo test generated_project_large_scale_smoke -- --nocapture
+SIM_LARGE_SCALE=1 SIM_LARGE_SCALE_SEED=20260524 cargo test generated_project_large_scale_smoke -- --nocapture
+SIM_LARGE_SCALE_ALL_EDGES=1 cargo test generated_project_large_scale_engine_checks_all_edges -- --nocapture
+```
+
+The scale smoke currently generates 2,284 Ruby files and 23,328 method definitions, matching the measured file/method shape. It samples goto, references, hover, and local receiver type inference across all generated call shapes. The large-scale-shape generator also emits class methods through both `def self.name` and `class << self` forms. LOC and rough call/ref-ish density are still below large-scale and remain the next confidence gap.
+
+The all-edge engine smoke uses the same large-scale-shape synthetic project but checks every generated method call, constant ref, and generated local assignment type fact against the engine oracle. Last local run on May 25 2026:
+
+```text
+files=2,284 methods=23,328 edges=23,718 calls=16,732 const_refs=3,796
+analysis refs=285,741 types=366,520 graph_edges=3,787
+finished in 228.73s
+```
+
+Real-corpus smoke is also opt-in because it indexes a caller-provided local checkout and is slow:
+
+```bash
+SIM_REAL_CORPUS=1 SIM_REAL_CORPUS_ROOT=/path/to/app cargo test generated_project_real_corpus_smoke -- --nocapture
+```
+
+Last local run on May 25 2026:
+
+| Metric | Count |
+| ------ | ----- |
+| Rust smoke collected Ruby files | 2,281 |
+| LOC | 719,195 |
+| namespace defs | 9,719 |
+| method defs | 23,328 |
+| rough call/ref-ish lines | 254,640 |
+| index wall time | 767.94s total, 214.52s project indexing |
+| analysis stats | 2,281 files, 24,719 methods, 581,473 refs, 58,340 types, 4,926 graph edges |
+
+Real semantic samples passed for goto, references, hover, and type inlay hints:
+
+```text
+goto/refs/hover=12 sampled method refs
+type_hints=lib/platform/helpers/commerce_helpers.rb, lib/platform/commerce.rb, lib/platform/users.rb
+```
+
+The real-corpus gate caught one real false-positive regression on May 25 2026:
+`AdminAPIClient#post` references included a Rails route DSL `post` call from
+`config/routes/admin_routes.rb`. The fix tightened method reference target
+expansion so class method refs no longer pull same-named top-level DSL calls
+through the root ancestor unless a matching root method fact exists.
+
+## Next Confidence Ladder
+
+1. Reduce real-corpus gate cost: cache project facts or add a faster all-project engine-only path so this can run in nightly CI.
+2. Increase synthetic density: more calls/constant refs per file, more namespace reopen/partial definitions, more Rails-like DSL edges.
+3. Add LSP sampled checks for more scale edges, not just one sample per call shape.
+4. Add nightly random soak: many `SIM_RANDOM_SEEDS`, failed seeds appended to `regression_seeds.txt`.
+5. Add more Ruby semantic tables: refinements, deeper pattern matching, keyword arg forwarding.
+
 ## Implementation Status ✅
 
 | Phase                              | Status      | Description                                                          |
@@ -1126,13 +1268,22 @@ The simulation runner uses `tracked_code()` which generates one of 18 scenarios:
 
 | Ruby Construct            | Status     |
 | ------------------------- | ---------- | ----- | ---------- |
-| Blocks (`{                | x          | x }`) | ❌ Not yet |
-| Procs/Lambdas             | ❌ Not yet |
-| `if`/`unless`/`case`      | ❌ Not yet |
-| `begin`/`rescue`/`ensure` | ❌ Not yet |
-| Method aliases            | ❌ Not yet |
+| Blocks                    | ✅ Def/goto/refs/hover/type for bare calls inside blocks plus Array/Hash and local `yield` block parameter type flow, including numbered `_1` params, class-scoped yielding helper calls, anonymous `&` block forwarding, and `...` argument/block forwarding; local yielded/forwarded block return type feeds hover/inlay/method return inference |
+| Procs/Lambdas             | ✅ Def/goto/refs/hover for bare calls inside `lambda` and `Proc.new`; local `lambda`/`Proc.new` `.call` return type feeds hover, assignment hints, and method return hints |
+| `if`/`unless`/`case`      | ✅ Method return inference, local assignment type facts, and generated simulator type assertions for expression assignments |
+| `case`/`in` pattern match | ✅ Local pattern captures are defs/refs, and static hash-pattern capture values feed hover, local assignment type facts, and method return inference |
+| `begin`/`rescue`/`ensure` | ✅ Method return inference, hover, local assignment type facts, and generated simulator type assertions for expression assignments |
+| `expr rescue fallback`    | ✅ Method return inference, hover, local assignment type facts, and generated simulator type assertions for expression assignments |
+| Method aliases            | ✅ Def/goto/refs/hover for `alias` and `alias_method` |
+| Rails delegate            | ✅ Def/goto/refs/hover/type, including cross-file late-open target resolution |
+| Method-object reflection  | ✅ Def/goto/refs/hover for `method(:name)` and `instance_method(:name)` literal selectors |
+| Include hooks             | ✅ Def/goto/refs/hover/type for `def self.included(base); base.extend(ClassMethods); base.send(:include, SharedMethods); base.class_eval { include RequestHelpers }; end` |
+| Const-get define_method   | ✅ Def/goto/refs/hover/type for `Namespace.const_get(:Child).send(:define_method, :name)` |
+| Const-get constant refs   | ✅ Def/goto/refs/hover/type for `Namespace.const_get(:Child)` literal selectors |
+| Const-defined constant refs | ✅ Def/goto/refs/hover/type for `Namespace.const_defined?(:Child)` literal selectors |
+| `extend self`             | ✅ Goto/refs/hover/type for module singleton dispatch; seeded simulator emits module class-send calls |
 | Refinements               | ❌ Not yet |
-| `method_missing`          | ❌ Not yet |
+| `method_missing`          | ✅ Goto/refs/hover/type for fallback dispatch plus unresolved-method suppression; seeded simulator emits fallback calls |
 
 ---
 

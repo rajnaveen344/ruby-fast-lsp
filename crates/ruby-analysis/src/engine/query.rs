@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::core::method_store::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceFact,
     SourceFileId, SymbolFact, TypeFact, TypeResolution, TypeSubject,
@@ -63,6 +64,13 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn method_facts_in_file(&self, file_id: SourceFileId) -> Vec<MethodFact> {
         self.engine.method_facts_in_file(file_id)
+    }
+
+    pub fn method_visibility_overrides_in_file(
+        &self,
+        file_id: SourceFileId,
+    ) -> Vec<MethodVisibilityOverrideFact> {
+        self.engine.method_visibility_overrides_in_file(file_id)
     }
 
     pub fn all_method_facts(&self) -> Vec<MethodFact> {

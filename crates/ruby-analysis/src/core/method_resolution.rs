@@ -3,6 +3,7 @@ use crate::{FullyQualifiedName, RubyMethod, TextRange};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodCalleeResolution {
     Exact,
+    MethodMissing,
     ReceiverOnly,
 }
 

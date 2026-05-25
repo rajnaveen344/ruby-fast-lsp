@@ -1,6 +1,6 @@
 use crate::core::{
-    FullyQualifiedName, MethodParamFact, MethodParamKind, NamespaceKind, RubyMethod, TypeFact,
-    TypeProvenance, TypeSubject,
+    FullyQualifiedName, GraphEdgeKind, MethodParamFact, MethodParamKind, NamespaceKind, RubyMethod,
+    TypeFact, TypeProvenance, TypeSubject,
 };
 use crate::{get_method_namespace_kind, LocalScopeKind as LVScopeKind};
 use log::warn;
@@ -106,6 +106,21 @@ impl FactCollector {
             self.direct_range(&full_location),
             direct_params,
         );
+        if node.receiver().is_none()
+            && actual_namespace_kind == NamespaceKind::Instance
+            && self.scope_tracker.module_function_mode_enabled()
+        {
+            self.direct_push_method_fact(
+                namespace_parts.clone(),
+                NamespaceKind::Singleton,
+                method,
+                self.direct_range(&full_location),
+                params
+                    .iter()
+                    .map(|param| MethodParamFact::new(param.name.clone(), param.kind))
+                    .collect(),
+            );
+        }
 
         let body_range = self.body_text_range(node.body().map(|b| b.location()), &node.location());
 
@@ -193,6 +208,9 @@ impl FactCollector {
             // Infer return type from method body using TypeTracker
             let mut tracker = TypeTracker::new(self.document.content.as_bytes());
             tracker = tracker.with_analysis_engine(self.analysis_engine.clone());
+            tracker = tracker.with_local_method_returns(self.local_method_returns_for_tracker());
+            tracker = tracker.with_local_superclasses(self.local_superclasses_for_tracker());
+            tracker = tracker.with_yield_param_types(self.yield_param_types_by_method.clone());
             // Set the current class context for self resolution
             if !namespace_parts.is_empty() {
                 tracker.set_current_class(Some(instance_owner_fqn.clone()));
@@ -388,6 +406,39 @@ impl FactCollector {
                 yard_type, rbs_type
             ),
         );
+    }
+
+    fn local_method_returns_for_tracker(
+        &self,
+    ) -> std::collections::HashMap<FullyQualifiedName, RubyType> {
+        self.type_store
+            .all_facts()
+            .into_iter()
+            .filter_map(|fact| match fact.subject {
+                TypeSubject::MethodReturn(fqn) if fact.ruby_type != RubyType::Unknown => {
+                    Some((fqn, fact.ruby_type))
+                }
+                TypeSubject::Constant(_)
+                | TypeSubject::Local { .. }
+                | TypeSubject::InstanceVariable { .. }
+                | TypeSubject::ClassVariable { .. }
+                | TypeSubject::GlobalVariable(_)
+                | TypeSubject::MethodReturn(_)
+                | TypeSubject::Parameter { .. }
+                | TypeSubject::Expression(_) => None,
+            })
+            .collect()
+    }
+
+    fn local_superclasses_for_tracker(
+        &self,
+    ) -> std::collections::HashMap<FullyQualifiedName, FullyQualifiedName> {
+        self.direct_facts
+            .graph_edges
+            .iter()
+            .filter(|edge| edge.kind == GraphEdgeKind::Superclass)
+            .map(|edge| (edge.source.clone(), edge.target.clone()))
+            .collect()
     }
 }
 

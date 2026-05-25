@@ -31,14 +31,20 @@ impl EngineQuery {
     ) -> Option<HoverInfo> {
         // Step 1: Get identifier at position using existing analyzer
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
-        let (identifier_opt, identifier_type, namespace, scope_id, _namespace_kind) =
+        let (identifier_opt, identifier_type, namespace, scope_id, namespace_kind) =
             analyzer.get_identifier(position);
 
         let identifier = identifier_opt?;
 
         // Step 2: Convert Identifier to HoverTarget (analysis-domain representation)
-        let target =
-            identifier_to_hover_target(identifier, identifier_type, namespace, scope_id, position);
+        let target = identifier_to_hover_target(
+            identifier,
+            identifier_type,
+            namespace,
+            namespace_kind,
+            scope_id,
+            position,
+        );
 
         // Step 3: Create context for generators
         let context = HoverContext {

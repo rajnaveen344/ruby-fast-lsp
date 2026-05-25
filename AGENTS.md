@@ -464,6 +464,14 @@ Moved non-LSP logic out of `src/`:
   optimize mid-refactor; profile after architecture cleanup. Likely targets:
   duplicate parse/fact passes, full-file processing on every change, extension
   hook overhead, source offset conversions, and repeated engine graph resolution.
+- Failed May 23 2026 experiment: incremental `ImmediateAffected` re-resolution
+  during `didChange` regressed real editing. A helper edit fanned out to 2186
+  affected files, splitting time between engine resolution and diagnostic
+  publishing. Do not reintroduce broad inline affected-file fanout without a
+  reproducible lifecycle benchmark and a design that distinguishes symbol export
+  changes from body-only changes. Future direction: semantic export fingerprints
+  plus bounded/visible-file diagnostic refresh, with project-wide refresh outside
+  the typing critical path.
 
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
 `Url`, editor commands, or publish diagnostics can stay in `ruby-fast-lsp`.

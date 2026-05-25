@@ -49,6 +49,23 @@ u = User.new
 }
 
 #[tokio::test]
+async fn method_missing_suppresses_unresolved_method_warn() {
+    check(
+        r#"
+class DynamicRecord
+  def method_missing(name, *args)
+    "dynamic"
+  end
+end
+
+record = DynamicRecord.new
+<warn none code="unresolved-method">record.virtual_total</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn chain_first_link_flagged_downstream_silent() {
     // u.foo unresolved on User → flag foo only. .bar's receiver type is
     // unknown after the broken link, so do NOT add additional noise.

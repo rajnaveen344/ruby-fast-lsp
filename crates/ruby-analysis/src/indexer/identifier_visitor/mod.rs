@@ -5,6 +5,7 @@ use crate::{Identifier, LVScopeId, RubyDocument, ScopeTracker};
 use ruby_prism::*;
 use tower_lsp::lsp_types::Position;
 
+mod alias_method_node;
 mod back_reference_read_node;
 mod block_node;
 mod call_node;
@@ -16,6 +17,7 @@ mod local_variable_read_node;
 mod module_node;
 mod numbered_reference_read_node;
 mod parameters_node;
+mod super_node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentifierType {
@@ -120,6 +122,28 @@ impl IdentifierVisitor {
     }
 }
 
+fn static_eval_block_namespace(node: &CallNode) -> Option<Vec<RubyConstant>> {
+    if !matches!(node.name().as_slice(), b"class_eval" | b"module_eval") {
+        return None;
+    }
+    node.block()?;
+    let receiver = node.receiver()?;
+    let eval_ref = crate::mixin_ref_from_node(&receiver)?;
+    Some(eval_ref.parts)
+}
+
+fn concern_class_methods_block_namespace(node: &CallNode) -> Option<Vec<RubyConstant>> {
+    if node.receiver().is_some() || node.name().as_slice() != b"class_methods" {
+        return None;
+    }
+    node.block()?;
+    Some(vec![RubyConstant::new("ClassMethods").expect(
+        "INVARIANT VIOLATED: static Concern ClassMethods constant is invalid. \
+         This is a bug because `ClassMethods` is a valid Ruby constant. \
+         Fix: inspect RubyConstant validation.",
+    )])
+}
+
 impl Visit<'_> for IdentifierVisitor {
     fn visit_class_node(&mut self, node: &ClassNode) {
         self.process_class_node_entry(node);
@@ -143,6 +167,11 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_def_node_entry(node);
         visit_def_node(self, node);
         self.process_def_node_exit(node);
+    }
+
+    fn visit_alias_method_node(&mut self, node: &AliasMethodNode) {
+        self.process_alias_method_node_entry(node);
+        visit_alias_method_node(self, node);
     }
 
     fn visit_block_node(&mut self, node: &BlockNode) {
@@ -177,8 +206,41 @@ impl Visit<'_> for IdentifierVisitor {
 
     fn visit_call_node(&mut self, node: &CallNode) {
         self.process_call_node_entry(node);
-        visit_call_node(self, node);
+        if let Some(eval_namespace) = static_eval_block_namespace(node) {
+            if let Some(receiver) = node.receiver() {
+                self.visit(&receiver);
+            }
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            if let Some(block) = node.block() {
+                self.scope_tracker.push_ns_scopes(eval_namespace);
+                self.visit(&block);
+                self.scope_tracker.pop_ns_scope();
+            }
+        } else if let Some(class_methods_namespace) = concern_class_methods_block_namespace(node) {
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            if let Some(block) = node.block() {
+                self.scope_tracker.push_ns_scopes(class_methods_namespace);
+                self.visit(&block);
+                self.scope_tracker.pop_ns_scope();
+            }
+        } else {
+            visit_call_node(self, node);
+        }
         self.process_call_node_exit(node);
+    }
+
+    fn visit_forwarding_super_node(&mut self, node: &ForwardingSuperNode) {
+        self.process_forwarding_super_node_entry(node);
+        visit_forwarding_super_node(self, node);
+    }
+
+    fn visit_super_node(&mut self, node: &SuperNode) {
+        self.process_super_node_entry(node);
+        visit_super_node(self, node);
     }
 
     fn visit_local_variable_read_node(&mut self, node: &LocalVariableReadNode) {
@@ -191,6 +253,12 @@ impl Visit<'_> for IdentifierVisitor {
         self.process_local_variable_write_node_entry(node);
         visit_local_variable_write_node(self, node);
         self.process_local_variable_write_node_exit(node);
+    }
+
+    fn visit_local_variable_target_node(&mut self, node: &LocalVariableTargetNode) {
+        self.process_local_variable_target_node_entry(node);
+        visit_local_variable_target_node(self, node);
+        self.process_local_variable_target_node_exit(node);
     }
 
     fn visit_class_variable_read_node(&mut self, node: &ClassVariableReadNode) {

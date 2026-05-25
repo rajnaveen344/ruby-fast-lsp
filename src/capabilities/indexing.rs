@@ -9,6 +9,19 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
+fn process_interactive_file(
+    indexer: &FileProcessor,
+    server: &RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+) -> anyhow::Result<crate::indexer::file_processor::ProcessResult> {
+    if server.workspace_for_uri(uri).is_some() {
+        indexer.process_file_current_file_resolution(uri, content, server)
+    } else {
+        indexer.process_file(uri, content, server)
+    }
+}
+
 /// Initialize workspace and run complete indexing.
 ///
 pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> anyhow::Result<()> {
@@ -25,75 +38,38 @@ pub async fn init_workspace(server: &RubyLanguageServer, folder_uri: Url) -> any
     Ok(())
 }
 
-fn analysis_file_already_indexed(server: &RubyLanguageServer, uri: &Url, content: &str) -> bool {
-    let path = uri
-        .to_file_path()
-        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
-    let engine = server.analysis_engine.lock();
-    let Some(file_id) = engine.file_id(&path) else {
-        return false;
-    };
-    let Some(file) = engine.file(file_id) else {
-        return false;
-    };
-    file.line_index.len() == content.len() && file.content_hash == source_hash(content)
-}
-
-fn source_hash(source: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
-}
-
 pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDocumentParams) {
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
-    let file_already_indexed = analysis_file_already_indexed(server, &uri, &content);
     let analysis_file_id = server.open_or_update_analysis_file(&uri, content.clone());
 
-    // Only create a fresh document if one doesn't exist
-    // IMPORTANT: Don't overwrite existing document that may have lvars from workspace indexing
     {
         let mut docs = server.docs.lock();
         if let Some(existing_doc) = docs.get(&uri) {
             let mut doc_guard = existing_doc.write();
             doc_guard.set_analysis_file_id(analysis_file_id);
             doc_guard.update(content.clone(), params.text_document.version);
-            if file_already_indexed {
-                doc_guard.indexed_version = Some(params.text_document.version);
-            }
         } else {
-            let mut document = RubyDocument::with_analysis_file_id(
+            let document = RubyDocument::with_analysis_file_id(
                 uri.clone(),
                 content.clone(),
                 params.text_document.version,
                 analysis_file_id,
             );
-            if file_already_indexed {
-                document.indexed_version = Some(params.text_document.version);
-            }
             docs.insert(uri.clone(), Arc::new(RwLock::new(document)));
         }
     }
     debug!("Doc cache size: {}", server.docs.lock().len());
 
-    if file_already_indexed {
-        let query = EngineQuery::with_engine(server.analysis_engine.clone());
-        let diagnostics = query.get_unresolved_diagnostics(&uri);
-        server.publish_diagnostics(uri, diagnostics).await;
-        return;
-    }
-
     // Process file with unified FileProcessor::process_file. Route analysis state
     // by URI so the file lands in its workspace's own index.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
-    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &content, server) {
-        Ok(result) => (result.affected_uris, result.diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
-    };
+    let (affected_uris, mut diagnostics) =
+        match process_interactive_file(&indexer, server, &uri, &content) {
+            Ok(result) => (result.affected_uris, result.diagnostics),
+            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        };
 
     // Invalidate namespace tree cache with debouncing
     server.invalidate_namespace_tree_cache_debounced();
@@ -144,15 +120,16 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         }
     }
 
-    // Full processing on every change - includes unresolved diagnostics.
+    // Process current file without forcing a project-wide reference/diagnostic
+    // resolve. Project-wide propagation runs during workspace indexing/save.
     // Route by URI so the file's workspace index is the one updated.
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
-    let (affected_uris, mut diagnostics) = match indexer.process_file(&uri, &final_content, server)
-    {
-        Ok(result) => (result.affected_uris, result.diagnostics),
-        Err(_) => (std::collections::HashSet::new(), Vec::new()),
-    };
+    let (affected_uris, mut diagnostics) =
+        match process_interactive_file(&indexer, server, &uri, &final_content) {
+            Ok(result) => (result.affected_uris, result.diagnostics),
+            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+        };
 
     // Add unresolved diagnostics (now freshly computed with correct positions)
     let query = EngineQuery::with_engine(server.analysis_engine.clone());

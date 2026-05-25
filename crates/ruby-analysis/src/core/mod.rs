@@ -32,14 +32,16 @@ pub use graph_store::{
 };
 pub use method_resolution::{MethodCalleeResolution, ResolvedMethodCallee};
 pub use method_store::{
-    MethodFact, MethodParamFact, MethodParamKind, MethodStore, StoredMethodFact,
+    MethodFact, MethodParamFact, MethodParamKind, MethodStore, MethodVisibilityOverrideFact,
+    StoredMethodFact,
 };
 pub use reference_store::{
     ConstLookup, ConstantPath, KeywordArgCandidate, MethodCallSignatureCandidate,
-    MethodReferenceCandidate, MethodReferenceDiagnostics, ReferenceCandidate,
-    ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore,
-    StoredConstantReferenceCandidate, StoredMethodReferenceCandidate, StoredReferenceCandidate,
-    StoredReferenceCandidateKind, StoredReferenceCandidateRef, StoredResolvedReferenceCandidate,
+    MethodReferenceAccess, MethodReferenceCandidate, MethodReferenceDiagnostics,
+    ReferenceCandidate, ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact,
+    ReferenceStore, StoredConstantReferenceCandidate, StoredMethodReferenceCandidate,
+    StoredReferenceCandidate, StoredReferenceCandidateKind, StoredReferenceCandidateRef,
+    StoredResolvedReferenceCandidate,
 };
 pub use ruby_method::RubyMethod;
 pub use ruby_namespace::RubyConstant;

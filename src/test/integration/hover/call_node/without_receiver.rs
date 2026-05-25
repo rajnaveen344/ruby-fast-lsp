@@ -28,6 +28,110 @@ end
     .await;
 }
 
+#[tokio::test]
+async fn super_method_call() {
+    check(
+        r#"
+class ParentProcessor
+  def process
+    "parent"
+  end
+end
+
+class ChildProcessor < ParentProcessor
+  def process
+    super<hover label="String">
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn yielding_block_call_uses_block_return_type() {
+    check(
+        r#"
+class User
+  def name
+    "Ada"
+  end
+end
+
+def with_user
+  yield User.new
+end
+
+def label
+  with_user<hover label="String"> do |user|
+    user.name
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn included_hook_instance_method_call_uses_target_return_type() {
+    check(
+        r#"
+module DailyTrends
+  def self.included(base)
+    base.send :include, SharedMethods
+  end
+
+  module SharedMethods
+    # @return [String]
+    def get_html
+      "html"
+    end
+  end
+end
+
+class Worker
+  include DailyTrends
+
+  def render
+    get_html<hover label="String">
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn included_hook_class_eval_instance_method_call_uses_target_return_type() {
+    check(
+        r#"
+module AdminHelper
+  def self.included(base)
+    base.class_eval do
+      include RequestHelpers
+    end
+  end
+
+  module RequestHelpers
+    # @return [String]
+    def api_get
+      "ok"
+    end
+  end
+end
+
+class SpecContext
+  include AdminHelper
+
+  def render
+    api_get<hover label="String">
+  end
+end
+"#,
+    )
+    .await;
+}
+
 // =============================================================================
 // Method Parameters
 // =============================================================================
