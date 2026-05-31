@@ -137,12 +137,7 @@ impl EngineQuery {
                 protected_caller,
             )
             .into_iter()
-            .filter(|callee| {
-                matches!(
-                    callee.resolution,
-                    MethodCalleeResolution::Exact | MethodCalleeResolution::MethodMissing
-                )
-            })
+            .filter(|callee| matches!(callee.resolution, MethodCalleeResolution::Exact))
             .flat_map(|callee| callee.definition_locations)
             .collect::<Vec<_>>();
 

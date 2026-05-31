@@ -105,6 +105,7 @@ impl<'a> AnalysisQuery<'a> {
         };
 
         let mut callees = Vec::new();
+        let mut method_missing_fallbacks = Vec::new();
         for fqn in &fqns_to_search {
             let ancestor_chain = method_lookup_chain(self.engine, fqn);
             if let Some(callee) = method_callee_in_chain(
@@ -123,11 +124,15 @@ impl<'a> AnalysisQuery<'a> {
             } else if let Some(callee) =
                 method_missing_callee_in_chain(self.engine, &ancestor_chain)
             {
-                callees.push(callee);
+                method_missing_fallbacks.push(callee);
             }
         }
 
         if callees.is_empty() {
+            if !method_missing_fallbacks.is_empty() {
+                return Some(method_missing_fallbacks);
+            }
+
             return Some(
                 fqns_to_search
                     .into_iter()

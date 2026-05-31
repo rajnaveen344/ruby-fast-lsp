@@ -1469,7 +1469,7 @@ async fn generated_project_resolves_class_attribute_methods() {
 }
 
 #[tokio::test]
-async fn generated_project_resolves_method_missing_fallback() {
+async fn generated_project_uses_method_missing_fallback_without_goto_definition() {
     let runner = SimulationRunner::start(method_missing_project()).await;
 
     runner.check_definitions().await;

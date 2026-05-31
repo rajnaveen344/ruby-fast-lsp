@@ -421,6 +421,9 @@ impl SimulationRunner {
             let Some(expected_target) = oracle.resolve_call(call) else {
                 continue;
             };
+            if expected_target.name == "method_missing" && call.target.name != "method_missing" {
+                continue;
+            }
             let def = self.def_pos(&expected_target);
             let locs = self
                 .editor
