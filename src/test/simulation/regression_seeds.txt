@@ -2,3 +2,4 @@
 # Add failed SIM_SEED values here after reducing a failure.
 # Normal `cargo test test::simulation` always replays these seeds.
 9177262849732973560 # chained refs missed after late intermediate file open + caller reopen
+559323752246194677 # chained refs missed after late return-owner file open

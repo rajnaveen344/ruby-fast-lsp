@@ -105,6 +105,9 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
             Err(_) => (std::collections::HashSet::new(), Vec::new()),
         }
     };
+    if !skip_processing {
+        refresh_open_project_files_after_dependency_open(&indexer, server, &uri);
+    }
     let process_elapsed = process_start.elapsed();
 
     let cache_start = Instant::now();
@@ -150,6 +153,39 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         affected_count,
         affected_elapsed
     );
+}
+
+fn refresh_open_project_files_after_dependency_open(
+    indexer: &FileProcessor,
+    server: &RubyLanguageServer,
+    opened_uri: &Url,
+) {
+    let open_docs = {
+        let docs = server.docs.lock();
+        docs.iter()
+            .filter_map(|(uri, doc)| {
+                if uri == opened_uri {
+                    return None;
+                }
+                if analysis_file_kind(server, uri).is_some_and(|kind| kind.is_external()) {
+                    return None;
+                }
+                let doc = doc.read();
+                Some((uri.clone(), doc.content.clone()))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (uri, content) in open_docs {
+        if let Err(err) =
+            indexer.process_file_current_file_resolution_forced(&uri, &content, server)
+        {
+            log::warn!(
+                "Failed to refresh open file after dependency open: {}: {err}",
+                uri.path()
+            );
+        }
+    }
 }
 
 fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKind> {

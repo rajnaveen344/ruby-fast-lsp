@@ -1080,6 +1080,59 @@ end
 }
 
 #[tokio::test]
+async fn references_chained_method_after_late_return_owner_file_open() {
+    let mut editor = FakeEditor::new().await;
+    let target = r#"
+module Payments
+  class Gateway
+    def capture
+      "ok"
+    end
+  end
+end
+"#;
+    let caller = r#"
+module Billing
+  class Invoice
+    def charge
+      account = Billing::Account.new
+      account.gateway.capture
+    end
+  end
+end
+"#;
+    let intermediate = r#"
+module Billing
+  class Account
+    # @return [Payments::Gateway]
+    def gateway
+      Payments::Gateway.new
+    end
+  end
+end
+"#;
+    let unrelated_late_file = r#"
+module Billing
+  class Statement
+  end
+end
+"#;
+
+    editor.open("gateway.rb", target).await;
+    editor.open("invoice.rb", caller).await;
+    editor.open("account.rb", intermediate).await;
+    editor.open("statement.rb", unrelated_late_file).await;
+
+    let refs = editor.references_at("gateway.rb", 3, 8).await;
+    assert!(
+        refs.iter().any(|location| {
+            location.uri.path().ends_with("invoice.rb") && location.range.start.line == 5
+        }),
+        "expected Payments::Gateway#capture references to include invoice chain call after late return-owner open, got {refs:?}"
+    );
+}
+
+#[tokio::test]
 async fn references_namespaced_chained_method_inside_method() {
     check(
         r#"

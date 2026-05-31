@@ -92,6 +92,21 @@ impl FileProcessor {
         self.process_file_with_resolution(uri, content, server, FileResolution::CurrentFile)
     }
 
+    pub fn process_file_current_file_resolution_forced(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<ProcessResult> {
+        self.process_file_with_resolution_forced(
+            uri,
+            content,
+            server,
+            FileResolution::CurrentFile,
+            true,
+        )
+    }
+
     pub fn process_file_deferred_resolution(
         &self,
         uri: &Url,
@@ -108,8 +123,19 @@ impl FileProcessor {
         server: &RubyLanguageServer,
         resolution: FileResolution,
     ) -> Result<ProcessResult> {
+        self.process_file_with_resolution_forced(uri, content, server, resolution, false)
+    }
+
+    fn process_file_with_resolution_forced(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        resolution: FileResolution,
+        force_reindex: bool,
+    ) -> Result<ProcessResult> {
         // Check if this version was already indexed - skip expensive re-indexing if unchanged
-        let already_indexed = {
+        let already_indexed = !force_reindex && {
             let docs = server.docs.lock();
             if let Some(doc_arc) = docs.get(uri) {
                 let doc = doc_arc.read();
