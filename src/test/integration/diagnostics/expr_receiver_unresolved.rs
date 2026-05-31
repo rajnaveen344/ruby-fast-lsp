@@ -12,7 +12,7 @@
 //! because `Class#new` isn't in the user index. Tests scope assertions tightly
 //! around the calls under test to avoid colliding with that pre-existing noise.
 
-use crate::test::harness::check;
+use crate::test::harness::{check, check_multi_file};
 
 #[tokio::test]
 async fn expr_receiver_known_type_unknown_method_warns() {
@@ -62,6 +62,41 @@ record = DynamicRecord.new
 <warn none code="unresolved-method">record.virtual_total</warn>
 "#,
     )
+    .await;
+}
+
+#[tokio::test]
+async fn duplicate_inherited_method_defs_do_not_warn() {
+    check_multi_file(&[
+        (
+            "child.rb",
+            r#"
+class Child < Base
+  def save
+    <warn none code="unresolved-method">run</warn>
+  end
+end
+"#,
+        ),
+        (
+            "base_a.rb",
+            r#"
+class Base
+  def run
+  end
+end
+"#,
+        ),
+        (
+            "base_b.rb",
+            r#"
+class Base
+  def run
+  end
+end
+"#,
+        ),
+    ])
     .await;
 }
 

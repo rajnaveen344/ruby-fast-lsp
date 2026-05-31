@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use crate::core::{
     ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact,
-    FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, RaiseArgCandidate,
-    ReferenceFact, RubyConstant, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
-    StoredReferenceCandidateRef, TextRange,
+    FqnId, FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact,
+    NamespaceKind, RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod, RubyType,
+    SourceFileId, StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
@@ -14,6 +14,19 @@ use crate::engine::resolution::{
     method_lookup_chain, method_missing_method, namespace_target_exists,
 };
 use crate::{AnalysisEngine, AnalysisQuery};
+
+type MethodReferenceCacheKey = (ConstLookupId, NamespaceKind, RubyMethod, bool);
+type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>;
+
+#[derive(Clone)]
+enum MethodReferenceResolution {
+    Unique(MethodFact),
+    Ambiguous {
+        owner: FullyQualifiedName,
+        method: RubyMethod,
+    },
+    Missing,
+}
 
 impl AnalysisEngine {
     pub(super) fn resolve_reference_candidates(&mut self) {
@@ -26,17 +39,13 @@ impl AnalysisEngine {
 
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
-        let mut method_fact_cache: HashMap<
-            (ConstLookupId, crate::core::NamespaceKind, RubyMethod, bool),
-            Option<MethodFact>,
-        > = HashMap::new();
+        let mut method_fact_cache: HashMap<MethodReferenceCacheKey, MethodReferenceResolution> =
+            HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
-        let mut constant_target_cache: HashMap<ConstLookupId, Option<crate::core::FqnId>> =
-            HashMap::new();
-        let mut method_lookup_chain_cache: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>> =
-            HashMap::new();
+        let mut constant_target_cache: HashMap<ConstLookupId, Option<FqnId>> = HashMap::new();
+        let mut method_lookup_chain_cache: MethodLookupChainCache = HashMap::new();
         self.facts.references.resolved.clear();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
@@ -126,6 +135,8 @@ impl AnalysisEngine {
                                         .into_iter()
                                         .next()
                                     })
+                                    .map(MethodReferenceResolution::Unique)
+                                    .unwrap_or(MethodReferenceResolution::Missing)
                             } else {
                                 method_fact_for_receiver_with_chain_cache(
                                     self,
@@ -136,10 +147,13 @@ impl AnalysisEngine {
                             }
                         })
                         .clone();
-                    if let Some(fact) = fact {
-                        let fact_method = method_name_from_fact(&fact);
-                        let target =
-                            FullyQualifiedName::method(fact.owner.namespace_parts(), fact_method);
+                    if let Some((owner, resolved_method, fact)) =
+                        resolved_method_reference_parts(&fact)
+                    {
+                        let target = FullyQualifiedName::method(
+                            owner.namespace_parts(),
+                            resolved_method,
+                        );
                         let target = self.names.intern_fqn(target);
                         self.facts.references.resolved.add(
                             target,
@@ -149,29 +163,30 @@ impl AnalysisEngine {
                                 candidate.access,
                             ),
                         );
-                        if fact_method == candidate.method {
+                        if resolved_method == candidate.method {
                             if let Some(diagnostics) = candidate.diagnostics.as_deref() {
-                                self.push_signature_diagnostics(
-                                    &fact,
-                                    &candidate.method,
-                                    &diagnostics.signature,
-                                    diagnostics.diagnostic_range,
-                                    &mut unresolved_constants,
-                                );
+                                if let Some(fact) = fact {
+                                    self.push_signature_diagnostics(
+                                        fact,
+                                        &candidate.method,
+                                        &diagnostics.signature,
+                                        diagnostics.diagnostic_range,
+                                        &mut unresolved_constants,
+                                    );
+                                }
                             }
                         }
-                    } else if *method_namespace_exists_cache
-                        .entry(method_reference_owner_fqn(
-                            self,
-                            candidate.owner,
-                            candidate.owner_kind,
-                        ))
-                        .or_insert_with_key(|owner_fqn| {
-                            self.method_namespace_target_exists(owner_fqn)
-                        })
-                    {
+                    } else if matches!(fact, MethodReferenceResolution::Missing) {
                         let owner_fqn =
                             method_reference_owner_fqn(self, candidate.owner, candidate.owner_kind);
+                        let namespace_exists = *method_namespace_exists_cache
+                            .entry(owner_fqn.clone())
+                            .or_insert_with_key(|owner_fqn| {
+                                self.method_namespace_target_exists(owner_fqn)
+                            });
+                        if !namespace_exists {
+                            continue;
+                        }
                         let target = FullyQualifiedName::method(
                             owner_fqn.namespace_parts(),
                             candidate.method,
@@ -221,10 +236,10 @@ impl AnalysisEngine {
                                     "unresolved-method",
                                     message,
                                 ));
+                            }
                         }
                     }
                 }
-            }
         }
         self.facts.references.candidates = reference_candidate_store;
         self.facts.references.resolved.sort_all();
@@ -258,11 +273,12 @@ impl AnalysisEngine {
             HashMap::from([(file_id, self.resolve_diagnostic_candidates_in_file(file_id))]);
         let mut method_fact_cache: HashMap<
             (FullyQualifiedName, RubyMethod, bool),
-            Option<MethodFact>,
+            MethodReferenceResolution,
         > = HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
+        let mut method_lookup_chain_cache: MethodLookupChainCache = HashMap::new();
         let mut resolved_refs = Vec::new();
 
         for candidate in reference_candidates {
@@ -335,35 +351,48 @@ impl AnalysisEngine {
                                         .into_iter()
                                         .next()
                                     })
+                                    .map(MethodReferenceResolution::Unique)
+                                    .unwrap_or(MethodReferenceResolution::Missing)
                             } else {
-                                query.method_fact_for_receiver(&owner_fqn, &method)
+                                method_fact_for_receiver_with_chain_cache(
+                                    self,
+                                    &owner_fqn,
+                                    &method,
+                                    &mut method_lookup_chain_cache,
+                                )
                             }
                         })
                         .clone();
-                    if let Some(fact) = fact {
-                        let fact_method = method_name_from_fact(&fact);
+                    if let Some((owner, resolved_method, fact)) =
+                        resolved_method_reference_parts(&fact)
+                    {
                         let target =
-                            FullyQualifiedName::method(fact.owner.namespace_parts(), fact_method);
+                            FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
                         let target = self.names.intern_fqn(target);
                         resolved_refs.push((
                             target,
                             ReferenceFact::method(candidate.range, caller, access),
                         ));
-                        if fact_method == method {
+                        if resolved_method == method {
                             if let Some(diagnostics) = diagnostics.as_deref() {
-                                self.push_signature_diagnostics(
-                                    &fact,
-                                    &method,
-                                    &diagnostics.signature,
-                                    diagnostics.diagnostic_range,
-                                    &mut unresolved,
-                                );
+                                if let Some(fact) = fact {
+                                    self.push_signature_diagnostics(
+                                        fact,
+                                        &method,
+                                        &diagnostics.signature,
+                                        diagnostics.diagnostic_range,
+                                        &mut unresolved,
+                                    );
+                                }
                             }
                         }
-                    } else if *method_namespace_exists_cache
-                        .entry(owner_fqn.clone())
-                        .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn))
-                    {
+                    } else if matches!(fact, MethodReferenceResolution::Missing) {
+                        let namespace_exists = *method_namespace_exists_cache
+                            .entry(owner_fqn.clone())
+                            .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn));
+                        if !namespace_exists {
+                            continue;
+                        }
                         let target =
                             FullyQualifiedName::method(owner_fqn.namespace_parts(), method);
                         let target = self.names.intern_fqn(target);
@@ -805,7 +834,7 @@ fn constant_name(parts: &[RubyConstant]) -> String {
 fn method_reference_owner_fqn(
     engine: &AnalysisEngine,
     owner: ConstLookupId,
-    owner_kind: crate::core::NamespaceKind,
+    owner_kind: NamespaceKind,
 ) -> FullyQualifiedName {
     let owner_lookup = engine.names.const_lookup(owner).expect(
         "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
@@ -819,10 +848,10 @@ fn method_fact_for_receiver_with_chain_cache(
     engine: &AnalysisEngine,
     namespace_fqn: &FullyQualifiedName,
     method: &RubyMethod,
-    chain_cache: &mut HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
-) -> Option<MethodFact> {
+    chain_cache: &mut MethodLookupChainCache,
+) -> MethodReferenceResolution {
     if !namespace_target_exists(engine, namespace_fqn) {
-        return None;
+        return MethodReferenceResolution::Missing;
     }
 
     let ancestor_chain = chain_cache
@@ -845,8 +874,19 @@ fn method_fact_for_receiver_with_chain_cache(
 
         match facts.len() {
             0 => continue,
-            1 => return facts.pop(),
-            _ => return None,
+            1 => {
+                return MethodReferenceResolution::Unique(facts.pop().expect(
+                    "INVARIANT VIOLATED: method fact count changed after len check. \
+                     This is a bug because no code mutates facts between len and pop. \
+                     Fix: keep method fact vector local and immutable between checks.",
+                ));
+            }
+            _ => {
+                return MethodReferenceResolution::Ambiguous {
+                    owner: ancestor.clone(),
+                    method: *method,
+                };
+            }
         }
     }
 
@@ -859,5 +899,17 @@ fn method_fact_for_receiver_with_chain_cache(
         );
     }
 
-    None
+    MethodReferenceResolution::Missing
+}
+
+fn resolved_method_reference_parts(
+    resolution: &MethodReferenceResolution,
+) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
+    match resolution {
+        MethodReferenceResolution::Unique(fact) => {
+            Some((&fact.owner, method_name_from_fact(fact), Some(fact)))
+        }
+        MethodReferenceResolution::Ambiguous { owner, method } => Some((owner, *method, None)),
+        MethodReferenceResolution::Missing => None,
+    }
 }
