@@ -1,370 +1,52 @@
 ---
 name: architecture
-description: "Design Ruby Fast LSP features, understand module responsibilities, apply layer boundaries, and make structural changes."
+description: "Design Ruby Fast LSP changes using the current ruby-analysis core/engine/indexer/inference boundaries."
 ---
 
-# Architecture Skill
+# Architecture
 
-Use this skill when designing new features, understanding module responsibilities, or making structural changes to the Ruby Fast LSP project. Provides guidance on the 3-layer architecture, module boundaries, and dependency rules. Triggers: architecture, design, module structure, dependencies, layers, new feature, refactoring structure.
+Use this skill for structural changes, module placement, dependency direction, or questions about where logic belongs.
 
----
+## Source Of Truth
 
-## 3-Layer Architecture
+Read `AGENTS.md` first. It contains the detailed current architecture direction. Treat this skill as a compact checklist, not a replacement.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  LAYER 1: API Layer                                         │
-│  server.rs + handlers/                                       │
-│  - LSP protocol handling                                     │
-│  - Request/response routing                                  │
-│  - Thin: delegates to capabilities                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  LAYER 2: Service Layer                                      │
-│  query/ + capabilities/                                      │
-│  - Business logic                                            │
-│  - Feature implementations                                   │
-│  - IndexQuery as unified interface                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  LAYER 3: Data Layer                                         │
-│  indexer/ + types/                                           │
-│  - Symbol storage (RubyIndex)                                │
-│  - Core types (FQN, RubyType)                                │
-│  - Two-phase indexing                                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  FOUNDATION: Analysis Layer                                  │
-│  analyzer_prism/ + inferrer/                                 │
-│  - AST traversal                                             │
-│  - Type inference                                            │
-│  - CFG-based analysis                                        │
-└─────────────────────────────────────────────────────────────┘
-```
+## Current Boundary
 
----
+`ruby-fast-lsp` should stay a thin LSP/editor adapter over reusable analysis crates.
 
-## Dependency Rules
+| Layer                      | Owns                                                                                                   | Must Not Own                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `ruby-analysis::core`      | FQNs, Ruby names, ranges, source IDs, facts, Ruby types                                                | AST traversal, query policy, LSP/editor protocol         |
+| `ruby-analysis::engine`    | Workspace semantic state, fact ingestion, graph/reference/diagnostic resolution, deterministic queries | `tower_lsp` types, snippets, editor triggers             |
+| `ruby-analysis::indexer`   | Ruby parsing and AST traversal that emits facts/candidates                                             | Global semantic truth, LSP protocol, workspace lifecycle |
+| `ruby-analysis::inference` | Type derivation, local flow tracking, RBS lookup/substitution                                          | LSP protocol, editor UX, persistent workspace ownership  |
+| `src/*`                    | Server lifecycle, document cache, handlers, capabilities, protocol conversion                          | Reusable type/graph algorithms                           |
+| `extensions/*`             | External DSL/library facts and patches                                                                 | Global source of truth                                   |
 
-### Allowed Dependencies (Top to Bottom Only)
+## Placement Rules
 
-```
-handlers/ ──────► capabilities/
-                      │
-                      ▼
-                  query/
-                      │
-         ┌───────────┼───────────┐
-         ▼           ▼           ▼
-    indexer/   analyzer_prism/  inferrer/
-         │           │           │
-         └───────────┼───────────┘
-                     ▼
-                  types/
-```
+- If code consumes or returns `tower_lsp::lsp_types::*`, `Url`, snippets, trigger characters, editor commands, or diagnostics publishing, keep it in `src/`.
+- If code consumes or returns `TextRange`, FQNs, facts, graph entries, or `RubyType`, put it in `crates/ruby-analysis`.
+- `src/query/*` is an adapter over `ruby-analysis::engine::AnalysisQuery`; it may map cursor/document context to domain queries and map `TextRange` back to LSP `Location`.
+- Method lookup semantics must stay single-sourced in engine resolution. Use `AnalysisQuery::resolve_method_callees*` for navigation and `AnalysisQuery::resolve_method_reference*` for reference/diagnostic policy.
+- Do not reintroduce public store getters or public `HashMap<FullyQualifiedName, Vec<Fact>>` data access.
 
-### Forbidden Dependencies
+## Engine Write Path
 
-- **No upward dependencies**: indexer/ cannot depend on capabilities/
-- **No circular dependencies**: if A depends on B, B cannot depend on A
-- **No cross-layer skipping**: handlers/ should not directly use indexer/
-
----
-
-## Module Responsibilities
-
-### handlers/ (API Layer)
-
-**Purpose**: Route LSP requests/notifications to appropriate handlers.
-
-**Files**:
-
-- `request.rs` - Handle LSP requests (goto, hover, completion, etc.)
-- `notification.rs` - Handle LSP notifications (didOpen, didChange, etc.)
-
-**Rules**:
-
-- Maximum 10 lines per handler function
-- Delegate immediately to capabilities/
-- Only do parameter extraction and response formatting
+Use one write path:
 
 ```rust
-// GOOD: Thin handler
-pub async fn handle_goto_definition(
-    server: &RubyLanguageServer,
-    params: GotoDefinitionParams,
-) -> Result<Option<GotoDefinitionResponse>> {
-    let uri = params.text_document_position_params.text_document.uri;
-    let position = params.text_document_position_params.position;
-
-    definition::goto_definition(server, &uri, position).await
-}
+let file_id = engine.register_file(input);
+let facts = collect_facts(file_id, &content);
+engine.replace_facts(file_id, facts, ResolveMode::Immediate);
 ```
 
-### capabilities/ (Service Layer)
+For workspace indexing, defer resolution per file and call `engine.resolve()` once after the batch.
 
-**Purpose**: Implement LSP features using query layer.
+## Review Questions
 
-**Modules**:
-
-- `completion/` - Code completion
-- `definition/` - Go-to-definition
-- `hover/` - Hover information
-- `references/` - Find references
-- `inlay_hints/` - Type hints
-- `code_lens/` - Code lenses
-- `diagnostics/` - Error reporting
-
-**Rules**:
-
-- Each capability should be ~50-200 lines
-- Use IndexQuery for all index access
-- No direct index manipulation
-
-```rust
-// GOOD: Uses IndexQuery
-pub async fn goto_definition(
-    server: &RubyLanguageServer,
-    uri: &Url,
-    position: Position,
-) -> Option<GotoDefinitionResponse> {
-    let query = IndexQuery::new(&server.index, uri);
-    query.find_definitions_at_position(position)
-}
-```
-
-### query/ (Service Layer)
-
-**Purpose**: Unified interface for all index queries. Single point of access.
-
-**Key Type**: `IndexQuery`
-
-```rust
-pub struct IndexQuery<'a> {
-    index: &'a RubyIndex,
-    document: Option<&'a RubyDocument>,
-}
-
-impl IndexQuery<'_> {
-    // Navigation
-    pub fn find_definitions_at_position(&self, pos: Position) -> Vec<Location>;
-    pub fn find_references_at_position(&self, pos: Position) -> Vec<Location>;
-
-    // Type information
-    pub fn get_hover_at_position(&self, pos: Position) -> Option<Hover>;
-    pub fn resolve_type_at_position(&self, pos: Position) -> Option<RubyType>;
-
-    // Completion
-    pub fn get_completions_at_position(&self, pos: Position) -> Vec<CompletionItem>;
-}
-```
-
-**Rules**:
-
-- All business logic lives here
-- Consolidate scattered query patterns
-- Position-based API (elegant abstraction)
-
-### indexer/ (Data Layer)
-
-**Purpose**: Symbol storage and retrieval.
-
-**Key Components**:
-
-- `RubyIndex` - Central in-memory symbol store
-- `FileProcessor` - Process single files
-- `Coordinator` - Orchestrate workspace indexing
-
-**Two-Phase Indexing Protocol**:
-
-```
-Phase 1: Build Definitions
-┌─────────────────────────────────────┐
-│ For each file:                      │
-│   1. Parse with Prism               │
-│   2. Extract class/module/method    │
-│   3. Store definitions in index     │
-└─────────────────────────────────────┘
-                 │
-                 ▼
-Phase 2: Resolve References
-┌─────────────────────────────────────┐
-│ For each file:                      │
-│   1. Resolve constant references    │
-│   2. Build inheritance graph        │
-│   3. Link method calls to defs      │
-└─────────────────────────────────────┘
-```
-
-**Rules**:
-
-- No LSP-specific types (use core types only)
-- Support incremental updates
-- Thread-safe access via RwLock
-
-### analyzer_prism/ (Foundation)
-
-**Purpose**: Ruby code analysis via Prism parser.
-
-**Key Types**:
-
-- `RubyPrismAnalyzer` - Main analyzer
-- `Identifier` - Parsed identifier with position
-- `MethodReceiver` - Receiver type for method calls
-
-**Rules**:
-
-- Visitor pattern for AST traversal
-- Return rich types, not raw AST nodes
-- Position tracking for all identifiers
-
-### inferrer/ (Foundation)
-
-**Purpose**: Type inference engine.
-
-**Key Components**:
-
-- `RubyType` - Type representation
-- `TypeQuery` - Query types at positions
-- `cfg/` - Control flow graph for type narrowing
-
-**Rules**:
-
-- Support YARD annotations
-- Support RBS type definitions
-- Handle union types gracefully
-
-### types/ (Foundation)
-
-**Purpose**: Core type definitions used everywhere.
-
-**Key Types**:
-
-- `FullyQualifiedName` (FQN) - Validated symbol names
-- `RubyConstant` - Validated constant names
-- `RubyMethod` - Validated method names
-- `Location`, `Position`, `Range` - LSP primitives
-
-**Rules**:
-
-- Validate at construction time
-- Immutable after creation
-- Use `Ustr` for interned strings
-
----
-
-## Adding a New LSP Capability
-
-### Step 1: Create capability module
-
-```
-src/capabilities/my_feature/
-├── mod.rs          # Main entry point
-└── helpers.rs      # Optional helpers
-```
-
-### Step 2: Implement using IndexQuery
-
-```rust
-// src/capabilities/my_feature/mod.rs
-use crate::query::IndexQuery;
-
-pub async fn handle_my_feature(
-    server: &RubyLanguageServer,
-    params: MyFeatureParams,
-) -> Option<MyFeatureResponse> {
-    let query = IndexQuery::new(&server.index, &params.uri);
-
-    // Use query methods
-    let result = query.find_something(params.position)?;
-
-    Some(result.into())
-}
-```
-
-### Step 3: Add handler routing
-
-```rust
-// src/handlers/request.rs
-MyFeatureRequest::METHOD => {
-    let params: MyFeatureParams = serde_json::from_value(params)?;
-    let result = my_feature::handle_my_feature(&server, params).await;
-    Ok(serde_json::to_value(result)?)
-}
-```
-
-### Step 4: Register capability
-
-```rust
-// src/server.rs - in initialize()
-capabilities.my_feature_provider = Some(MyFeatureOptions::default());
-```
-
----
-
-## Adding to IndexQuery
-
-When capabilities need new query patterns, add to IndexQuery:
-
-````rust
-// src/query/mod.rs
-impl IndexQuery<'_> {
-    /// Find all symbols matching the given pattern.
-    ///
-    /// # Example
-    /// ```
-    /// let symbols = query.find_symbols_matching("User*");
-    /// ```
-    pub fn find_symbols_matching(&self, pattern: &str) -> Vec<Symbol> {
-        // Implementation using self.index
-    }
-}
-````
-
----
-
-## File Size Guidelines
-
-| Module           | Target    | Max       | Current Status         |
-| ---------------- | --------- | --------- | ---------------------- |
-| Handler files    | 50 lines  | 100 lines | OK                     |
-| Capability entry | 100 lines | 300 lines | Some exceed            |
-| Query methods    | 50 lines  | 100 lines | OK                     |
-| Indexer files    | 200 lines | 500 lines | coordinator.rs exceeds |
-| Analyzer         | 500 lines | 800 lines | mod.rs exceeds (2420)  |
-
----
-
-## Architectural Decisions Record
-
-When making structural changes, document:
-
-1. **Context**: What problem are we solving?
-2. **Decision**: What approach did we choose?
-3. **Consequences**: What are the tradeoffs?
-
-Example:
-
-```markdown
-## ADR-001: Unified Query Layer
-
-### Context
-
-Query logic was scattered across capabilities, leading to duplication.
-
-### Decision
-
-Create IndexQuery as single entry point for all index queries.
-
-### Consequences
-
-- (+) Consistent API across features
-- (+) Easier to add new query patterns
-- (-) One more layer of indirection
-```
+- Can this logic be used by a non-LSP client? If yes, it probably belongs in `ruby-analysis`.
+- Does this duplicate method/MRO/diagnostic policy already owned by engine resolution?
+- Does the proposed API expose store internals rather than domain views or query primitives?
+- Does this change keep parsing/fact collection separate from semantic graph ownership?

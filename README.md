@@ -86,7 +86,7 @@ The binary will be at `target/release/ruby-fast-lsp`.
 
 3. Restart Claude Code. The language server will start automatically when you work with Ruby files, providing diagnostics, navigation, and type information.
 
-For project-specific configuration, add the same `lspServers` block to `.claude/settings.json` in your project root instead.
+Keep this in your user-level Claude Code settings. This repository does not carry project-local `.claude` configuration.
 
 ### VS Code
 

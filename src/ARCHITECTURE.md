@@ -7,16 +7,16 @@ This document describes the architecture of the Ruby Fast LSP server. The codeba
 The Ruby Fast LSP server follows a modular architecture with clear separation of concerns:
 
 ```
+crates/
+└── ruby-analysis/  - Reusable core facts, engine, inference, and parser-to-facts indexer
 src/
-├── ruby-analysis/  - Reusable analysis engine, inference, and indexer
 ├── capabilities/   - LSP/editor adapters, snippets, trigger handling
-├── indexer/        - File discovery and fact collection orchestration
-├── query/          - LSP protocol adapters over ruby-analysis
+├── indexer/        - Workspace discovery and fact collection orchestration
+├── query/          - LSP protocol adapters over ruby-analysis::engine::AnalysisQuery
 ├── handlers/       - LSP request/notification routing
 ├── server.rs       - LSP server coordination
 └── main.rs         - Application entry point
-tests/
-└── fixtures/       - Ruby files to be tested by the LSP
+src/test/           - Test harnesses and integration tests
 ```
 
 ### Core Philosophy
@@ -48,7 +48,7 @@ The Indexer is responsible for discovering Ruby files, parsing them, and feeding
 - `FactCollector` emits symbols, methods, graph facts, references, diagnostics, and variable scopes in one AST pass
 - File discovery and parsing stay separate from engine query logic
 
-### 2. Analyzer (`src/ruby-analysis/src/indexer/`)
+### 2. Analyzer (`crates/ruby-analysis/src/indexer/`)
 
 The Analyzer is responsible for understanding Ruby code structure using the Prism parser.
 
@@ -128,21 +128,21 @@ The Server coordinates between LSP clients and the internal components.
 - The server delegates actual implementation to capability modules
 - The server maintains minimal state (mostly for coordination)
 
-### 5. Inference (`crates/ruby-analysis/src/inference/`)
+### 6. Inference (`crates/ruby-analysis/src/inference/`)
 
 Inference handles type analysis and integration with RBS type signatures.
 
 - **Primary Responsibility**: Infer types for Ruby expressions
 - **Secondary Responsibility**: Load and query RBS type information
 
-### 6. Handlers (`src/handlers/`)
+### 7. Handlers (`src/handlers/`)
 
 Handlers manage the routing of LSP requests and notifications.
 
 - **Primary Responsibility**: Receive requests from the server and route them to capabilities
 - **Secondary Responsibility**: Handle document lifecycle notifications (open, change, save)
 
-### 7. Ruby Version (`src/indexer/version/`)
+### 8. Ruby Version (`src/indexer/version/`)
 
 Ruby version detection and version-manager integration.
 

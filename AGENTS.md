@@ -11,24 +11,23 @@ This file provides context for AI assistants working on this project.
 
 ## Documentation
 
-All AI-related documentation is maintained in the `.ai/` folder. Read these files for detailed context:
+This file is the canonical AI guide. Keep it current when architecture,
+testing, or agent workflow changes.
 
-### Core Documentation (`.ai/steering/`)
+Supporting docs:
 
-| File                                                    | Purpose                                                          |
-| ------------------------------------------------------- | ---------------------------------------------------------------- |
-| [README.md](.ai/steering/README.md)                     | Entry point - architecture overview, feature status, quick start |
-| [product.md](.ai/steering/product.md)                   | Feature overview and design philosophy                           |
-| [structure.md](.ai/steering/structure.md)               | Project directory layout and code organization                   |
-| [tech.md](.ai/steering/tech.md)                         | Tech stack, dependencies, common commands                        |
-| [testing.md](.ai/steering/testing.md)                   | Testing strategy and test harness usage                          |
-| [ruby-ast-mapping.md](.ai/steering/ruby-ast-mapping.md) | Ruby syntax to Prism AST node mapping                            |
+| File                                      | Purpose                                      |
+| ----------------------------------------- | -------------------------------------------- |
+| [src/ARCHITECTURE.md](src/ARCHITECTURE.md) | Current implementation architecture          |
+| [src/query/README.md](src/query/README.md) | LSP query adapter boundaries                 |
+| [src/test/README.md](src/test/README.md)  | Test harness and integration test structure  |
 
-### Additional Resources
+For Prism AST node names and byte offsets, prefer:
 
-- `.ai/docs/` - Deep-dive documentation on specific features (type inference, simulation testing, etc.)
-- `.ai/specs/` - Feature specifications and implementation plans
-- `.ai/diagrams/` - C4 architecture diagrams (LikeC4 format)
+```bash
+cargo run --bin ast -- '<ruby snippet>'
+cargo run --bin ast -- --loc '<ruby snippet>'
+```
 
 ## Common Commands
 
@@ -85,6 +84,25 @@ cargo build --release         # Release build
 - `src/indexer/` - LSP/workspace indexing orchestration
 - `crates/ruby-analysis/src/indexer/` - AST analysis and parser-to-facts code
 - `crates/ruby-analysis/` - Shared facts, graph/query engine, inference, and parser-to-facts indexing primitives
+
+## Agent-Focused Feature Tracking
+
+Claude Code's agent-critical LSP requests are implemented: definition,
+references, hover, document symbols, workspace symbols, implementation, call
+hierarchy, and diagnostics after edits.
+
+Verified gaps worth tracking:
+
+| Gap | Current state | Why it matters |
+| --- | --- | --- |
+| Signature help | No `signature_help` capability/provider. | Agents and editors cannot ask for callable parameter shape at a call site. |
+| Code actions / quick fixes | No `code_action` capability/provider. | Diagnostics cannot offer structured fixes. |
+| Cross-file symbol rename | `rename` is implemented for local variables and method parameters only. | Project-wide class/module/method/constant renames still need explicit design. |
+| RuboCop/Standard integration | No linter integration. | Style/lint diagnostics are out of scope for the current engine. |
+
+Do not treat old feature matrices as source of truth. Before adding a feature
+gap here, verify it against `src/handlers`, advertised server capabilities, and
+integration tests.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
@@ -620,6 +638,26 @@ so root crate tests cannot depend back on it without creating a package cycle.
 Future cleanup: rename the external one to `BlackBoxEditor` or `LspTestClient`
 to avoid confusion, then keep the internal `FakeEditor` as the richer core test
 harness until core tests move to external integration crates.
+
+### Simulation Testing
+
+Simulation tests are custom deterministic project simulations, not `proptest`.
+They generate Ruby project graphs, drive lifecycle/edit operations through
+`FakeEditor`, and compare LSP/index observations against a model oracle.
+
+Useful commands:
+
+```bash
+cargo test test::simulation --release
+SIM_SEED=123 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
+SIM_RANDOM_SEEDS=10 cargo test generated_project_runs_seeded_edit_sequence -- --nocapture
+SIM_LARGE_SCALE=1 cargo test generated_project_large_scale_smoke -- --nocapture
+```
+
+Seeded simulation uses fixed seeds plus `src/test/simulation/regression_seeds.txt`.
+Failures write a replay artifact under the temp directory with the exact
+`SIM_SEED=... cargo test generated_project_runs_seeded_edit_sequence -- --nocapture`
+command. Add reduced regression seeds to `regression_seeds.txt`.
 
 ### Type Inference Architecture
 
