@@ -23,6 +23,7 @@ pub struct SourceMap {
     pub include_refs: Vec<NamespaceRefSite>,
     pub superclass_refs: Vec<NamespaceRefSite>,
     pub type_asserts: Vec<TypeAssertSite>,
+    pub direct_macro_calls: Vec<DirectMacroCallSite>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,12 @@ pub struct TypeAssertSite {
     pub expected: String,
     pub pos: SourcePos,
     pub kind: TypeAssertKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectMacroCallSite {
+    pub name: String,
+    pub pos: SourcePos,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +133,8 @@ pub fn render_project(project: &SyntheticProject) -> ProjectRender {
         map.include_refs.extend(renderer.map.include_refs);
         map.superclass_refs.extend(renderer.map.superclass_refs);
         map.type_asserts.extend(renderer.map.type_asserts);
+        map.direct_macro_calls
+            .extend(renderer.map.direct_macro_calls);
         map.files.insert(file.clone());
         files.insert(file, renderer.code);
     }
@@ -261,6 +270,7 @@ impl FileRenderer {
         }
 
         for prepend in namespace.prepends.iter().filter(|prepend| prepend.enabled) {
+            self.record_direct_macro_call(leaf_depth + 1, "prepend");
             self.map.include_refs.push(NamespaceRefSite {
                 owner: namespace.fqn.clone(),
                 target: prepend.fqn.clone(),
@@ -277,6 +287,7 @@ impl FileRenderer {
         }
 
         for include in namespace.includes.iter().filter(|include| include.enabled) {
+            self.record_direct_macro_call(leaf_depth + 1, "include");
             self.map.include_refs.push(NamespaceRefSite {
                 owner: namespace.fqn.clone(),
                 target: include.fqn.clone(),
@@ -293,6 +304,7 @@ impl FileRenderer {
         }
 
         for extend in namespace.extends.iter().filter(|extend| extend.enabled) {
+            self.record_direct_macro_call(leaf_depth + 1, "extend");
             self.map.include_refs.push(NamespaceRefSite {
                 owner: namespace.fqn.clone(),
                 target: extend.fqn.clone(),
@@ -309,6 +321,7 @@ impl FileRenderer {
         }
 
         if namespace.extend_self {
+            self.record_direct_macro_call(leaf_depth + 1, "extend");
             self.push_line(leaf_depth + 1, "extend self");
         }
 
@@ -388,6 +401,7 @@ impl FileRenderer {
                     .iter()
                     .filter(|include| include.enabled)
                 {
+                    self.record_direct_macro_call(leaf_depth + 3, "include");
                     self.map.include_refs.push(NamespaceRefSite {
                         owner: namespace.fqn.clone(),
                         target: include.fqn.clone(),
@@ -423,6 +437,7 @@ impl FileRenderer {
                 .iter()
                 .filter(|prepend| prepend.enabled)
             {
+                self.record_direct_macro_call(leaf_depth + 2, "prepend");
                 self.map.include_refs.push(NamespaceRefSite {
                     owner: namespace.fqn.clone(),
                     target: prepend.fqn.clone(),
@@ -443,6 +458,7 @@ impl FileRenderer {
                 .iter()
                 .filter(|include| include.enabled)
             {
+                self.record_direct_macro_call(leaf_depth + 2, "include");
                 self.map.include_refs.push(NamespaceRefSite {
                     owner: namespace.fqn.clone(),
                     target: include.fqn.clone(),
@@ -526,6 +542,7 @@ impl FileRenderer {
             .iter()
             .filter(|visibility_override| visibility_override.enabled)
         {
+            self.record_direct_macro_call(leaf_depth + 1, visibility_override.visibility.keyword());
             self.push_line(
                 leaf_depth + 1,
                 &format!(
@@ -627,6 +644,17 @@ impl FileRenderer {
         self.push_line(depth, &format!("{} = {}", constant.name, constant.value));
     }
 
+    fn record_direct_macro_call(&mut self, depth: usize, name: &str) {
+        self.map.direct_macro_calls.push(DirectMacroCallSite {
+            name: name.to_string(),
+            pos: SourcePos {
+                file: self.file.clone(),
+                line: self.line,
+                character: indent_len(depth) as u32,
+            },
+        });
+    }
+
     fn render_method(&mut self, namespace: &NamespaceSpec, method: &MethodSpec, depth: usize) {
         let scoped_visibility = method.visibility != MethodVisibility::Public;
         if scoped_visibility && method.visibility_syntax == MethodVisibilitySyntax::ScopeKeyword {
@@ -640,6 +668,7 @@ impl FileRenderer {
                 method.name,
                 namespace.fqn
             );
+            self.record_direct_macro_call(depth, method.visibility.keyword());
             self.push_line(depth, method.visibility.keyword());
         }
 
@@ -676,6 +705,7 @@ impl FileRenderer {
                     method.name,
                     namespace.fqn
                 );
+                self.record_direct_macro_call(depth, "module_function");
                 self.push_line(depth, "module_function");
                 self.push_line(depth, "");
                 self.render_method_body(namespace, method, depth, "def ");
@@ -717,6 +747,7 @@ impl FileRenderer {
                 method.name,
                 namespace.fqn
             );
+            self.record_direct_macro_call(depth, method.visibility.keyword());
             self.push_line(
                 depth,
                 &format!("{} :{}", method.visibility.keyword(), method.name),
@@ -725,6 +756,7 @@ impl FileRenderer {
         }
 
         if scoped_visibility && method.visibility_syntax == MethodVisibilitySyntax::ScopeKeyword {
+            self.record_direct_macro_call(depth, MethodVisibility::Public.keyword());
             self.push_line(depth, MethodVisibility::Public.keyword());
             self.push_line(depth, "");
         }
@@ -753,6 +785,7 @@ impl FileRenderer {
 
         let def_line = format!("define_method(:{}) do", method.name);
         let char_offset = indent_len(depth) + "define_method(:".len();
+        self.record_direct_macro_call(depth, "define_method");
         self.map.defs.insert(
             MethodTarget {
                 owner: namespace.fqn.clone(),
@@ -927,6 +960,9 @@ impl FileRenderer {
                 indent_len(depth) + "alias_method :".len(),
             ),
         };
+        if alias.form == AliasForm::MethodCall {
+            self.record_direct_macro_call(depth, "alias_method");
+        }
         self.map.defs.insert(
             target,
             SourcePos {
@@ -952,6 +988,7 @@ impl FileRenderer {
         };
         match (delegate.kind, delegate.form) {
             (MethodKind::Instance, DelegateForm::Rails) => {
+                self.record_direct_macro_call(depth, "delegate");
                 self.map.defs.insert(
                     target,
                     SourcePos {
@@ -998,6 +1035,16 @@ impl FileRenderer {
                         "INVARIANT VIOLATED: Rails delegate rendered inside Forwardable branch. This is a bug because delegate form dispatch must be exhaustive. Fix: keep render_delegate form match aligned."
                     ),
                 };
+                self.record_direct_macro_call(
+                    inner_depth,
+                    match delegate.form {
+                        DelegateForm::ForwardableSingular => "def_delegator",
+                        DelegateForm::ForwardablePlural => "def_delegators",
+                        DelegateForm::Rails => panic!(
+                            "INVARIANT VIOLATED: Rails delegate reached Forwardable macro recording. This is a bug because delegate form dispatch must be exhaustive. Fix: keep render_delegate form match aligned."
+                        ),
+                    },
+                );
                 self.map.defs.insert(
                     target,
                     SourcePos {
@@ -1033,6 +1080,7 @@ impl FileRenderer {
             line: self.line,
             character: (indent_len(depth) + "class_attribute :".len()) as u32,
         };
+        self.record_direct_macro_call(depth, "class_attribute");
         self.map.defs.insert(
             MethodTarget {
                 owner: namespace.fqn.clone(),

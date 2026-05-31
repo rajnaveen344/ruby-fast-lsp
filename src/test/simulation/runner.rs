@@ -105,6 +105,7 @@ impl SimulationRunner {
                     .await;
             }
         }
+        self.assert_direct_macro_calls_do_not_warn().await;
     }
 
     pub fn known_gap_reasons(&self) -> BTreeSet<&'static str> {
@@ -161,6 +162,7 @@ impl SimulationRunner {
         self.check_references().await;
         self.check_hover().await;
         self.check_types().await;
+        self.assert_direct_macro_calls_do_not_warn().await;
     }
 
     pub async fn open_file(&mut self, file: &str) {
@@ -1089,6 +1091,16 @@ impl SimulationRunner {
             file,
             diagnostics
         );
+    }
+
+    async fn assert_direct_macro_calls_do_not_warn(&self) {
+        for macro_call in &self.render.map.direct_macro_calls {
+            if !self.open_files.contains(&macro_call.pos.file) {
+                continue;
+            }
+            self.assert_no_unresolved_method(&macro_call.pos.file, &macro_call.name)
+                .await;
+        }
     }
 
     pub async fn assert_no_unresolved_method(&self, file: &str, method: &str) {
