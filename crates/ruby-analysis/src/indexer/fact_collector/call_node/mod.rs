@@ -30,12 +30,12 @@ impl FactCollector {
     pub fn process_call_node_entry(&mut self, node: &CallNode) {
         let extension_host = self.extension_host.clone();
         extension_host.process_call_node(self, node);
-        let method_name = utf8_str(node.name().as_slice());
-        let track_call = extension_host.should_track_enclosing_call(method_name);
+
+        let track_call = extension_host.should_track_enclosing_call(self, node);
         self.extension_call_stack_marks.push(track_call);
         if track_call {
-            self.extension_call_stack
-                .push(extension_host.resolved_call_for_stack(self, node));
+            let resolved_call = extension_host.resolved_call_for_stack(self, node);
+            self.extension_call_stack.push(resolved_call);
         }
 
         self.process_direct_call_facts(node);

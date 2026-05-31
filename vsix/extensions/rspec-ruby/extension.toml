@@ -15,3 +15,9 @@ output = "target/wasm32-wasip1/release/rspec-ruby.wasm"
 
 [indexing]
 call_names = ["describe", "context", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"]
+
+[[indexing.targets]]
+owner = ["RSpec"]
+owner_kind = "singleton"
+method = "describe"
+frame = true

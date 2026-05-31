@@ -19,11 +19,11 @@ use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::config::RubyFastLspConfig;
-use crate::query::MethodCalleeResolution;
-use ruby_analysis::core::FullyQualifiedName;
-use ruby_analysis::core::NamespaceKind;
-use ruby_analysis::core::RubyConstant;
-use ruby_analysis::core::RubyMethod;
+use ruby_analysis::core::{
+    FullyQualifiedName, MethodCalleeResolution, MethodFact, NamespaceKind, RubyConstant,
+    RubyMethod, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
+};
+use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
@@ -46,6 +46,8 @@ impl std::fmt::Debug for ExtensionRegistryHandle {
 
 struct ExtensionRegistry {
     extensions: Vec<Arc<LoadedWasmExtension>>,
+    tracked_call_names: BTreeSet<String>,
+    semantic_seeded: Mutex<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +76,16 @@ struct LoadedWasmExtension {
     metadata: ExtensionMetadata,
     extension: Mutex<ruby_fast_lsp_extension_wasm_host::WasmExtension>,
     status: Mutex<ExtensionStatus>,
+    indexed_call_names: BTreeSet<String>,
+    semantic_targets: Vec<ExtensionMethodTarget>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ExtensionMethodTarget {
+    owner: Vec<RubyConstant>,
+    owner_kind: NamespaceKind,
+    method: RubyMethod,
+    frame: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +162,17 @@ struct ExtensionBuildManifest {
 #[derive(Clone, Debug, Deserialize)]
 struct ExtensionIndexingManifest {
     call_names: Vec<String>,
+    #[serde(default)]
+    targets: Vec<ExtensionMethodTargetManifest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ExtensionMethodTargetManifest {
+    owner: Vec<String>,
+    owner_kind: String,
+    method: String,
+    #[serde(default)]
+    frame: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -238,6 +261,13 @@ impl ExtensionRegistryHandle {
         self.inner.read().status_reports()
     }
 
+    pub fn ensure_semantic_seed_facts(
+        &self,
+        engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
+    ) {
+        self.inner.read().ensure_semantic_seed_facts(engine);
+    }
+
     pub fn process_call_node(&self, visitor: &mut FactCollector, node: &CallNode) {
         process_call_node_with_registry(self, visitor, node);
     }
@@ -260,14 +290,8 @@ impl FactCollectorExtensionHost for ExtensionRegistryHandle {
         ExtensionRegistryHandle::process_call_node(self, visitor, node);
     }
 
-    fn should_track_enclosing_call(&self, method_name: &str) -> bool {
-        if self.inner.read().has_loaded_extensions() {
-            return true;
-        }
-        matches!(
-            method_name,
-            "describe" | "context" | "shared_examples" | "shared_context"
-        )
+    fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode) -> bool {
+        self.inner.read().should_track_enclosing_call(visitor, node)
     }
 
     fn resolved_call_for_stack(&self, visitor: &FactCollector, node: &CallNode) -> ResolvedCall {
@@ -291,8 +315,12 @@ impl fmt::Display for ExtensionLoadError {
 
 impl ExtensionRegistry {
     fn load(config: &ExtensionLoadConfig) -> Self {
+        let extensions = load_wasm_extensions(config);
+        let tracked_call_names = tracked_call_names(&extensions);
         Self {
-            extensions: load_wasm_extensions(config),
+            extensions,
+            tracked_call_names,
+            semantic_seeded: Mutex::new(false),
         }
     }
 
@@ -300,10 +328,35 @@ impl ExtensionRegistry {
         self.extensions.clone()
     }
 
-    fn has_loaded_extensions(&self) -> bool {
-        self.extensions
-            .iter()
-            .any(|extension| extension.is_loaded())
+    fn should_track_enclosing_call(&self, visitor: &FactCollector, node: &CallNode) -> bool {
+        let method_name = utils::utf8_str(node.name().as_slice());
+        if !self.tracked_call_names.contains(method_name) {
+            return false;
+        }
+
+        if self.extensions.iter().any(|extension| {
+            extension.is_loaded()
+                && extension
+                    .semantic_targets
+                    .iter()
+                    .any(|target| target.frame && target.method.as_str() == method_name)
+                && extension.semantically_matches_call(visitor, node)
+        }) {
+            return true;
+        }
+
+        if !visitor.extension_call_stack.is_empty()
+            && self.extensions.iter().any(|extension| {
+                extension.is_loaded() && extension.can_run_inside_extension_frame(visitor, node)
+            })
+        {
+            return true;
+        }
+
+        !self.has_loaded_wasm_for_call(method_name)
+            && ruby_fast_lsp_extension_rspec::extension()
+                .indexed_call_names()
+                .contains(&method_name)
     }
 
     fn status_reports(&self) -> Vec<ExtensionStatusReport> {
@@ -312,17 +365,70 @@ impl ExtensionRegistry {
             .map(|extension| extension.status_report())
             .collect()
     }
+
+    fn has_loaded_wasm_for_call(&self, method_name: &str) -> bool {
+        self.extensions
+            .iter()
+            .any(|extension| extension.is_loaded() && extension.handles_call(method_name))
+    }
+
+    fn ensure_semantic_seed_facts(
+        &self,
+        engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
+    ) {
+        let mut seeded = self.semantic_seeded.lock();
+        if *seeded {
+            return;
+        }
+
+        let mut engine = engine.lock();
+        let file_id = engine.register_file(SourceFileInput {
+            path: PathBuf::from("/__ruby_fast_lsp_extension__/semantic_targets.rb"),
+            content: String::new(),
+            kind: SourceKind::Stub,
+        });
+        let range = TextRange::new(file_id, 0, 0);
+        let mut facts = FileFacts::default();
+        for extension in &self.extensions {
+            if !extension.is_loaded() {
+                continue;
+            }
+            for target in &extension.semantic_targets {
+                let owner = FullyQualifiedName::namespace_with_kind(
+                    target.owner.clone(),
+                    target.owner_kind,
+                );
+                let fqn = FullyQualifiedName::method(target.owner.clone(), target.method);
+                facts.symbols.push(SymbolFact::new(
+                    fqn.clone(),
+                    AnalysisSymbolKind::Method,
+                    range,
+                ));
+                facts.methods.push(MethodFact::new(fqn, owner, range));
+            }
+        }
+        engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+        *seeded = true;
+    }
 }
 
 impl LoadedWasmExtension {
     fn new(
         metadata: ExtensionMetadata,
         extension: ruby_fast_lsp_extension_wasm_host::WasmExtension,
+        semantic_targets: Vec<ExtensionMethodTarget>,
     ) -> Self {
+        let indexed_call_names = extension
+            .indexed_call_names()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         Self {
             metadata,
             extension: Mutex::new(extension),
             status: Mutex::new(ExtensionStatus::Loaded),
+            indexed_call_names,
+            semantic_targets,
         }
     }
 
@@ -342,7 +448,6 @@ impl LoadedWasmExtension {
             ExtensionStatus::Loaded => ("loaded", None),
             ExtensionStatus::Failed { reason } => ("failed", Some(reason.clone())),
         };
-        let indexed_call_names = self.extension.lock().indexed_call_names().to_vec();
         ExtensionStatusReport {
             id: self.metadata.id.clone(),
             name: self.metadata.name.clone(),
@@ -353,9 +458,71 @@ impl LoadedWasmExtension {
             permissions: self.metadata.permissions.clone(),
             watched_files: self.metadata.watched_files.clone(),
             process_commands: self.metadata.process_commands.clone(),
-            indexed_call_names,
+            indexed_call_names: self.indexed_call_names.iter().cloned().collect(),
         }
     }
+
+    fn handles_call(&self, method_name: &str) -> bool {
+        self.indexed_call_names.contains(method_name)
+    }
+
+    fn has_semantic_targets(&self) -> bool {
+        !self.semantic_targets.is_empty()
+    }
+
+    fn semantically_matches_call(&self, visitor: &FactCollector, node: &CallNode) -> bool {
+        if !self.has_semantic_targets() {
+            return self.handles_call(utils::utf8_str(node.name().as_slice()));
+        }
+
+        let method_name = utils::utf8_str(node.name().as_slice());
+        if !self.handles_call(method_name) {
+            return false;
+        }
+
+        let Ok(method) = RubyMethod::new(method_name) else {
+            return false;
+        };
+        let callees = resolved_core_callees_for_call(visitor, node);
+        self.semantic_targets.iter().any(|target| {
+            extension_target_owner_exists(visitor, target)
+                && target.method == method
+                && callees.iter().any(|callee| {
+                    callee.resolution != MethodCalleeResolution::ReceiverOnly
+                        && target.owner == callee.owner.namespace_parts()
+                        && Some(target.owner_kind) == callee.owner.namespace_kind()
+                        && target.method == callee.method
+                })
+        })
+    }
+
+    fn can_run_inside_extension_frame(&self, visitor: &FactCollector, node: &CallNode) -> bool {
+        !visitor.extension_call_stack.is_empty()
+            && self.handles_call(utils::utf8_str(node.name().as_slice()))
+    }
+}
+
+fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> BTreeSet<String> {
+    let mut names = ruby_fast_lsp_extension_rspec::extension()
+        .indexed_call_names()
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<BTreeSet<_>>();
+    for extension in extensions {
+        if !extension.is_loaded() {
+            continue;
+        }
+        names.extend(extension.indexed_call_names.iter().cloned());
+    }
+    names
+}
+
+fn extension_target_owner_exists(visitor: &FactCollector, target: &ExtensionMethodTarget) -> bool {
+    let required_owner = FullyQualifiedName::namespace(target.owner.clone());
+    let engine = visitor.analysis_engine.lock();
+    ruby_analysis::engine::AnalysisQuery::new(&engine)
+        .known_namespace_fqns()
+        .contains(&required_owner)
 }
 
 pub fn configure_from_config(config: &RubyFastLspConfig) {
@@ -410,6 +577,10 @@ fn process_call_node_with_registry(
     if process_wasm_call_node(registry, visitor, node) {
         return;
     }
+    let method_name = utils::utf8_str(node.name().as_slice());
+    if registry.inner.read().has_loaded_wasm_for_call(method_name) {
+        return;
+    }
 
     let rspec = ruby_fast_lsp_extension_rspec::extension();
 
@@ -421,7 +592,6 @@ fn process_call_node_with_registry(
         rspec.id()
     );
 
-    let method_name = utils::utf8_str(node.name().as_slice());
     if !rspec.indexed_call_names().contains(&method_name) {
         return;
     }
@@ -543,14 +713,16 @@ fn process_wasm_call_node(
         if !loaded.is_loaded() {
             continue;
         }
-        let mut extension = loaded.extension.lock();
-        if !extension
-            .indexed_call_names()
-            .iter()
-            .any(|name| name == method_name)
+        if !loaded.handles_call(method_name) {
+            continue;
+        }
+        if loaded.has_semantic_targets()
+            && !loaded.semantically_matches_call(visitor, node)
+            && !loaded.can_run_inside_extension_frame(visitor, node)
         {
             continue;
         }
+        let mut extension = loaded.extension.lock();
 
         let ctx = call_context(visitor, node);
         let patches = match extension.index_call(&ctx) {
@@ -803,8 +975,18 @@ fn load_wasm_extension(
     if let Some(manifest) = &package.manifest {
         validate_manifest_call_names(manifest, extension.indexed_call_names())?;
     }
+    let semantic_targets = package
+        .manifest
+        .as_ref()
+        .map(parse_manifest_method_targets)
+        .transpose()?
+        .unwrap_or_default();
 
-    Ok(Arc::new(LoadedWasmExtension::new(metadata, extension)))
+    Ok(Arc::new(LoadedWasmExtension::new(
+        metadata,
+        extension,
+        semantic_targets,
+    )))
 }
 
 fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadError> {
@@ -1014,6 +1196,59 @@ fn validate_manifest_call_names(
     Ok(())
 }
 
+fn parse_manifest_method_targets(
+    manifest: &ExtensionManifest,
+) -> Result<Vec<ExtensionMethodTarget>, ExtensionLoadError> {
+    let Some(indexing) = &manifest.indexing else {
+        return Ok(Vec::new());
+    };
+    indexing
+        .targets
+        .iter()
+        .map(|target| parse_manifest_method_target(&manifest.id, target))
+        .collect()
+}
+
+fn parse_manifest_method_target(
+    extension_id: &str,
+    target: &ExtensionMethodTargetManifest,
+) -> Result<ExtensionMethodTarget, ExtensionLoadError> {
+    let owner = target
+        .owner
+        .iter()
+        .map(|part| {
+            RubyConstant::new(part).map_err(|err| {
+                ExtensionLoadError::new(format!(
+                    "extension `{}` indexing target owner part `{}` is invalid: {}",
+                    extension_id, part, err
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let owner_kind = match target.owner_kind.as_str() {
+        "instance" => NamespaceKind::Instance,
+        "singleton" => NamespaceKind::Singleton,
+        other => {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{}` indexing target owner_kind `{}` is invalid; expected `instance` or `singleton`",
+                extension_id, other
+            )))
+        }
+    };
+    let method = RubyMethod::new(&target.method).map_err(|err| {
+        ExtensionLoadError::new(format!(
+            "extension `{}` indexing target method `{}` is invalid: {}",
+            extension_id, target.method, err
+        ))
+    })?;
+    Ok(ExtensionMethodTarget {
+        owner,
+        owner_kind,
+        method,
+        frame: target.frame,
+    })
+}
+
 fn wasm_file_stem(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -1068,14 +1303,7 @@ pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> Reso
         .receiver()
         .map(|receiver| receiver_from_node(&receiver))
         .unwrap_or(Receiver::None);
-    let resolved_callees = if matches!(
-        method_name.as_str(),
-        "describe" | "context" | "shared_examples" | "shared_context"
-    ) {
-        resolved_callees_for_call(visitor, node)
-    } else {
-        Vec::new()
-    };
+    let resolved_callees = resolved_callees_for_call(visitor, node);
     ResolvedCall {
         method_name,
         receiver: receiver.clone(),
@@ -1089,6 +1317,16 @@ pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> Reso
 }
 
 fn resolved_callees_for_call(visitor: &FactCollector, node: &CallNode) -> Vec<ResolvedCallee> {
+    resolved_core_callees_for_call(visitor, node)
+        .into_iter()
+        .map(resolved_callee_to_abi)
+        .collect()
+}
+
+fn resolved_core_callees_for_call(
+    visitor: &FactCollector,
+    node: &CallNode,
+) -> Vec<ruby_analysis::core::ResolvedMethodCallee> {
     let method_name = utils::utf8_str(node.name().as_slice());
     let Ok(method) = RubyMethod::new(method_name) else {
         return Vec::new();
@@ -1098,7 +1336,7 @@ fn resolved_callees_for_call(visitor: &FactCollector, node: &CallNode) -> Vec<Re
         .map(|receiver| core_method_receiver_from_node(visitor, &receiver))
         .unwrap_or(CoreMethodReceiver::None);
 
-    resolved_callees_for_call_analysis(
+    resolved_core_callees_for_call_analysis(
         &visitor.analysis_engine,
         &core_receiver,
         &method,
@@ -1107,13 +1345,13 @@ fn resolved_callees_for_call(visitor: &FactCollector, node: &CallNode) -> Vec<Re
     )
 }
 
-fn resolved_callees_for_call_analysis(
+fn resolved_core_callees_for_call_analysis(
     engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
     receiver: &CoreMethodReceiver,
     method: &RubyMethod,
     current_namespace: &[RubyConstant],
     namespace_kind: NamespaceKind,
-) -> Vec<ResolvedCallee> {
+) -> Vec<ruby_analysis::core::ResolvedMethodCallee> {
     let engine = engine.lock();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let namespace_fqn = match receiver {
@@ -1137,29 +1375,28 @@ fn resolved_callees_for_call_analysis(
     };
 
     callees
-        .into_iter()
-        .map(|callee| {
-            let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
-                panic!(
-                    "INVARIANT VIOLATED: analysis resolved extension callee owner `{}` is not a namespace. \
-                     This is a bug because extension callee owners must be namespaces. \
-                     Fix: keep AnalysisQuery::resolve_method_callees returning namespace owners.",
-                    callee.owner
-                )
-            });
-            ResolvedCallee {
-                owner: callee
-                    .owner
-                    .namespace_parts()
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-                owner_kind: namespace_kind_to_abi(owner_kind),
-                method: callee.method.to_string(),
-                resolution: callee_resolution_to_abi(callee.resolution),
-            }
-        })
-        .collect()
+}
+
+fn resolved_callee_to_abi(callee: ruby_analysis::core::ResolvedMethodCallee) -> ResolvedCallee {
+    let owner_kind = callee.owner.namespace_kind().unwrap_or_else(|| {
+        panic!(
+            "INVARIANT VIOLATED: analysis resolved extension callee owner `{}` is not a namespace. \
+             This is a bug because extension callee owners must be namespaces. \
+             Fix: keep AnalysisQuery::resolve_method_callees returning namespace owners.",
+            callee.owner
+        )
+    });
+    ResolvedCallee {
+        owner: callee
+            .owner
+            .namespace_parts()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        owner_kind: namespace_kind_to_abi(owner_kind),
+        method: callee.method.to_string(),
+        resolution: callee_resolution_to_abi(callee.resolution),
+    }
 }
 
 fn core_method_receiver_from_node(visitor: &FactCollector, node: &Node) -> CoreMethodReceiver {
@@ -1440,6 +1677,44 @@ mod tests {
             "INVARIANT VIOLATED: initialization options loaded a direct wasm file. \
              This is a bug because editor-installed extensions must be manifest packages. \
              Fix: require extension.toml for initialization option extension paths."
+        );
+    }
+
+    #[test]
+    fn manifest_method_targets_parse_semantic_owner_kind_and_method() {
+        let manifest: ExtensionManifest = toml::from_str(
+            r#"
+id = "semantic"
+abi_version = 1
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+
+[indexing]
+call_names = ["describe"]
+
+[[indexing.targets]]
+owner = ["RSpec"]
+owner_kind = "singleton"
+method = "describe"
+frame = true
+"#,
+        )
+        .expect("test manifest must parse");
+
+        let targets =
+            parse_manifest_method_targets(&manifest).expect("test semantic targets must parse");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            targets[0],
+            ExtensionMethodTarget {
+                owner: vec![RubyConstant::new("RSpec").expect("test constant is valid")],
+                owner_kind: NamespaceKind::Singleton,
+                method: RubyMethod::new("describe").expect("test method is valid"),
+                frame: true,
+            },
+            "INVARIANT VIOLATED: extension semantic target parsing changed. \
+             This is a bug because extension dispatch must be gated by resolved method target. \
+             Fix: preserve owner, owner_kind, method, and frame fields."
         );
     }
 

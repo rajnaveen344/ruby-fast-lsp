@@ -70,7 +70,7 @@ pub struct FactCollector {
 pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
     fn process_call_node(&self, _visitor: &mut FactCollector, _node: &CallNode) {}
 
-    fn should_track_enclosing_call(&self, _method_name: &str) -> bool {
+    fn should_track_enclosing_call(&self, _visitor: &FactCollector, _node: &CallNode) -> bool {
         false
     }
 

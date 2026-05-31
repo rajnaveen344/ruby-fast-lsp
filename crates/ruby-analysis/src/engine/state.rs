@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use crate::core::memory_estimate::{fqn_heap_bytes, vec_payload_bytes};
 use crate::core::{
@@ -355,30 +354,12 @@ impl AnalysisEngine {
     }
 
     pub fn resolve_file(&mut self, file_id: SourceFileId) {
-        let total_start = Instant::now();
         self.assert_known_file_id(
             file_id,
             "file-local resolve references unknown source file id",
         );
-        let assert_elapsed = total_start.elapsed();
-        let unresolved_before = self.graph.unresolved_edges().len();
-        let graph_start = Instant::now();
         self.retry_unresolved_graph_edges();
-        let graph_elapsed = graph_start.elapsed();
-        let unresolved_after = self.graph.unresolved_edges().len();
-        let refs_start = Instant::now();
         self.resolve_reference_candidates_in_file(file_id);
-        let refs_elapsed = refs_start.elapsed();
-        log::info!(
-            "[PERF][engine resolve_file waterfall] file_id={:?} total={:?} assert_file={:?} graph_retry={:?} unresolved_graph_edges_before={} unresolved_graph_edges_after={} refs_diags={:?}",
-            file_id,
-            total_start.elapsed(),
-            assert_elapsed,
-            graph_elapsed,
-            unresolved_before,
-            unresolved_after,
-            refs_elapsed
-        );
     }
 
     pub fn shrink_to_fit(&mut self) {
