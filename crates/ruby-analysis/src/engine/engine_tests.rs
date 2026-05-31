@@ -242,6 +242,7 @@ fn method_candidate_resolves_when_method_definition_arrives_later() {
                         diagnostic_range: TextRange::new(ref_file, 5, 9),
                         receiver_label: Some("User".to_string()),
                         diagnose_unresolved: true,
+                        allow_unindexed_owner: false,
                         signature: crate::core::MethodCallSignatureCandidate::default(),
                     },
                 },

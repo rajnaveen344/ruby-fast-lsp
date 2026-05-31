@@ -39,6 +39,7 @@ impl FactCollector {
                     diagnostic_range: range,
                     receiver_label: Some("super".to_string()),
                     diagnose_unresolved: self.diagnostics_enabled,
+                    allow_unindexed_owner: false,
                     signature: MethodCallSignatureCandidate::default(),
                 },
             },

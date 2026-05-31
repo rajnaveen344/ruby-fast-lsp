@@ -1406,6 +1406,7 @@ fn source_range(visitor: &FactCollector, location: &ruby_prism::Location) -> Sou
 
 fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
     let mut map: HashMap<String, RubyType> = HashMap::new();
+    let literal_analyzer = LiteralAnalyzer::new();
     for line in content.lines() {
         let trimmed = line.trim();
         let Some(eq_idx) = trimmed.find('=') else {
@@ -1421,6 +1422,15 @@ fn build_variable_type_map(content: &str) -> HashMap<String, RubyType> {
             continue;
         }
         let rhs_full = trimmed[eq_idx + 1..].trim();
+        let parse_result = ruby_prism::parse(rhs_full.as_bytes());
+        if parse_result.errors().count() == 0 {
+            if let Some(literal_type) = literal_analyzer.analyze_literal(&parse_result.node()) {
+                if literal_type != RubyType::Unknown {
+                    map.entry(lhs.to_string()).or_insert(literal_type);
+                    continue;
+                }
+            }
+        }
         let Some(new_pos) = rhs_full.find(".new") else {
             continue;
         };

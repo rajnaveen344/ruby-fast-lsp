@@ -88,6 +88,12 @@ pub fn rbs_method_exists_for_type(
     false
 }
 
+pub fn rbs_class_exists_for_type(receiver_type: &RubyType) -> bool {
+    rbs_class_names_for_type(receiver_type)
+        .iter()
+        .any(|class_name| crate::inference::rbs::has_rbs_class(class_name))
+}
+
 fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
     match receiver_type {
         RubyType::Array(element_types) => {

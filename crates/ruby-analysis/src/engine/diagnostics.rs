@@ -158,7 +158,11 @@ impl AnalysisEngine {
                             .or_insert_with_key(|owner_fqn| {
                                 self.method_namespace_target_exists(owner_fqn)
                             });
-                        if !namespace_exists {
+                        let allow_unindexed_owner = candidate
+                            .diagnostics
+                            .as_deref()
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                        if !namespace_exists && !allow_unindexed_owner {
                             continue;
                         }
                         let target = FullyQualifiedName::method(
@@ -179,15 +183,19 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let suggestion = method_suggestion_cache
-                                .entry((owner_fqn.clone(), candidate.method))
-                                .or_insert_with(|| {
-                                    self.find_method_suggestion(
-                                        &owner_fqn,
-                                        candidate.method.as_str(),
-                                    )
+                            let suggestion = namespace_exists
+                                .then(|| {
+                                    method_suggestion_cache
+                                        .entry((owner_fqn.clone(), candidate.method))
+                                        .or_insert_with(|| {
+                                            self.find_method_suggestion(
+                                                &owner_fqn,
+                                                candidate.method.as_str(),
+                                            )
+                                        })
+                                        .clone()
                                 })
-                                .clone();
+                                .flatten();
                             let mut message = match &diagnostics.receiver_label {
                                 Some(label) => format!(
                                     "Unresolved method `{}` on `{}`",
@@ -350,7 +358,10 @@ impl AnalysisEngine {
                         let namespace_exists = *method_namespace_exists_cache
                             .entry(owner_fqn.clone())
                             .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn));
-                        if !namespace_exists {
+                        let allow_unindexed_owner = diagnostics
+                            .as_deref()
+                            .is_some_and(|diagnostics| diagnostics.allow_unindexed_owner);
+                        if !namespace_exists && !allow_unindexed_owner {
                             continue;
                         }
                         let target =
@@ -365,12 +376,16 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
-                            let suggestion = method_suggestion_cache
-                                .entry((owner_fqn.clone(), method))
-                                .or_insert_with(|| {
-                                    self.find_method_suggestion(&owner_fqn, method.as_str())
+                            let suggestion = namespace_exists
+                                .then(|| {
+                                    method_suggestion_cache
+                                        .entry((owner_fqn.clone(), method))
+                                        .or_insert_with(|| {
+                                            self.find_method_suggestion(&owner_fqn, method.as_str())
+                                        })
+                                        .clone()
                                 })
-                                .clone();
+                                .flatten();
                             let mut message = match &diagnostics.receiver_label {
                                 Some(label) => {
                                     format!(

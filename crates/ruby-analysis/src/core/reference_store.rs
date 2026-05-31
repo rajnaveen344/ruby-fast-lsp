@@ -101,6 +101,7 @@ pub struct MethodReferenceDiagnostics {
     pub diagnostic_range: TextRange,
     pub receiver_label: Option<String>,
     pub diagnose_unresolved: bool,
+    pub allow_unindexed_owner: bool,
     pub signature: MethodCallSignatureCandidate,
 }
 
