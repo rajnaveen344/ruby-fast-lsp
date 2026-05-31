@@ -63,27 +63,27 @@ jobs:
       - name: Copy binary to npm package
         shell: bash
         run: |
-          mkdir -p npm/${{ matrix.npm-pkg }}/bin
-          cp target/${{ matrix.target }}/release/${{ matrix.bin }} npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
-          chmod +x npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
+          mkdir -p editors/npm/${{ matrix.npm-pkg }}/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} editors/npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
+          chmod +x editors/npm/${{ matrix.npm-pkg }}/bin/${{ matrix.bin }}
 
       - name: Copy binary to VSIX
         shell: bash
         run: |
-          mkdir -p vsix/bin/${{ matrix.vsix-platform }}
-          cp target/${{ matrix.target }}/release/${{ matrix.bin }} vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
+          mkdir -p editors/vscode/vsix/bin/${{ matrix.vsix-platform }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} editors/vscode/vsix/bin/${{ matrix.vsix-platform }}/${{ matrix.bin }}
 
       - name: Upload npm artifact
         uses: actions/upload-artifact@v4
         with:
           name: npm-${{ matrix.npm-pkg }}
-          path: npm/${{ matrix.npm-pkg }}
+          path: editors/npm/${{ matrix.npm-pkg }}
 
       - name: Upload VSIX binary
         uses: actions/upload-artifact@v4
         with:
           name: vsix-bin-${{ matrix.vsix-platform }}
-          path: vsix/bin/${{ matrix.vsix-platform }}
+          path: editors/vscode/vsix/bin/${{ matrix.vsix-platform }}
 
   publish-npm:
     needs: build
@@ -112,39 +112,36 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
           # Resolve README symlink to real file (npm doesn't follow symlinks)
-          if [ -L npm/ruby-fast-lsp/README.md ]; then
-            cp --remove-destination "$(readlink -f npm/ruby-fast-lsp/README.md)" npm/ruby-fast-lsp/README.md
+          if [ -L editors/npm/ruby-fast-lsp/README.md ]; then
+            cp --remove-destination "$(readlink -f editors/npm/ruby-fast-lsp/README.md)" editors/npm/ruby-fast-lsp/README.md
           fi
 
           # Copy built binaries into npm package dirs
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            cp -r artifacts/npm-${pkg}/* npm/${pkg}/
+            cp -r artifacts/npm-${pkg}/* editors/npm/${pkg}/
           done
 
           # Sync version in all package.json files
           for pkg in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" npm/${pkg}/package.json
+            sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" editors/npm/${pkg}/package.json
           done
 
           # Sync optionalDependencies versions
           for dep in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            sed -i "s|\"@ruby-fast/lsp-${dep}\": \".*\"|\"@ruby-fast/lsp-${dep}\": \"${VERSION}\"|" npm/ruby-fast-lsp/package.json
+            sed -i "s|\"@ruby-fast/lsp-${dep}\": \".*\"|\"@ruby-fast/lsp-${dep}\": \"${VERSION}\"|" editors/npm/ruby-fast-lsp/package.json
           done
 
       - name: Publish platform packages
         run: |
           for pkg in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
             echo "Publishing @ruby-fast/lsp-${pkg}@${VERSION}..."
-            cd npm/${pkg}
-            npm publish --access public || echo "Already published, skipping"
-            cd ../..
+            (cd editors/npm/${pkg} && npm publish --access public) || echo "Already published, skipping"
           done
 
       - name: Publish main CLI package
         run: |
           echo "Publishing @ruby-fast/lsp@${VERSION}..."
-          cd npm/ruby-fast-lsp
-          npm publish --access public || echo "Already published, skipping"
+          (cd editors/npm/ruby-fast-lsp && npm publish --access public) || echo "Already published, skipping"
 
   publish-vsix:
     needs: build
@@ -161,7 +158,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: vsix-bin-*
-          path: vsix/bin-artifacts
+          path: editors/vscode/vsix/bin-artifacts
 
       - name: Prepare VSIX
         run: |
@@ -186,37 +183,35 @@ jobs:
 
           # Move binaries into place
           for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-            mkdir -p vsix/bin/${platform}
-            cp -r vsix/bin-artifacts/vsix-bin-${platform}/* vsix/bin/${platform}/
+            mkdir -p editors/vscode/vsix/bin/${platform}
+            cp -r editors/vscode/vsix/bin-artifacts/vsix-bin-${platform}/* editors/vscode/vsix/bin/${platform}/
           done
-          rm -rf vsix/bin-artifacts
+          rm -rf editors/vscode/vsix/bin-artifacts
 
           # Sync version in VSIX package.json
-          sed -i "s/\"version\": \".*\"/\"version\": \"${VSIX_VERSION}\"/" vsix/package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"${VSIX_VERSION}\"/" editors/vscode/vsix/package.json
 
           # Pre-zip stubs if script exists
-          if [ -f "./scripts/zip_stubs.sh" ]; then
-            ./scripts/zip_stubs.sh
-          fi
+          ./editors/scripts/zip_vscode_stubs.sh
 
       - name: Install VSIX dependencies
         run: |
-          cd vsix
+          cd editors/vscode/vsix
           npm install
 
       - name: Package VSIX
         run: |
-          cd vsix
+          cd editors/vscode/vsix
           npx @vscode/vsce package
 
       - name: Publish to VS Code Marketplace
         run: |
-          cd vsix
+          cd editors/vscode/vsix
           npx @vscode/vsce publish -p ${{ secrets.VSCE_TOKEN }}
 
       - name: Publish to Open VSX
         run: |
-          cd vsix
+          cd editors/vscode/vsix
           for attempt in 1 2 3; do
             if npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}; then
               exit 0

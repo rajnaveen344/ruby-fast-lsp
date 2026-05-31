@@ -3,11 +3,13 @@ set -e
 
 # Build binaries and copy them into the npm platform packages.
 # Usage:
-#   ./npm/build.sh                    # build all platforms
-#   ./npm/build.sh --current-only     # build current platform only
+#   ./editors/scripts/build_npm.sh                    # build all platforms
+#   ./editors/scripts/build_npm.sh --current-only     # build current platform only
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+EDITORS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+NPM_DIR="$EDITORS_DIR/npm"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VERSION=$(grep -m 1 "version" "$ROOT_DIR/Cargo.toml" | cut -d '"' -f 2)
 
 echo "Building ruby-fast-lsp v${VERSION}"
@@ -41,27 +43,27 @@ for PLATFORM in $PLATFORMS; do
   BIN_NAME="ruby-fast-lsp"
   case "$PLATFORM" in win32-*) BIN_NAME="ruby-fast-lsp.exe" ;; esac
 
-  cargo build --release --target "$TARGET"
+  cargo build --release --target "$TARGET" --manifest-path "$ROOT_DIR/Cargo.toml"
 
   # Copy binary into npm package
-  mkdir -p "$SCRIPT_DIR/$PLATFORM/bin"
-  cp "$ROOT_DIR/target/$TARGET/release/$BIN_NAME" "$SCRIPT_DIR/$PLATFORM/bin/$BIN_NAME"
+  mkdir -p "$NPM_DIR/$PLATFORM/bin"
+  cp "$ROOT_DIR/target/$TARGET/release/$BIN_NAME" "$NPM_DIR/$PLATFORM/bin/$BIN_NAME"
 
-  echo "    -> $SCRIPT_DIR/$PLATFORM/bin/$BIN_NAME"
+  echo "    -> $NPM_DIR/$PLATFORM/bin/$BIN_NAME"
 done
 
 # Sync version across all package.json files
 for PKG in ruby-fast-lsp darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-  sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/$PKG/package.json" 2>/dev/null || \
-  sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/$PKG/package.json"
+  sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$NPM_DIR/$PKG/package.json" 2>/dev/null || \
+  sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$NPM_DIR/$PKG/package.json"
 done
 
 # Sync optionalDependencies versions in main package
 for DEP in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
-  sed -i '' "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json" 2>/dev/null || \
-  sed -i "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$SCRIPT_DIR/ruby-fast-lsp/package.json"
+  sed -i '' "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$NPM_DIR/ruby-fast-lsp/package.json" 2>/dev/null || \
+  sed -i "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$NPM_DIR/ruby-fast-lsp/package.json"
 done
 
 echo ""
 echo "Done. Built $(echo $PLATFORMS | wc -w | tr -d ' ') platform(s)."
-echo "To publish: ./npm/publish.sh"
+echo "To publish: ./editors/scripts/publish_npm.sh"

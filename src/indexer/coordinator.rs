@@ -515,7 +515,7 @@ impl IndexingCoordinator {
     ///
     /// We try to find stubs in this order:
     /// 1. Use the configured stub path
-    /// 2. Look in the workspace's vsix/stubs directory
+    /// 2. Look in the workspace's editors/vscode/vsix/stubs directory
     /// 3. Fall back to Ruby 3.0 stubs if available
     pub fn find_core_stubs_for_version(&self, version: (u8, u8)) -> Option<PathBuf> {
         // First, try the configured stub path
@@ -524,7 +524,12 @@ impl IndexingCoordinator {
         }
 
         // Look for stubs in the workspace
-        let stubs_dir = self.workspace_root.join("vsix").join("stubs");
+        let stubs_dir = self
+            .workspace_root
+            .join("editors")
+            .join("vscode")
+            .join("vsix")
+            .join("stubs");
         let version_dir = format!("rubystubs{}{}", version.0, version.1);
         let stubs_path = stubs_dir.join(version_dir);
 
@@ -606,7 +611,12 @@ mod coordinator_integration_tests {
             let project_root = temp_dir.path().to_path_buf();
 
             // Create directory structure
-            let core_stubs_dir = project_root.join("vsix").join("stubs").join("rubystubs30");
+            let core_stubs_dir = project_root
+                .join("editors")
+                .join("vscode")
+                .join("vsix")
+                .join("stubs")
+                .join("rubystubs30");
             let stdlib_dir = project_root.join("stdlib");
             let project_files_dir = project_root.join("app");
 

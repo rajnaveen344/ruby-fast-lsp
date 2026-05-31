@@ -339,7 +339,14 @@ impl IndexerStdlib {
             exe_dir.join("stubs").join(&stub_dir),
             exe_dir.parent()?.join("stubs").join(&stub_dir),
             exe_dir.parent()?.parent()?.join("stubs").join(&stub_dir),
-            exe_dir.parent()?.join("vsix").join("stubs").join(&stub_dir),
+            exe_dir
+                .parent()?
+                .parent()?
+                .join("editors")
+                .join("vscode")
+                .join("vsix")
+                .join("stubs")
+                .join(&stub_dir),
         ];
 
         candidates.into_iter().find(|p| p.exists())

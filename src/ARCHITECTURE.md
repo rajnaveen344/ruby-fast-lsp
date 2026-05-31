@@ -17,6 +17,10 @@ src/
 ├── server.rs       - LSP server coordination
 └── main.rs         - Application entry point
 src/test/           - Test harnesses and integration tests
+editors/
+├── scripts/        - Shared editor packaging and publishing scripts
+├── vscode/         - VS Code extension assets, packaging script, and VSIX stubs
+└── npm/            - npm package manifests and platform package directories
 ```
 
 ### Core Philosophy

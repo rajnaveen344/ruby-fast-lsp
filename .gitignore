@@ -11,12 +11,12 @@ CLAUDE.md
 src/test/simulation/soak_failures.log
 # DHAT heap profiling output
 *heap.json
-# Pre-zipped stubs (generated from vsix/stubs, not tracked in git)
-vsix/stubs-zipped/
+# Pre-zipped stubs (generated from editors/vscode/vsix/stubs, not tracked in git)
+editors/vscode/vsix/stubs-zipped/
 # LikeC4 snapshots
 .likec4
 # npm platform binaries (built by CI)
-npm/darwin-arm64/bin/
-npm/darwin-x64/bin/
-npm/linux-x64/bin/
-npm/win32-x64/bin/
+editors/npm/darwin-arm64/bin/
+editors/npm/darwin-x64/bin/
+editors/npm/linux-x64/bin/
+editors/npm/win32-x64/bin/

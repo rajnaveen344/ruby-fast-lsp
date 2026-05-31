@@ -1,11 +1,14 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # Configuration
 EXTENSION_NAME="ruby-fast-lsp"
-EXTENSION_VERSION=$(grep -m 1 "version" Cargo.toml | cut -d '"' -f 2)
-EXTENSION_DIR="./vsix"
-TARGET_DIR="./target"
+EXTENSION_VERSION=$(grep -m 1 "version" "$ROOT_DIR/Cargo.toml" | cut -d '"' -f 2)
+EXTENSION_DIR="$SCRIPT_DIR/vsix"
+TARGET_DIR="$ROOT_DIR/target"
 REBUILD_LSP=false
 SKIP_BUILDS=false
 SELECTED_PLATFORMS=""
@@ -168,7 +171,7 @@ build_for_target() {
         binary_name="${binary_name}.exe"
     fi
     
-    binary_path="./target/${target}/release/${binary_name}"
+    binary_path="$ROOT_DIR/target/${target}/release/${binary_name}"
     
     # Check if we need to build
     if [ ! -f "$binary_path" ] || [ "$REBUILD_LSP" = true ]; then
@@ -188,13 +191,13 @@ build_for_target() {
                 return 1
             fi
             
-            if ! cross build --release --target "$target"; then
+            if ! cross build --release --target "$target" --manifest-path "$ROOT_DIR/Cargo.toml"; then
                 echo "Failed to cross-compile for $platform ($target)"
                 return 1
             fi
         else
             # For native builds, use cargo directly
-            if ! cargo build --release --target "$target"; then
+            if ! cargo build --release --target "$target" --manifest-path "$ROOT_DIR/Cargo.toml"; then
                 echo "Failed to build for $platform ($target)"
                 return 1
             fi
@@ -238,20 +241,13 @@ echo "Pre-zipping Ruby stubs..."
 STUBS_ZIP_DIR="$EXTENSION_DIR/stubs-zipped"
 
 if [ -d "$EXTENSION_DIR/stubs" ]; then
-    # Run the zip script to create pre-zipped stubs
-    if [ -f "./scripts/zip_stubs.sh" ]; then
-        ./scripts/zip_stubs.sh
-    else
-        echo "Warning: zip_stubs.sh not found, creating stubs-zipped manually..."
-        mkdir -p "$STUBS_ZIP_DIR"
-        for version_dir in "$EXTENSION_DIR/stubs"/rubystubs*; do
-            if [ -d "$version_dir" ]; then
-                version_name=$(basename "$version_dir")
-                (cd "$version_dir" && zip -9 -q "../../stubs-zipped/${version_name}.zip" *.rb)
-            fi
-        done
+    ZIP_STUBS_SCRIPT="$SCRIPT_DIR/../scripts/zip_vscode_stubs.sh"
+    if [ ! -x "$ZIP_STUBS_SCRIPT" ]; then
+        echo "Error: missing executable VS Code stub zipper at $ZIP_STUBS_SCRIPT"
+        exit 1
     fi
-    
+    "$ZIP_STUBS_SCRIPT"
+
     # Verify zipped stubs
     if [ -d "$STUBS_ZIP_DIR" ]; then
         zip_count=$(find "$STUBS_ZIP_DIR" -maxdepth 1 -name "*.zip" | wc -l)
@@ -266,10 +262,10 @@ fi
 echo "Bundling Ruby Fast LSP extensions..."
 rm -rf "$EXTENSION_DIR/extensions"
 mkdir -p "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release"
-cp "extensions/rspec-ruby/extension.toml" "$EXTENSION_DIR/extensions/rspec-ruby/"
-cp "extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-ruby/"
+cp "$ROOT_DIR/extensions/rspec-ruby/extension.toml" "$EXTENSION_DIR/extensions/rspec-ruby/"
+cp "$ROOT_DIR/extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-ruby/"
 cp \
-    "extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
+    "$ROOT_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
     "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/"
 
 # Navigate to extension directory and package
@@ -281,7 +277,8 @@ echo "Packaging extension..."
 vsce package
 
 # Move the VSIX file to the target directory
-mv *.vsix "../$TARGET_DIR/"
+mkdir -p "$TARGET_DIR"
+mv *.vsix "$TARGET_DIR/"
 
 echo "VSIX package created successfully!"
 echo "You can find the VSIX file in the target directory of your project."
@@ -312,6 +309,6 @@ done
 
 echo ""
 echo "To build for additional platforms, use the --platforms option:"
-echo "  ./create_vsix.sh --platforms macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64"
+echo "  ./editors/vscode/create_vsix.sh --platforms macos-x64,macos-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64"
 echo "  or"
-echo "  ./create_vsix.sh --platforms all"
+echo "  ./editors/vscode/create_vsix.sh --platforms all"

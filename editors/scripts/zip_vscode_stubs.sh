@@ -8,8 +8,11 @@
 
 set -e
 
-STUBS_DIR="vsix/stubs"
-OUTPUT_DIR="vsix/stubs-zipped"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+EDITORS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+EXTENSION_DIR="$EDITORS_DIR/vscode/vsix"
+STUBS_DIR="$EXTENSION_DIR/stubs"
+OUTPUT_DIR="$EXTENSION_DIR/stubs-zipped"
 FORCE=false
 
 # Parse arguments
@@ -59,7 +62,7 @@ for version_dir in "$STUBS_DIR"/rubystubs*; do
             echo "  Zipping $version_name..."
             
             # Create zip with maximum compression, storing files at root level
-            (cd "$version_dir" && zip -9 -q "../../stubs-zipped/${version_name}.zip" *.rb)
+            (cd "$version_dir" && zip -9 -q "$output_file" *.rb)
             
             # Show size info
             original_size=$(du -sk "$version_dir" | cut -f1)
@@ -83,4 +86,3 @@ echo ""
 echo "Total sizes:"
 du -sh "$STUBS_DIR"
 du -sh "$OUTPUT_DIR"
-

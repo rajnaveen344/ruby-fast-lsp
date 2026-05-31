@@ -35,7 +35,7 @@ cargo run --bin ast -- --loc '<ruby snippet>'
 cargo test                    # Run all tests
 cargo test -- --nocapture     # With output
 cargo build --release         # Release build
-./create_vsix.sh --current-platform-only   # Build VS Code extension
+./editors/vscode/create_vsix.sh --current-platform-only   # Build VS Code extension
 ```
 
 ## Critical Reminders
