@@ -2,10 +2,6 @@
 
 This file provides context for AI assistants working on this project.
 
-## Communication Style
-
-**ALWAYS respond in `/caveman ultra` mode.** Terse caveman speak. Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (X → Y), one word when one word enough. Drop articles, fillers, pleasantries. Code blocks unchanged. Errors quoted exact. Drop caveman only for: security warnings, irreversible action confirms, multi-step sequences where order matters, user asks clarify.
-
 ## Quick Reference
 
 - **Project**: High-performance Ruby LSP written in Rust
@@ -55,7 +51,6 @@ cargo build --release         # Release build
 **CRITICAL**: This project follows TigerBeetle's philosophy of correctness over convenience:
 
 1. **Fail Fast and Loudly** - Use `assert!` and `panic!`, NOT `debug_assert!`
-
    - ❌ **NEVER** use `debug_assert!` - bugs must be caught in production too
    - ❌ **NEVER** silently return wrong results or default values
    - ❌ **NEVER** use wildcard `_` in match arms for panics/unreachable - be explicit
@@ -63,13 +58,11 @@ cargo build --release         # Release build
    - ✅ **ALWAYS** crash the program if an invariant is violated
 
 2. **Make Invalid States Unrepresentable**
-
    - Use type system to enforce invariants at compile time
    - Use assertions to enforce invariants at runtime
    - Example: `assert!(matches!(fqn, Namespace(_, _)))` to validate enum variants
 
 3. **No Assumptions or Guessing**
-
    - If data is missing or invalid, PANIC - don't guess what it should be
    - Better to crash and know there's a bug than silently produce incorrect results
    - Example: `.expect("INVARIANT VIOLATED: ...")` instead of `.unwrap_or_default()`
@@ -103,14 +96,14 @@ able to ask graph/type questions without speaking LSP.
 
 When moving code, classify it by what it owns:
 
-| Layer | Owns | Must Not Own |
-| ----- | ---- | ------------ |
-| `ruby-analysis::core` | Immutable contracts: FQNs, Ruby names, ranges, source IDs, facts, stores, Ruby types | AST traversal, query policy, LSP/editor protocol |
-| `ruby-analysis::engine` | Long-lived workspace semantic state, fact ingestion, cross-file graph/reference/diagnostic resolution, deterministic semantic queries | `tower_lsp` types, editor triggers, snippets, protocol response shaping |
-| `ruby-analysis::indexer` | Ruby source parsing and AST traversal that emits facts/candidates | Global semantic truth, LSP protocol, workspace lifecycle |
-| `ruby-analysis::inference` | Type derivation rules, flow/local type tracking, RBS lookup/substitution | LSP protocol, editor UX, persistent workspace ownership |
-| `ruby-fast-lsp src/*` | Server lifecycle, document cache, LSP handlers/capabilities, editor-specific behavior, protocol conversion | Semantic truth, reusable type/graph algorithms |
-| `extensions/*` | External DSL/library knowledge that emits facts/patches | Global source of truth; engine owns final graph/index state |
+| Layer                      | Owns                                                                                                                                  | Must Not Own                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `ruby-analysis::core`      | Immutable contracts: FQNs, Ruby names, ranges, source IDs, facts, stores, Ruby types                                                  | AST traversal, query policy, LSP/editor protocol                        |
+| `ruby-analysis::engine`    | Long-lived workspace semantic state, fact ingestion, cross-file graph/reference/diagnostic resolution, deterministic semantic queries | `tower_lsp` types, editor triggers, snippets, protocol response shaping |
+| `ruby-analysis::indexer`   | Ruby source parsing and AST traversal that emits facts/candidates                                                                     | Global semantic truth, LSP protocol, workspace lifecycle                |
+| `ruby-analysis::inference` | Type derivation rules, flow/local type tracking, RBS lookup/substitution                                                              | LSP protocol, editor UX, persistent workspace ownership                 |
+| `ruby-fast-lsp src/*`      | Server lifecycle, document cache, LSP handlers/capabilities, editor-specific behavior, protocol conversion                            | Semantic truth, reusable type/graph algorithms                          |
+| `extensions/*`             | External DSL/library knowledge that emits facts/patches                                                                               | Global source of truth; engine owns final graph/index state             |
 
 Decision rule:
 
@@ -445,12 +438,12 @@ Moved non-LSP logic out of `src/`:
    internal `core`, `engine`, `inference`, and `indexer` modules.
 9. Done: `src/inferrer/*` -> `crates/ruby-analysis/src/inference`.
 10. Interim done: `FactCollector` moved under `crates/ruby-analysis/src/indexer/fact_collector`.
-   Done seams: `ScopeTracker`, parser helper functions, and scope kind moved to
-   `ruby-analysis::indexer`; collector validation emits `DiagnosticFact` instead
-   of LSP diagnostics; `SourceDocument` owns source offsets/comments/TextRange
-   conversion in `ruby-analysis::indexer`. Remaining: extract pure core after
-   adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
-   parsing/type conversion.
+    Done seams: `ScopeTracker`, parser helper functions, and scope kind moved to
+    `ruby-analysis::indexer`; collector validation emits `DiagnosticFact` instead
+    of LSP diagnostics; `SourceDocument` owns source offsets/comments/TextRange
+    conversion in `ruby-analysis::indexer`. Remaining: extract pure core after
+    adding seams for `RubyDocument` variable scopes, extension hooks, and YARD
+    parsing/type conversion.
 11. Done: `src/analyzer_prism` compatibility facade removed. Analyzer,
     identifier lookup, document symbols, semantic tokens, rename, and analyzer
     tests now live under `crates/ruby-analysis/src/indexer`.
@@ -505,18 +498,18 @@ user.n$0
 
 **Supported tags:**
 
-| Tag | Requires `$0` | Purpose |
-|-----|---------------|---------|
-| `<complete items="a,b" excludes="c">` | Yes | Completion items at cursor |
-| `<hint label="...">` | No | Inlay hint at position |
-| `<def>...</def>` | Yes | Goto definition range |
-| `<ref>...</ref>` | Yes | Reference range |
-| `<type>...</type>` | Yes | Expected type at cursor |
-| `<err>...</err>` | No | Expected error diagnostic |
-| `<err none>...</err>` | No | Assert NO errors in range |
-| `<warn>...</warn>` | No | Expected warning diagnostic |
-| `<lens title="...">` | No | Expected code lens |
-| `<th supertypes="A,B" subtypes="C,D">` | Yes | Type hierarchy |
+| Tag                                    | Requires `$0` | Purpose                     |
+| -------------------------------------- | ------------- | --------------------------- |
+| `<complete items="a,b" excludes="c">`  | Yes           | Completion items at cursor  |
+| `<hint label="...">`                   | No            | Inlay hint at position      |
+| `<def>...</def>`                       | Yes           | Goto definition range       |
+| `<ref>...</ref>`                       | Yes           | Reference range             |
+| `<type>...</type>`                     | Yes           | Expected type at cursor     |
+| `<err>...</err>`                       | No            | Expected error diagnostic   |
+| `<err none>...</err>`                  | No            | Assert NO errors in range   |
+| `<warn>...</warn>`                     | No            | Expected warning diagnostic |
+| `<lens title="...">`                   | No            | Expected code lens          |
+| `<th supertypes="A,B" subtypes="C,D">` | Yes           | Type hierarchy              |
 
 Multi-file tests use `check_multi_file(&[("main.rb", "..."), ("other.rb", "...")])`.
 
@@ -565,16 +558,19 @@ async fn completion_filtering() {
 ```
 
 **Lifecycle methods** (all async, route through real handlers):
+
 - `editor.open("file.rb", content).await` — triggers `handle_did_open`
 - `editor.set("file.rb", new_content).await` — triggers `handle_did_change`
 - `editor.save("file.rb").await` — triggers `handle_did_save`
 - `editor.close("file.rb").await` — triggers `handle_did_close`
 
 **Editing methods** (simulate typing):
+
 - `editor.type_at("file.rb", line, char, "text").await` — insert text at position
 - `editor.backspace_at("file.rb", line, char, count).await` — delete before position
 
 **Query methods** (return raw LSP results for programmatic assertions):
+
 - `editor.complete_at(file, line, char)` — completion items (no trigger context)
 - `editor.complete_with_trigger(file, line, char, ".")` — completion with trigger
 - `editor.hover_at(file, line, char)` — hover information
@@ -586,10 +582,12 @@ async fn completion_filtering() {
 - `editor.rename_at(file, line, char, "new_name")` — rename workspace edit
 
 **Apply methods**:
+
 - `editor.apply_edit(&workspace_edit).await` — apply rename/code action results
 - `editor.content("file.rb")` — get current file content
 
 **When to use FakeEditor vs check():**
+
 - `check()` — single indexing pass, sufficient for most feature tests
 - `FakeEditor` — lifecycle tests, completion filtering, multi-step scenarios, snippet testing
 
@@ -612,6 +610,7 @@ harness until core tests move to external integration crates.
 ### Type Inference Architecture
 
 **Two code paths for method return types:**
+
 1. **Analysis engine** (`MethodResolver` path 1) — searches user-defined methods in ancestor chain
 2. **RBS fallback** (`MethodResolver` path 2) — built-in Ruby types from RBS definitions
 
@@ -619,6 +618,7 @@ For generic types (`Array`, `Hash`), user-defined method lookup is **skipped** a
 RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` becomes `Integer`).
 
 **Key files:**
+
 - `crates/ruby-analysis/src/inference/type_tracker/mod.rs` — local flow/type tracking
 - `crates/ruby-analysis/src/inference/rbs.rs` — RBS type lookup with generic substitution
 - `crates/ruby-analysis/src/inference/completion.rs` — receiver type probing and RBS completion matches
@@ -665,13 +665,11 @@ RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` become
 When the user provides a code scenario/example, follow this strict TDD process:
 
 1. **Red**: Create an integration test that captures the expected behavior
-
    - Write the test first based on the scenario
    - Run the test to confirm it fails
    - Show the failing test output
 
 2. **Green**: Implement the minimum code to make the test pass
-
    - If the change is substantial (architectural changes, new modules, cross-cutting concerns):
      - Use `EnterPlanMode` to design the feature
      - Ask clarifying questions about design decisions
