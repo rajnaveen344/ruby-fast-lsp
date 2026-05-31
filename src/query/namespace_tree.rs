@@ -23,7 +23,7 @@ impl EngineQuery {
              This is a bug because namespace tree is derived from graph facts. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         AnalysisQuery::new(&engine).namespace_tree_hash(show_external_types)
     }
 
@@ -33,7 +33,7 @@ impl EngineQuery {
              This is a bug because namespace tree is derived from graph facts. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         AnalysisQuery::new(&engine).namespace_tree(show_external_types)
     }
 }

@@ -190,7 +190,7 @@ impl EngineQuery {
         let Some(engine) = self.analysis_engine() else {
             return false;
         };
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let receiver_fqn =
             FullyQualifiedName::namespace_with_kind(receiver_parts, NamespaceKind::Instance);
@@ -207,12 +207,12 @@ impl EngineQuery {
         let Some(engine) = self.analysis_engine() else {
             return false;
         };
-        let engine = engine.lock();
+        let engine = engine.read();
         engine.all_method_facts().iter().any(|fact| {
             let FullyQualifiedName::Method(_, fact_method) = &fact.fqn else {
                 return false;
             };
-            fact_method == method
+            *fact_method == *method
                 && fact.visibility == ruby_analysis::core::method_store::MethodVisibility::Private
         }) || engine.all_method_visibility_overrides().iter().any(|fact| {
             fact.method == *method
@@ -231,7 +231,7 @@ impl EngineQuery {
         }
 
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let path = location.uri.to_file_path().ok()?;
         if let Some(file_id) = query.file_id(&path) {
@@ -438,7 +438,7 @@ impl EngineQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
             &engine,
@@ -453,7 +453,7 @@ impl EngineQuery {
         caller_namespace_fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
             &engine,
@@ -472,7 +472,7 @@ impl EngineQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(crate::utils::deduplicate_locations(locations_for_ranges(
             &engine,
@@ -491,7 +491,7 @@ impl EngineQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let namespace_fqn =
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
@@ -508,7 +508,7 @@ impl EngineQuery {
         method: &RubyMethod,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let namespace_fqn =
             FullyQualifiedName::namespace_with_kind(ancestors.to_vec(), namespace_kind);
@@ -524,7 +524,7 @@ impl EngineQuery {
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -537,7 +537,7 @@ impl EngineQuery {
         fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -550,7 +550,7 @@ impl EngineQuery {
         fqn: &FullyQualifiedName,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,

@@ -326,7 +326,7 @@ impl FactCollector {
         let range = self.direct_range(&node.location());
 
         let receiver_type = {
-            let engine = self.analysis_engine.lock();
+            let engine = self.analysis_engine.read();
             let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
             let Ok(method) = RubyMethod::new(&receiver_method) else {
@@ -363,7 +363,7 @@ impl FactCollector {
                 continue;
             };
             let return_type = {
-                let engine = self.analysis_engine.lock();
+                let engine = self.analysis_engine.read();
                 let query = AnalysisQuery::new(&engine);
                 method_call_return_type(Some(&query), receiver_type, &method_name)
             };
@@ -400,7 +400,7 @@ impl FactCollector {
         };
 
         let receiver_type = {
-            let engine = self.analysis_engine.lock();
+            let engine = self.analysis_engine.read();
             let query = AnalysisQuery::new(&engine);
             let owner = FullyQualifiedName::namespace_with_kind(namespace.clone(), owner_kind);
             query.method_return_type_for_receiver(&owner, &receiver_method)
@@ -432,7 +432,7 @@ impl FactCollector {
                 continue;
             };
             let return_type = {
-                let engine = self.analysis_engine.lock();
+                let engine = self.analysis_engine.read();
                 let query = AnalysisQuery::new(&engine);
                 method_call_return_type(Some(&query), receiver_type, target_method.as_str())
             };
@@ -964,7 +964,7 @@ impl FactCollector {
                  This is a bug because ruby-analysis::core TextRange currently stores u32 offsets. \
                  Fix: widen TextRange offsets before indexing files larger than u32::MAX bytes.",
             );
-            let engine = self.analysis_engine.lock();
+            let engine = self.analysis_engine.read();
             return AnalysisQuery::new(&engine).variable_type_before(
                 VariableTypeKind::Instance,
                 var_name,
@@ -1011,7 +1011,7 @@ impl FactCollector {
         parts: &[RubyConstant],
         current_namespace: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
-        let engine = self.analysis_engine.lock();
+        let engine = self.analysis_engine.read();
         crate::engine::AnalysisQuery::new(&engine)
             .resolve_constant_in_context(parts, current_namespace)
     }

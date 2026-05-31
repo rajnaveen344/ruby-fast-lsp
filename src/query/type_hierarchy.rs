@@ -84,7 +84,7 @@ impl EngineQuery {
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         if let Some(item) = query
             .type_hierarchy_node_for_constant(&constant_parts, &ancestors)
@@ -119,7 +119,7 @@ impl EngineQuery {
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         let fqn = match query.parse_namespace_fqn(&data.fqn) {
             Some(f) => f,
@@ -161,7 +161,7 @@ impl EngineQuery {
              This is a bug because LSP typeHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         let fqn = match query.parse_namespace_fqn(&data.fqn) {
             Some(f) => f,

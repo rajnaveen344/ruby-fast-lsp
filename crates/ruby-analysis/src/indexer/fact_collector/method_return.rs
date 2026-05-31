@@ -51,6 +51,10 @@ impl FactCollector {
             }
         }
 
+        if matches!(receiver_type, RubyType::Array(_) | RubyType::Hash(_, _)) {
+            return resolve_rbs_method_return_type(receiver_type, method_name);
+        }
+
         if self.resolve_analysis_method_returns {
             self.resolve_method_return_type_from_analysis(receiver_type, method_name, allow_private)
                 .or_else(|| resolve_rbs_method_return_type(receiver_type, method_name))
@@ -67,7 +71,7 @@ impl FactCollector {
     ) -> Option<RubyType> {
         let method = RubyMethod::new(method_name).ok()?;
         let namespace = receiver_namespace_for_analysis(receiver_type)?;
-        let engine = self.analysis_engine.lock();
+        let engine = self.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let caller_namespace = FullyQualifiedName::namespace_with_kind(
             self.scope_tracker.get_ns_stack(),
@@ -87,14 +91,16 @@ impl FactCollector {
 
             let method_fqn =
                 FullyQualifiedName::method(callee.owner.namespace_parts(), callee.method);
-            if self.direct_method_fact_is_visible(
+            let direct_method_is_visible = self.direct_method_fact_is_visible(
                 &method_fqn,
                 &callee.owner,
                 &namespace,
                 allow_private,
                 &caller_namespace,
-            ) {
-                if let Some(return_type) = self.local_method_return_type(&method_fqn) {
+            );
+            if direct_method_is_visible {
+                let local_return_type = self.local_method_return_type(&method_fqn);
+                if let Some(return_type) = local_return_type {
                     if !return_types.contains(&return_type) {
                         return_types.push(return_type);
                     }

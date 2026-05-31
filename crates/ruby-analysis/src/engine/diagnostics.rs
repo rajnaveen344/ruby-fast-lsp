@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
 use crate::core::{
-    DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FullyQualifiedName,
-    GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, RaiseArgCandidate, ReferenceFact,
-    RubyConstant, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
+    ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact,
+    FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, RaiseArgCandidate,
+    ReferenceFact, RubyConstant, RubyMethod, RubyType, SourceFileId, StoredReferenceCandidateKind,
     StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
     EXCEPTION_WHITELIST, NON_EXCEPTION_TYPES,
+};
+use crate::engine::resolution::{
+    method_lookup_chain, method_missing_method, namespace_target_exists,
 };
 use crate::{AnalysisEngine, AnalysisQuery};
 
@@ -24,11 +27,15 @@ impl AnalysisEngine {
         let reference_candidate_store = std::mem::take(&mut self.facts.references.candidates);
         let mut unresolved_constants = self.resolve_diagnostic_candidates();
         let mut method_fact_cache: HashMap<
-            (FullyQualifiedName, RubyMethod, bool),
+            (ConstLookupId, crate::core::NamespaceKind, RubyMethod, bool),
             Option<MethodFact>,
         > = HashMap::new();
         let mut method_namespace_exists_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
+            HashMap::new();
+        let mut constant_target_cache: HashMap<ConstLookupId, Option<crate::core::FqnId>> =
+            HashMap::new();
+        let mut method_lookup_chain_cache: HashMap<FullyQualifiedName, Vec<FullyQualifiedName>> =
             HashMap::new();
         self.facts.references.resolved.clear();
         for candidate in reference_candidate_store.iter_candidates() {
@@ -54,15 +61,24 @@ impl AnalysisEngine {
                          This is a bug because constant lookups must only store interned context FQN ids. \
                          Fix: intern lookup contexts before inserting candidates.",
                     );
-                    if let Some(target) = self.resolve_constant_reference(
-                        &parts,
-                        &if lookup.absolute {
-                            Vec::new()
-                        } else {
-                            context.namespace_parts()
-                        },
-                    ) {
-                        let target = self.names.intern_fqn(target);
+                    let target = if let Some(target) = constant_target_cache.get(&candidate.lookup)
+                    {
+                        *target
+                    } else {
+                        let target = self
+                            .resolve_constant_reference(
+                                &parts,
+                                &if lookup.absolute {
+                                    Vec::new()
+                                } else {
+                                    context.namespace_parts()
+                                },
+                            )
+                            .map(|target| self.names.intern_fqn(target));
+                        constant_target_cache.insert(candidate.lookup, target);
+                        target
+                    };
+                    if let Some(target) = target {
                         self.facts
                             .references
                             .resolved
@@ -80,20 +96,24 @@ impl AnalysisEngine {
                     }
                 }
                 StoredReferenceCandidateRef::Method(candidate) => {
-                    let owner_lookup = self
-                        .names
-                        .const_lookup(candidate.owner)
-                        .expect(
-                            "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
-                             This is a bug because stored reference candidates must only contain interned lookup ids. \
-                             Fix: intern constant lookups before inserting candidates.",
-                        );
-                    let owner = owner_lookup.path.to_vec();
-                    let owner_fqn =
-                        FullyQualifiedName::namespace_with_kind(owner, candidate.owner_kind);
+                    let method_cache_key = (
+                        candidate.owner,
+                        candidate.owner_kind,
+                        candidate.method,
+                        candidate.is_super,
+                    );
                     let fact = method_fact_cache
-                        .entry((owner_fqn.clone(), candidate.method, candidate.is_super))
+                        .entry(method_cache_key)
                         .or_insert_with(|| {
+                            let owner_lookup = self.names.const_lookup(candidate.owner).expect(
+                                "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
+                                 This is a bug because stored reference candidates must only contain interned lookup ids. \
+                                 Fix: intern constant lookups before inserting candidates.",
+                            );
+                            let owner_fqn = FullyQualifiedName::namespace_with_kind(
+                                owner_lookup.path.to_vec(),
+                                candidate.owner_kind,
+                            );
                             let query = AnalysisQuery::new(self);
                             if candidate.is_super {
                                 query
@@ -107,7 +127,12 @@ impl AnalysisEngine {
                                         .next()
                                     })
                             } else {
-                                query.method_fact_for_receiver(&owner_fqn, &candidate.method)
+                                method_fact_for_receiver_with_chain_cache(
+                                    self,
+                                    &owner_fqn,
+                                    &candidate.method,
+                                    &mut method_lookup_chain_cache,
+                                )
                             }
                         })
                         .clone();
@@ -136,9 +161,17 @@ impl AnalysisEngine {
                             }
                         }
                     } else if *method_namespace_exists_cache
-                        .entry(owner_fqn.clone())
-                        .or_insert_with(|| self.method_namespace_target_exists(&owner_fqn))
+                        .entry(method_reference_owner_fqn(
+                            self,
+                            candidate.owner,
+                            candidate.owner_kind,
+                        ))
+                        .or_insert_with_key(|owner_fqn| {
+                            self.method_namespace_target_exists(owner_fqn)
+                        })
                     {
+                        let owner_fqn =
+                            method_reference_owner_fqn(self, candidate.owner, candidate.owner_kind);
                         let target = FullyQualifiedName::method(
                             owner_fqn.namespace_parts(),
                             candidate.method,
@@ -767,4 +800,64 @@ fn constant_name(parts: &[RubyConstant]) -> String {
         .map(RubyConstant::as_str)
         .collect::<Vec<_>>()
         .join("::")
+}
+
+fn method_reference_owner_fqn(
+    engine: &AnalysisEngine,
+    owner: ConstLookupId,
+    owner_kind: crate::core::NamespaceKind,
+) -> FullyQualifiedName {
+    let owner_lookup = engine.names.const_lookup(owner).expect(
+        "INVARIANT VIOLATED: method reference candidate points to missing owner lookup. \
+         This is a bug because stored reference candidates must only contain interned lookup ids. \
+         Fix: intern constant lookups before inserting candidates.",
+    );
+    FullyQualifiedName::namespace_with_kind(owner_lookup.path.to_vec(), owner_kind)
+}
+
+fn method_fact_for_receiver_with_chain_cache(
+    engine: &AnalysisEngine,
+    namespace_fqn: &FullyQualifiedName,
+    method: &RubyMethod,
+    chain_cache: &mut HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>,
+) -> Option<MethodFact> {
+    if !namespace_target_exists(engine, namespace_fqn) {
+        return None;
+    }
+
+    let ancestor_chain = chain_cache
+        .entry(namespace_fqn.clone())
+        .or_insert_with(|| method_lookup_chain(engine, namespace_fqn))
+        .clone();
+
+    for ancestor in &ancestor_chain {
+        let mut facts = engine.method_facts_matching_owner_name(ancestor, method);
+
+        facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        facts.dedup();
+
+        match facts.len() {
+            0 => continue,
+            1 => return facts.pop(),
+            _ => return None,
+        }
+    }
+
+    if *method != method_missing_method() {
+        return method_fact_for_receiver_with_chain_cache(
+            engine,
+            namespace_fqn,
+            &method_missing_method(),
+            chain_cache,
+        );
+    }
+
+    None
 }

@@ -770,13 +770,14 @@ pub(super) fn method_lookup_chain(
             }
             return chain;
         } else {
-            return vec![
+            let chain = vec![
                 fqn.clone(),
                 FullyQualifiedName::namespace_with_kind(
                     Vec::new(),
                     crate::core::NamespaceKind::Instance,
                 ),
             ];
+            return chain;
         }
     } else {
         let mut chain = Vec::new();

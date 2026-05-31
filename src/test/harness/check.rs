@@ -685,7 +685,7 @@ async fn run_type_check(
                                  This is a bug because ruby-analysis::core TypeSubject::Local stores u32 scope ids. \
                                  Fix: widen TypeSubject::Local scope_id before indexing more than u32::MAX scopes.",
                             );
-                            let type_store = server.analysis_engine.lock().type_store().clone();
+                            let type_store = server.analysis_engine.read().type_store().clone();
                             TypeQuery::with_type_store_for_file(
                                 uri,
                                 content.as_bytes(),
@@ -708,7 +708,7 @@ async fn run_type_check(
                         ruby_analysis::core::FullyQualifiedName::namespace(iden.clone());
                     let doc_snapshot = server.docs.lock().get(uri).map(|doc| doc.read().clone());
                     let constant_type = if let Some(doc) = doc_snapshot {
-                        let type_store = server.analysis_engine.lock().type_store().clone();
+                        let type_store = server.analysis_engine.read().type_store().clone();
                         TypeQuery::with_type_store_for_file(
                             uri,
                             content.as_bytes(),
@@ -746,7 +746,7 @@ async fn run_type_check(
                             });
 
                         if let Some(fqn) = method_fqn {
-                            let engine = server.analysis_engine.lock();
+                            let engine = server.analysis_engine.read();
                             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
                             let return_types = query
                                 .methods_for_fqn(&fqn)
@@ -869,7 +869,7 @@ fn method_call_return_type_from_analysis(
     };
     let namespace =
         FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
-    let engine = server.analysis_engine.lock();
+    let engine = server.analysis_engine.read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     query.method_return_type_for_receiver(&namespace, &method)
 }
@@ -881,7 +881,7 @@ fn variable_type_from_analysis(
 ) -> Option<ruby_analysis::inference::RubyType> {
     use ruby_analysis::core::{RubyType, TypeSubject};
 
-    let type_store = server.analysis_engine.lock().type_store().clone();
+    let type_store = server.analysis_engine.read().type_store().clone();
     type_store
         .all_facts()
         .into_iter()
@@ -1026,7 +1026,7 @@ async fn run_diagnostics_check(
         );
         visitor.visit(&parse_result.node());
         let file_id = visitor.document.analysis_file_id();
-        let mut engine = server.analysis_engine.lock();
+        let mut engine = server.analysis_engine.write();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         let facts = ruby_analysis::engine::FileFacts {
             symbols: query.symbol_facts_in_file(file_id),

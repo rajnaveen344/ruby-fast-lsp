@@ -4,7 +4,7 @@ use super::project::{EditStep, SyntheticProject};
 use super::ruby_gen::{
     CallSite, ConstantRefSite, ProjectRender, SourceMap, SourcePos, TypeAssertKind,
 };
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind as CoreNamespaceKind, RubyConstant, RubyMethod, RubyType,
     SourceKind, TextRange, TypeSubject,
@@ -22,14 +22,14 @@ use tower_lsp::lsp_types::Url;
 
 pub struct EngineSimulationRunner {
     project: SyntheticProject,
-    engine: Arc<Mutex<AnalysisEngine>>,
+    engine: Arc<RwLock<AnalysisEngine>>,
     render: ProjectRender,
 }
 
 impl EngineSimulationRunner {
     pub fn start(project: SyntheticProject) -> Self {
         let render = project.render();
-        let engine = Arc::new(Mutex::new(AnalysisEngine::new()));
+        let engine = Arc::new(RwLock::new(AnalysisEngine::new()));
         let mut runner = Self {
             project,
             engine,
@@ -48,12 +48,12 @@ impl EngineSimulationRunner {
     }
 
     pub fn stats(&self) -> AnalysisStats {
-        self.engine.lock().stats()
+        self.engine.read().stats()
     }
 
     pub fn check_definitions(&self) {
         let oracle = OracleState::all_files(&self.project, &self.render.map);
-        let engine = self.engine.lock();
+        let engine = self.engine.read();
         let query = engine.query();
 
         for call in self
@@ -124,7 +124,7 @@ impl EngineSimulationRunner {
 
     pub fn check_references(&self) {
         let oracle = OracleState::all_files(&self.project, &self.render.map);
-        let engine = self.engine.lock();
+        let engine = self.engine.read();
         let query = engine.query();
         let mut expected_method_calls: HashMap<MethodTarget, Vec<&CallSite>> = HashMap::new();
         for call in self
@@ -215,7 +215,7 @@ impl EngineSimulationRunner {
     }
 
     pub fn check_types(&self) {
-        let engine = self.engine.lock();
+        let engine = self.engine.read();
         let query = engine.query();
 
         for type_assert in self
@@ -268,13 +268,13 @@ impl EngineSimulationRunner {
         let mut direct_passes = Vec::new();
 
         for (file, content) in &files {
-            let file_id = self.engine.lock().register_file(SourceFileInput {
+            let file_id = self.engine.write().register_file(SourceFileInput {
                 path: Path::new(file).to_path_buf(),
                 content: content.clone(),
                 kind: SourceKind::Project,
             });
             let direct_facts = self.collect_direct_facts(file_id, file, content, &known_namespaces);
-            self.engine.lock().replace_facts(
+            self.engine.write().replace_facts(
                 file_id,
                 FileFacts {
                     symbols: direct_facts.symbols.clone(),
@@ -292,7 +292,7 @@ impl EngineSimulationRunner {
             );
             direct_passes.push((file.clone(), content.clone(), file_id, direct_facts));
         }
-        self.engine.lock().resolve();
+        self.engine.write().resolve();
 
         for (file, content, file_id, direct_facts) in direct_passes {
             let uri = Url::parse(&format!("file:///sim/{}", file)).unwrap_or_else(|err| {
@@ -326,10 +326,10 @@ impl EngineSimulationRunner {
                 diagnostics: visitor.analysis_diagnostics,
             };
             self.engine
-                .lock()
+                .write()
                 .replace_facts(file_id, facts, ResolveMode::Deferred);
         }
-        self.engine.lock().resolve();
+        self.engine.write().resolve();
     }
 
     fn collect_direct_facts(

@@ -17,7 +17,7 @@ use crate::core::{FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod};
 use crate::engine::{AnalysisEngine, AnalysisQuery};
 use crate::r#type::literal::LiteralAnalyzer;
 use crate::r#type::ruby::RubyType;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use ruby_prism::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -43,7 +43,7 @@ pub struct TypeTracker<'a> {
     literal_analyzer: LiteralAnalyzer,
 
     /// Engine for method return type lookups on analysis path
-    analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
+    analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
 
     /// Max loop iterations (to prevent infinite loops)
     max_loop_iterations: usize,
@@ -86,7 +86,7 @@ impl<'a> TypeTracker<'a> {
         }
     }
 
-    pub fn with_analysis_engine(mut self, analysis_engine: Arc<Mutex<AnalysisEngine>>) -> Self {
+    pub fn with_analysis_engine(mut self, analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
         self.analysis_engine = Some(analysis_engine);
         self
     }
@@ -1019,7 +1019,7 @@ impl<'a> TypeTracker<'a> {
         };
         let namespace =
             FullyQualifiedName::namespace_with_kind(receiver_fqn.namespace_parts(), namespace_kind);
-        let engine = analysis_engine.lock();
+        let engine = analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         if allow_private {
             query.method_return_type_for_receiver(&namespace, &method)
@@ -1143,7 +1143,7 @@ impl<'a> TypeTracker<'a> {
         let Some(analysis_engine) = self.analysis_engine.as_ref() else {
             return RubyType::Unknown;
         };
-        let engine = analysis_engine.lock();
+        let engine = analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let Some(callee) = query.resolve_super_method_callee(&namespace, method) else {
             return RubyType::Unknown;

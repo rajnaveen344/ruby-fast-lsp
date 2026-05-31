@@ -3,7 +3,7 @@
 //! This module contains the logic for generating actual hints from AST nodes.
 //! Generators are pure functions that take nodes and context, returning hints.
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use ruby_analysis::core::SourceFileId;
 use ruby_analysis::engine::{AnalysisEngine, AnalysisQuery, VariableTypeKind};
 use ruby_analysis::indexer::{
@@ -42,7 +42,7 @@ pub enum InlayHintKind {
 pub struct HintContext<'a> {
     pub file_id: SourceFileId,
     pub document: &'a RubyDocument,
-    pub analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
+    pub analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
 }
 
 /// Generate structural hints (end labels, implicit returns).
@@ -254,7 +254,7 @@ fn method_return_type_from_analysis(
     context: &HintContext,
 ) -> Option<RubyType> {
     let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.lock();
+    let engine = engine.read();
     AnalysisQuery::new(&engine).method_return_type_at(name, context.file_id, byte_offset)
 }
 
@@ -265,7 +265,7 @@ fn parameter_type_from_analysis(
     context: &HintContext,
 ) -> Option<RubyType> {
     let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.lock();
+    let engine = engine.read();
     AnalysisQuery::new(&engine).parameter_type_at(
         method_name,
         param_name,
@@ -281,7 +281,7 @@ fn variable_type_from_analysis_facts(
     byte_offset: u32,
 ) -> Option<RubyType> {
     let engine = context.analysis_engine.as_ref()?;
-    let engine = engine.lock();
+    let engine = engine.read();
     AnalysisQuery::new(&engine).variable_type_before(
         variable_type_kind(kind),
         name,

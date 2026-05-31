@@ -35,7 +35,7 @@ impl EngineQuery {
         partial: &str,
     ) -> Option<Vec<CompletionItem>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         if !query.has_symbols() {
             return None;
@@ -81,7 +81,7 @@ impl EngineQuery {
         let Some(engine) = self.analysis_engine() else {
             return Vec::new();
         };
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
             .method_matches_for_type(receiver_type, partial_method, kind)
@@ -102,7 +102,7 @@ impl EngineQuery {
         let Some(engine) = self.analysis_engine() else {
             return Vec::new();
         };
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
         query
             .top_level_method_matches(partial_method)

@@ -136,7 +136,7 @@ impl IndexerStdlib {
                     }
                 });
 
-                server.analysis_engine.lock().resolve();
+                server.analysis_engine.write().resolve();
 
                 info!("Indexed {} core stub files", stub_files.len());
                 return Ok(());
@@ -171,7 +171,7 @@ impl IndexerStdlib {
                 }
             }
         });
-        server.analysis_engine.lock().resolve();
+        server.analysis_engine.write().resolve();
         info!("Indexed {} core stub files", stub_files.len());
 
         Ok(())
@@ -229,7 +229,7 @@ impl IndexerStdlib {
         }
 
         if indexed_count > 0 {
-            server.analysis_engine.lock().resolve();
+            server.analysis_engine.write().resolve();
         }
 
         info!(

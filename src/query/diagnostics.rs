@@ -19,7 +19,7 @@ impl EngineQuery {
              This is a bug because diagnostics are owned by ruby-analysis::engine. \
              Fix: construct EngineQuery with EngineQuery::with_engine or with_doc_and_engine.",
         );
-        let engine = analysis_engine.lock();
+        let engine = analysis_engine.read();
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));

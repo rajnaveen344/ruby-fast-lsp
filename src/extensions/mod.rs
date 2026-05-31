@@ -263,7 +263,7 @@ impl ExtensionRegistryHandle {
 
     pub fn ensure_semantic_seed_facts(
         &self,
-        engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) {
         self.inner.read().ensure_semantic_seed_facts(engine);
     }
@@ -374,14 +374,14 @@ impl ExtensionRegistry {
 
     fn ensure_semantic_seed_facts(
         &self,
-        engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
+        engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) {
         let mut seeded = self.semantic_seeded.lock();
         if *seeded {
             return;
         }
 
-        let mut engine = engine.lock();
+        let mut engine = engine.write();
         let file_id = engine.register_file(SourceFileInput {
             path: PathBuf::from("/__ruby_fast_lsp_extension__/semantic_targets.rb"),
             content: String::new(),
@@ -519,7 +519,7 @@ fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> BTreeSet<Strin
 
 fn extension_target_owner_exists(visitor: &FactCollector, target: &ExtensionMethodTarget) -> bool {
     let required_owner = FullyQualifiedName::namespace(target.owner.clone());
-    let engine = visitor.analysis_engine.lock();
+    let engine = visitor.analysis_engine.read();
     ruby_analysis::engine::AnalysisQuery::new(&engine)
         .known_namespace_fqns()
         .contains(&required_owner)
@@ -1346,13 +1346,13 @@ fn resolved_core_callees_for_call(
 }
 
 fn resolved_core_callees_for_call_analysis(
-    engine: &Arc<Mutex<ruby_analysis::engine::AnalysisEngine>>,
+    engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
     receiver: &CoreMethodReceiver,
     method: &RubyMethod,
     current_namespace: &[RubyConstant],
     namespace_kind: NamespaceKind,
 ) -> Vec<ruby_analysis::core::ResolvedMethodCallee> {
-    let engine = engine.lock();
+    let engine = engine.read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let namespace_fqn = match receiver {
         CoreMethodReceiver::Constant(path) => {

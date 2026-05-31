@@ -318,7 +318,7 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery<'_> {
         namespace: &FullyQualifiedName,
         method: &RubyMethod,
     ) -> Option<RubyType> {
-        let engine = self.server.analysis_engine.lock();
+        let engine = self.server.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .method_return_type_for_receiver(namespace, method)
     }
@@ -334,7 +334,7 @@ impl CompletionSemanticQuery for ServerCompletionSemanticQuery<'_> {
             CompletionVariableKind::Class => ruby_analysis::engine::VariableTypeKind::Class,
             CompletionVariableKind::Global => ruby_analysis::engine::VariableTypeKind::Global,
         };
-        let engine = self.server.analysis_engine.lock();
+        let engine = self.server.analysis_engine.read();
         ruby_analysis::engine::AnalysisQuery::new(&engine)
             .variable_type_in_file(kind, name, file_id)
     }

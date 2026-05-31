@@ -568,7 +568,7 @@ impl FakeEditor {
             );
             visitor.visit(&parse_result.node());
             let file_id = visitor.document.analysis_file_id();
-            let mut engine = self.server.analysis_engine.lock();
+            let mut engine = self.server.analysis_engine.write();
             let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
             let facts = ruby_analysis::engine::FileFacts {
                 symbols: query.symbol_facts_in_file(file_id),

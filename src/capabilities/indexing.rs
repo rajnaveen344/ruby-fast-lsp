@@ -343,7 +343,7 @@ mod tests {
         .await;
 
         let path = uri.to_file_path().expect("file URI must convert to path");
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let file_id = engine
             .file_id(path)
             .expect("did_open must register file in analysis engine");
@@ -374,7 +374,7 @@ mod tests {
         .await;
 
         let path = uri.to_file_path().expect("file URI must convert to path");
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let file_id = engine
             .file_id(path)
             .expect("did_change must register file in analysis engine");
@@ -419,7 +419,7 @@ mod tests {
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let account_fqn =
             FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         assert!(
             engine.symbol_facts_for(&user_fqn).is_empty(),
             "stale User symbol facts must be removed after reindex"
@@ -448,7 +448,7 @@ mod tests {
         .await;
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         assert_eq!(query.references_for_fqn(&user_fqn).len(), 2);
     }
@@ -473,7 +473,7 @@ mod tests {
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_fqn);
         assert_eq!(edges.len(), 1);
@@ -514,7 +514,7 @@ mod tests {
 
         let user_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_fqn);
         assert!(
@@ -546,7 +546,7 @@ mod tests {
         let user_singleton =
             FullyQualifiedName::singleton_namespace(vec![RubyConstant::new("User").unwrap()]);
         let auth_fqn = FullyQualifiedName::namespace(vec![RubyConstant::new("Auth").unwrap()]);
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let edges = query.graph_edges_from(&user_singleton);
         assert!(
@@ -585,7 +585,7 @@ mod tests {
             RubyMethod::new("find").expect("test method must be valid"),
         );
 
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let query = AnalysisQuery::new(&engine);
         let name_facts = query.methods_for_fqn(&name_fqn);
         assert_eq!(name_facts.len(), 1);

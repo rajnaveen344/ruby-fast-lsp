@@ -106,7 +106,7 @@ pub struct RubyLanguageServer {
     pub workspaces: Arc<RwLock<Vec<Workspace>>>,
     pub docs: Arc<Mutex<HashMap<Url, Arc<RwLock<RubyDocument>>>>>,
     /// Editor-agnostic analysis state shared by LSP and future agent APIs.
-    pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
+    pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub extension_registry: ExtensionRegistryHandle,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
@@ -126,7 +126,7 @@ impl RubyLanguageServer {
             client: Some(client),
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
-            analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
+            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(config)),
             extension_registry,
             namespace_tree_cache: Arc::new(Mutex::new(None)),
@@ -221,7 +221,7 @@ impl RubyLanguageServer {
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
         self.analysis_engine
-            .lock()
+            .write()
             .register_file(ruby_analysis::engine::SourceFileInput {
                 path,
                 content: source.into(),
@@ -380,7 +380,7 @@ impl Default for RubyLanguageServer {
             client: None,
             workspaces: Arc::new(RwLock::new(Vec::new())),
             docs: Arc::new(Mutex::new(HashMap::new())),
-            analysis_engine: Arc::new(Mutex::new(AnalysisEngine::new())),
+            analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(RubyFastLspConfig::default())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),

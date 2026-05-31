@@ -44,7 +44,7 @@ fn resolve_method_callees_with_private(
     protected_caller: Option<&FullyQualifiedName>,
 ) -> Option<Vec<ResolvedMethodCallee>> {
     let engine = query.analysis_engine()?;
-    let engine = engine.lock();
+    let engine = engine.read();
     let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let callees = if allow_private {
         analysis_query.resolve_method_callees(namespace_fqn, method)?
@@ -73,7 +73,7 @@ pub(super) fn resolve_super_method_callee(
     method: &RubyMethod,
 ) -> Option<ResolvedMethodCallee> {
     let engine = query.analysis_engine()?;
-    let engine = engine.lock();
+    let engine = engine.read();
     let analysis_query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let callee = analysis_query.resolve_super_method_callee(namespace_fqn, method)?;
 

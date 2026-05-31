@@ -111,7 +111,7 @@ impl IndexerGem {
         };
 
         if !indexed_files.is_empty() {
-            server.analysis_engine.lock().resolve();
+            server.analysis_engine.write().resolve();
         }
 
         info!("Indexed {} files from gems", indexed_files.len());

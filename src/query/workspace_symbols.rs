@@ -12,7 +12,7 @@ impl EngineQuery {
         let Some(engine) = self.analysis_engine() else {
             return false;
         };
-        let engine = engine.lock();
+        let engine = engine.read();
         AnalysisQuery::new(&engine).has_symbols()
     }
 
@@ -22,7 +22,7 @@ impl EngineQuery {
              This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         AnalysisQuery::new(&engine)
             .top_level_symbols(50)
             .into_iter()
@@ -36,7 +36,7 @@ impl EngineQuery {
              This is a bug because LSP workspace/symbol should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         AnalysisQuery::new(&engine)
             .search_workspace_symbols(query, 100)
             .into_iter()
@@ -77,7 +77,7 @@ fn analysis_symbol_kind_to_lsp_kind(kind: AnalysisSymbolKind) -> SymbolKind {
 mod tests {
     use std::sync::Arc;
 
-    use parking_lot::Mutex;
+    use parking_lot::RwLock;
     use ruby_analysis::core::{
         FullyQualifiedName, RubyConstant, RubyMethod, SourceFileId, SourceKind, SymbolFact,
         SymbolKind as AnalysisSymbolKind, TextRange,
@@ -126,7 +126,7 @@ mod tests {
             ResolveMode::Immediate,
         );
 
-        EngineQuery::with_engine(Arc::new(Mutex::new(engine)))
+        EngineQuery::with_engine(Arc::new(RwLock::new(engine)))
     }
 
     #[test]

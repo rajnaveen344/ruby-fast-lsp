@@ -316,7 +316,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     let start = Instant::now();
     let inferred_count = server
         .analysis_engine
-        .lock()
+        .read()
         .type_store()
         .all_facts()
         .into_iter()
@@ -330,7 +330,7 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
 }
 
 fn print_stats(server: &RubyLanguageServer) {
-    let engine = server.analysis_engine.lock();
+    let engine = server.analysis_engine.read();
     let stats = engine.stats();
 
     info!("=== ANALYSIS STATS ===");

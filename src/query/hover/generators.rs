@@ -3,7 +3,7 @@
 //! Ruby target classification and reusable semantic lookup live in
 //! `ruby-analysis`; this module builds the protocol-facing hover text.
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use ruby_analysis::core::{
     FullyQualifiedName, NamespaceKind, RubyConstant, RubyMethod, TypeSubject,
 };
@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::Position;
 /// Context for hover generation (provides access to necessary data).
 pub struct HoverContext<'a> {
     pub document: Option<&'a Arc<parking_lot::RwLock<RubyDocument>>>,
-    pub analysis_engine: Option<&'a Arc<Mutex<AnalysisEngine>>>,
+    pub analysis_engine: Option<&'a Arc<RwLock<AnalysisEngine>>>,
 }
 
 /// Hover information for a symbol.
@@ -120,7 +120,7 @@ fn get_type_from_type_query(
     );
     drop(doc);
 
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     AnalysisQuery::new(&engine).local_variable_type_at(name, scope_id, file_id, byte_offset)
 }
 
@@ -278,7 +278,7 @@ fn variable_type_from_analysis(
     let file_id = doc.analysis_file_id();
     drop(doc);
 
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     AnalysisQuery::new(&engine).variable_type_in_file(
         variable_type_kind(variable_kind),
         name,
@@ -290,7 +290,7 @@ fn constant_hover_from_analysis(
     context: &HoverContext,
     path: &[RubyConstant],
 ) -> Option<HoverInfo> {
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     let query = AnalysisQuery::new(&engine);
     query.constant_hover(path).map(format_constant_hover)
 }
@@ -335,7 +335,7 @@ fn method_call_return_type_from_receiver(
         .map(|document| document.position_to_analysis_offset(position))
         .unwrap_or(0);
     let method_return_type = {
-        let engine_guard = context.analysis_engine.map(|engine| engine.lock());
+        let engine_guard = context.analysis_engine.map(|engine| engine.read());
         let analysis_query = engine_guard
             .as_ref()
             .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
@@ -390,7 +390,7 @@ fn expression_type_at_position(context: &HoverContext, position: Position) -> Op
     let byte_offset = doc.position_to_analysis_offset(position);
     drop(doc);
 
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     engine
         .type_store()
         .facts_in_file(file_id)
@@ -422,7 +422,7 @@ fn super_method_return_type_from_analysis(
     namespace_kind: NamespaceKind,
 ) -> Option<RubyType> {
     let method = RubyMethod::new(method_name).ok()?;
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     let query = AnalysisQuery::new(&engine);
     let owner = FullyQualifiedName::namespace_with_kind(namespace.to_vec(), namespace_kind);
     let callee = query.resolve_super_method_callee(&owner, &method)?;
@@ -504,7 +504,7 @@ fn method_definition_hover_from_analysis(
     let byte_offset = doc.position_to_analysis_offset(position);
     drop(doc);
 
-    let engine = context.analysis_engine?.lock();
+    let engine = context.analysis_engine?.read();
     let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
     let return_type = query
         .method_return_type_at_with_kind(method_name, namespace_kind, file_id, byte_offset)

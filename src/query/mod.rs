@@ -38,7 +38,7 @@ pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use ruby_analysis::inference::TypeQuery;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;
 use ruby_analysis::indexer::RubyDocument;
 use std::sync::Arc;
@@ -51,14 +51,14 @@ use tower_lsp::lsp_types::Url;
 pub struct EngineQuery {
     doc: Option<Arc<RwLock<RubyDocument>>>,
     uri: Option<Url>,
-    analysis_engine: Option<Arc<Mutex<AnalysisEngine>>>,
+    analysis_engine: Option<Arc<RwLock<AnalysisEngine>>>,
 }
 
 impl EngineQuery {
     /// Create an EngineQuery with document context and analysis engine access.
     pub fn with_doc_and_engine(
         doc: Arc<RwLock<RubyDocument>>,
-        analysis_engine: Arc<Mutex<AnalysisEngine>>,
+        analysis_engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Self {
         let uri = doc.read().uri.clone();
         Self {
@@ -69,7 +69,7 @@ impl EngineQuery {
     }
 
     /// Create an EngineQuery with analysis engine access and no document context.
-    pub fn with_engine(analysis_engine: Arc<Mutex<AnalysisEngine>>) -> Self {
+    pub fn with_engine(analysis_engine: Arc<RwLock<AnalysisEngine>>) -> Self {
         Self {
             doc: None,
             uri: None,
@@ -91,7 +91,7 @@ impl EngineQuery {
 
     /// Get the analysis engine if attached.
     #[inline]
-    pub fn analysis_engine(&self) -> Option<&Arc<Mutex<AnalysisEngine>>> {
+    pub fn analysis_engine(&self) -> Option<&Arc<RwLock<AnalysisEngine>>> {
         self.analysis_engine.as_ref()
     }
 }

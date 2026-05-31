@@ -1983,7 +1983,7 @@ async fn generated_project_real_corpus_smoke() {
     let index_start = Instant::now();
     index_project_files_for_smoke(&server, &files);
     let index_elapsed = index_start.elapsed();
-    let stats = server.analysis_engine.lock().stats();
+    let stats = server.analysis_engine.read().stats();
     eprintln!(
         "real corpus index: elapsed={:?} files={} methods={} refs={} types={} graph_edges={} diagnostics={}",
         index_elapsed,
@@ -2370,14 +2370,14 @@ fn index_project_files_for_smoke(server: &RubyLanguageServer, files: &[PathBuf])
                 )
             });
     }
-    server.analysis_engine.lock().resolve();
+    server.analysis_engine.write().resolve();
 }
 
 fn select_real_method_reference_samples(
     server: &RubyLanguageServer,
     limit: usize,
 ) -> Vec<RealMethodSample> {
-    let engine = server.analysis_engine.lock();
+    let engine = server.analysis_engine.read();
     let query = engine.query();
     let mut methods = engine.all_method_facts();
     methods.sort_by_key(|method| {
@@ -2589,7 +2589,7 @@ async fn hover_at(
 
 async fn assert_real_type_inlay_samples(server: &RubyLanguageServer, limit: usize) -> Vec<PathBuf> {
     let candidates = {
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let mut counts = BTreeMap::new();
         for fact in engine.type_store().all_facts() {
             *counts.entry(fact.range.file_id).or_insert(0usize) += 1;

@@ -174,7 +174,7 @@ async fn run_once(workspace_path: &PathBuf) -> Result<IndexingTimings> {
     // observation.
     t.total = wall;
 
-    let engine = server.analysis_engine.lock();
+    let engine = server.analysis_engine.read();
     info!(
         "analysis after pass: {} symbols, {} methods, {} refs",
         engine.all_symbol_facts().len(),

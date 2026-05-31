@@ -83,7 +83,7 @@ impl EngineQuery {
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_doc_and_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -100,7 +100,7 @@ impl EngineQuery {
              This is a bug because LSP implementation should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_doc_and_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,

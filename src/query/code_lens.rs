@@ -79,7 +79,7 @@ impl EngineQuery {
                  This is a bug because module usage lenses are derived from graph facts. \
                  Fix: construct EngineQuery with with_doc_and_engine().",
             );
-            let engine = engine_ref.lock();
+            let engine = engine_ref.read();
             let query = AnalysisQuery::new(&engine);
             let usages = mixin_usages_from_analysis(&query, &engine, &module.fqn);
             let class_locations =

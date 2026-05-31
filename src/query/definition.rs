@@ -227,7 +227,7 @@ impl EngineQuery {
         ancestors: &[RubyConstant],
     ) -> Option<FullyQualifiedName> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         AnalysisQuery::new(&engine).resolve_constant_in_context(constant_path, ancestors)
     }
 
@@ -237,7 +237,7 @@ impl EngineQuery {
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -251,7 +251,7 @@ impl EngineQuery {
         ancestors: &[RubyConstant],
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -264,7 +264,7 @@ impl EngineQuery {
         name: &str,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -277,7 +277,7 @@ impl EngineQuery {
         name: &str,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -290,7 +290,7 @@ impl EngineQuery {
         name: &str,
     ) -> Option<Vec<Location>> {
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let query = AnalysisQuery::new(&engine);
         non_empty_locations(locations_for_ranges(
             &engine,
@@ -306,7 +306,7 @@ impl EngineQuery {
     ) -> Option<Vec<Location>> {
         let fqn = FullyQualifiedName::local_variable(name.to_string()).ok()?;
         let engine = self.analysis_engine()?;
-        let engine = engine.lock();
+        let engine = engine.read();
         let range = engine
             .symbol_facts_for(&fqn)
             .into_iter()

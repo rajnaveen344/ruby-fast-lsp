@@ -16,7 +16,7 @@ use crate::inference::RubyType;
 use crate::yard::parser::{CommentLineInfo, YardParser};
 use crate::RubyDocument;
 use crate::{collect_namespaces, control_flow, utf8_str, ScopeTracker};
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ pub struct FactCollector {
     pub extension_call_stack_marks: Vec<bool>,
     pub extension_index_patches: Vec<IndexPatch>,
     pub extension_host: Arc<dyn FactCollectorExtensionHost>,
-    pub analysis_engine: Arc<Mutex<AnalysisEngine>>,
+    pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     pub include_local_vars: bool,
     pub reference_candidates: Vec<ReferenceCandidate>,
     pub diagnostic_candidates: Vec<DiagnosticCandidate>,
@@ -154,7 +154,7 @@ impl FactCollector {
     pub fn analysis_only(
         document: RubyDocument,
         extension_host: Arc<dyn FactCollectorExtensionHost>,
-        analysis_engine: Arc<Mutex<AnalysisEngine>>,
+        analysis_engine: Arc<RwLock<AnalysisEngine>>,
     ) -> Self {
         let scope_tracker = ScopeTracker::new();
         Self {
@@ -1168,7 +1168,7 @@ impl FactCollector {
             });
         }
 
-        let engine = self.analysis_engine.lock();
+        let engine = self.analysis_engine.read();
         let query = crate::engine::AnalysisQuery::new(&engine);
         query
             .constant_value_type(&constant_fqn)
@@ -1238,7 +1238,7 @@ impl FactCollector {
         } else {
             self.scope_tracker.get_ns_stack()
         };
-        let engine = self.analysis_engine.lock();
+        let engine = self.analysis_engine.read();
         if let Some(fqn) = crate::engine::AnalysisQuery::new(&engine)
             .resolve_constant_in_context(&receiver_ref.parts, &context)
         {

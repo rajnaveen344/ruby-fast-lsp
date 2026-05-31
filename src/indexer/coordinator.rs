@@ -193,7 +193,7 @@ impl IndexingCoordinator {
         let total_dur = start_time.elapsed();
         info!("Complete indexing finished in {:?}", total_dur);
         {
-            let mut engine = server.analysis_engine.lock();
+            let mut engine = server.analysis_engine.write();
             engine.shrink_to_fit();
         }
         release_allocator_free_pages();
@@ -209,7 +209,7 @@ impl IndexingCoordinator {
     }
 
     fn log_analysis_memory_stats(&self, server: &RubyLanguageServer) {
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         let stats = engine.stats();
         let memory = engine.estimated_memory_stats();
         let total = memory.total();
@@ -331,7 +331,7 @@ impl IndexingCoordinator {
     /// Publish diagnostics for unresolved entries across all indexed files.
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
         let file_ids = {
-            let engine = server.analysis_engine.lock();
+            let engine = server.analysis_engine.read();
             let mut file_ids = engine.diagnostic_store().file_ids();
             file_ids.sort_by(|left, right| {
                 let left_path = engine
@@ -353,7 +353,7 @@ impl IndexingCoordinator {
 
         for file_id in file_ids {
             let Some((uri, diagnostics)) = ({
-                let engine = server.analysis_engine.lock();
+                let engine = server.analysis_engine.read();
                 match engine.file(file_id) {
                     Some(file) => match Url::from_file_path(&file.path) {
                         Ok(uri) => {

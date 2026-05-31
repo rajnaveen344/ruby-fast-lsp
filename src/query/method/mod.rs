@@ -234,7 +234,7 @@ impl EngineQuery {
             .as_ref()
             .map(|doc| doc.position_to_analysis_offset(position))
             .unwrap_or(0);
-        let engine_guard = self.analysis_engine().map(|engine| engine.lock());
+        let engine_guard = self.analysis_engine().map(|engine| engine.read());
         let analysis_query = engine_guard
             .as_ref()
             .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));

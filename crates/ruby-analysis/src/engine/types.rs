@@ -431,16 +431,10 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
-            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
             let mut facts = self
                 .engine
-                .method_facts_for(&method_fqn)
-                .iter()
-                .filter(|fact| {
-                    fact.owner.namespace_parts() == ancestor.namespace_parts()
-                        && fact.owner.namespace_kind() == ancestor.namespace_kind()
-                })
-                .cloned()
+                .method_facts_matching_owner_name(&ancestor, method)
+                .into_iter()
                 .collect::<Vec<_>>();
 
             facts.sort_by_key(|fact| {
@@ -544,7 +538,8 @@ impl<'a> AnalysisQuery<'a> {
             return None;
         }
 
-        for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
+        let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
+        for ancestor in &ancestor_chain {
             let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
             let method_facts = self.engine.method_facts_for(&method_fqn);
             let facts = method_facts
@@ -555,7 +550,7 @@ impl<'a> AnalysisQuery<'a> {
                         && {
                             let (visibility, owner) = effective_method_visibility_for_chain(
                                 self.engine,
-                                &method_lookup_chain(self.engine, namespace_fqn),
+                                &ancestor_chain,
                                 fact,
                                 method,
                             );

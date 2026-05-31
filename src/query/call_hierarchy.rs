@@ -74,7 +74,7 @@ impl EngineQuery {
                      This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
                      Fix: construct EngineQuery with with_engine().",
                 );
-                let engine = engine_ref.lock();
+                let engine = engine_ref.read();
                 let query = AnalysisQuery::new(&engine);
                 if let Some(item) = query
                     .call_hierarchy_method_for_owner(&owner_fqn, iden)
@@ -104,7 +104,7 @@ impl EngineQuery {
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         let method_fqn = query.parse_method_fqn(&data.fqn)?;
         Some(
@@ -131,7 +131,7 @@ impl EngineQuery {
              This is a bug because LSP callHierarchy should be a thin wrapper over AnalysisEngine. \
              Fix: construct EngineQuery with with_engine().",
         );
-        let engine = engine_ref.lock();
+        let engine = engine_ref.read();
         let query = AnalysisQuery::new(&engine);
         let method_fqn = query.parse_method_fqn(&data.fqn)?;
         Some(

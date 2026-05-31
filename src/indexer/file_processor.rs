@@ -407,7 +407,7 @@ impl FileProcessor {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.to_string()));
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         engine
             .file_id(&path)
             .and_then(|file_id| engine.file(file_id))
@@ -467,7 +467,7 @@ fn replace_file_analysis(
     facts: FileFacts,
     resolution: FileResolution,
 ) {
-    let mut engine = server.analysis_engine.lock();
+    let mut engine = server.analysis_engine.write();
     match resolution {
         FileResolution::Full => {
             engine.replace_facts(file_id, facts, ResolveMode::Immediate);
@@ -498,7 +498,7 @@ fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex)
 }
 
 fn collect_known_namespaces(server: &RubyLanguageServer) -> HashSet<FullyQualifiedName> {
-    let engine = server.analysis_engine.lock();
+    let engine = server.analysis_engine.read();
     AnalysisQuery::new(&engine).known_namespace_fqns()
 }
 
@@ -513,7 +513,7 @@ fn add_extension_analysis_facts(
     }
 
     let mut known_namespaces = {
-        let engine = server.analysis_engine.lock();
+        let engine = server.analysis_engine.read();
         AnalysisQuery::new(&engine).known_namespace_fqns()
     };
     for node in &facts.graph_nodes {
