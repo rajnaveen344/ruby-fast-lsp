@@ -612,8 +612,11 @@ impl AnalysisEngine {
                 namespace.clone(),
                 crate::core::NamespaceKind::Instance,
             );
-            if let Some(fact) = query.method_fact_for_receiver(&namespace_fqn, method) {
-                return query.method_return_type(&fact).or(Some(RubyType::Unknown));
+            let lookup = query.resolve_method_reference(&namespace_fqn, method);
+            if let Some((_owner, _resolved_method, fact)) = lookup.reference_parts() {
+                return fact
+                    .and_then(|fact| query.method_return_type(fact))
+                    .or(Some(RubyType::Unknown));
             }
             if namespace.is_empty() {
                 break;

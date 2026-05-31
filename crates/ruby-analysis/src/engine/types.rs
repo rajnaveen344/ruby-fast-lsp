@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::core::method_store::MethodVisibility;
 use crate::core::{
     FullyQualifiedName, GraphNodeKind, MethodFact, NamespaceKind, RubyConstant, RubyMethod,
     RubyType, SourceFileId, TypeFact, TypeResolution, TypeSubject,
@@ -8,8 +7,7 @@ use crate::core::{
 use crate::engine::lookup_types::{ConstantHover, ConstantHoverKind, VariableTypeKind};
 use crate::engine::query::AnalysisQuery;
 use crate::engine::resolution::{
-    effective_method_visibility_for_chain, method_lookup_chain, method_missing_method,
-    namespace_target_exists, protected_method_visible_from,
+    method_facts_in_chain, method_lookup_chain, method_missing_method, namespace_target_exists,
 };
 
 type MethodVisitKey = (FullyQualifiedName, SourceFileId, u32, u32);
@@ -421,46 +419,6 @@ impl<'a> AnalysisQuery<'a> {
             .collect()
     }
 
-    pub fn method_fact_for_receiver(
-        &self,
-        namespace_fqn: &FullyQualifiedName,
-        method: &RubyMethod,
-    ) -> Option<MethodFact> {
-        if !namespace_target_exists(self.engine, namespace_fqn) {
-            return None;
-        }
-
-        for ancestor in method_lookup_chain(self.engine, namespace_fqn) {
-            let mut facts = self
-                .engine
-                .method_facts_matching_owner_name(&ancestor, method)
-                .into_iter()
-                .collect::<Vec<_>>();
-
-            facts.sort_by_key(|fact| {
-                (
-                    fact.range.file_id,
-                    fact.range.start_byte,
-                    fact.range.end_byte,
-                    fact.fqn.to_string(),
-                )
-            });
-            facts.dedup();
-
-            match facts.len() {
-                0 => continue,
-                1 => return facts.pop(),
-                _ => return None,
-            }
-        }
-
-        if *method != method_missing_method() {
-            return self.method_fact_for_receiver(namespace_fqn, &method_missing_method());
-        }
-
-        None
-    }
-
     pub fn method_return_type(&self, fact: &MethodFact) -> Option<crate::core::RubyType> {
         let mut seen = HashSet::new();
         self.method_return_type_inner(fact, &mut seen)
@@ -539,46 +497,16 @@ impl<'a> AnalysisQuery<'a> {
         }
 
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
-        for ancestor in &ancestor_chain {
-            let method_fqn = FullyQualifiedName::method(ancestor.namespace_parts(), *method);
-            let method_facts = self.engine.method_facts_for(&method_fqn);
-            let facts = method_facts
-                .iter()
-                .filter(|fact| {
-                    fact.owner.namespace_parts() == ancestor.namespace_parts()
-                        && fact.owner.namespace_kind() == ancestor.namespace_kind()
-                        && {
-                            let (visibility, owner) = effective_method_visibility_for_chain(
-                                self.engine,
-                                &ancestor_chain,
-                                fact,
-                                method,
-                            );
-                            match visibility {
-                                MethodVisibility::Public => true,
-                                MethodVisibility::Private => allow_private,
-                                MethodVisibility::Protected => {
-                                    allow_private
-                                        || protected_caller.is_some_and(|caller| {
-                                            protected_method_visible_from(
-                                                self.engine,
-                                                &owner,
-                                                caller,
-                                            )
-                                        })
-                                }
-                            }
-                        }
-                })
-                .collect::<Vec<_>>();
-
-            if facts.is_empty() {
-                continue;
-            }
-
+        if let Some((_owner, facts)) = method_facts_in_chain(
+            self.engine,
+            &ancestor_chain,
+            method,
+            allow_private,
+            protected_caller,
+        ) {
             let mut return_types = facts
                 .into_iter()
-                .filter_map(|fact| self.method_return_type_inner(fact, seen))
+                .filter_map(|fact| self.method_return_type_inner(&fact, seen))
                 .collect::<Vec<_>>();
 
             if return_types.is_empty() {

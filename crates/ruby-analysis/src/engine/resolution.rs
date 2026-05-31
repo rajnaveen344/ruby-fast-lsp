@@ -1012,10 +1012,32 @@ fn method_callee_in_chain(
     allow_private: bool,
     protected_caller: Option<&FullyQualifiedName>,
 ) -> Option<ResolvedMethodCallee> {
+    let (owner, facts) = method_facts_in_chain(
+        engine,
+        ancestor_chain,
+        method,
+        allow_private,
+        protected_caller,
+    )?;
+    Some(ResolvedMethodCallee {
+        owner,
+        method: *method,
+        resolution,
+        definition_ranges: facts.into_iter().map(|fact| fact.range).collect(),
+    })
+}
+
+pub(super) fn method_facts_in_chain(
+    engine: &crate::AnalysisEngine,
+    ancestor_chain: &[FullyQualifiedName],
+    method: &RubyMethod,
+    allow_private: bool,
+    protected_caller: Option<&FullyQualifiedName>,
+) -> Option<(FullyQualifiedName, Vec<MethodFact>)> {
     for ancestor in ancestor_chain {
-        let definition_ranges = engine
+        let mut facts = engine
             .method_facts_matching_owner_name(ancestor, method)
-            .iter()
+            .into_iter()
             .filter(|fact| {
                 ancestor_chain.iter().any(|chain_fqn| {
                     chain_fqn.namespace_parts() == fact.owner.namespace_parts()
@@ -1032,16 +1054,19 @@ fn method_callee_in_chain(
                     )
                 }
             })
-            .map(|fact| fact.range)
             .collect::<Vec<_>>();
 
-        if !definition_ranges.is_empty() {
-            return Some(ResolvedMethodCallee {
-                owner: ancestor.clone(),
-                method: *method,
-                resolution,
-                definition_ranges,
+        if !facts.is_empty() {
+            facts.sort_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                    fact.fqn.to_string(),
+                )
             });
+            facts.dedup();
+            return Some((ancestor.clone(), facts));
         }
     }
 
