@@ -99,7 +99,7 @@ OPTIONS:
 ENV:
     RUBY_FAST_LSP_CORPUS_DIR=/parent
                             Overrides corpus lookup to /parent/<corpus>/.
-                            Skip snapshot_corpus.sh for local iteration.
+                            Skip src/perf/snapshot.sh for local iteration.
 
 EXAMPLES:
     cargo run --release --bin bench_references -- --corpus discourse

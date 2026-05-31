@@ -58,7 +58,7 @@ pub fn ensure_corpus(name: &str) -> Result<PathBuf> {
 
     Err(anyhow!(
         "corpus {:?} not available. \
-         Run `scripts/snapshot_corpus.sh {}` to fetch it into {}, \
+         Run `src/perf/snapshot.sh {}` to fetch it into {}, \
          ship a tarball at {}, or set RUBY_FAST_LSP_CORPUS_DIR to an existing checkout.",
         name,
         name,
@@ -175,7 +175,7 @@ mod tests {
         let err = ensure_corpus("does-not-exist-xyz").unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("snapshot_corpus.sh"),
+            msg.contains("src/perf/snapshot.sh"),
             "unexpected error: {}",
             msg
         );

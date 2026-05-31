@@ -1,8 +1,7 @@
-//! Debug capabilities for the LSP REPL.
+//! Debug capabilities exposed through custom LSP requests.
 //!
 //! This module provides custom debug methods that can be invoked via the
-//! `$/listCommands` protocol, allowing tools like `lsp-repl` to discover
-//! and execute debug commands.
+//! `$/listCommands` protocol.
 
 use log::debug;
 pub use ruby_analysis::engine::{

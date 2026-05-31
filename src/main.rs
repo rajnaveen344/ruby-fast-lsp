@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
         "ruby/namespaceTree",
         RubyLanguageServer::handle_namespace_tree_request,
     )
-    // Debug commands for lsp-repl
+    // Debug commands for custom LSP clients
     .custom_method("$/listCommands", RubyLanguageServer::handle_list_commands)
     .custom_method(
         "ruby-fast-lsp/debug/lookup",
