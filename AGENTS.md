@@ -349,6 +349,20 @@ Rules:
 - One write path: `register_file -> replace_facts -> resolve`.
 - Feature APIs compose query primitives, e.g. type hints from `types(File)` and
   project diagnostics from `diagnostics(AllProject)`.
+- Method lookup semantics must stay single-sourced in the engine resolution
+  module. Definitions, references, diagnostics, hover, call hierarchy, and type
+  inference must not hand-roll ancestor/MRO lookup or duplicate "unique vs
+  ambiguous vs missing" policy. Use
+  `AnalysisQuery::resolve_method_callees*` for navigation-style answers and
+  `AnalysisQuery::resolve_method_reference*` when the caller needs the
+  diagnostic/reference policy:
+  - `MethodLookupResult::Unique(MethodFact)` means a single callable method fact was found.
+  - `MethodLookupResult::Ambiguous { owner, method }` means method exists but multiple defs match;
+    references should resolve, unresolved-method diagnostics should stay silent,
+    and signature/arity diagnostics should be skipped unless ambiguity is later
+    disambiguated.
+  - `MethodLookupResult::Missing` means the namespace exists but no matching method was found, so
+    unresolved-method diagnostics may be emitted if the candidate asks for them.
 - Migrate incrementally: hide stores first, then port methods, graph, refs,
   symbols, types, diagnostics. Start with method/graph because flamegraphs show
   method lookup, MRO, and unresolved-method suggestions as hot.

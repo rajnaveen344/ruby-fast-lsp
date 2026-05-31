@@ -41,6 +41,7 @@ pub use namespace_tree_types::{
     IncluderInfo, LocationInfo, MixinInfo, NamespaceNode, NamespaceTreeResponse, ViaModuleInfo,
 };
 pub use query::AnalysisQuery;
+pub use resolution::MethodLookupResult;
 pub use state::{
     AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SourceFile, SourceFileInput,
 };

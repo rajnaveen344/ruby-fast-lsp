@@ -1,9 +1,40 @@
+use std::collections::HashMap;
+
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeKind, MethodCalleeResolution,
-    MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, SymbolKind, TextRange,
+    MethodFact, MethodReferenceAccess, ResolvedMethodCallee, RubyConstant, RubyMethod, SymbolKind,
+    TextRange,
 };
 use crate::engine::query::AnalysisQuery;
+
+pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>;
+
+#[derive(Clone)]
+pub enum MethodLookupResult {
+    Unique(MethodFact),
+    Ambiguous {
+        owner: FullyQualifiedName,
+        method: RubyMethod,
+    },
+    Missing,
+}
+
+impl MethodLookupResult {
+    pub fn reference_parts(&self) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
+        match self {
+            MethodLookupResult::Unique(fact) => {
+                Some((&fact.owner, method_name_from_fact(fact), Some(fact)))
+            }
+            MethodLookupResult::Ambiguous { owner, method } => Some((owner, *method, None)),
+            MethodLookupResult::Missing => None,
+        }
+    }
+
+    pub fn is_missing(&self) -> bool {
+        matches!(self, MethodLookupResult::Missing)
+    }
+}
 
 impl<'a> AnalysisQuery<'a> {
     pub fn resolve_method_callees(
@@ -117,6 +148,105 @@ impl<'a> AnalysisQuery<'a> {
 
         let ancestor_chain = method_lookup_chain(self.engine, namespace_fqn);
         method_callee_after_owner(self.engine, &ancestor_chain, namespace_fqn, method)
+    }
+
+    pub fn resolve_method_reference(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> MethodLookupResult {
+        let mut cache = MethodLookupChainCache::new();
+        self.resolve_method_reference_with_chain_cache(namespace_fqn, method, &mut cache)
+    }
+
+    pub(crate) fn resolve_method_reference_with_chain_cache(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        chain_cache: &mut MethodLookupChainCache,
+    ) -> MethodLookupResult {
+        if !namespace_target_exists(self.engine, namespace_fqn) {
+            return MethodLookupResult::Missing;
+        }
+
+        let ancestor_chain = chain_cache
+            .entry(namespace_fqn.clone())
+            .or_insert_with(|| method_lookup_chain(self.engine, namespace_fqn))
+            .clone();
+
+        for ancestor in &ancestor_chain {
+            let mut facts = self.engine.method_facts_matching_owner_name(ancestor, method);
+
+            facts.sort_by_key(|fact| {
+                (
+                    fact.range.file_id,
+                    fact.range.start_byte,
+                    fact.range.end_byte,
+                    fact.fqn.to_string(),
+                )
+            });
+            facts.dedup();
+
+            match facts.len() {
+                0 => continue,
+                1 => {
+                    return MethodLookupResult::Unique(facts.pop().expect(
+                        "INVARIANT VIOLATED: method fact count changed after len check. \
+                         This is a bug because no code mutates facts between len and pop. \
+                         Fix: keep method fact vector local and immutable between checks.",
+                    ));
+                }
+                _ => {
+                    return MethodLookupResult::Ambiguous {
+                        owner: ancestor.clone(),
+                        method: *method,
+                    };
+                }
+            }
+        }
+
+        if *method != method_missing_method() {
+            return self.resolve_method_reference_with_chain_cache(
+                namespace_fqn,
+                &method_missing_method(),
+                chain_cache,
+            );
+        }
+
+        MethodLookupResult::Missing
+    }
+
+    pub(crate) fn resolve_super_method_reference(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> MethodLookupResult {
+        let Some(callee) = self.resolve_super_method_callee(namespace_fqn, method) else {
+            return MethodLookupResult::Missing;
+        };
+        let mut facts = self.engine.method_facts_matching_owner_name(&callee.owner, method);
+        facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        facts.dedup();
+
+        match facts.len() {
+            0 => MethodLookupResult::Missing,
+            1 => MethodLookupResult::Unique(facts.pop().expect(
+                "INVARIANT VIOLATED: super method fact count changed after len check. \
+                 This is a bug because no code mutates facts between len and pop. \
+                 Fix: keep method fact vector local and immutable between checks.",
+            )),
+            _ => MethodLookupResult::Ambiguous {
+                owner: callee.owner,
+                method: *method,
+            },
+        }
     }
 
     pub fn method_reference_targets(
@@ -635,6 +765,18 @@ impl<'a> AnalysisQuery<'a> {
 
         None
     }
+}
+
+fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {
+    let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+        panic!(
+            "INVARIANT VIOLATED: method fact has non-method FQN `{}`. \
+             This is a bug because method facts must be keyed by method FQNs. \
+             Fix: only insert MethodFact values built from FullyQualifiedName::Method.",
+            fact.fqn
+        );
+    };
+    *method
 }
 
 fn method_name_declared_private_in_source(
