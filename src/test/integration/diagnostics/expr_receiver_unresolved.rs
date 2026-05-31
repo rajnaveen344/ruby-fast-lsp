@@ -217,3 +217,52 @@ items = [1, 2, 3]
     )
     .await;
 }
+
+#[tokio::test]
+async fn visibility_modifier_does_not_warn_as_unresolved_method() {
+    check(
+        r#"
+class BulkAccountActionForm
+  <warn none code="unresolved-method">private</warn>
+
+  def bulk_account_action_validation_helper
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn bare_raise_does_not_warn_as_unresolved_method() {
+    check_multi_file(&[
+        (
+            "bulk_account_action_form.rb",
+            r#"
+class BulkAccountActionForm
+  def bulk_account_action_validation_helper
+    return <warn none code="unresolved-method">raise GosPosh::Platform::Errors::InvalidInputError.new("Action")</warn>
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def raise(...)
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}

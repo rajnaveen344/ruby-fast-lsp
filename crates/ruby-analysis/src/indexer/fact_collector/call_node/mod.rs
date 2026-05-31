@@ -40,11 +40,13 @@ impl FactCollector {
             self.extension_call_stack.push(resolved_call);
         }
 
-        self.process_direct_call_facts(node);
-        self.process_call_reference_candidate(node);
+        let direct_call_handled = self.process_direct_call_facts(node);
+        if !direct_call_handled {
+            self.process_call_reference_candidate(node);
+        }
     }
 
-    fn process_direct_call_facts(&mut self, node: &CallNode) {
+    fn process_direct_call_facts(&mut self, node: &CallNode) -> bool {
         self.push_direct_included_hook_mixin_edges(node);
 
         if node.receiver().is_some() && node.name().as_slice() == b"class_attribute" {
@@ -53,28 +55,71 @@ impl FactCollector {
 
         if node.receiver().is_some() {
             self.push_direct_send_define_method_fact(node);
-            return;
+            return false;
         }
 
         match node.name().as_slice() {
-            b"attr_reader" => self.push_direct_attr_method_facts(node, true, false),
-            b"attr_writer" => self.push_direct_attr_method_facts(node, false, true),
-            b"attr_accessor" => self.push_direct_attr_method_facts(node, true, true),
-            b"class_attribute" => self.push_direct_class_attribute_method_facts(node),
-            b"private" => self.push_direct_visibility_modifier(node, MethodVisibility::Private),
-            b"protected" => self.push_direct_visibility_modifier(node, MethodVisibility::Protected),
-            b"public" => self.push_direct_visibility_modifier(node, MethodVisibility::Public),
-            b"module_function" => self.push_direct_module_function_facts(node),
-            b"alias_method" => self.push_direct_alias_method_fact(node),
-            b"define_method" => self.push_direct_define_method_fact(node),
-            b"delegate" => self.push_direct_delegate_method_facts(node),
-            b"def_delegator" | b"def_delegators" => {
-                self.push_direct_forwardable_delegate_method_facts(node)
+            b"attr_reader" => {
+                self.push_direct_attr_method_facts(node, true, false);
+                true
             }
-            b"include" => self.push_direct_mixin_edges(node, GraphEdgeKind::Include),
-            b"prepend" => self.push_direct_mixin_edges(node, GraphEdgeKind::Prepend),
-            b"extend" => self.push_direct_mixin_edges(node, GraphEdgeKind::Extend),
-            _ => {}
+            b"attr_writer" => {
+                self.push_direct_attr_method_facts(node, false, true);
+                true
+            }
+            b"attr_accessor" => {
+                self.push_direct_attr_method_facts(node, true, true);
+                true
+            }
+            b"class_attribute" => {
+                self.push_direct_class_attribute_method_facts(node);
+                true
+            }
+            b"private" => {
+                self.push_direct_visibility_modifier(node, MethodVisibility::Private);
+                true
+            }
+            b"protected" => {
+                self.push_direct_visibility_modifier(node, MethodVisibility::Protected);
+                true
+            }
+            b"public" => {
+                self.push_direct_visibility_modifier(node, MethodVisibility::Public);
+                true
+            }
+            b"module_function" => {
+                self.push_direct_module_function_facts(node);
+                true
+            }
+            b"alias_method" => {
+                self.push_direct_alias_method_fact(node);
+                true
+            }
+            b"define_method" => {
+                self.push_direct_define_method_fact(node);
+                true
+            }
+            b"delegate" => {
+                self.push_direct_delegate_method_facts(node);
+                true
+            }
+            b"def_delegator" | b"def_delegators" => {
+                self.push_direct_forwardable_delegate_method_facts(node);
+                true
+            }
+            b"include" => {
+                self.push_direct_mixin_edges(node, GraphEdgeKind::Include);
+                true
+            }
+            b"prepend" => {
+                self.push_direct_mixin_edges(node, GraphEdgeKind::Prepend);
+                true
+            }
+            b"extend" => {
+                self.push_direct_mixin_edges(node, GraphEdgeKind::Extend);
+                true
+            }
+            _ => false,
         }
     }
 
