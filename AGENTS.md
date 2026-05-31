@@ -714,10 +714,14 @@ RBS handles generic substitution (e.g., `Array[Integer]#first` → `Elem` become
 
 ## TDD Workflow
 
-When the user provides a code scenario/example, follow this strict TDD process:
+When the user reports that behavior is broken or "not working", follow this
+strict TDD process. This applies even if the report is informal or diagnostic
+driven rather than a polished code example:
 
 1. **Red**: Create an integration test that captures the expected behavior
-   - Write the test first based on the scenario
+   - Write the test first based on the reported behavior
+   - If the report lacks a complete snippet, reduce it to the smallest
+     representative fixture that exercises the same LSP/indexer/engine path
    - Run the test to confirm it fails
    - Show the failing test output
 

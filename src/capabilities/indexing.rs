@@ -2,6 +2,7 @@ use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
+use ruby_analysis::core::SourceKind;
 use ruby_analysis::indexer::RubyDocument;
 
 use log::{debug, info};
@@ -56,8 +57,14 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let total_start = Instant::now();
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
+    let existing_kind = analysis_file_kind(server, &uri);
+    let source_kind = existing_kind.unwrap_or(SourceKind::Project);
+    let skip_processing = existing_kind
+        .map(|kind| kind.is_external())
+        .unwrap_or(false);
     let register_start = Instant::now();
-    let analysis_file_id = server.open_or_update_analysis_file(&uri, content.clone());
+    let analysis_file_id =
+        server.open_or_update_analysis_file_with_kind(&uri, content.clone(), source_kind);
     let register_elapsed = register_start.elapsed();
 
     let doc_start = Instant::now();
@@ -85,11 +92,19 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
     let process_start = Instant::now();
-    let (affected_uris, mut diagnostics) =
+    let (affected_uris, mut diagnostics) = if skip_processing {
+        info!(
+            "[PERF][interactive] file={} mode=known-external-skip elapsed={:?}",
+            uri.path(),
+            process_start.elapsed()
+        );
+        (std::collections::HashSet::new(), Vec::new())
+    } else {
         match process_interactive_file(&indexer, server, &uri, &content) {
             Ok(result) => (result.affected_uris, result.diagnostics),
             Err(_) => (std::collections::HashSet::new(), Vec::new()),
-        };
+        }
+    };
     let process_elapsed = process_start.elapsed();
 
     let cache_start = Instant::now();
@@ -135,6 +150,17 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
         affected_count,
         affected_elapsed
     );
+}
+
+fn analysis_file_kind(server: &RubyLanguageServer, uri: &Url) -> Option<SourceKind> {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
+    let engine = server.analysis_engine.read();
+    engine
+        .file_id(&path)
+        .and_then(|file_id| engine.file(file_id))
+        .map(|file| file.kind)
 }
 
 pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTextDocumentParams) {
@@ -318,9 +344,10 @@ pub async fn handle_watched_files_changed(
 #[cfg(test)]
 mod tests {
     use ruby_analysis::core::{
-        FullyQualifiedName, GraphEdgeKind, NamespaceKind, RubyConstant, RubyMethod, SymbolKind,
+        FullyQualifiedName, GraphEdgeKind, MethodFact, NamespaceKind, RubyConstant, RubyMethod,
+        SymbolKind, TextRange,
     };
-    use ruby_analysis::engine::AnalysisQuery;
+    use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 
     use super::*;
 
@@ -350,6 +377,63 @@ mod tests {
         let file = engine.file(file_id).unwrap();
         assert_eq!(file.line_index.len(), "A = 1".len());
         assert!(file.source_text().is_none());
+    }
+
+    #[tokio::test]
+    async fn did_open_preserves_known_external_file_without_reprocessing() {
+        let server = RubyLanguageServer::default();
+        let uri = Url::parse("file:///tmp/rubystubs33/kernel.rb").expect("test URI must parse");
+        let file_id = server.open_or_update_analysis_file_with_kind(
+            &uri,
+            "module Kernel\n  def puts\n  end\nend".to_string(),
+            SourceKind::Stub,
+        );
+        let kernel = RubyConstant::new("Kernel").expect("test constant must be valid");
+        let puts = RubyMethod::new("puts").expect("test method must be valid");
+        let puts_fqn = FullyQualifiedName::method(vec![kernel], puts);
+        server.analysis_engine.write().replace_facts(
+            file_id,
+            FileFacts {
+                methods: vec![MethodFact::new(
+                    puts_fqn.clone(),
+                    FullyQualifiedName::namespace(vec![kernel]),
+                    TextRange::new(file_id, 16, 20),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Deferred,
+        );
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "module Kernel\n  def generated_after_open\n  end\nend".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let path = uri.to_file_path().expect("file URI must convert to path");
+        let engine = server.analysis_engine.read();
+        let file_id = engine
+            .file_id(path)
+            .expect("known external file must remain registered");
+        let file = engine.file(file_id).expect("registered file must exist");
+        assert_eq!(file.kind, SourceKind::Stub);
+        let query = AnalysisQuery::new(&engine);
+        assert_eq!(query.methods_for_fqn(&puts_fqn).len(), 1);
+        let generated_fqn = FullyQualifiedName::method(
+            vec![kernel],
+            RubyMethod::new("generated_after_open").expect("test method must be valid"),
+        );
+        assert!(
+            query.methods_for_fqn(&generated_fqn).is_empty(),
+            "known external didOpen must not reprocess and replace indexed stub facts"
+        );
     }
 
     #[tokio::test]

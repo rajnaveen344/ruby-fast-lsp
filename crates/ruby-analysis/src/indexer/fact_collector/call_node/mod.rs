@@ -11,7 +11,7 @@ use log::trace;
 use ruby_prism::{CallNode, Node};
 
 use super::bad_splat::BadSplatCandidate;
-use crate::inference::method::method_call_return_type;
+use crate::inference::method::{method_call_return_type, rbs_method_exists_for_type};
 use crate::inference::RubyType;
 use crate::yard::YardTypeConverter;
 
@@ -680,6 +680,9 @@ impl FactCollector {
             };
             let access =
                 method_reference_access(node, &receiver_info, static_send_target.is_some());
+            let rbs_resolves_method = inferred_expr_type.as_ref().is_some_and(|ruby_type| {
+                rbs_method_exists_for_type(ruby_type, &method, namespace_kind)
+            });
             self.reference_candidates.push(ReferenceCandidate::method(
                 message_range,
                 crate::core::MethodReferenceCandidate {
@@ -693,6 +696,7 @@ impl FactCollector {
                         diagnostic_range: message_range,
                         receiver_label,
                         diagnose_unresolved: self.diagnostics_enabled
+                            && !rbs_resolves_method
                             && !matches!(receiver_info, ReceiverInfo::SelfReceiver),
                         signature,
                     },

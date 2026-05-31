@@ -21,7 +21,9 @@ pub enum MethodLookupResult {
 }
 
 impl MethodLookupResult {
-    pub fn reference_parts(&self) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
+    pub fn reference_parts(
+        &self,
+    ) -> Option<(&FullyQualifiedName, RubyMethod, Option<&MethodFact>)> {
         match self {
             MethodLookupResult::Unique(fact) => {
                 Some((&fact.owner, method_name_from_fact(fact), Some(fact)))
@@ -175,7 +177,9 @@ impl<'a> AnalysisQuery<'a> {
             .clone();
 
         for ancestor in &ancestor_chain {
-            let mut facts = self.engine.method_facts_matching_owner_name(ancestor, method);
+            let mut facts = self
+                .engine
+                .method_facts_matching_owner_name(ancestor, method);
 
             facts.sort_by_key(|fact| {
                 (
@@ -224,7 +228,9 @@ impl<'a> AnalysisQuery<'a> {
         let Some(callee) = self.resolve_super_method_callee(namespace_fqn, method) else {
             return MethodLookupResult::Missing;
         };
-        let mut facts = self.engine.method_facts_matching_owner_name(&callee.owner, method);
+        let mut facts = self
+            .engine
+            .method_facts_matching_owner_name(&callee.owner, method);
         facts.sort_by_key(|fact| {
             (
                 fact.range.file_id,

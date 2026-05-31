@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use crate::core::{
-    ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact,
-    FqnId, FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact,
-    NamespaceKind, RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod, RubyType,
-    SourceFileId, StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
+    ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FqnId,
+    FullyQualifiedName, GraphEdgeKind, MethodCallSignatureCandidate, MethodFact, NamespaceKind,
+    RaiseArgCandidate, ReferenceFact, RubyConstant, RubyMethod, RubyType, SourceFileId,
+    StoredReferenceCandidateKind, StoredReferenceCandidateRef, TextRange,
 };
 use crate::engine::diagnostic_helpers::{
     arity_mismatch, closest_keyword, levenshtein, suggestion_threshold, MethodArity,
@@ -126,10 +126,8 @@ impl AnalysisEngine {
                         })
                         .clone();
                     if let Some((owner, resolved_method, fact)) = fact.reference_parts() {
-                        let target = FullyQualifiedName::method(
-                            owner.namespace_parts(),
-                            resolved_method,
-                        );
+                        let target =
+                            FullyQualifiedName::method(owner.namespace_parts(), resolved_method);
                         let target = self.names.intern_fqn(target);
                         self.facts.references.resolved.add(
                             target,
@@ -212,10 +210,10 @@ impl AnalysisEngine {
                                     "unresolved-method",
                                     message,
                                 ));
-                            }
                         }
                     }
                 }
+            }
         }
         self.facts.references.candidates = reference_candidate_store;
         self.facts.references.resolved.sort_all();

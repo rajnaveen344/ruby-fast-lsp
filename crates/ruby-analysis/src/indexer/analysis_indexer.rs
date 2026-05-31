@@ -866,6 +866,19 @@ impl Visit<'_> for AnalysisIndexer {
                     }
                 }
             }
+        } else if class_implicitly_inherits_object(&fqn) {
+            let object = RubyConstant::new("Object").expect(
+                "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
+                 This is a bug because Ruby's implicit class superclass must be representable. \
+                 Fix: update RubyConstant validation or implicit superclass construction.",
+            );
+            self.push_edge(
+                fqn.clone(),
+                &[object],
+                true,
+                GraphEdgeKind::Superclass,
+                range,
+            );
         }
 
         self.scope_stack.push(ScopeKind::Instance);
@@ -1697,6 +1710,14 @@ fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> Tex
         file_id,
         u32_offset(location.start_offset()),
         u32_offset(location.end_offset()),
+    )
+}
+
+fn class_implicitly_inherits_object(fqn: &FullyQualifiedName) -> bool {
+    let parts = fqn.namespace_parts();
+    !matches!(
+        parts.as_slice(),
+        [name] if name.as_str() == "Object" || name.as_str() == "BasicObject"
     )
 }
 

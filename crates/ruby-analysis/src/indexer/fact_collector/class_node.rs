@@ -1,4 +1,4 @@
-use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind};
+use crate::core::{FullyQualifiedName, GraphEdgeKind, GraphNodeKind, RubyConstant};
 use crate::mixin_ref_from_node;
 use crate::LocalScopeKind as LVScopeKind;
 use log::error;
@@ -49,6 +49,19 @@ impl FactCollector {
                     }
                 }
             }
+        } else if class_implicitly_inherits_object(&fqn) {
+            let object = RubyConstant::new("Object").expect(
+                "INVARIANT VIOLATED: Object is not a valid Ruby constant. \
+                 This is a bug because Ruby's implicit class superclass must be representable. \
+                 Fix: update RubyConstant validation or implicit superclass construction.",
+            );
+            self.direct_push_edge(
+                fqn.clone(),
+                &[object],
+                true,
+                GraphEdgeKind::Superclass,
+                range,
+            );
         }
 
         // Setup local variable scope
@@ -68,4 +81,12 @@ impl FactCollector {
         self.scope_tracker.pop_scope_kind();
         self.document.variable_scopes_mut().exit_scope();
     }
+}
+
+fn class_implicitly_inherits_object(fqn: &FullyQualifiedName) -> bool {
+    let parts = fqn.namespace_parts();
+    !matches!(
+        parts.as_slice(),
+        [name] if name.as_str() == "Object" || name.as_str() == "BasicObject"
+    )
 }

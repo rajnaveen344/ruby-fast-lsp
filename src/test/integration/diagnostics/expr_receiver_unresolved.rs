@@ -136,3 +136,84 @@ u = User.new
     )
     .await;
 }
+
+#[tokio::test]
+async fn bare_kernel_method_in_class_does_not_warn_when_object_includes_kernel() {
+    check_multi_file(&[
+        (
+            "scenario_extractor.rb",
+            r#"
+class ScenarioExtractor
+  def to_output
+    <warn none code="unresolved-method">puts "ok"</warn>
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def puts(obj = nil, *args)
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn bare_kernel_method_in_nested_class_uses_implicit_object_superclass() {
+    check_multi_file(&[
+        (
+            "nested.rb",
+            r#"
+module Reports
+  class ScenarioExtractor
+    def to_output
+      <warn none code="unresolved-method">puts "ok"</warn>
+    end
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def puts(obj = nil, *args)
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn array_include_predicate_does_not_warn_when_receiver_type_is_known() {
+    check(
+        r#"
+items = [1, 2, 3]
+<warn none code="unresolved-method">items.include?(2)</warn>
+"#,
+    )
+    .await;
+}

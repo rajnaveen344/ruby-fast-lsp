@@ -1,6 +1,6 @@
 //! Method call return type resolution.
 
-use crate::core::{FullyQualifiedName, RubyMethod, RubyType};
+use crate::core::{FullyQualifiedName, NamespaceKind, RubyMethod, RubyType};
 use crate::engine::AnalysisQuery;
 
 /// Resolve a method call return type for a receiver type.
@@ -57,6 +57,37 @@ pub fn method_call_return_type_with_visibility(
     rbs_method_return_type(receiver_type, method_name)
 }
 
+pub fn rbs_method_exists_for_type(
+    receiver_type: &RubyType,
+    method: &RubyMethod,
+    kind: NamespaceKind,
+) -> bool {
+    let is_singleton = kind == NamespaceKind::Singleton;
+    let method_name = method.as_str();
+
+    for class_name in rbs_class_names_for_type(receiver_type) {
+        if crate::inference::rbs::get_rbs_class_methods(&class_name, is_singleton)
+            .iter()
+            .any(|method_info| method_info.name == method_name)
+        {
+            return true;
+        }
+    }
+
+    if is_singleton {
+        for rbs_class in ["Class", "Module"] {
+            if crate::inference::rbs::get_rbs_class_methods(rbs_class, false)
+                .iter()
+                .any(|method_info| method_info.name == method_name)
+            {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
     match receiver_type {
         RubyType::Array(element_types) => {
@@ -85,6 +116,50 @@ fn generic_rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -
         | RubyType::ModuleReference(_)
         | RubyType::Union(_)
         | RubyType::Unknown => None,
+    }
+}
+
+fn rbs_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
+    match ruby_type {
+        RubyType::Class(fqn) | RubyType::ClassReference(fqn) => {
+            let parts = fqn.namespace_parts();
+            let fqn_name = parts
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            let simple_name = parts.last().map(|part| part.to_string());
+
+            let mut names = Vec::new();
+            if !fqn_name.is_empty() {
+                names.push(fqn_name);
+            }
+            if let Some(simple_name) = simple_name {
+                if !names.contains(&simple_name) {
+                    names.push(simple_name);
+                }
+            }
+            names
+        }
+        RubyType::Module(fqn) | RubyType::ModuleReference(fqn) => fqn
+            .namespace_parts()
+            .last()
+            .map(|constant| vec![constant.to_string()])
+            .unwrap_or_default(),
+        RubyType::Array(_) => vec!["Array".to_string()],
+        RubyType::Hash(_, _) => vec!["Hash".to_string()],
+        RubyType::Union(types) => {
+            let mut all_names = Vec::new();
+            for ty in types {
+                for name in rbs_class_names_for_type(ty) {
+                    if !all_names.contains(&name) {
+                        all_names.push(name);
+                    }
+                }
+            }
+            all_names
+        }
+        RubyType::Unknown => Vec::new(),
     }
 }
 

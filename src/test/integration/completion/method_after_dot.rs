@@ -120,6 +120,37 @@ arr.f$0
 }
 
 #[tokio::test]
+async fn variable_from_array_literal_includes_include_predicate() {
+    check(
+        r#"
+arr = [1, 2, 3]
+arr.inc$0
+<complete items="include?">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn instance_variable_from_array_literal_includes_include_predicate() {
+    check(
+        r#"
+class ScenarioExtractor
+  def initialize
+    @scenarios = []
+  end
+
+  def to_output
+    @scenarios.inc$0
+  end
+end
+<complete items="include?">
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn array_each_block_param_completion() {
     check(
         r#"
