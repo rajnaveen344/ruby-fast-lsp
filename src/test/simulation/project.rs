@@ -3,11 +3,13 @@ use super::graph::{
     NamespaceSpec,
 };
 use super::ruby_gen::{render_project, ProjectRender};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub struct SyntheticProject {
     pub name: String,
     pub namespaces: Vec<NamespaceSpec>,
+    pub raw_files: BTreeMap<String, String>,
     pub edits: Vec<EditStep>,
 }
 
@@ -16,6 +18,7 @@ impl SyntheticProject {
         Self {
             name: name.to_string(),
             namespaces: Vec::new(),
+            raw_files: BTreeMap::new(),
             edits: Vec::new(),
         }
     }
@@ -54,6 +57,11 @@ impl SyntheticProject {
                 }
             });
         }
+        self
+    }
+
+    pub fn raw_file(&mut self, path: &str, content: &str) -> &mut Self {
+        self.raw_files.insert(path.to_string(), content.to_string());
         self
     }
 

@@ -130,6 +130,16 @@ pub fn render_project(project: &SyntheticProject) -> ProjectRender {
         files.insert(file, renderer.code);
     }
 
+    for (file, content) in &project.raw_files {
+        assert!(
+            !files.contains_key(file),
+            "INVARIANT VIOLATED: raw simulation file `{}` collides with a generated namespace file. This is a bug because each simulated file path must have one source. Fix: rename the raw file or namespace.",
+            file
+        );
+        map.files.insert(file.clone());
+        files.insert(file.clone(), content.clone());
+    }
+
     ProjectRender { files, map }
 }
 

@@ -1630,6 +1630,49 @@ async fn generated_project_updates_method_diagnostics() {
 }
 
 #[tokio::test]
+async fn generated_project_runtime_core_methods_do_not_warn() {
+    let mut project = SyntheticProject::new("synthetic_runtime_core");
+    project
+        .module("Kernel", |module| {
+            module.method("puts");
+        })
+        .class("Object", |class| {
+            class.include("Kernel");
+        })
+        .class("ScenarioExtractor", |class| {
+            class
+                .method("to_output")
+                .calls("Kernel#puts", CallShape::Bare);
+        });
+
+    let runner = SimulationRunner::start(project).await;
+    runner
+        .assert_no_unresolved_method("scenario_extractor.rb", "puts")
+        .await;
+}
+
+#[tokio::test]
+async fn generated_project_rbs_builtin_methods_do_not_warn() {
+    let mut project = SyntheticProject::new("synthetic_rbs_builtins");
+    project.raw_file(
+        "stdlib/array_usage.rb",
+        r#"
+items = [1, 2, 3]
+items.include?(2)
+items.nope_builtin(2)
+"#,
+    );
+
+    let runner = SimulationRunner::start(project).await;
+    runner
+        .assert_no_unresolved_method("stdlib/array_usage.rb", "include?")
+        .await;
+    runner
+        .assert_unresolved_method("stdlib/array_usage.rb", "nope_builtin")
+        .await;
+}
+
+#[tokio::test]
 async fn generated_project_updates_constant_diagnostics() {
     let project = phase1_project();
     let mut runner = SimulationRunner::start(project.clone()).await;

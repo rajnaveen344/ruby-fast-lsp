@@ -1077,7 +1077,7 @@ impl SimulationRunner {
             .filter(|call| self.project.method_enabled(&call.target))
     }
 
-    async fn assert_unresolved_method(&self, file: &str, method: &str) {
+    pub async fn assert_unresolved_method(&self, file: &str, method: &str) {
         let diagnostics = self.editor.diagnostics(file).await;
         assert!(
             diagnostics
@@ -1091,7 +1091,7 @@ impl SimulationRunner {
         );
     }
 
-    async fn assert_no_unresolved_method(&self, file: &str, method: &str) {
+    pub async fn assert_no_unresolved_method(&self, file: &str, method: &str) {
         let diagnostics = self.editor.diagnostics(file).await;
         assert!(
             diagnostics
