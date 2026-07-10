@@ -4,9 +4,9 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::capabilities::{
-    call_hierarchy, code_lens, completion, debug, definitions, document_symbols, folding_range,
-    formatting, hover, implementation, inlay_hints, namespace_tree, references, rename,
-    semantic_tokens, signature_help, type_hierarchy, workspace_symbols,
+    call_hierarchy, code_actions, code_lens, completion, debug, definitions, document_symbols,
+    folding_range, formatting, hover, implementation, inlay_hints, namespace_tree, references,
+    rename, semantic_tokens, signature_help, type_hierarchy, workspace_symbols,
 };
 use crate::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
@@ -82,6 +82,13 @@ pub async fn handle_signature_help(
     params: SignatureHelpParams,
 ) -> LspResult<Option<SignatureHelp>> {
     Ok(signature_help::handle_signature_help(lang_server, params).await)
+}
+
+pub async fn handle_code_actions(
+    lang_server: &RubyLanguageServer,
+    params: CodeActionParams,
+) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
+    Ok(code_actions::handle_code_actions(lang_server, params).await)
 }
 
 pub async fn handle_semantic_tokens_full(

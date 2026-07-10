@@ -112,6 +112,11 @@ pub async fn handle_initialize(
             retrigger_characters: Some(vec![",".to_string()]),
             work_done_progress_options: WorkDoneProgressOptions::default(),
         }),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+            resolve_provider: Some(false),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
         document_on_type_formatting_provider: Some(
             capabilities::formatting::get_document_on_type_formatting_options(),
         ),

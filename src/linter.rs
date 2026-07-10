@@ -47,23 +47,7 @@ pub async fn lint_document(
         return Ok(Vec::new());
     }
 
-    let command_argv = if config.linter_command.is_empty() {
-        vec![
-            "bundle".to_string(),
-            "exec".to_string(),
-            config
-                .linter
-                .executable()
-                .expect(
-                    "INVARIANT VIOLATED: enabled linter has no executable. \
-                     This is a bug because every enabled linter kind must map to an executable. \
-                     Fix: add the executable mapping when adding a LinterKind variant.",
-                )
-                .to_string(),
-        ]
-    } else {
-        config.linter_command.clone()
-    };
+    let command_argv = resolved_command(config);
     let (program, initial_args) = command_argv.split_first().expect(
         "INVARIANT VIOLATED: linter command argv is empty after default command resolution. \
          This is a bug because enabled linters must always resolve to a program. \
@@ -131,6 +115,113 @@ pub async fn lint_document(
 
     let stdout = std::str::from_utf8(&output.stdout).context("linter output was not UTF-8")?;
     parse_linter_json(stdout, config.linter, content)
+}
+
+pub async fn fix_document(
+    config: &RubyFastLspConfig,
+    workspace_root: &Path,
+    file_path: &Path,
+    content: &str,
+    timeout: Duration,
+) -> Result<String> {
+    if config.linter == LinterKind::None {
+        return Err(anyhow!(
+            "cannot request a fix while the external linter is disabled"
+        ));
+    }
+    let command_argv = resolved_command(config);
+    let (program, initial_args) = command_argv.split_first().expect(
+        "INVARIANT VIOLATED: linter fix command argv is empty after resolution. \
+         This is a bug because enabled linters must always resolve to a program. \
+         Fix: preserve the default command or validate configured argv before execution.",
+    );
+    let fix_flag = match config.linter {
+        LinterKind::RuboCop => "--autocorrect",
+        LinterKind::Standard => "--fix",
+        LinterKind::None => unreachable!(
+            "INVARIANT VIOLATED: disabled linter reached safe fix flag selection. \
+             This is a bug because fix_document rejects LinterKind::None first. \
+             Fix: preserve the disabled-linter guard above."
+        ),
+    };
+    let stdin_path = file_path.strip_prefix(workspace_root).unwrap_or(file_path);
+    let mut child = Command::new(program)
+        .args(initial_args)
+        .args([fix_flag, "--stderr", "--force-exclusion", "--stdin"])
+        .arg(stdin_path)
+        .current_dir(workspace_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to start safe {} fix command `{}` in {}",
+                config.linter.data_name().unwrap_or("configured"),
+                command_argv.join(" "),
+                workspace_root.display()
+            )
+        })?;
+    let mut stdin = child.stdin.take().expect(
+        "INVARIANT VIOLATED: spawned linter fix has no piped stdin. \
+         This is a bug because the command is always configured with Stdio::piped(). \
+         Fix: keep stdin piped before taking the child handle.",
+    );
+    stdin
+        .write_all(content.as_bytes())
+        .await
+        .context("failed to write Ruby source to safe linter fix stdin")?;
+    drop(stdin);
+
+    let output = tokio::time::timeout(timeout, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "safe {} fix timed out after {} ms while checking {}",
+                config.linter.data_name().unwrap_or("configured"),
+                timeout.as_millis(),
+                file_path.display()
+            )
+        })?
+        .context("failed while waiting for safe linter fix process")?;
+    if !matches!(output.status.code(), Some(0) | Some(1)) {
+        return Err(anyhow!(
+            "safe {} fix failed for {} with exit status {:?}: {}",
+            config.linter.data_name().unwrap_or("configured"),
+            file_path.display(),
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let fixed = String::from_utf8(output.stdout).context("safe linter fix output was not UTF-8")?;
+    if fixed.is_empty() && !content.is_empty() {
+        return Err(anyhow!(
+            "safe {} fix returned empty source for non-empty document {}",
+            config.linter.data_name().unwrap_or("configured"),
+            file_path.display()
+        ));
+    }
+    Ok(fixed)
+}
+
+fn resolved_command(config: &RubyFastLspConfig) -> Vec<String> {
+    if !config.linter_command.is_empty() {
+        return config.linter_command.clone();
+    }
+    vec![
+        "bundle".to_string(),
+        "exec".to_string(),
+        config
+            .linter
+            .executable()
+            .expect(
+                "INVARIANT VIOLATED: enabled linter has no executable. \
+                 This is a bug because every enabled linter kind must map to an executable. \
+                 Fix: add the executable mapping when adding a LinterKind variant.",
+            )
+            .to_string(),
+    ]
 }
 
 pub fn parse_linter_json(
@@ -356,6 +447,45 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("timed out"), "{error:#}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn standard_safe_fix_uses_fix_flag_and_current_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("fake-standardrb");
+        let captured_args = temp.path().join("fix-args.txt");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
+            captured_args.display()
+        );
+        fs::write(&executable, script).unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).unwrap();
+        let config = RubyFastLspConfig {
+            linter: LinterKind::Standard,
+            linter_command: vec![executable.to_string_lossy().to_string()],
+            ..RubyFastLspConfig::default()
+        };
+
+        let source = "puts 'already safe'\n";
+        let fixed = fix_document(
+            &config,
+            temp.path(),
+            &temp.path().join("sample.rb"),
+            source,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fixed, source);
+        let args = fs::read_to_string(captured_args).unwrap();
+        assert!(args.contains("--fix --stderr --force-exclusion --stdin"));
+        assert!(!args.contains("--fix-unsafely"));
     }
 
     #[test]

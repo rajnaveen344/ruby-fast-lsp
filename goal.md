@@ -93,7 +93,9 @@ Priority order:
    and save, using current-buffer stdin, workspace-aware configuration,
    structured command argv, JSON diagnostics with UTF-16 position conversion,
    timeout/failure isolation, and VS Code settings.
-3. Code actions for safe linter fixes.
+3. Done: preferred quick-fix code actions for safe RuboCop and Standard fixes,
+   operating on the current unsaved buffer and returning an editor-applied
+   full-document edit only when safe corrected output differs.
 4. Cross-file constant, class, and module rename with prepare-rename support.
 5. Document highlights.
 6. Selection ranges.
@@ -390,10 +392,29 @@ At the end of every goal session, record:
   conversion; lifecycle tests cover open/change/save and semantic-diagnostic
   preservation on linter failure.
 - Next priority: safe RuboCop/Standard code actions using the correctability
-  metadata already attached to diagnostics.
+  metadata already attached to diagnostics. Done in the follow-up commit;
+  cross-file constant/class/module rename is now the next priority.
 - Packaging risk unchanged: the local gate still emits a `0.2.3` VSIX while
   Cargo is `0.2.6`, and npm audit reports one moderate and one high dependency
   vulnerability. These remain explicit Packaging Completion blockers.
-- Rating: the overall baseline remains 6.5/10 until code actions and the rest of
-  Milestone 1 close a broader daily-workflow gap; no score increase is claimed
-  for this isolated capability.
+- Rating: with signature help, external lint diagnostics, and safe quick fixes
+  integrated and package-verified, the current estimate is **6.7/10**. This is
+  a modest breadth/refactoring increase; the 7.3 Milestone 1 target remains
+  gated by rename, highlights, selection ranges, indexing configuration, and
+  full-document formatting.
+
+### July 2026: Safe linter quick fixes
+
+- User-visible: correctable RuboCop and Standard diagnostics expose a preferred
+  `quickfix` action and apply the corrected unsaved buffer through a
+  `WorkspaceEdit`.
+- Safety: RuboCop uses `--autocorrect` rather than unsafe `--autocorrect-all`;
+  Standard uses its safe `--fix` mode. Noncorrectable diagnostics do not offer
+  actions, unchanged output produces no edit, and failed correction processes
+  produce no edit.
+- Integration evidence: initialization advertises only `quickfix`; a real
+  FakeEditor lifecycle test requests the action, applies its edit through
+  `didChange`, and verifies resulting content. Runner tests verify Standard's
+  safe flag and current-buffer stdin behavior.
+- Architecture: subprocess execution and LSP edit shaping remain in `src/`;
+  no external-linter policy or protocol types entered `ruby-analysis`.

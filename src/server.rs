@@ -23,12 +23,13 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
-    CodeLens, CodeLensParams, CompletionItem, CompletionParams, CompletionResponse, Diagnostic,
-    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, RenameParams,
+    CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams, CompletionItem,
+    CompletionParams, CompletionResponse, Diagnostic, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentOnTypeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+    InitializedParams, InlayHintParams, Location, ReferenceParams, RenameParams,
     SemanticTokensParams, SemanticTokensResult, SignatureHelp, SignatureHelpParams,
     SymbolInformation, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
     TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkspaceEdit,
@@ -566,6 +567,13 @@ impl LanguageServer for RubyLanguageServer {
         params: SignatureHelpParams,
     ) -> LspResult<Option<SignatureHelp>> {
         request::handle_signature_help(self, params).await
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> LspResult<Option<Vec<CodeActionOrCommand>>> {
+        request::handle_code_actions(self, params).await
     }
 
     async fn semantic_tokens_full(

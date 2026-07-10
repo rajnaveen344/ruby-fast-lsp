@@ -95,7 +95,6 @@ Verified gaps worth tracking:
 
 | Gap | Current state | Why it matters |
 | --- | --- | --- |
-| Code actions / quick fixes | No `code_action` capability/provider. | Diagnostics cannot offer structured fixes. |
 | Cross-file symbol rename | `rename` is implemented for local variables and method parameters only. | Project-wide class/module/method/constant renames still need explicit design. |
 
 Do not treat old feature matrices as source of truth. Before adding a feature
@@ -112,6 +111,12 @@ They run on document open and save, consume the current buffer over stdin, merge
 with semantic diagnostics, and stay out of the `didChange` typing path. The
 server accepts a structured command argv and isolates startup failures, invalid
 output, abnormal exits, and timeouts from analysis state.
+
+Safe linter code actions are implemented as preferred `quickfix` actions for
+correctable RuboCop/Standard diagnostics. They run against the current buffer,
+use RuboCop `--autocorrect` or Standard `--fix`, and return a full-document
+workspace edit only when corrected output differs. Unsafe RuboCop fixes and
+failed/empty correction output never become edits.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

@@ -129,6 +129,10 @@ structured argv array—no shell parsing is performed:
 
 Linter failures and timeouts are logged without replacing syntax or semantic
 diagnostics. A successful lint report is merged with Ruby Fast LSP diagnostics.
+Correctable offenses offer a preferred `Quick Fix` that runs RuboCop's safe
+`--autocorrect` mode or Standard's safe `--fix` mode against the current buffer
+and returns an editor-applied document edit. Unsafe RuboCop corrections are not
+applied.
 
 ## See Also
 

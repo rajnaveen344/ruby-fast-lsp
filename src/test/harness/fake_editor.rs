@@ -50,14 +50,14 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
-    CodeLens, CodeLensParams, CompletionContext, CompletionItem, CompletionParams,
-    CompletionResponse, CompletionTriggerKind, Diagnostic, DiagnosticSeverity,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
-    InlayHintParams, Location, NumberOrString, PartialResultParams, Position, Range,
-    ReferenceContext, ReferenceParams, RenameParams, SignatureHelp, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams,
+    CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTriggerKind,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams,
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString, PartialResultParams,
+    Position, Range, ReferenceContext, ReferenceParams, RenameParams, SignatureHelp,
+    SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
     WorkspaceEdit,
 };
@@ -543,6 +543,31 @@ impl FakeEditor {
         };
         self.server
             .code_lens(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    pub async fn code_actions(
+        &self,
+        filename: &str,
+        diagnostics: Vec<Diagnostic>,
+    ) -> Vec<CodeActionOrCommand> {
+        self.assert_open(filename, "code_actions");
+        let uri = Self::filename_to_uri(filename);
+        self.server
+            .code_action(CodeActionParams {
+                text_document: TextDocumentIdentifier { uri },
+                range: Range::default(),
+                context: CodeActionContext {
+                    diagnostics,
+                    only: Some(vec![tower_lsp::lsp_types::CodeActionKind::QUICKFIX]),
+                    trigger_kind: None,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
             .await
             .ok()
             .flatten()
