@@ -117,6 +117,8 @@ pub struct RubyLanguageServer {
     /// The process ID of the parent process (VS Code extension host).
     /// Used to detect when the parent process dies so we can exit cleanly.
     pub parent_process_id: Arc<Mutex<Option<u32>>>,
+    #[cfg(test)]
+    published_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
 }
 
 impl RubyLanguageServer {
@@ -134,6 +136,8 @@ impl RubyLanguageServer {
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -263,9 +267,22 @@ impl RubyLanguageServer {
 
     /// Publish diagnostics for a document
     pub async fn publish_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) {
+        #[cfg(test)]
+        self.published_diagnostics
+            .lock()
+            .insert(uri.clone(), diagnostics.clone());
         if let Some(client) = &self.client {
             let _ = client.publish_diagnostics(uri, diagnostics, None).await;
         }
+    }
+
+    #[cfg(test)]
+    pub fn last_published_diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
+        self.published_diagnostics
+            .lock()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Request the client to refresh inlay hints
@@ -387,6 +404,8 @@ impl Default for RubyLanguageServer {
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
             parent_process_id: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
             extension_registry: ExtensionRegistryHandle::from_environment(),
         }
     }

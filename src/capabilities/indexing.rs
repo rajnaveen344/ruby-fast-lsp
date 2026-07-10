@@ -1,5 +1,6 @@
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
+use crate::linter::lint_document;
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
 use ruby_analysis::core::SourceKind;
@@ -7,8 +8,9 @@ use ruby_analysis::indexer::RubyDocument;
 
 use log::{debug, info};
 use parking_lot::RwLock;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 
 fn process_interactive_file(
@@ -120,6 +122,7 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let diag_start = Instant::now();
     let query = EngineQuery::with_engine(server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
     let diag_count = diagnostics.len();
     let diag_elapsed = diag_start.elapsed();
     let publish_start = Instant::now();
@@ -329,6 +332,7 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
     // Add unresolved diagnostics from the analysis engine.
     let query = EngineQuery::with_engine(server.analysis_engine.clone());
     diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+    append_external_linter_diagnostics(server, &uri, &content, &mut diagnostics).await;
     server.publish_diagnostics(uri.clone(), diagnostics).await;
 
     // Publish diagnostics for files affected by removed definitions
@@ -343,6 +347,48 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
 
     // Request the client to refresh inlay hints after save
     server.refresh_inlay_hints().await;
+}
+
+async fn append_external_linter_diagnostics(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    content: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let config = server.config.lock().clone();
+    if config.linter == crate::config::LinterKind::None {
+        return;
+    }
+    let Ok(file_path) = uri.to_file_path() else {
+        log::warn!(
+            "Skipping {} diagnostics for non-file URI {}",
+            config.linter.data_name().unwrap_or("external linter"),
+            uri
+        );
+        return;
+    };
+    let workspace_root = server
+        .workspace_for_uri(uri)
+        .map(|workspace| workspace.root_path)
+        .or_else(|| file_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| Path::new(".").to_path_buf());
+
+    match lint_document(
+        &config,
+        &workspace_root,
+        &file_path,
+        content,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(linter_diagnostics) => diagnostics.extend(linter_diagnostics),
+        Err(error) => log::warn!(
+            "External linter diagnostics unavailable for {}: {error:#}. \
+             Check rubyFastLsp.linterCommand and the workspace bundle.",
+            file_path.display()
+        ),
+    }
 }
 
 pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextDocumentParams) {

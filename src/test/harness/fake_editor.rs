@@ -255,6 +255,11 @@ impl FakeEditor {
         &self.server
     }
 
+    pub fn published_diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
+        let uri = Self::filename_to_uri(filename);
+        self.server.last_published_diagnostics(&uri)
+    }
+
     /// Consume the editor and return the underlying server.
     pub fn into_server(self) -> RubyLanguageServer {
         self.server

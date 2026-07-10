@@ -109,6 +109,27 @@ ruby-fast-lsp --stdio
 
 Configure your editor's LSP client to connect via stdio with language ID `ruby`.
 
+## RuboCop and Standard diagnostics
+
+External lint diagnostics are opt-in and run when a Ruby document is opened or
+saved. They never run in the `didChange` typing path. In VS Code, set
+`rubyFastLsp.linter` to `rubocop` or `standard`.
+
+By default the server executes `bundle exec rubocop` or
+`bundle exec standardrb` in the workspace root and sends the current editor
+buffer over stdin. To use a binstub or another Ruby environment, configure a
+structured argv array—no shell parsing is performed:
+
+```json
+{
+  "rubyFastLsp.linter": "rubocop",
+  "rubyFastLsp.linterCommand": ["bin/rubocop"]
+}
+```
+
+Linter failures and timeouts are logged without replacing syntax or semantic
+diagnostics. A successful lint report is merged with Ruby Fast LSP diagnostics.
+
 ## See Also
 
 - [Ruby Fast Cop](https://github.com/rajnaveen344/ruby-fast-cop) - A high-performance Ruby linter written in Rust, designed as a companion to Ruby Fast LSP.

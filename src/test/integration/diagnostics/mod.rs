@@ -2,6 +2,7 @@
 
 mod bad_splat;
 mod expr_receiver_unresolved;
+mod external_linter;
 mod inconsistent_return;
 mod missing_kwarg;
 mod misspelled_method;

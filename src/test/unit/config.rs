@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::RubyFastLspConfig;
+    use crate::config::{LinterKind, RubyFastLspConfig};
     use serde_json::json;
 
     #[test]
@@ -8,6 +8,20 @@ mod tests {
         let config = RubyFastLspConfig::default();
 
         assert_eq!(config.ruby_version, "auto");
+        assert_eq!(config.linter, LinterKind::None);
+        assert!(config.linter_command.is_empty());
+    }
+
+    #[test]
+    fn test_linter_configuration_deserialization() {
+        let config: RubyFastLspConfig = serde_json::from_value(json!({
+            "linter": "standard",
+            "linterCommand": ["bundle", "exec", "standardrb"]
+        }))
+        .unwrap();
+
+        assert_eq!(config.linter, LinterKind::Standard);
+        assert_eq!(config.linter_command, vec!["bundle", "exec", "standardrb"]);
     }
 
     #[test]

@@ -89,7 +89,10 @@ Priority order:
 1. Done: signature help using engine method facts, cross-file YARD metadata,
    and RBS overload signatures, including visibility/MRO resolution, nested
    calls, variadic and keyword selection, and edit/reindex lifecycle coverage.
-2. RuboCop and Standard diagnostics integration.
+2. Done: opt-in RuboCop and Standard diagnostics integration on document open
+   and save, using current-buffer stdin, workspace-aware configuration,
+   structured command argv, JSON diagnostics with UTF-16 position conversion,
+   timeout/failure isolation, and VS Code settings.
 3. Code actions for safe linter fixes.
 4. Cross-file constant, class, and module rename with prepare-rename support.
 5. Document highlights.
@@ -367,3 +370,30 @@ At the end of every goal session, record:
 - Any regression or compatibility risk discovered.
 - The next highest-priority incomplete item.
 - Whether the category ratings or overall rating genuinely changed.
+
+## Progress Evidence
+
+### July 2026: External lint diagnostics
+
+- User-visible: RuboCop and Standard offenses are merged with Ruby Fast LSP
+  diagnostics on document open and save; the external process never runs during
+  `didChange`.
+- Configuration: `rubyFastLsp.linter` selects `none`, `rubocop`, or `standard`;
+  `rubyFastLsp.linterCommand` optionally supplies a structured argv such as
+  `["bin/rubocop"]`.
+- Correctness: RuboCop parser byte columns are converted to LSP UTF-16 positions,
+  including multibyte source lines.
+- Isolation: missing commands, abnormal exits, malformed JSON, and ten-second
+  timeouts are logged without discarding syntax or semantic diagnostics.
+- Focused evidence: runner/parser tests cover stdin, argv, working directory,
+  exit status 1, Standard attribution, malformed output, timeout, and UTF-16
+  conversion; lifecycle tests cover open/change/save and semantic-diagnostic
+  preservation on linter failure.
+- Next priority: safe RuboCop/Standard code actions using the correctability
+  metadata already attached to diagnostics.
+- Packaging risk unchanged: the local gate still emits a `0.2.3` VSIX while
+  Cargo is `0.2.6`, and npm audit reports one moderate and one high dependency
+  vulnerability. These remain explicit Packaging Completion blockers.
+- Rating: the overall baseline remains 6.5/10 until code actions and the rest of
+  Milestone 1 close a broader daily-workflow gap; no score increase is claimed
+  for this isolated capability.

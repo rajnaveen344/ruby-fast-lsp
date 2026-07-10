@@ -2,6 +2,42 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LinterKind {
+    #[default]
+    None,
+    #[serde(rename = "rubocop")]
+    RuboCop,
+    Standard,
+}
+
+impl LinterKind {
+    pub fn executable(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RuboCop => Some("rubocop"),
+            Self::Standard => Some("standardrb"),
+        }
+    }
+
+    pub fn diagnostic_source(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RuboCop => Some("RuboCop"),
+            Self::Standard => Some("Standard"),
+        }
+    }
+
+    pub fn data_name(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RuboCop => Some("rubocop"),
+            Self::Standard => Some("standard"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RubyFastLspConfig {
@@ -25,6 +61,14 @@ pub struct RubyFastLspConfig {
 
     #[serde(rename = "logLevel")]
     pub log_level: String,
+
+    /// Optional external linter. It runs on document open and save, never in
+    /// the didChange typing path.
+    pub linter: LinterKind,
+
+    /// Structured command argv. Empty uses `bundle exec <linter>`.
+    #[serde(rename = "linterCommand")]
+    pub linter_command: Vec<String>,
 }
 
 impl Default for RubyFastLspConfig {
@@ -37,6 +81,8 @@ impl Default for RubyFastLspConfig {
             extension_settings: BTreeMap::new(),
             code_lens_modules_enabled: Some(true),
             log_level: "info".to_string(),
+            linter: LinterKind::None,
+            linter_command: Vec::new(),
         }
     }
 }

@@ -684,7 +684,9 @@ function activate(context) {
             stubsPath: config.get('stubsPath', ''),
             extensionPath: context.extensionPath,
             extensionPackages,
-            extensionDirs: []
+            extensionDirs: [],
+            linter: config.get('linter', 'none'),
+            linterCommand: config.get('linterCommand', [])
         },
         outputChannel: outputChannel
     };
@@ -737,6 +739,8 @@ function activate(context) {
                                 rubyVersion: newConfig.get('rubyVersion', 'auto'),
                                 stubsPath: newConfig.get('stubsPath', ''),
                                 logLevel: newConfig.get('logLevel', 'info'),
+                                linter: newConfig.get('linter', 'none'),
+                                linterCommand: newConfig.get('linterCommand', []),
                                 extensionPackages,
                                 extensionDirs: []
                             }

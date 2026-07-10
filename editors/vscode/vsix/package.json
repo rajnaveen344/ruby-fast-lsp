@@ -107,6 +107,20 @@
             "Development - per-node operations, very verbose (not for normal use)"
           ]
         },
+        "rubyFastLsp.linter": {
+          "type": "string",
+          "enum": ["none", "rubocop", "standard"],
+          "default": "none",
+          "description": "Run RuboCop or Standard diagnostics when a Ruby document is opened or saved. External linters never run while typing."
+        },
+        "rubyFastLsp.linterCommand": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Optional linter command and arguments as an argv array, for example [\"bin/rubocop\"]. Empty uses bundle exec rubocop or bundle exec standardrb."
+        },
         "rubyFastLsp.showExternalTypes": {
           "type": "boolean",
           "default": false,
