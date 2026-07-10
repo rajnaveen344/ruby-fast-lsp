@@ -57,10 +57,10 @@ use tower_lsp::lsp_types::{
     DocumentHighlightParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
     InlayHintParams, Location, NumberOrString, PartialResultParams, Position,
-    PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams, SignatureHelp,
-    SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceEdit,
+    PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams, SelectionRange,
+    SelectionRangeParams, SignatureHelp, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -533,6 +533,29 @@ impl FakeEditor {
         };
         self.server
             .document_highlight(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns one nested selection chain per requested position.
+    pub async fn selection_ranges(
+        &self,
+        filename: &str,
+        positions: &[Position],
+    ) -> Vec<SelectionRange> {
+        self.assert_open(filename, "selection_ranges");
+        let params = SelectionRangeParams {
+            text_document: TextDocumentIdentifier {
+                uri: Self::filename_to_uri(filename),
+            },
+            positions: positions.to_vec(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        self.server
+            .selection_range(params)
             .await
             .ok()
             .flatten()

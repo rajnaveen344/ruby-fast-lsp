@@ -30,11 +30,11 @@ use tower_lsp::lsp_types::{
     DocumentHighlightParams, DocumentOnTypeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
     GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, InlayHintParams,
-    Location, PrepareRenameResponse, ReferenceParams, RenameParams, SemanticTokensParams,
-    SemanticTokensResult, SignatureHelp, SignatureHelpParams, SymbolInformation,
-    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkspaceEdit,
-    WorkspaceSymbolParams,
+    Location, PrepareRenameResponse, ReferenceParams, RenameParams, SelectionRange,
+    SelectionRangeParams, SemanticTokensParams, SemanticTokensResult, SignatureHelp,
+    SignatureHelpParams, SymbolInformation, TextDocumentPositionParams, TextEdit,
+    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Url, WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -568,6 +568,13 @@ impl LanguageServer for RubyLanguageServer {
         params: DocumentHighlightParams,
     ) -> LspResult<Option<Vec<DocumentHighlight>>> {
         request::handle_document_highlight(self, params).await
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> LspResult<Option<Vec<SelectionRange>>> {
+        request::handle_selection_ranges(self, params).await
     }
 
     async fn signature_help(

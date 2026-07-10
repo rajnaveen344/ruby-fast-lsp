@@ -16,6 +16,7 @@ pub mod inlay_hints;
 pub mod namespace_tree;
 pub mod references;
 pub mod rename;
+pub mod selection_ranges;
 pub mod semantic_tokens;
 pub mod signature_help;
 pub mod type_hierarchy;

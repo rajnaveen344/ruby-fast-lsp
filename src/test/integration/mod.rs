@@ -16,6 +16,7 @@ mod inlay_hints;
 mod mixins;
 mod references;
 mod rename;
+mod selection_ranges;
 mod signature_help;
 mod type_hierarchy;
 

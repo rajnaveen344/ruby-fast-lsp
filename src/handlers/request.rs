@@ -6,8 +6,8 @@
 use crate::capabilities::{
     call_hierarchy, code_actions, code_lens, completion, debug, definitions, document_highlights,
     document_symbols, folding_range, formatting, hover, implementation, inlay_hints,
-    namespace_tree, references, rename, semantic_tokens, signature_help, type_hierarchy,
-    workspace_symbols,
+    namespace_tree, references, rename, selection_ranges, semantic_tokens, signature_help,
+    type_hierarchy, workspace_symbols,
 };
 use crate::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
@@ -85,6 +85,13 @@ pub async fn handle_document_highlight(
     let uri = params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
     Ok(document_highlights::find_document_highlights(lang_server, &uri, position).await)
+}
+
+pub async fn handle_selection_ranges(
+    lang_server: &RubyLanguageServer,
+    params: SelectionRangeParams,
+) -> LspResult<Option<Vec<SelectionRange>>> {
+    Ok(selection_ranges::handle_selection_ranges(lang_server, params).await)
 }
 
 pub async fn handle_signature_help(

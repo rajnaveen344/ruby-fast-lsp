@@ -130,6 +130,11 @@ existing semantic references query. They support constants, methods, and local
 variables, refresh after edits, and intentionally do not introduce a separate
 symbol-resolution policy.
 
+Selection ranges are collected in `ruby-analysis::indexer` from Prism token and
+AST containment ranges, then converted to nested LSP responses in `src/`. The
+collector supports multiple positions, malformed and empty buffers, UTF-16
+positions, and current unsaved document content.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

@@ -19,6 +19,7 @@ pub mod receiver_resolution;
 pub mod rename;
 mod ruby_document;
 mod scope_tracker;
+mod selection_ranges;
 pub mod semantic_tokens;
 mod source_document;
 mod variable_scopes;
@@ -40,6 +41,7 @@ pub use scope_tracker::{
     build_constant_path_name, collect_namespaces, get_method_namespace_kind, mixin_ref_from_node,
     utf8_str, LocalScopeKind, MixinRef, ScopeFrame, ScopeTracker,
 };
+pub use selection_ranges::selection_range_chains;
 pub use semantic_tokens::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
 pub use source_document::SourceDocument;
 pub use variable_scopes::{

@@ -103,7 +103,9 @@ Priority order:
 5. Done: document highlights for constants, methods, and locals, composed from
    centralized semantic references, filtered to the current document, and
    covered through edit/reindex lifecycle tests.
-6. Selection ranges.
+6. Done: syntax-aware selection ranges from identifier/message tokens through
+   expressions, statements, and enclosing scopes, with multi-position,
+   malformed-buffer, UTF-16, and edit lifecycle coverage.
 7. Index include/exclude and dependency configuration.
 8. Full-document formatting through external formatter integration.
 
@@ -469,3 +471,22 @@ At the end of every goal session, record:
 - Next priority: selection ranges.
 - Rating remains **6.8/10**. Highlights close a useful editor-polish gap but are
   too small alone to justify another overall score increase.
+
+### July 2026: Selection ranges
+
+- User-visible: expand/shrink selection follows Ruby syntax from call messages
+  and identifier tokens through chained expressions, assignments, statements,
+  methods, and the file scope.
+- Correctness: one nested response is returned for each requested position in
+  input order; parent ranges strictly contain children. Empty and malformed
+  buffers return valid fallbacks, and non-BMP text uses LSP UTF-16 positions.
+- Architecture: generic Prism branch/leaf traversal and token refinement live
+  in `ruby-analysis::indexer`; the server adapter only converts domain
+  `TextRange` chains to nested LSP `SelectionRange` values.
+- Integration evidence: initialization advertises `selectionRange`; focused
+  tests cover chained calls, multiple positions, strict nesting, malformed and
+  empty documents, emoji, and current-buffer refresh after `didChange`.
+- Next priority: index include/exclude and dependency configuration.
+- Rating remains **6.8/10**. Selection ranges complete another editor workflow,
+  but indexing configuration and full-document formatting still gate Milestone
+  1 completeness.
