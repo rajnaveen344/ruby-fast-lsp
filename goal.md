@@ -2,7 +2,7 @@
 
 ## Reusable Goal Text
 
-Elevate Ruby Fast LSP from its current estimated 6.5/10 completeness to a 9/10 direct competitor to Shopify Ruby LSP. Preserve Ruby Fast LSP's advantages in semantic analysis, method navigation, references, RBS/YARD inference, deterministic simulation, Rust performance, agent-first APIs, and sandboxed extensions while closing the everyday editor, Rails, template, packaging, and production-confidence gaps. Work incrementally with strict TDD, keep the simulator as the primary comprehensive semantic verification system, run the complete local pre-push verification gate before every commit or push, and update this document whenever scope or measured readiness changes.
+Elevate Ruby Fast LSP from its current estimated 6.5/10 completeness to a 9/10 direct competitor to Shopify Ruby LSP. Preserve Ruby Fast LSP's advantages in semantic analysis, method navigation, references, RBS/YARD inference, deterministic simulation, Rust performance, agent-first APIs, and sandboxed extensions while closing the everyday editor, Rails, template, packaging, and production-confidence gaps. Complete the versioned, deterministic, permission-bounded, and failure-isolated extension architecture before broad framework expansion; RSpec must use its public contracts as the reference implementation, and Rails and third-party extensions must use those same contracts without privileged access to engine stores or LSP server state. Work incrementally with strict TDD, keep the simulator as the primary comprehensive semantic verification system, run the complete local pre-push verification gate before every commit or push, and update this document whenever scope or measured readiness changes.
 
 ## Product Definition
 
