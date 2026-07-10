@@ -381,6 +381,7 @@ fn lookup_owner_for_call(call: &super::ruby_gen::CallSite) -> Option<FullyQualif
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
         | CallShape::BareInProc
+        | CallShape::FrameworkRouteBlock
         | CallShape::Super => Some(instance_namespace(&call.caller.owner)),
         CallShape::LocalVar { .. }
         | CallShape::Ivar { .. }

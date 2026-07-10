@@ -90,6 +90,7 @@ pub enum CallShape {
     BareInBraceBlock,
     BareInLambda,
     BareInProc,
+    FrameworkRouteBlock,
     Super,
     LocalVar {
         name: String,
@@ -171,6 +172,7 @@ impl CallShape {
             CallShape::BareInBraceBlock => "bare-brace-block",
             CallShape::BareInLambda => "bare-lambda",
             CallShape::BareInProc => "bare-proc",
+            CallShape::FrameworkRouteBlock => "framework-route-block",
             CallShape::Super => "super",
             CallShape::LocalVar { .. } => "local",
             CallShape::Ivar { .. } => "ivar",
@@ -436,6 +438,7 @@ pub struct NamespaceSpec {
     pub aliases: Vec<AliasSpec>,
     pub delegates: Vec<DelegateSpec>,
     pub class_attributes: Vec<ClassAttributeSpec>,
+    pub route_calls: Vec<CallSpec>,
 }
 
 impl NamespaceSpec {
@@ -462,6 +465,7 @@ impl NamespaceSpec {
             aliases: Vec::new(),
             delegates: Vec::new(),
             class_attributes: Vec::new(),
+            route_calls: Vec::new(),
         }
     }
 
@@ -668,6 +672,14 @@ impl<'a> NamespaceBuilder<'a> {
         self.namespace.class_attributes.push(ClassAttributeSpec {
             name: name.to_string(),
             enabled: true,
+        });
+        self
+    }
+
+    pub fn route_call(&mut self, target: &str) -> &mut Self {
+        self.namespace.route_calls.push(CallSpec {
+            target: MethodTarget::parse(target),
+            shape: CallShape::FrameworkRouteBlock,
         });
         self
     }

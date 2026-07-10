@@ -90,10 +90,6 @@ impl<'a> AnalysisQuery<'a> {
             if !allow_private && private_method_in_chain(self.engine, &ancestor_chain, method) {
                 return Some(vec![receiver_only_callee(namespace_fqn.clone(), method)]);
             }
-            if let Some(callee) = method_missing_callee_in_chain(self.engine, &ancestor_chain) {
-                return Some(vec![callee]);
-            }
-
             let includers = module_includers(self.engine, namespace_fqn);
             if includers.is_empty() {
                 vec![namespace_fqn.clone()]
@@ -917,7 +913,7 @@ pub(super) fn method_lookup_chain(
         if fqn.namespace_parts().is_empty() {
             let mut chain = Vec::new();
             let mut visited = std::collections::HashSet::new();
-            build_mro(engine, fqn, &mut chain, &mut visited);
+            append_top_level_instance_fallback(engine, &mut chain, &mut visited);
             if chain.is_empty() {
                 chain.push(fqn.clone());
             }
@@ -941,12 +937,42 @@ pub(super) fn method_lookup_chain(
             Vec::new(),
             crate::core::NamespaceKind::Instance,
         );
-        if !chain.contains(&root) && !fqn.namespace_parts().is_empty() {
-            chain.push(root);
+        if !chain.contains(&root)
+            && !fqn.namespace_parts().is_empty()
+            && (is_module_instance_namespace(engine, fqn)
+                || fqn.namespace_kind() == Some(crate::core::NamespaceKind::Singleton))
+        {
+            append_top_level_instance_fallback(engine, &mut chain, &mut visited);
         }
 
         chain
     }
+}
+
+fn append_top_level_instance_fallback(
+    engine: &crate::AnalysisEngine,
+    chain: &mut Vec<FullyQualifiedName>,
+    visited: &mut std::collections::HashSet<FullyQualifiedName>,
+) {
+    let root =
+        FullyQualifiedName::namespace_with_kind(Vec::new(), crate::core::NamespaceKind::Instance);
+    build_mro(engine, &root, chain, visited);
+
+    let object_fqn = top_level_object_instance_fqn();
+    if !engine.graph_nodes_for(&object_fqn).is_empty() {
+        build_mro(engine, &object_fqn, chain, visited);
+    }
+}
+
+fn top_level_object_instance_fqn() -> FullyQualifiedName {
+    FullyQualifiedName::namespace_with_kind(
+        vec![RubyConstant::new("Object").expect(
+            "INVARIANT VIOLATED: `Object` is not a valid Ruby constant. \
+             This is a bug because Ruby core class names must be valid constants. \
+             Fix: inspect RubyConstant validation.",
+        )],
+        crate::core::NamespaceKind::Instance,
+    )
 }
 
 fn build_mro(

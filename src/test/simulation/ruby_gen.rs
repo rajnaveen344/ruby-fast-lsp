@@ -333,6 +333,10 @@ impl FileRenderer {
             self.push_line(leaf_depth + 1, "extend ActiveSupport::Concern");
         }
 
+        for route_call in &namespace.route_calls {
+            self.render_route_call(namespace, route_call, leaf_depth + 1);
+        }
+
         if namespace
             .included_hook_extends
             .iter()
@@ -1435,6 +1439,12 @@ impl FileRenderer {
                 self.record_call(caller, target, shape, depth, receiver);
                 self.push_line(depth, &format!("{}{} }}", receiver, target.name));
             }
+            CallShape::FrameworkRouteBlock => {
+                self.push_line(depth, "get \"/synthetic\" do");
+                self.record_call(caller, target, shape, depth + 1, "");
+                self.push_line(depth + 1, &target.name);
+                self.push_line(depth, "end");
+            }
             CallShape::Super => {
                 self.record_call(caller, target, shape, depth, "");
                 self.push_line(depth, "super");
@@ -1523,6 +1533,20 @@ impl FileRenderer {
                 self.push_line(depth, "end");
             }
         }
+    }
+
+    fn render_route_call(
+        &mut self,
+        namespace: &NamespaceSpec,
+        call: &super::graph::CallSpec,
+        depth: usize,
+    ) {
+        let caller = MethodTarget {
+            owner: namespace.fqn.clone(),
+            name: "__sim_route__".to_string(),
+            kind: MethodKind::Instance,
+        };
+        self.render_call(&caller, &call.target, &call.shape, depth);
     }
 
     fn record_call(
@@ -1622,6 +1646,7 @@ fn method_definition_support(shape: &CallShape) -> OracleSupport {
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
         | CallShape::BareInProc
+        | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }
         | CallShape::Ivar { .. }
@@ -1645,6 +1670,7 @@ fn method_reference_support(shape: &CallShape) -> OracleSupport {
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
         | CallShape::BareInProc
+        | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }
         | CallShape::Ivar { .. }
@@ -1668,6 +1694,7 @@ fn method_hover_support(shape: &CallShape) -> OracleSupport {
         | CallShape::BareInBraceBlock
         | CallShape::BareInLambda
         | CallShape::BareInProc
+        | CallShape::FrameworkRouteBlock
         | CallShape::Super
         | CallShape::LocalVar { .. }
         | CallShape::Ivar { .. }

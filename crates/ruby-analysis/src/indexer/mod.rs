@@ -46,3 +46,10 @@ pub use variable_scopes::{
     CaptureRef, LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
     VariableNode, VariableScopes,
 };
+
+pub fn is_framework_instance_block_call_name(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"get" | b"post" | b"put" | b"patch" | b"delete" | b"options" | b"head"
+    )
+}

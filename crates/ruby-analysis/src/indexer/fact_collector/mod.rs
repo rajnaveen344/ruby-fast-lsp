@@ -1761,7 +1761,17 @@ impl Visit<'_> for FactCollector {
             if let Some(block) = node.block() {
                 let block_param_types = self.infer_block_param_types_for_call(node);
                 self.block_param_type_stack.push(block_param_types);
+                let framework_instance_block =
+                    crate::is_framework_instance_block_call_name(node.name().as_slice())
+                        && node.receiver().is_none();
+                if framework_instance_block {
+                    self.scope_tracker
+                        .push_scope_kind(crate::LocalScopeKind::FrameworkInstanceBlock);
+                }
                 self.visit(&block);
+                if framework_instance_block {
+                    self.scope_tracker.pop_scope_kind();
+                }
                 self.block_param_type_stack.pop().expect(
                     "INVARIANT VIOLATED: block parameter type stack underflow after call block. \
                      This is a bug because each pushed block type frame must be popped exactly once. \

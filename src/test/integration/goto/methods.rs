@@ -189,6 +189,66 @@ end
 }
 
 #[tokio::test]
+async fn goto_helper_method_from_framework_route_block() {
+    let mut editor = FakeEditor::new().await;
+    editor
+        .open(
+            "commerce.rb",
+            r#"module App
+  module API
+    module Commerce
+      def fetch_credits
+        []
+      end
+    end
+  end
+end
+"#,
+        )
+        .await;
+    editor
+        .open(
+            "api.rb",
+            r#"module App
+  module API
+    include App::API::Commerce
+  end
+end
+"#,
+        )
+        .await;
+    editor
+        .open(
+            "base_app.rb",
+            r#"class BaseApp
+  helpers do
+    include App::API
+  end
+end
+"#,
+        )
+        .await;
+    editor
+        .open(
+            "admin_app.rb",
+            r#"class AdminApp < BaseApp
+  get "/credits" do
+    fetch_credits
+  end
+end
+"#,
+        )
+        .await;
+
+    let defs = editor.goto_def_at("admin_app.rb", 2, 8).await;
+    assert!(
+        defs.iter()
+            .any(|loc| loc.uri.path().ends_with("/commerce.rb")),
+        "route block helper call should resolve to included API method, got {defs:?}"
+    );
+}
+
+#[tokio::test]
 async fn goto_explicit_receiver_private_method_does_not_resolve() {
     let mut editor = FakeEditor::new().await;
     editor

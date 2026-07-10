@@ -227,6 +227,19 @@ impl Visit<'_> for IdentifierVisitor {
                 self.visit(&block);
                 self.scope_tracker.pop_ns_scope();
             }
+        } else if crate::is_framework_instance_block_call_name(node.name().as_slice())
+            && node.receiver().is_none()
+            && node.block().is_some()
+        {
+            if let Some(arguments) = node.arguments() {
+                self.visit_arguments_node(&arguments);
+            }
+            if let Some(block) = node.block() {
+                self.scope_tracker
+                    .push_scope_kind(crate::LocalScopeKind::FrameworkInstanceBlock);
+                self.visit(&block);
+                self.scope_tracker.pop_scope_kind();
+            }
         } else {
             visit_call_node(self, node);
         }

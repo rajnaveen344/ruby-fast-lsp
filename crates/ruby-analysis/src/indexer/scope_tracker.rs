@@ -13,6 +13,7 @@ pub enum LocalScopeKind {
     InstanceMethod,
     ClassMethod,
     Block,
+    FrameworkInstanceBlock,
     Rescue,
     ExplicitBlockLocal,
 }
@@ -33,6 +34,7 @@ impl fmt::Display for LocalScopeKind {
             LocalScopeKind::InstanceMethod => write!(f, "InstanceMethod"),
             LocalScopeKind::ClassMethod => write!(f, "ClassMethod"),
             LocalScopeKind::Block => write!(f, "Block"),
+            LocalScopeKind::FrameworkInstanceBlock => write!(f, "FrameworkInstanceBlock"),
             LocalScopeKind::Rescue => write!(f, "Rescue"),
             LocalScopeKind::ExplicitBlockLocal => write!(f, "ExplicitBlockLocal"),
         }
@@ -211,6 +213,7 @@ impl ScopeTracker {
             match kind {
                 LocalScopeKind::InstanceMethod => return NamespaceKind::Instance,
                 LocalScopeKind::ClassMethod => return NamespaceKind::Singleton,
+                LocalScopeKind::FrameworkInstanceBlock => return NamespaceKind::Instance,
                 LocalScopeKind::Constant => break,
                 LocalScopeKind::Block
                 | LocalScopeKind::Rescue
@@ -230,6 +233,7 @@ impl ScopeTracker {
             match kind {
                 LocalScopeKind::InstanceMethod => return NamespaceKind::Instance,
                 LocalScopeKind::ClassMethod => return NamespaceKind::Singleton,
+                LocalScopeKind::FrameworkInstanceBlock => return NamespaceKind::Instance,
                 LocalScopeKind::Constant => break,
                 LocalScopeKind::Block
                 | LocalScopeKind::Rescue

@@ -44,7 +44,8 @@ impl<'a> OracleState<'a> {
             | CallShape::BareInDoBlock
             | CallShape::BareInBraceBlock
             | CallShape::BareInLambda
-            | CallShape::BareInProc => {
+            | CallShape::BareInProc
+            | CallShape::FrameworkRouteBlock => {
                 self.resolve_instance_method(&call.caller.owner, &call.target.name)
             }
             CallShape::Super => self.resolve_super_method(&call.caller.owner, &call.target.name),

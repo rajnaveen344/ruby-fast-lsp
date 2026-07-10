@@ -172,6 +172,108 @@ end
 }
 
 #[tokio::test]
+async fn top_level_kernel_methods_do_not_warn_when_object_includes_kernel() {
+    check_multi_file(&[
+        (
+            "boot.rb",
+            r#"
+<warn none code="unresolved-method">require "json"</warn>
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def require(name)
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn instance_kernel_exception_methods_do_not_warn_when_object_includes_kernel() {
+    check_multi_file(&[
+        (
+            "processor.rb",
+            r#"
+class Processor
+  def run
+    <warn none code="unresolved-method">raise "bad"</warn>
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def raise(*args)
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn module_instance_kernel_methods_do_not_warn_when_object_includes_kernel() {
+    check_multi_file(&[
+        (
+            "feature.rb",
+            r#"
+module Feature
+  def run
+    <warn none code="unresolved-method">raise "bad"</warn>
+    <warn none code="unresolved-method">__method__</warn>
+  end
+end
+"#,
+        ),
+        (
+            "kernel.rb",
+            r#"
+module Kernel
+  def raise(*args)
+  end
+
+  def __method__
+  end
+end
+"#,
+        ),
+        (
+            "object.rb",
+            r#"
+class Object
+  include Kernel
+end
+"#,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
 async fn bare_kernel_method_in_nested_class_uses_implicit_object_superclass() {
     check_multi_file(&[
         (
