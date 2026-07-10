@@ -6,7 +6,7 @@
 use crate::capabilities::{
     call_hierarchy, code_lens, completion, debug, definitions, document_symbols, folding_range,
     formatting, hover, implementation, inlay_hints, namespace_tree, references, rename,
-    semantic_tokens, type_hierarchy, workspace_symbols,
+    semantic_tokens, signature_help, type_hierarchy, workspace_symbols,
 };
 use crate::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
@@ -75,6 +75,13 @@ pub async fn handle_references(
     let references = references::find_references_at_position(lang_server, &uri, position).await;
 
     Ok(references)
+}
+
+pub async fn handle_signature_help(
+    lang_server: &RubyLanguageServer,
+    params: SignatureHelpParams,
+) -> LspResult<Option<SignatureHelp>> {
+    Ok(signature_help::handle_signature_help(lang_server, params).await)
 }
 
 pub async fn handle_semantic_tokens_full(

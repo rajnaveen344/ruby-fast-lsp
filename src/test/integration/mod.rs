@@ -15,6 +15,7 @@ mod inlay_hints;
 mod mixins;
 mod references;
 mod rename;
+mod signature_help;
 mod type_hierarchy;
 
 // Domain-specific (YARD type annotations)

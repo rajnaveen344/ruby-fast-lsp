@@ -29,6 +29,7 @@ mod inlay_hints;
 mod method;
 pub mod namespace_tree;
 mod references;
+mod signature_help;
 pub mod type_hierarchy;
 mod workspace_symbols;
 
@@ -37,6 +38,7 @@ pub use hover::HoverInfo;
 pub use inlay_hints::{InlayHintData, InlayHintKind};
 pub use method::{MethodCalleeResolution, MethodInfo, ResolvedMethodCallee};
 pub use ruby_analysis::inference::TypeQuery;
+pub use signature_help::{SignatureData, SignatureHelpData, SignatureParameterData};
 
 use parking_lot::RwLock;
 use ruby_analysis::engine::AnalysisEngine;

@@ -107,6 +107,11 @@ pub async fn handle_initialize(
             }),
             ..CompletionOptions::default()
         }),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        }),
         document_on_type_formatting_provider: Some(
             capabilities::formatting::get_document_on_type_formatting_options(),
         ),

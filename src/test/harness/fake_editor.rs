@@ -56,9 +56,10 @@ use tower_lsp::lsp_types::{
     DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
     InlayHintParams, Location, NumberOrString, PartialResultParams, Position, Range,
-    ReferenceContext, ReferenceParams, RenameParams, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
+    ReferenceContext, ReferenceParams, RenameParams, SignatureHelp, SignatureHelpParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -349,6 +350,26 @@ impl FakeEditor {
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
         self.server.hover(params).await.ok().flatten()
+    }
+
+    /// Returns signature help at a 0-indexed position.
+    pub async fn signature_help_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<SignatureHelp> {
+        self.assert_open(filename, "signature_help_at");
+        let uri = Self::filename_to_uri(filename);
+        let params = SignatureHelpParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            context: None,
+        };
+        self.server.signature_help(params).await.ok().flatten()
     }
 
     /// Returns goto-definition locations at a 0-indexed position.

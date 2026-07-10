@@ -29,9 +29,10 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
     FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
     InitializeResult, InitializedParams, InlayHintParams, Location, ReferenceParams, RenameParams,
-    SemanticTokensParams, SemanticTokensResult, SymbolInformation, TextEdit, TypeHierarchyItem,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
-    WorkspaceEdit, WorkspaceSymbolParams,
+    SemanticTokensParams, SemanticTokensResult, SignatureHelp, SignatureHelpParams,
+    SymbolInformation, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url, WorkspaceEdit,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -539,6 +540,13 @@ impl LanguageServer for RubyLanguageServer {
         info!("[PERF] References completed in {:?}", start_time.elapsed());
 
         result
+    }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> LspResult<Option<SignatureHelp>> {
+        request::handle_signature_help(self, params).await
     }
 
     async fn semantic_tokens_full(

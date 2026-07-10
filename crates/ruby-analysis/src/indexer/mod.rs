@@ -25,7 +25,7 @@ mod variable_scopes;
 pub mod yard;
 
 pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
-pub use analyzer::RubyPrismAnalyzer;
+pub use analyzer::{RubyPrismAnalyzer, SignatureHelpTarget};
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
 pub use hover::{identifier_to_hover_target, HoverTarget};

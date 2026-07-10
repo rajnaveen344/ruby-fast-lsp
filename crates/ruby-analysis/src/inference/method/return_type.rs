@@ -169,6 +169,28 @@ fn rbs_class_names_for_type(ruby_type: &RubyType) -> Vec<String> {
     }
 }
 
+pub fn rbs_method_signatures_for_type(
+    receiver_type: &RubyType,
+    method_name: &str,
+) -> Vec<crate::inference::rbs::RbsMethodSignature> {
+    let is_singleton = matches!(
+        receiver_type,
+        RubyType::ClassReference(_) | RubyType::ModuleReference(_)
+    );
+    let mut signatures = Vec::new();
+    for class_name in rbs_class_names_for_type(receiver_type) {
+        signatures.extend(crate::inference::rbs::get_rbs_method_signatures(
+            &class_name,
+            method_name,
+            is_singleton,
+        ));
+        if !signatures.is_empty() {
+            break;
+        }
+    }
+    signatures
+}
+
 fn rbs_method_return_type(receiver_type: &RubyType, method_name: &str) -> Option<RubyType> {
     match receiver_type {
         RubyType::Class(fqn) | RubyType::Module(fqn) => {

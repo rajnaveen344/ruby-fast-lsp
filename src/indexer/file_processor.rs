@@ -200,7 +200,7 @@ impl FileProcessor {
 
         // 3. Collect facts.
         let direct_facts_seed =
-            collect_direct_facts(server, &node, document.analysis_file_id(), None);
+            collect_direct_facts(server, &node, content, document.analysis_file_id(), None);
         replace_analysis_facts_for_file(
             server,
             document.analysis_file_id(),
@@ -355,7 +355,7 @@ impl FileProcessor {
         let node = parse_result.node();
 
         let direct_facts_seed = if resolve_references {
-            collect_direct_facts(server, &node, analysis_file_id, known_namespaces)
+            collect_direct_facts(server, &node, content, analysis_file_id, known_namespaces)
         } else {
             ruby_analysis::indexer::AnalysisIndex::default()
         };
@@ -460,13 +460,15 @@ struct ExtensionGraphEdge<'a> {
 fn collect_direct_facts(
     server: &RubyLanguageServer,
     node: &ruby_prism::Node<'_>,
+    content: &str,
     file_id: ruby_analysis::core::SourceFileId,
     known_namespaces: Option<&HashSet<FullyQualifiedName>>,
 ) -> ruby_analysis::indexer::AnalysisIndex {
     let known_namespaces = known_namespaces
         .cloned()
         .unwrap_or_else(|| collect_known_namespaces(server));
-    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces).index_node(node)
+    AnalysisIndexer::with_known_namespaces(file_id, known_namespaces)
+        .index_node_with_source(node, content)
 }
 
 fn replace_analysis_facts_for_file(

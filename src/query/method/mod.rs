@@ -20,7 +20,7 @@ use ruby_analysis::core::NamespaceKind;
 use ruby_analysis::core::RubyConstant;
 use ruby_analysis::core::RubyMethod;
 use ruby_analysis::indexer::{
-    resolve_receiver_to_namespace, MethodReceiver, ReceiverResolutionContext,
+    resolve_receiver_to_namespace, resolve_receiver_type, MethodReceiver, ReceiverResolutionContext,
 };
 use ruby_analysis::inference::RubyType;
 use tower_lsp::lsp_types::{Location, Position};
@@ -243,5 +243,31 @@ impl EngineQuery {
         };
 
         resolve_receiver_to_namespace(receiver, &context)
+    }
+
+    pub(crate) fn resolve_receiver_type(
+        &self,
+        receiver: &MethodReceiver,
+        current_namespace: &[RubyConstant],
+        namespace_kind: NamespaceKind,
+        position: Position,
+    ) -> RubyType {
+        let doc_guard = self.doc.as_ref().map(|doc| doc.read());
+        let byte_offset = doc_guard
+            .as_ref()
+            .map(|doc| doc.position_to_analysis_offset(position))
+            .unwrap_or(0);
+        let engine_guard = self.analysis_engine().map(|engine| engine.read());
+        let analysis_query = engine_guard
+            .as_ref()
+            .map(|engine| ruby_analysis::engine::AnalysisQuery::new(engine));
+        let context = ReceiverResolutionContext {
+            query: analysis_query.as_ref(),
+            document: doc_guard.as_deref(),
+            current_namespace,
+            namespace_kind,
+            byte_offset,
+        };
+        resolve_receiver_type(receiver, &context)
     }
 }

@@ -31,6 +31,8 @@ use ruby_prism::{
     SingletonClassNode, Visit,
 };
 
+use super::yard::{YardMethodDoc, YardParser};
+
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisIndex {
     pub symbols: Vec<SymbolFact>,
@@ -57,6 +59,7 @@ pub struct AnalysisIndexer {
     module_function_mode_stack: Vec<bool>,
     visibility_stack: Vec<MethodVisibility>,
     known_namespaces: HashSet<FullyQualifiedName>,
+    source: Option<String>,
     facts: AnalysisIndex,
 }
 
@@ -77,17 +80,25 @@ impl AnalysisIndexer {
             module_function_mode_stack: Vec::new(),
             visibility_stack: vec![MethodVisibility::Public],
             known_namespaces,
+            source: None,
             facts: AnalysisIndex::default(),
         }
     }
 
     pub fn index_source(mut self, source: &str) -> AnalysisIndex {
+        self.source = Some(source.to_string());
         let parse = ruby_prism::parse(source.as_bytes());
         self.visit(&parse.node());
         self.facts
     }
 
     pub fn index_node(mut self, node: &Node<'_>) -> AnalysisIndex {
+        self.visit(node);
+        self.facts
+    }
+
+    pub fn index_node_with_source(mut self, node: &Node<'_>, source: &str) -> AnalysisIndex {
+        self.source = Some(source.to_string());
         self.visit(node);
         self.facts
     }
@@ -934,12 +945,32 @@ impl Visit<'_> for AnalysisIndexer {
         let owner =
             FullyQualifiedName::namespace_with_kind(self.namespace_stack.clone(), owner_kind);
         let range = self.range(&node.location());
-        let params = method_param_facts(node);
+        let yard_doc = self.source.as_deref().and_then(|source| {
+            YardParser::extract_from_source(source, node.location().start_offset())
+        });
+        let params = method_param_facts(node)
+            .into_iter()
+            .map(|param| {
+                let yard_param = yard_doc
+                    .as_ref()
+                    .and_then(|doc| doc.find_param(&param.name));
+                param.with_signature_metadata(
+                    yard_param.and_then(|param| param.format_type()),
+                    yard_param.and_then(|param| param.description.clone()),
+                )
+            })
+            .collect::<Vec<_>>();
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.facts.methods.push(
             MethodFact::with_param_facts(fqn.clone(), owner, range, params.clone())
+                .with_signature_metadata(
+                    yard_doc.as_ref().and_then(|doc| doc.description.clone()),
+                    yard_doc
+                        .as_ref()
+                        .and_then(YardMethodDoc::format_return_type),
+                )
                 .with_visibility(self.current_visibility()),
         );
         if node.receiver().is_none()
@@ -956,6 +987,12 @@ impl Visit<'_> for AnalysisIndexer {
             );
             self.facts.methods.push(
                 MethodFact::with_param_facts(fqn.clone(), owner, range, params)
+                    .with_signature_metadata(
+                        yard_doc.as_ref().and_then(|doc| doc.description.clone()),
+                        yard_doc
+                            .as_ref()
+                            .and_then(YardMethodDoc::format_return_type),
+                    )
                     .with_visibility(self.current_visibility()),
             );
         }

@@ -25,6 +25,8 @@ pub enum MethodVisibility {
 pub struct MethodParamFact {
     pub name: String,
     pub kind: MethodParamKind,
+    pub type_label: Option<String>,
+    pub documentation: Option<String>,
 }
 
 impl MethodParamFact {
@@ -36,7 +38,22 @@ impl MethodParamFact {
              This is a bug because parameter facts must identify a Ruby parameter. \
              Fix: skip anonymous parameters or assign a valid generated name before inserting."
         );
-        Self { name, kind }
+        Self {
+            name,
+            kind,
+            type_label: None,
+            documentation: None,
+        }
+    }
+
+    pub fn with_signature_metadata(
+        mut self,
+        type_label: Option<String>,
+        documentation: Option<String>,
+    ) -> Self {
+        self.type_label = type_label;
+        self.documentation = documentation;
+        self
     }
 }
 
@@ -49,6 +66,8 @@ pub struct MethodFact {
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
+    pub documentation: Option<String>,
+    pub return_type_label: Option<String>,
 }
 
 impl MethodFact {
@@ -61,6 +80,8 @@ impl MethodFact {
             param_facts: Vec::new(),
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            documentation: None,
+            return_type_label: None,
         }
     }
 
@@ -92,6 +113,8 @@ impl MethodFact {
             param_facts,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            documentation: None,
+            return_type_label: None,
         }
     }
 
@@ -109,11 +132,23 @@ impl MethodFact {
             param_facts: Vec::new(),
             delegate_receiver: Some(delegate_receiver),
             visibility: MethodVisibility::Public,
+            documentation: None,
+            return_type_label: None,
         }
     }
 
     pub fn with_visibility(mut self, visibility: MethodVisibility) -> Self {
         self.visibility = visibility;
+        self
+    }
+
+    pub fn with_signature_metadata(
+        mut self,
+        documentation: Option<String>,
+        return_type_label: Option<String>,
+    ) -> Self {
+        self.documentation = documentation;
+        self.return_type_label = return_type_label;
         self
     }
 }
@@ -152,6 +187,8 @@ pub struct StoredMethodFact {
     pub param_facts: Vec<MethodParamFact>,
     pub delegate_receiver: Option<RubyMethod>,
     pub visibility: MethodVisibility,
+    pub documentation: Option<String>,
+    pub return_type_label: Option<String>,
 }
 
 impl StoredMethodFact {
@@ -165,6 +202,8 @@ impl StoredMethodFact {
             param_facts: Vec::new(),
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            documentation: None,
+            return_type_label: None,
         }
     }
 
@@ -185,6 +224,8 @@ impl StoredMethodFact {
             param_facts,
             delegate_receiver: None,
             visibility: MethodVisibility::Public,
+            documentation: None,
+            return_type_label: None,
         }
     }
 }
@@ -477,8 +518,30 @@ fn method_fact_heap_bytes(fact: &StoredMethodFact) -> usize {
         + fact
             .param_facts
             .iter()
-            .map(|param| string_heap_bytes(&param.name))
+            .map(|param| {
+                string_heap_bytes(&param.name)
+                    + param
+                        .type_label
+                        .as_ref()
+                        .map(string_heap_bytes)
+                        .unwrap_or(0)
+                    + param
+                        .documentation
+                        .as_ref()
+                        .map(string_heap_bytes)
+                        .unwrap_or(0)
+            })
             .sum::<usize>()
+        + fact
+            .documentation
+            .as_ref()
+            .map(string_heap_bytes)
+            .unwrap_or(0)
+        + fact
+            .return_type_label
+            .as_ref()
+            .map(string_heap_bytes)
+            .unwrap_or(0)
 }
 
 fn sort_method_ids_by_fqn(facts: &[Option<StoredMethodFact>], ids: &mut [MethodFactId]) {

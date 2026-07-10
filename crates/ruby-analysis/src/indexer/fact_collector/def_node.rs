@@ -10,7 +10,7 @@ use crate::inference::r#type::literal::LiteralAnalyzer;
 use crate::inference::type_tracker::TypeTracker;
 use crate::inference::RubyType;
 
-use crate::yard::{YardMethodDoc, YardTypeConverter};
+use crate::yard::{YardMethodDoc, YardParser, YardTypeConverter};
 
 use super::FactCollector;
 
@@ -67,7 +67,7 @@ impl FactCollector {
 
         // Extract YARD documentation from comments preceding the method
         let method_start_offset = node.location().start_offset();
-        let yard_doc = self.extract_doc_comments(method_start_offset);
+        let yard_doc = YardParser::extract_from_source(&self.document.content, method_start_offset);
 
         // Extract parameter info with positions for inlay hints
         let params = self.extract_method_params(node);
@@ -97,28 +97,53 @@ impl FactCollector {
 
         let direct_params = params
             .iter()
-            .map(|param| MethodParamFact::new(param.name.clone(), param.kind))
+            .map(|param| {
+                let yard_param = yard_doc
+                    .as_ref()
+                    .and_then(|doc| doc.find_param(&param.name));
+                MethodParamFact::new(param.name.clone(), param.kind).with_signature_metadata(
+                    yard_param.and_then(|param| param.format_type()),
+                    yard_param.and_then(|param| param.description.clone()),
+                )
+            })
             .collect();
-        self.direct_push_method_fact(
+        self.direct_push_method_fact_with_signature(
             namespace_parts.clone(),
             actual_namespace_kind,
             method,
             self.direct_range(&full_location),
             direct_params,
+            yard_doc.as_ref().and_then(|doc| doc.description.clone()),
+            yard_doc
+                .as_ref()
+                .and_then(YardMethodDoc::format_return_type),
         );
         if node.receiver().is_none()
             && actual_namespace_kind == NamespaceKind::Instance
             && self.scope_tracker.module_function_mode_enabled()
         {
-            self.direct_push_method_fact(
+            self.direct_push_method_fact_with_signature(
                 namespace_parts.clone(),
                 NamespaceKind::Singleton,
                 method,
                 self.direct_range(&full_location),
                 params
                     .iter()
-                    .map(|param| MethodParamFact::new(param.name.clone(), param.kind))
+                    .map(|param| {
+                        let yard_param = yard_doc
+                            .as_ref()
+                            .and_then(|doc| doc.find_param(&param.name));
+                        MethodParamFact::new(param.name.clone(), param.kind)
+                            .with_signature_metadata(
+                                yard_param.and_then(|param| param.format_type()),
+                                yard_param.and_then(|param| param.description.clone()),
+                            )
+                    })
                     .collect(),
+                yard_doc.as_ref().and_then(|doc| doc.description.clone()),
+                yard_doc
+                    .as_ref()
+                    .and_then(YardMethodDoc::format_return_type),
             );
         }
 

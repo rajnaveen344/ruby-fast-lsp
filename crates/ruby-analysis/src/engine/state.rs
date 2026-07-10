@@ -878,6 +878,8 @@ impl AnalysisEngine {
                     param_facts: fact.param_facts,
                     delegate_receiver: fact.delegate_receiver,
                     visibility: fact.visibility,
+                    documentation: fact.documentation,
+                    return_type_label: fact.return_type_label,
                 }
             })
             .collect()
@@ -963,6 +965,8 @@ impl AnalysisEngine {
             param_facts: fact.param_facts,
             delegate_receiver: fact.delegate_receiver,
             visibility: fact.visibility,
+            documentation: fact.documentation,
+            return_type_label: fact.return_type_label,
         }
     }
 

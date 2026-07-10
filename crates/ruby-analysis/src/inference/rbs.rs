@@ -9,7 +9,20 @@ use rbs_parser::{Loader, RbsType};
 
 use crate::core::FullyQualifiedName;
 use crate::core::RubyConstant;
-use crate::r#type::ruby::RubyType;
+use crate::core::{MethodParamKind, RubyType};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RbsMethodSignature {
+    pub parameters: Vec<RbsSignatureParameter>,
+    pub return_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RbsSignatureParameter {
+    pub name: String,
+    pub kind: MethodParamKind,
+    pub type_label: String,
+}
 
 /// Global RBS loader with embedded core types
 static RBS_LOADER: Lazy<RwLock<Loader>> = Lazy::new(|| {
@@ -35,6 +48,51 @@ pub fn get_rbs_method_return_type(
     loader
         .get_method_return_type(class_name, method_name, is_singleton)
         .cloned()
+}
+
+pub fn get_rbs_method_signatures(
+    class_name: &str,
+    method_name: &str,
+    is_singleton: bool,
+) -> Vec<RbsMethodSignature> {
+    let loader = RBS_LOADER.read();
+    let method = if is_singleton {
+        loader.get_singleton_method(class_name, method_name)
+    } else {
+        loader.get_instance_method(class_name, method_name)
+    };
+    let Some(method) = method else {
+        return Vec::new();
+    };
+
+    method
+        .overloads
+        .iter()
+        .map(|overload| RbsMethodSignature {
+            parameters: overload
+                .params
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| RbsSignatureParameter {
+                    name: parameter
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("arg{}", index)),
+                    kind: match parameter.kind {
+                        rbs_parser::ParamKind::Required => MethodParamKind::Required,
+                        rbs_parser::ParamKind::Optional => MethodParamKind::Optional,
+                        rbs_parser::ParamKind::Rest => MethodParamKind::Rest,
+                        rbs_parser::ParamKind::Keyword => MethodParamKind::RequiredKeyword,
+                        rbs_parser::ParamKind::KeywordOpt => MethodParamKind::OptionalKeyword,
+                        rbs_parser::ParamKind::KeywordRest => MethodParamKind::KeywordRest,
+                        rbs_parser::ParamKind::Block => MethodParamKind::Block,
+                    },
+                    type_label: parameter.r#type.to_string(),
+                })
+                .collect(),
+            return_type: overload.return_type.to_string(),
+        })
+        .collect()
 }
 
 /// Get the return type of a method from RBS, converted to RubyType

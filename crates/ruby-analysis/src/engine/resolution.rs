@@ -39,6 +39,74 @@ impl MethodLookupResult {
 }
 
 impl<'a> AnalysisQuery<'a> {
+    pub fn resolve_method_signature_facts(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_inner(namespace_fqn, method, true, None)
+    }
+
+    pub fn resolve_public_method_signature_facts(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_inner(namespace_fqn, method, false, None)
+    }
+
+    pub fn resolve_protected_method_signature_facts(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        caller_namespace_fqn: &FullyQualifiedName,
+    ) -> Vec<MethodFact> {
+        self.resolve_method_signature_facts_inner(
+            namespace_fqn,
+            method,
+            false,
+            Some(caller_namespace_fqn),
+        )
+    }
+
+    fn resolve_method_signature_facts_inner(
+        &self,
+        namespace_fqn: &FullyQualifiedName,
+        method: &RubyMethod,
+        allow_private: bool,
+        protected_caller: Option<&FullyQualifiedName>,
+    ) -> Vec<MethodFact> {
+        let Some(callees) = self.resolve_method_callees_inner(
+            namespace_fqn,
+            method,
+            allow_private,
+            protected_caller,
+        ) else {
+            return Vec::new();
+        };
+
+        let mut facts = callees
+            .into_iter()
+            .filter(|callee| callee.resolution == MethodCalleeResolution::Exact)
+            .flat_map(|callee| {
+                self.engine
+                    .method_facts_matching_owner_name(&callee.owner, method)
+                    .into_iter()
+                    .filter(move |fact| callee.definition_ranges.contains(&fact.range))
+            })
+            .collect::<Vec<_>>();
+        facts.sort_by_key(|fact| {
+            (
+                fact.range.file_id,
+                fact.range.start_byte,
+                fact.range.end_byte,
+                fact.fqn.to_string(),
+            )
+        });
+        facts.dedup();
+        facts
+    }
+
     pub fn resolve_method_callees(
         &self,
         namespace_fqn: &FullyQualifiedName,

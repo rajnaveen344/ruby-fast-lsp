@@ -95,7 +95,6 @@ Verified gaps worth tracking:
 
 | Gap | Current state | Why it matters |
 | --- | --- | --- |
-| Signature help | No `signature_help` capability/provider. | Agents and editors cannot ask for callable parameter shape at a call site. |
 | Code actions / quick fixes | No `code_action` capability/provider. | Diagnostics cannot offer structured fixes. |
 | Cross-file symbol rename | `rename` is implemented for local variables and method parameters only. | Project-wide class/module/method/constant renames still need explicit design. |
 | RuboCop/Standard integration | No linter integration. | Style/lint diagnostics are out of scope for the current engine. |
@@ -103,6 +102,11 @@ Verified gaps worth tracking:
 Do not treat old feature matrices as source of truth. Before adding a feature
 gap here, verify it against `src/handlers`, advertised server capabilities, and
 integration tests.
+
+Signature help is implemented for user-defined methods through engine-owned
+MRO and visibility resolution, with cross-file YARD metadata and RBS overload
+fallback. Its LSP adapter supports nested calls, positional/rest arguments,
+keywords/keyword-rest arguments, and edit/reindex lifecycle updates.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

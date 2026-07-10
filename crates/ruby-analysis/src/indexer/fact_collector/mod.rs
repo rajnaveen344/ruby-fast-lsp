@@ -401,6 +401,21 @@ impl FactCollector {
         range: TextRange,
         params: Vec<MethodParamFact>,
     ) {
+        self.direct_push_method_fact_with_signature(
+            namespace, owner_kind, method, range, params, None, None,
+        );
+    }
+
+    pub fn direct_push_method_fact_with_signature(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        params: Vec<MethodParamFact>,
+        documentation: Option<String>,
+        return_type_label: Option<String>,
+    ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
         self.direct_facts
@@ -408,6 +423,7 @@ impl FactCollector {
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
         self.direct_facts.methods.push(
             MethodFact::with_param_facts(fqn, owner, range, params)
+                .with_signature_metadata(documentation, return_type_label)
                 .with_visibility(self.scope_tracker.current_visibility()),
         );
     }

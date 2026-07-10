@@ -545,6 +545,9 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
+            if !child.is_named() {
+                continue;
+            }
             match child.kind() {
                 "required_parameter" | "parameter" => {
                     let param = self.visit_parameter(child, ParamKind::Required)?;
@@ -574,15 +577,79 @@ impl<'a> Visitor<'a> {
                     let param = self.visit_parameter(child, ParamKind::Block)?;
                     params.push(param);
                 }
-                _ => {
-                    // Try to parse as a type directly
-                    if let Ok(t) = self.visit_type(child) {
-                        params.push(MethodParam::required(t));
-                    }
+                "required_positionals" | "trailing_positionals" => {
+                    params.extend(self.visit_parameter_group(child, ParamKind::Required)?);
                 }
+                "optional_positionals" => {
+                    params.extend(self.visit_parameter_group(child, ParamKind::Optional)?);
+                }
+                "rest_positional" => {
+                    params.extend(self.visit_parameter_group(child, ParamKind::Rest)?);
+                }
+                "keywords" => params.extend(self.visit_parameters(child)?),
+                "required_keywords" => {
+                    params.extend(self.visit_keyword_group(child, ParamKind::Keyword)?);
+                }
+                "optional_keywords" => {
+                    params.extend(self.visit_keyword_group(child, ParamKind::KeywordOpt)?);
+                }
+                "splat_keyword" => {
+                    params.extend(self.visit_parameter_group(child, ParamKind::KeywordRest)?);
+                }
+                "unnamed_parameter" => {}
+                _ => {}
             }
         }
 
+        Ok(params)
+    }
+
+    fn visit_parameter_group(
+        &self,
+        node: Node,
+        kind: ParamKind,
+    ) -> Result<Vec<MethodParam>, ParseError> {
+        let mut params = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.is_named() && child.kind() == "parameter" {
+                params.push(self.visit_parameter(child, kind.clone())?);
+            }
+        }
+        Ok(params)
+    }
+
+    fn visit_keyword_group(
+        &self,
+        node: Node,
+        kind: ParamKind,
+    ) -> Result<Vec<MethodParam>, ParseError> {
+        let mut params = Vec::new();
+        let mut name = None;
+        let mut parameter_type = None;
+        let mut nested = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if !child.is_named() {
+                continue;
+            }
+            match child.kind() {
+                "keyword" => name = Some(self.node_text(&child).to_string()),
+                "type" if parameter_type.is_none() => {
+                    parameter_type = Some(self.visit_type(child)?);
+                }
+                "keywords" => nested.extend(self.visit_parameters(child)?),
+                _ => {}
+            }
+        }
+        if let (Some(name), Some(parameter_type)) = (name, parameter_type) {
+            params.push(MethodParam {
+                name: Some(name),
+                r#type: parameter_type,
+                kind,
+            });
+        }
+        params.extend(nested);
         Ok(params)
     }
 
@@ -597,7 +664,7 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "parameter_name" | "name" | "identifier" => {
+                "parameter_name" | "name" | "identifier" | "var_name" => {
                     param.name = Some(self.node_text(&child).to_string());
                 }
                 _ => {

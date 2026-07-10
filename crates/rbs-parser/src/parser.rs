@@ -153,6 +153,24 @@ end
     }
 
     #[test]
+    fn test_parse_named_union_method_parameters() {
+        let source = r#"
+class String
+  def sub: (Regexp | string pattern, string | hash[String, _ToS] replacement) -> String
+end
+"#;
+        let mut parser = Parser::new();
+        let declarations = parser.parse(source).expect("RBS method must parse");
+        let Declaration::Class(class) = &declarations[0] else {
+            panic!("expected class declaration");
+        };
+        let parameters = &class.methods[0].overloads[0].params;
+        assert_eq!(parameters.len(), 2);
+        assert_eq!(parameters[0].name.as_deref(), Some("pattern"));
+        assert_eq!(parameters[1].name.as_deref(), Some("replacement"));
+    }
+
+    #[test]
     fn test_parse_raw_tree() {
         let mut parser = Parser::new();
         let source = "class Foo end";
