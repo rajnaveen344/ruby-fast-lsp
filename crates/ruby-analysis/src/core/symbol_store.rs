@@ -19,12 +19,33 @@ pub enum SymbolKind {
 pub struct SymbolFact {
     pub fqn: FullyQualifiedName,
     pub kind: SymbolKind,
+    /// Exact identifier token that declares this symbol.
+    pub name_range: TextRange,
+    /// Full declaration range used for navigation and presentation.
     pub range: TextRange,
 }
 
 impl SymbolFact {
     pub fn new(fqn: FullyQualifiedName, kind: SymbolKind, range: TextRange) -> Self {
-        Self { fqn, kind, range }
+        Self {
+            fqn,
+            kind,
+            name_range: range,
+            range,
+        }
+    }
+
+    pub fn with_name_range(mut self, name_range: TextRange) -> Self {
+        assert!(
+            name_range.file_id == self.range.file_id
+                && name_range.start_byte >= self.range.start_byte
+                && name_range.end_byte <= self.range.end_byte,
+            "INVARIANT VIOLATED: symbol name range is outside its declaration range. \
+             This is a bug because rename edits must target a token within the declaration. \
+             Fix: derive name_range from the declaring Prism node."
+        );
+        self.name_range = name_range;
+        self
     }
 }
 
@@ -32,12 +53,31 @@ impl SymbolFact {
 pub struct StoredSymbolFact {
     pub fqn: FqnId,
     pub kind: SymbolKind,
+    pub name_range: TextRange,
     pub range: TextRange,
 }
 
 impl StoredSymbolFact {
     pub fn new(fqn: FqnId, kind: SymbolKind, range: TextRange) -> Self {
-        Self { fqn, kind, range }
+        Self {
+            fqn,
+            kind,
+            name_range: range,
+            range,
+        }
+    }
+
+    pub fn with_name_range(mut self, name_range: TextRange) -> Self {
+        assert!(
+            name_range.file_id == self.range.file_id
+                && name_range.start_byte >= self.range.start_byte
+                && name_range.end_byte <= self.range.end_byte,
+            "INVARIANT VIOLATED: stored symbol name range is outside its declaration range. \
+             This is a bug because interned facts must preserve declaration token boundaries. \
+             Fix: intern SymbolFact::name_range without changing offsets."
+        );
+        self.name_range = name_range;
+        self
     }
 }
 

@@ -179,16 +179,20 @@ impl AnalysisIndexer {
         fqn: FullyQualifiedName,
         kind: GraphNodeKind,
         range: TextRange,
+        name_range: TextRange,
     ) {
         self.known_namespaces.insert(fqn.clone());
-        self.facts.symbols.push(SymbolFact::new(
-            fqn.clone(),
-            match kind {
-                GraphNodeKind::Class => SymbolKind::Class,
-                GraphNodeKind::Module => SymbolKind::Module,
-            },
-            range,
-        ));
+        self.facts.symbols.push(
+            SymbolFact::new(
+                fqn.clone(),
+                match kind {
+                    GraphNodeKind::Class => SymbolKind::Class,
+                    GraphNodeKind::Module => SymbolKind::Module,
+                },
+                range,
+            )
+            .with_name_range(name_range),
+        );
         self.facts
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));
@@ -756,6 +760,7 @@ impl AnalysisIndexer {
             FullyQualifiedName::namespace(target_namespace),
             GraphNodeKind::Module,
             range,
+            range,
         );
         self.push_edge(
             FullyQualifiedName::namespace(self.namespace_stack.clone()),
@@ -851,7 +856,12 @@ impl Visit<'_> for AnalysisIndexer {
 
         let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
         let range = self.range(&node.location());
-        self.push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range);
+        let name_range = terminal_name_range(
+            self.file_id,
+            &node.constant_path().location(),
+            node.name().as_slice(),
+        );
+        self.push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
 
         if let Some(superclass) = node.superclass() {
             if let Some((parts, absolute)) = constant_parts_and_absolute(&superclass) {
@@ -905,7 +915,12 @@ impl Visit<'_> for AnalysisIndexer {
 
         let fqn = FullyQualifiedName::namespace(self.namespace_stack.clone());
         let range = self.range(&node.location());
-        self.push_namespace_facts(fqn, GraphNodeKind::Module, range);
+        let name_range = terminal_name_range(
+            self.file_id,
+            &node.constant_path().location(),
+            node.name().as_slice(),
+        );
+        self.push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
 
         self.scope_stack.push(ScopeKind::Instance);
         visit_module_node(self, node);
@@ -1068,11 +1083,14 @@ impl Visit<'_> for AnalysisIndexer {
             let mut parts = self.namespace_stack.clone();
             parts.push(constant);
             let fqn = FullyQualifiedName::constant(parts);
-            self.facts.symbols.push(SymbolFact::new(
-                fqn.clone(),
-                SymbolKind::Constant,
-                self.range(&node.location()),
-            ));
+            self.facts.symbols.push(
+                SymbolFact::new(
+                    fqn.clone(),
+                    SymbolKind::Constant,
+                    self.range(&node.location()),
+                )
+                .with_name_range(self.range(&node.name_loc())),
+            );
             self.push_type_fact(
                 TypeSubject::Constant(fqn),
                 literal_type(&node.value()),
@@ -1086,11 +1104,23 @@ impl Visit<'_> for AnalysisIndexer {
         let target = node.target();
         if let Some(parts) = constant_path_parts(&target) {
             let fqn = FullyQualifiedName::constant(parts);
-            self.facts.symbols.push(SymbolFact::new(
-                fqn.clone(),
-                SymbolKind::Constant,
-                self.range(&node.location()),
-            ));
+            let name = target.name().expect(
+                "INVARIANT VIOLATED: constant path write target has no terminal name. \
+                 This is a bug because constant_path_parts accepted the same target. \
+                 Fix: keep constant path extraction and name range derivation aligned.",
+            );
+            self.facts.symbols.push(
+                SymbolFact::new(
+                    fqn.clone(),
+                    SymbolKind::Constant,
+                    self.range(&node.location()),
+                )
+                .with_name_range(terminal_name_range(
+                    self.file_id,
+                    &target.location(),
+                    name.as_slice(),
+                )),
+            );
             self.push_type_fact(
                 TypeSubject::Constant(fqn),
                 literal_type(&node.value()),
@@ -1750,6 +1780,20 @@ fn text_range(file_id: SourceFileId, location: &ruby_prism::Location<'_>) -> Tex
     )
 }
 
+fn terminal_name_range(
+    file_id: SourceFileId,
+    path: &ruby_prism::Location<'_>,
+    name: &[u8],
+) -> TextRange {
+    let end = path.end_offset();
+    let start = end.checked_sub(name.len()).expect(
+        "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
+         This is a bug because the terminal name must be contained in the constant path. \
+         Fix: inspect Prism constant path locations before deriving declaration ranges.",
+    );
+    TextRange::new(file_id, u32_offset(start), u32_offset(end))
+}
+
 fn class_implicitly_inherits_object(fqn: &FullyQualifiedName) -> bool {
     let parts = fqn.namespace_parts();
     !matches!(
@@ -2003,5 +2047,31 @@ mod tests {
                 )
                 .unwrap()]))
         }));
+    }
+
+    #[test]
+    fn indexes_exact_constant_declaration_name_ranges() {
+        let index =
+            AnalysisIndexer::new(file()).index_source("class Outer::User\nend\nOuter::LIMIT = 1\n");
+
+        let user = index
+            .symbols
+            .iter()
+            .find(|fact| fact.fqn.to_string() == "Outer::User")
+            .expect("class symbol should be indexed");
+        assert_eq!(
+            (user.name_range.start_byte, user.name_range.end_byte),
+            (13, 17)
+        );
+
+        let limit = index
+            .symbols
+            .iter()
+            .find(|fact| fact.fqn.to_string() == "Outer::LIMIT")
+            .expect("value constant should be indexed");
+        assert_eq!(
+            (limit.name_range.start_byte, limit.name_range.end_byte),
+            (29, 34)
+        );
     }
 }

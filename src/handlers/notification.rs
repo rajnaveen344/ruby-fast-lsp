@@ -120,7 +120,10 @@ pub async fn handle_initialize(
         document_on_type_formatting_provider: Some(
             capabilities::formatting::get_document_on_type_formatting_options(),
         ),
-        rename_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
         // Advertise multi-root workspace support so clients send
         // `workspace/didChangeWorkspaceFolders` for runtime add/remove.
         workspace: Some(WorkspaceServerCapabilities {

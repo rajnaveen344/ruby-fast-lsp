@@ -356,3 +356,42 @@ fn rejects_type_fact_for_unknown_file() {
         ResolveMode::Immediate,
     );
 }
+
+#[test]
+fn source_positions_use_utf16_code_units() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "unicode.rb", "a😀b\n");
+    let file = engine
+        .file(file_id)
+        .expect("registered source should exist");
+
+    assert_eq!(file.byte_offset_to_line_character(1), Some((0, 1)));
+    assert_eq!(file.byte_offset_to_line_character(5), Some((0, 3)));
+}
+
+#[test]
+fn constant_rename_rejects_external_only_definition() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = engine.register_file(SourceFileInput {
+        path: "gem/user.rb".into(),
+        content: "class User\nend\n".to_string(),
+        kind: SourceKind::Gem,
+    });
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    engine.replace_facts(
+        file_id,
+        FileFacts {
+            symbols: vec![
+                SymbolFact::new(user, SymbolKind::Class, TextRange::new(file_id, 0, 14))
+                    .with_name_range(TextRange::new(file_id, 6, 10)),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert!(engine
+        .query()
+        .constant_rename_target(&[RubyConstant::new("User").unwrap()], &[])
+        .is_none());
+}

@@ -92,7 +92,10 @@ impl SourceFile {
             if !source.is_char_boundary(target) {
                 return None;
             }
-            source[line_start..target].chars().count()
+            source[line_start..target]
+                .chars()
+                .map(char::len_utf16)
+                .sum()
         };
         Some((
             u32::try_from(line_index).expect(
@@ -849,7 +852,7 @@ impl AnalysisEngine {
             .into_iter()
             .map(|fact| {
                 let fqn = self.names.intern_fqn(fact.fqn);
-                StoredSymbolFact::new(fqn, fact.kind, fact.range)
+                StoredSymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
             })
             .collect()
     }
@@ -935,7 +938,7 @@ impl AnalysisEngine {
                  Fix: intern symbol FQNs before inserting facts.",
             )
             .clone();
-        SymbolFact::new(fqn, fact.kind, fact.range)
+        SymbolFact::new(fqn, fact.kind, fact.range).with_name_range(fact.name_range)
     }
 
     fn expand_method_fact(&self, fact: StoredMethodFact) -> MethodFact {

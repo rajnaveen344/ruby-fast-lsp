@@ -22,7 +22,9 @@ impl FactCollector {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
         let range = self.direct_range(&node.location());
-        self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range);
+        let name_range = self
+            .direct_terminal_name_range(&node.constant_path().location(), node.name().as_slice());
+        self.direct_push_namespace_facts(fqn.clone(), GraphNodeKind::Class, range, name_range);
         if let Some(superclass) = node.superclass() {
             if let Some(superclass_ref) = mixin_ref_from_node(&superclass) {
                 let super_range = self.direct_range(&superclass.location());

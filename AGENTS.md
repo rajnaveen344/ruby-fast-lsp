@@ -95,7 +95,7 @@ Verified gaps worth tracking:
 
 | Gap | Current state | Why it matters |
 | --- | --- | --- |
-| Cross-file symbol rename | `rename` is implemented for local variables and method parameters only. | Project-wide class/module/method/constant renames still need explicit design. |
+| Cross-file method rename | `rename` supports local variables, parameters, and project-owned classes/modules/constants. | Project-wide method rename still needs explicit ambiguity, alias, visibility, and dynamic-send policy. |
 
 Do not treat old feature matrices as source of truth. Before adding a feature
 gap here, verify it against `src/handlers`, advertised server capabilities, and
@@ -117,6 +117,13 @@ correctable RuboCop/Standard diagnostics. They run against the current buffer,
 use RuboCop `--autocorrect` or Standard `--fix`, and return a full-document
 workspace edit only when corrected output differs. Unsafe RuboCop fixes and
 failed/empty correction output never become edits.
+
+Cross-file class, module, and value-constant rename is engine-backed and exposed
+with prepare-rename support. Symbol facts retain exact declaration-name ranges;
+the engine resolves constant identity, filters edits to project sources, rejects
+invalid or colliding names, and returns deterministic definition/reference
+ranges. The LSP adapter only maps those ranges to workspace edits. Rename range
+conversion uses LSP UTF-16 positions, including non-BMP characters.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

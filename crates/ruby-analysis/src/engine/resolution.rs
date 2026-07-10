@@ -10,6 +10,13 @@ use crate::engine::query::AnalysisQuery;
 
 pub(crate) type MethodLookupChainCache = HashMap<FullyQualifiedName, Vec<FullyQualifiedName>>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstantRenameTarget {
+    pub fqn: FullyQualifiedName,
+    pub current_name: RubyConstant,
+    pub ranges: Vec<TextRange>,
+}
+
 #[derive(Clone)]
 pub enum MethodLookupResult {
     Unique(MethodFact),
@@ -429,6 +436,83 @@ impl<'a> AnalysisQuery<'a> {
         resolve_constant_fqn(self.engine, parts, false, &context_fqn)
     }
 
+    /// Resolve a constant-like symbol and return every editable project range.
+    ///
+    /// Definition token boundaries come from indexer facts; references come
+    /// from the engine's centralized constant resolution. External sources are
+    /// intentionally excluded because an editor rename must never edit gems,
+    /// stdlib, or generated stubs.
+    pub fn constant_rename_target(
+        &self,
+        parts: &[RubyConstant],
+        context: &[RubyConstant],
+    ) -> Option<ConstantRenameTarget> {
+        let fqn = self.resolve_constant_in_context(parts, context)?;
+        let current_name = *fqn.namespace_parts_slice().last()?;
+        let symbol_facts = self
+            .engine
+            .symbol_facts_for(&fqn)
+            .into_iter()
+            .filter(|fact| {
+                matches!(
+                    fact.kind,
+                    SymbolKind::Class | SymbolKind::Module | SymbolKind::Constant
+                ) && fact
+                    .name_range
+                    .end_byte
+                    .checked_sub(fact.name_range.start_byte)
+                    == u32::try_from(current_name.as_str().len()).ok()
+                    && self
+                        .engine
+                        .file(fact.range.file_id)
+                        .is_some_and(|file| file.kind.is_project())
+            })
+            .collect::<Vec<_>>();
+        if symbol_facts.is_empty() {
+            return None;
+        }
+        let mut ranges = symbol_facts
+            .into_iter()
+            .map(|fact| fact.name_range)
+            .chain(
+                self.engine
+                    .reference_facts_for(&fqn)
+                    .iter()
+                    .filter(|fact| {
+                        self.engine
+                            .file(fact.range.file_id)
+                            .is_some_and(|file| file.kind.is_project())
+                    })
+                    .filter_map(|fact| {
+                        constant_reference_name_range(self.engine, fact.range, current_name)
+                    }),
+            )
+            .collect::<Vec<_>>();
+        ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        ranges.dedup();
+
+        Some(ConstantRenameTarget {
+            fqn,
+            current_name,
+            ranges,
+        })
+    }
+
+    pub fn constant_rename_target_for_name(
+        &self,
+        parts: &[RubyConstant],
+        context: &[RubyConstant],
+        new_name: RubyConstant,
+    ) -> Option<ConstantRenameTarget> {
+        let target = self.constant_rename_target(parts, context)?;
+        if target.current_name == new_name
+            || constant_name_collides(self.engine, &target.fqn, new_name)
+        {
+            return None;
+        }
+        Some(target)
+    }
+
     pub fn constant_definition_ranges(
         &self,
         parts: &[RubyConstant],
@@ -840,6 +924,58 @@ impl<'a> AnalysisQuery<'a> {
 
         None
     }
+}
+
+fn constant_reference_name_range(
+    engine: &crate::AnalysisEngine,
+    range: TextRange,
+    name: RubyConstant,
+) -> Option<TextRange> {
+    let file = engine.file(range.file_id)?;
+    let start = usize::try_from(range.start_byte).ok()?;
+    let end = usize::try_from(range.end_byte).ok()?;
+    if let Some(source) = file.source_text() {
+        let text = source.get(start..end)?;
+        if !text.as_bytes().ends_with(name.as_str().as_bytes()) {
+            return None;
+        }
+    } else {
+        assert!(
+            file.line_index.is_ascii(),
+            "INVARIANT VIOLATED: source text was discarded for a non-ASCII file. \
+             This is a bug because exact rename validation requires retained non-ASCII source. \
+             Fix: retain SourceFile::source whenever SourceLineIndex::is_ascii is false."
+        );
+    }
+    let name_start = end.checked_sub(name.as_str().len())?;
+    if name_start < start {
+        return None;
+    }
+    Some(TextRange::new(
+        range.file_id,
+        u32::try_from(name_start).ok()?,
+        range.end_byte,
+    ))
+}
+
+fn constant_name_collides(
+    engine: &crate::AnalysisEngine,
+    target: &FullyQualifiedName,
+    new_name: RubyConstant,
+) -> bool {
+    let mut parts = target.namespace_parts();
+    let last = parts.last_mut().expect(
+        "INVARIANT VIOLATED: rename target has no constant path component. \
+         This is a bug because constant_rename_target only returns constant-like FQNs. \
+         Fix: reject empty constant paths before constructing a rename target.",
+    );
+    *last = new_name;
+
+    let namespace = FullyQualifiedName::namespace(parts.clone());
+    let constant = FullyQualifiedName::constant(parts);
+    !engine.symbol_facts_for(&namespace).is_empty()
+        || !engine.graph_nodes_for(&namespace).is_empty()
+        || !engine.symbol_facts_for(&constant).is_empty()
 }
 
 fn method_name_from_fact(fact: &MethodFact) -> RubyMethod {

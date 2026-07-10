@@ -96,7 +96,10 @@ Priority order:
 3. Done: preferred quick-fix code actions for safe RuboCop and Standard fixes,
    operating on the current unsaved buffer and returning an editor-applied
    full-document edit only when safe corrected output differs.
-4. Cross-file constant, class, and module rename with prepare-rename support.
+4. Done: cross-file constant, class, and module rename with prepare-rename
+   support, exact declaration token ranges, namespace-aware engine resolution,
+   collision and external-source safety, UTF-16 positions, and edit/reindex
+   lifecycle coverage.
 5. Document highlights.
 6. Selection ranges.
 7. Index include/exclude and dependency configuration.
@@ -359,10 +362,16 @@ safe to execute now. Follow strict TDD for broken or missing behavior: establish
 red, implement the minimum correct change, then run focused and broader tests.
 Preserve the ruby-analysis core/engine/indexer/inference boundaries, keep method
 resolution policy single-sourced in the engine, and use the simulator as the
-primary comprehensive semantic verification system. Before committing or
-pushing, run the local pre-push gate. Update goal.md with completed work,
-measured evidence, rating changes, and newly discovered blockers. Do not inflate
-the rating for code that is not tested, integrated, and usable.
+primary comprehensive semantic verification system. Complete the production
+extension platform described in Milestone 2 before broad framework expansion:
+extensions must use versioned public domain contracts, produce deterministic
+facts and semantic patches owned by the engine, and remain permission-bounded
+and failure-isolated. RSpec is the reference implementation, and Rails must use
+the same public extension contracts without privileged semantic-core hooks.
+Before committing or pushing, run the local pre-push gate. Update goal.md with
+completed work, measured evidence, rating changes, and newly discovered
+blockers. Do not inflate the rating for code that is not tested, integrated,
+and usable.
 ```
 
 At the end of every goal session, record:
@@ -418,3 +427,29 @@ At the end of every goal session, record:
   safe flag and current-buffer stdin behavior.
 - Architecture: subprocess execution and LSP edit shaping remain in `src/`;
   no external-linter policy or protocol types entered `ruby-analysis`.
+
+### July 2026: Cross-file constant rename
+
+- User-visible: classes, modules, and value constants can be renamed from a
+  declaration or reference across project files; reopened definitions are all
+  updated, and clients can probe exact ranges through `prepareRename`.
+- Safety: invalid Ruby constant names, sibling collisions, and targets defined
+  only in gems, stdlib, or stubs are rejected. Qualified references edit only
+  the resolved terminal name rather than deleting their namespace prefix.
+- Correctness: symbol facts retain exact declaration-name ranges, analysis and
+  document position conversion uses LSP UTF-16 code units, and non-BMP text is
+  covered by lifecycle tests.
+- Architecture: constant identity, collision policy, project-source filtering,
+  and deterministic edit ranges live in `ruby-analysis::engine`; Prism-derived
+  declaration ranges live in the indexer; `src/capabilities/rename.rs` remains
+  a protocol adapter while preserving the existing local-variable visitor.
+- Focused evidence: 35 rename integration tests cover prepare capability,
+  class/module/value-constant edits, cross-file and reopened definitions,
+  namespace isolation, invalid/colliding names, Unicode, reindex lifecycle, and
+  all existing local-variable cases. The `ruby-analysis` suite has 330 passing
+  tests including exact name ranges, UTF-16 conversion, and external-source
+  rejection.
+- Next priority: document highlights, followed by selection ranges.
+- Rating: current estimate is **6.8/10**. Rename closes an important daily
+  refactoring gap, but Milestone 1 remains incomplete until highlights,
+  selection ranges, indexing configuration, and formatting are shipped.

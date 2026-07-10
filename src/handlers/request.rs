@@ -399,3 +399,11 @@ pub async fn handle_rename(
     info!("[PERF] Rename completed in {:?}", start_time.elapsed());
     Ok(result)
 }
+
+pub async fn handle_prepare_rename(
+    lang_server: &RubyLanguageServer,
+    params: TextDocumentPositionParams,
+) -> LspResult<Option<PrepareRenameResponse>> {
+    info!("Prepare rename request received for: {:?}", params);
+    Ok(rename::handle_prepare_rename(lang_server, params).await)
+}

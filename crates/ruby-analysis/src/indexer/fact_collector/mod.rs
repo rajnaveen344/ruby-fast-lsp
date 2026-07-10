@@ -240,7 +240,7 @@ impl FactCollector {
         target_namespace.push(class_methods);
         let target_fqn = FullyQualifiedName::namespace(target_namespace);
         let range = self.direct_range(&node.location());
-        self.direct_push_namespace_facts(target_fqn, GraphNodeKind::Module, range);
+        self.direct_push_namespace_facts(target_fqn, GraphNodeKind::Module, range, range);
         self.direct_push_edge(
             FullyQualifiedName::namespace(current_namespace),
             &[class_methods],
@@ -300,21 +300,43 @@ impl FactCollector {
         )
     }
 
+    pub fn direct_terminal_name_range(
+        &self,
+        path: &ruby_prism::Location<'_>,
+        name: &[u8],
+    ) -> TextRange {
+        let end = path.end_offset();
+        let start = end.checked_sub(name.len()).expect(
+            "INVARIANT VIOLATED: constant name is longer than its Prism path location. \
+             This is a bug because the terminal name must be contained in the constant path. \
+             Fix: inspect Prism constant path locations before deriving declaration ranges.",
+        );
+        TextRange::new(
+            self.document.analysis_file_id(),
+            u32_offset(start),
+            u32_offset(end),
+        )
+    }
+
     pub fn direct_push_namespace_facts(
         &mut self,
         fqn: FullyQualifiedName,
         kind: GraphNodeKind,
         range: TextRange,
+        name_range: TextRange,
     ) {
         self.direct_known_namespaces.insert(fqn.clone());
-        self.direct_facts.symbols.push(SymbolFact::new(
-            fqn.clone(),
-            match kind {
-                GraphNodeKind::Class => SymbolKind::Class,
-                GraphNodeKind::Module => SymbolKind::Module,
-            },
-            range,
-        ));
+        self.direct_facts.symbols.push(
+            SymbolFact::new(
+                fqn.clone(),
+                match kind {
+                    GraphNodeKind::Class => SymbolKind::Class,
+                    GraphNodeKind::Module => SymbolKind::Module,
+                },
+                range,
+            )
+            .with_name_range(name_range),
+        );
         self.direct_facts
             .graph_nodes
             .push(GraphNodeFact::new(fqn.clone(), kind, range));

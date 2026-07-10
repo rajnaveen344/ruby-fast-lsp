@@ -52,7 +52,10 @@ impl SourceDocument {
             Err(after) => after - 1,
         };
         let line_start = self.line_offsets[line_index];
-        let character = self.content[line_start..offset].chars().count();
+        let character: usize = self.content[line_start..offset]
+            .chars()
+            .map(char::len_utf16)
+            .sum();
         (
             u32::try_from(line_index).expect(
                 "INVARIANT VIOLATED: source line index exceeded u32. \
@@ -86,11 +89,14 @@ impl SourceDocument {
         );
 
         let mut byte_offset = 0;
-        for (chars_seen, c) in self.content[line_start..line_end].chars().enumerate() {
-            if chars_seen >= target_char || c == '\n' {
+        let mut utf16_units = 0;
+        for c in self.content[line_start..line_end].chars() {
+            let char_units = c.len_utf16();
+            if utf16_units + char_units > target_char || c == '\n' {
                 break;
             }
             byte_offset += c.len_utf8();
+            utf16_units += char_units;
         }
 
         line_start + byte_offset
@@ -174,6 +180,15 @@ mod tests {
 
         assert_eq!(doc.offset_to_line_character(7), (0, 6));
         assert_eq!(doc.line_character_to_offset(0, 6), 6);
+    }
+
+    #[test]
+    fn positions_use_utf16_code_units() {
+        let doc = SourceDocument::new("a😀b\n".to_string(), SourceFileId(0));
+
+        assert_eq!(doc.offset_to_line_character(1), (0, 1));
+        assert_eq!(doc.offset_to_line_character(5), (0, 3));
+        assert_eq!(doc.line_character_to_offset(0, 3), 5);
     }
 
     #[test]

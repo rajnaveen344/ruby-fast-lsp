@@ -56,10 +56,10 @@ use tower_lsp::lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams,
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
     InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString, PartialResultParams,
-    Position, Range, ReferenceContext, ReferenceParams, RenameParams, SignatureHelp,
-    SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceEdit,
+    Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams,
+    SignatureHelp, SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -727,6 +727,23 @@ impl FakeEditor {
         self.server.rename(params).await.ok().flatten()
     }
 
+    /// Checks whether rename is valid at a 0-indexed position.
+    pub async fn prepare_rename_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<PrepareRenameResponse> {
+        self.assert_open(filename, "prepare_rename_at");
+        let params = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Self::filename_to_uri(filename),
+            },
+            position: Position::new(line, character),
+        };
+        self.server.prepare_rename(params).await.ok().flatten()
+    }
+
     /// Applies a `WorkspaceEdit` to the editor's buffers.
     ///
     /// Updates affected files via `set()`, so changes go through the real
@@ -819,7 +836,18 @@ impl FakeEditor {
         let mut offset = 0;
         for (i, line_str) in content.split('\n').enumerate() {
             if i == line as usize {
-                return offset + (character as usize).min(line_str.len());
+                let target = character as usize;
+                let mut utf16_units = 0;
+                let mut byte_offset = 0;
+                for c in line_str.chars() {
+                    let char_units = c.len_utf16();
+                    if utf16_units + char_units > target {
+                        break;
+                    }
+                    utf16_units += char_units;
+                    byte_offset += c.len_utf8();
+                }
+                return offset + byte_offset;
             }
             offset += line_str.len() + 1; // +1 for '\n'
         }

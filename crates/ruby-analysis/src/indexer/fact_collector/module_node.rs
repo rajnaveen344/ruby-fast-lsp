@@ -20,7 +20,9 @@ impl FactCollector {
 
         let fqn = FullyQualifiedName::namespace(self.scope_tracker.get_ns_stack());
         let range = self.direct_range(&node.location());
-        self.direct_push_namespace_facts(fqn, GraphNodeKind::Module, range);
+        let name_range = self
+            .direct_terminal_name_range(&node.constant_path().location(), node.name().as_slice());
+        self.direct_push_namespace_facts(fqn, GraphNodeKind::Module, range, name_range);
 
         self.scope_tracker.push_scope_kind(LVScopeKind::Constant);
 

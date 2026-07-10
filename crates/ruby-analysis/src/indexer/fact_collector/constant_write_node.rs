@@ -26,11 +26,14 @@ impl FactCollector {
         namespace.push(constant);
         // Value constants use Constant variant, not Namespace
         let fqn = FullyQualifiedName::constant(namespace);
-        self.direct_facts.symbols.push(SymbolFact::new(
-            fqn.clone(),
-            SymbolKind::Constant,
-            self.direct_range(&node.location()),
-        ));
+        self.direct_facts.symbols.push(
+            SymbolFact::new(
+                fqn.clone(),
+                SymbolKind::Constant,
+                self.direct_range(&node.location()),
+            )
+            .with_name_range(self.direct_range(&node.name_loc())),
+        );
         let inferred_type = self.infer_assignment_type_from_value(&node.value());
         self.direct_push_assignment_type(
             TypeSubject::Constant(fqn.clone()),
