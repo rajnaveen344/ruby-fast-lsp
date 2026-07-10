@@ -4,9 +4,10 @@
 //! Each handler delegates to the appropriate capability module for the actual logic.
 
 use crate::capabilities::{
-    call_hierarchy, code_actions, code_lens, completion, debug, definitions, document_symbols,
-    folding_range, formatting, hover, implementation, inlay_hints, namespace_tree, references,
-    rename, semantic_tokens, signature_help, type_hierarchy, workspace_symbols,
+    call_hierarchy, code_actions, code_lens, completion, debug, definitions, document_highlights,
+    document_symbols, folding_range, formatting, hover, implementation, inlay_hints,
+    namespace_tree, references, rename, semantic_tokens, signature_help, type_hierarchy,
+    workspace_symbols,
 };
 use crate::extensions::{ExtensionStatusParams, ExtensionStatusResponse};
 use crate::server::RubyLanguageServer;
@@ -75,6 +76,15 @@ pub async fn handle_references(
     let references = references::find_references_at_position(lang_server, &uri, position).await;
 
     Ok(references)
+}
+
+pub async fn handle_document_highlight(
+    lang_server: &RubyLanguageServer,
+    params: DocumentHighlightParams,
+) -> LspResult<Option<Vec<DocumentHighlight>>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+    Ok(document_highlights::find_document_highlights(lang_server, &uri, position).await)
 }
 
 pub async fn handle_signature_help(

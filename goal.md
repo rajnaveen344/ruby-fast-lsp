@@ -100,7 +100,9 @@ Priority order:
    support, exact declaration token ranges, namespace-aware engine resolution,
    collision and external-source safety, UTF-16 positions, and edit/reindex
    lifecycle coverage.
-5. Document highlights.
+5. Done: document highlights for constants, methods, and locals, composed from
+   centralized semantic references, filtered to the current document, and
+   covered through edit/reindex lifecycle tests.
 6. Selection ranges.
 7. Index include/exclude and dependency configuration.
 8. Full-document formatting through external formatter integration.
@@ -451,5 +453,19 @@ At the end of every goal session, record:
   rejection.
 - Next priority: document highlights, followed by selection ranges.
 - Rating: current estimate is **6.8/10**. Rename closes an important daily
-  refactoring gap, but Milestone 1 remains incomplete until highlights,
-  selection ranges, indexing configuration, and formatting are shipped.
+  refactoring gap, but Milestone 1 remains incomplete until selection ranges,
+  indexing configuration, and formatting are shipped.
+
+### July 2026: Document highlights
+
+- User-visible: editors can highlight same-document occurrences of constants,
+  methods, and local variables at the cursor.
+- Architecture: the capability is a current-document projection of the existing
+  semantic references query, preserving engine-owned constant/method identity,
+  MRO, visibility, ambiguity, and local-scope behavior.
+- Integration evidence: initialization advertises `documentHighlight`; tests
+  cover same-document filtering against a cross-file occurrence, class
+  constants, methods, locals, and refresh after `didChange` reindexing.
+- Next priority: selection ranges.
+- Rating remains **6.8/10**. Highlights close a useful editor-polish gap but are
+  too small alone to justify another overall score increase.

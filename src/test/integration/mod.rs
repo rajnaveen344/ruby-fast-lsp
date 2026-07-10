@@ -5,6 +5,7 @@ mod call_hierarchy;
 mod code_lens;
 mod completion;
 mod diagnostics;
+mod document_highlights;
 mod extensions;
 mod folding_range;
 mod goto;

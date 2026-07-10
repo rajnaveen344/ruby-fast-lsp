@@ -5,6 +5,7 @@ pub mod completion;
 pub mod debug;
 pub mod definitions;
 pub mod diagnostics;
+pub mod document_highlights;
 pub mod document_symbols;
 pub mod folding_range;
 pub mod formatting;

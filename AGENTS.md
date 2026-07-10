@@ -125,6 +125,11 @@ invalid or colliding names, and returns deterministic definition/reference
 ranges. The LSP adapter only maps those ranges to workspace edits. Rename range
 conversion uses LSP UTF-16 positions, including non-BMP characters.
 
+Document highlights are implemented as a same-document projection of the
+existing semantic references query. They support constants, methods, and local
+variables, refresh after edits, and intentionally do not introduce a separate
+symbol-resolution policy.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

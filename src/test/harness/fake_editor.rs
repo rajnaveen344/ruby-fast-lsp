@@ -53,13 +53,14 @@ use tower_lsp::lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams,
     CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTriggerKind,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbol, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString, PartialResultParams,
-    Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams,
-    SignatureHelp, SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceEdit,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentHighlight,
+    DocumentHighlightParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
+    InlayHintParams, Location, NumberOrString, PartialResultParams, Position,
+    PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams, SignatureHelp,
+    SignatureHelpParams, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -506,6 +507,32 @@ impl FakeEditor {
         };
         self.server
             .references(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Returns semantic highlights in the current document at a 0-indexed position.
+    pub async fn document_highlights_at(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<DocumentHighlight> {
+        self.assert_open(filename, "document_highlights_at");
+        let params = DocumentHighlightParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Self::filename_to_uri(filename),
+                },
+                position: Position::new(line, character),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        self.server
+            .document_highlight(params)
             .await
             .ok()
             .flatten()
