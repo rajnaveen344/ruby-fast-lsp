@@ -315,6 +315,11 @@ pub enum ReferenceTarget {
         namespace: Vec<String>,
         name: String,
     },
+    Method {
+        namespace: Vec<String>,
+        owner_kind: NamespaceKind,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

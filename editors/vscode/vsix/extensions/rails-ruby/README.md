@@ -13,10 +13,19 @@ namespaced constants, and navigation uses the exact option-value range.
 Polymorphic `belongs_to` declarations still create readers and writers but
 intentionally use an unknown type and do not invent a constant target.
 
+Active Record lifecycle callbacks (`before_save`, `after_commit`, and the other
+standard validation/save/create/update/destroy/initialize/find/touch variants)
+and custom `validate :method_name` declarations navigate from literal symbol or
+string arguments to instance methods. `validates` and the standard
+`validates_*_of` helpers similarly treat positional attribute names as reader
+method references. These references use normal engine MRO,
+private-method, ambiguity, find-references, and edit-removal behavior. Proc and
+block callbacks remain ordinary Ruby code and need no synthetic method target.
+
 Conventional target names use deterministic inflection: snake case is
 camelized and collection names use a small singularization rule. Options such
-as `through`, `source`, custom foreign keys, and dynamic `class_name` values are
-not inferred yet.
+as `through`, `source`, custom foreign keys, conditional validation semantics,
+validator classes, and dynamic `class_name` values are not inferred yet.
 
 Run the source contract tests with:
 

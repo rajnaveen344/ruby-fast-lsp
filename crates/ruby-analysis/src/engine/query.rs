@@ -103,8 +103,41 @@ impl<'a> AnalysisQuery<'a> {
                     StoredReferenceCandidateKind::Resolved { target, .. } => {
                         self.engine.fqn_for_id(target).cloned()
                     }
-                    StoredReferenceCandidateKind::Constant { .. }
-                    | StoredReferenceCandidateKind::Method { .. } => None,
+                    StoredReferenceCandidateKind::Method {
+                        owner,
+                        owner_kind,
+                        method,
+                        is_super,
+                        diagnostics,
+                        ..
+                    } => {
+                        if diagnostics.is_some() {
+                            return None;
+                        }
+                        let owner = self.engine.names.const_lookup(owner).expect(
+                            "INVARIANT VIOLATED: exact method reference points to a missing owner lookup. \
+                             This is a bug because candidates contain only interned lookup ids. \
+                             Fix: intern method target owners before storing candidates.",
+                        );
+                        let owner = FullyQualifiedName::namespace_with_kind(
+                            owner.path.to_vec(),
+                            owner_kind,
+                        );
+                        let resolution = if is_super {
+                            self.resolve_super_method_reference(&owner, &method)
+                        } else {
+                            self.resolve_method_reference(&owner, &method)
+                        };
+                        resolution.reference_parts().map(
+                            |(resolved_owner, resolved_method, _)| {
+                                FullyQualifiedName::method(
+                                    resolved_owner.namespace_parts(),
+                                    resolved_method,
+                                )
+                            },
+                        )
+                    }
+                    StoredReferenceCandidateKind::Constant { .. } => None,
                 }
             })
             .collect::<Vec<_>>();
@@ -114,12 +147,25 @@ impl<'a> AnalysisQuery<'a> {
             return Vec::new();
         }
 
-        let mut ranges = self
-            .engine
-            .symbol_facts_for(&targets[0])
-            .into_iter()
-            .map(|fact| fact.range)
-            .collect::<Vec<_>>();
+        let mut ranges = match &targets[0] {
+            FullyQualifiedName::Method(_, _) => self
+                .engine
+                .method_facts_for(&targets[0])
+                .into_iter()
+                .map(|fact| fact.range)
+                .collect::<Vec<_>>(),
+            FullyQualifiedName::Namespace(_, _)
+            | FullyQualifiedName::Constant(_)
+            | FullyQualifiedName::LocalVariable(_)
+            | FullyQualifiedName::InstanceVariable(_)
+            | FullyQualifiedName::ClassVariable(_)
+            | FullyQualifiedName::GlobalVariable(_) => self
+                .engine
+                .symbol_facts_for(&targets[0])
+                .into_iter()
+                .map(|fact| fact.range)
+                .collect::<Vec<_>>(),
+        };
         ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
         ranges.dedup();
         ranges

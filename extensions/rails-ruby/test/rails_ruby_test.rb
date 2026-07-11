@@ -96,4 +96,35 @@ class RailsRubyTest < Minitest::Test
     reader = patches.fetch(0).fetch("DefineMethod")
     assert_equal "Unknown", reader.fetch("return_type")
   end
+
+  def test_callback_symbol_references_an_instance_method
+    patches = extension.index_call(context("before_save", "normalize_account"))
+
+    assert_equal 1, patches.length
+    reference = patches.fetch(0).fetch("AddReference")
+    assert_equal(
+      {
+        "Method" => {
+          "namespace" => ["User"],
+          "owner_kind" => "Instance",
+          "name" => "normalize_account"
+        }
+      },
+      reference.fetch("target")
+    )
+  end
+
+  def test_custom_validation_symbol_references_a_private_method
+    patches = extension.index_call(context("validate", "account_is_active"))
+
+    reference = patches.fetch(0).fetch("AddReference")
+    assert_equal "account_is_active", reference.dig("target", "Method", "name")
+  end
+
+  def test_attribute_validation_symbol_references_its_reader
+    patches = extension.index_call(context("validates_presence_of", "account"))
+
+    reference = patches.fetch(0).fetch("AddReference")
+    assert_equal "account", reference.dig("target", "Method", "name")
+  end
 end

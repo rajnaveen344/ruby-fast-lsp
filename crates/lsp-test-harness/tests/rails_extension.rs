@@ -144,3 +144,45 @@ async fn polymorphic_association_does_not_invent_a_constant_target() {
     assert_eq!(definition.len(), 1, "polymorphic reader must still exist");
     assert_eq!(definition[0].range.start.line, 1);
 }
+
+#[tokio::test]
+async fn callbacks_and_custom_validations_reference_private_methods() {
+    let (_temp, package) = rails_package("callback_index_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/models/user.rb",
+            "class User\n  before_save :normalize_account\n  validate :account_is_active\n  private\n  def normalize_account\n  end\n  def account_is_active\n  end\nend\n",
+        )
+        .await;
+
+    let callback = editor.goto_definition("app/models/user.rb", 1, 18).await;
+    assert_eq!(callback.len(), 1, "callback symbol must resolve");
+    assert_eq!(callback[0].range.start.line, 4);
+
+    let validation = editor.goto_definition("app/models/user.rb", 2, 15).await;
+    assert_eq!(validation.len(), 1, "custom validation symbol must resolve");
+    assert_eq!(validation[0].range.start.line, 6);
+
+    let references = editor.references("app/models/user.rb", 4, 8).await;
+    assert!(
+        references.iter().any(|location| {
+            location.range.start.line == 1 && location.range.start.character == 14
+        }),
+        "callback symbol must enter ordinary engine method references, got {references:?}"
+    );
+
+    editor
+        .set(
+            "app/models/user.rb",
+            "class User\n  private\n  def normalize_account\n  end\n  def account_is_active\n  end\nend\n",
+        )
+        .await;
+    let references = editor.references("app/models/user.rb", 2, 8).await;
+    assert!(
+        references.iter().all(|location| {
+            !(location.range.start.line == 1 && location.range.start.character == 14)
+        }),
+        "removing callback declarations must remove stale method references, got {references:?}"
+    );
+}

@@ -1900,6 +1900,17 @@ fn validate_reference_target(
                 .map(|_| ())
                 .map_err(|err| format!("invalid reference constant name `{name}`: {err}"))
         }
+        ruby_fast_lsp_extension_api::ReferenceTarget::Method {
+            namespace, name, ..
+        } => {
+            if namespace.is_empty() {
+                return Err("reference method namespace must not be empty".to_string());
+            }
+            validate_extension_namespace(namespace, "reference method namespace")?;
+            RubyMethod::new(name)
+                .map(|_| ())
+                .map_err(|err| format!("invalid reference method name `{name}`: {err}"))
+        }
     }
 }
 
@@ -3104,6 +3115,9 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
             }
         }
         IndexPatch::AddReference(reference) => {
+            let range = visitor
+                .document
+                .lsp_range_to_text_range(range_from_abi(reference.location));
             let target = match &reference.target {
                 ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(namespace) => {
                     FullyQualifiedName::namespace(
@@ -3127,10 +3141,34 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                     ));
                     FullyQualifiedName::constant(parts)
                 }
+                ruby_fast_lsp_extension_api::ReferenceTarget::Method {
+                    namespace,
+                    owner_kind,
+                    name,
+                } => {
+                    let owner = namespace
+                        .iter()
+                        .map(|part| RubyConstant::new(part).expect(
+                            "INVARIANT VIOLATED: extension method reference namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before patch application.",
+                        ))
+                        .collect::<Vec<_>>();
+                    let method = RubyMethod::new(name).expect(
+                        "INVARIANT VIOLATED: extension method reference name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before patch application.",
+                    );
+                    let owner_kind = match owner_kind {
+                        AbiNamespaceKind::Instance => NamespaceKind::Instance,
+                        AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
+                    };
+                    visitor.reference_candidates.push(ReferenceCandidate::method_target(
+                        range,
+                        owner,
+                        owner_kind,
+                        method,
+                        None,
+                    ));
+                    return;
+                }
             };
-            let range = visitor
-                .document
-                .lsp_range_to_text_range(range_from_abi(reference.location));
             visitor
                 .reference_candidates
                 .push(ReferenceCandidate::resolved(range, target, None));
@@ -4674,6 +4712,31 @@ commands = ["standardrb"]
         let err = validate_index_patch_payloads(&[patch])
             .expect_err("empty generated reference targets must be rejected");
         assert!(err.contains("must not be empty"), "got: {err}");
+
+        let method_patch = IndexPatch::AddReference(ruby_fast_lsp_extension_api::ReferencePatch {
+            target: ruby_fast_lsp_extension_api::ReferenceTarget::Method {
+                namespace: vec!["User".to_string()],
+                owner_kind: AbiNamespaceKind::Instance,
+                name: "not a method".to_string(),
+            },
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 2,
+                    character: 14,
+                },
+                end: SourcePosition {
+                    line: 2,
+                    character: 26,
+                },
+            },
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "reference-test".to_string(),
+                macro_name: "before_save".to_string(),
+            },
+        });
+        let err = validate_index_patch_payloads(&[method_patch])
+            .expect_err("invalid extension method targets must be rejected");
+        assert!(err.contains("invalid reference method name"), "got: {err}");
     }
 
     #[test]

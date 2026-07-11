@@ -1068,3 +1068,34 @@ At the end of every goal session, record:
   credible without guessing. The next Milestone 3 priority is static
   validations and callbacks, followed by route/url helpers; `through`/`source`
   relationship enrichment remains an association follow-up.
+
+### July 2026: Engine-owned callback and validation navigation
+
+- Public method target: `AddReferencePatch` now supports an exact method owner,
+  owner kind, and method name. The SDK exposes `method_reference_target`; guests
+  still cannot inspect method facts or choose definitions.
+- Single-sourced semantics: accepted targets become diagnostic-free ordinary
+  method reference candidates. Engine method-reference resolution owns MRO,
+  private visibility, ambiguity, reference storage, and later-definition
+  behavior. Exact definition projection reads only these explicit candidates,
+  so normal parser call visibility behavior is unchanged.
+- Rails callbacks: the standard Active Record validation/save/create/update/
+  destroy/commit/rollback/initialize/find/touch callback macros resolve literal
+  symbol or string arguments to instance methods. `validate :method_name`
+  receives the same behavior, including private custom validators. `validates`,
+  `validates_associated`, and standard `validates_*_of` attribute helpers map
+  positional names to reader method references without diagnosing missing
+  schema-generated readers.
+- Lifecycle and safety: callback symbols appear in ordinary find-references;
+  removing declarations removes stale references through per-file replacement.
+  Invalid method targets are rejected at the guest boundary, and overlapping
+  incompatible targets retain deterministic conflict rejection.
+- Evidence: red-first engine and Rails source tests cover the new contract.
+  Deterministic WAT and rebuilt Ruby-authored Wasm black-box tests prove callback
+  and custom-validation go-to-definition, private method resolution,
+  find-references, and edit removal alongside existing association scenarios.
+- Rating increases to **8.0/10**. Rails model navigation now covers its most
+  common generated APIs and callback indirection. The next highest-value
+  Milestone 3 work is route/URL helpers and route-to-controller navigation;
+  richer validator classes and conditional validation semantics remain later
+  refinements.

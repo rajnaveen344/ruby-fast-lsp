@@ -26,9 +26,12 @@ Generated method returns and constants can use `named_type`, `array_type`,
 types rather than strings that the server would need to parse.
 Use `unknown_type` when a framework declaration intentionally cannot identify
 a concrete Ruby type.
-DSL tokens can become semantic references through `add_reference` with either
-`namespace_reference_target` or `constant_reference_target`. The server owns
-the resulting reference index and query behavior.
+DSL tokens can become semantic references through `add_reference` with
+`namespace_reference_target`, `constant_reference_target`, or
+`method_reference_target`. Exact method targets still use the engine's normal
+MRO, ambiguity, visibility, definition, and find-references policy; guests do
+not resolve method facts themselves. The server owns the resulting reference
+index and query behavior.
 
 Call arguments preserve literal values and source ranges. Ruby keyword pairs
 are flattened into ordinary `Argument` objects with `keyword_name`,

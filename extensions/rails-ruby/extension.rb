@@ -3,6 +3,25 @@
 require "ruby_fast_lsp_extension"
 
 module RailsRuby
+  CALLBACKS = [
+    "before_validation", "after_validation",
+    "before_save", "around_save", "after_save",
+    "before_create", "around_create", "after_create",
+    "before_update", "around_update", "after_update",
+    "before_destroy", "around_destroy", "after_destroy",
+    "before_commit", "after_commit", "after_rollback",
+    "after_create_commit", "after_update_commit", "after_destroy_commit", "after_save_commit",
+    "after_initialize", "after_find", "after_touch"
+  ].freeze
+
+  VALIDATIONS = [
+    "validate", "validates", "validates_associated",
+    "validates_absence_of", "validates_acceptance_of", "validates_confirmation_of",
+    "validates_exclusion_of", "validates_format_of", "validates_inclusion_of",
+    "validates_length_of", "validates_numericality_of", "validates_presence_of",
+    "validates_size_of", "validates_uniqueness_of", "validates_comparison_of"
+  ].freeze
+
   def self.singularize(name)
     return name[0...-3] + "y" if name.end_with?("ies") && name.length > 3
     return name[0...-2] if name.end_with?("ses") && name.length > 3
@@ -112,6 +131,30 @@ extension "rails-ruby" do
           source: source
         )
       patches
+    end
+  end
+
+
+  (RailsRuby::CALLBACKS + RailsRuby::VALIDATIONS).each do |macro|
+    on_call macro do |ctx|
+      next [] if ctx.current_namespace.empty?
+
+      ctx.arguments.each_with_object([]) do |argument, patches|
+        next if argument.keyword_name
+
+        name = argument.symbol_or_string
+        next unless name
+
+        patches << add_reference(
+          target: method_reference_target(
+            name: name,
+            namespace: ctx.current_namespace,
+            owner_kind: :instance
+          ),
+          location: argument.range,
+          source: macro_source(ctx)
+        )
+      end
     end
   end
 end

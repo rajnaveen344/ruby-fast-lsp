@@ -463,6 +463,16 @@ module RubyFastLspExtension
       {"Constant" => {"namespace" => namespace, "name" => name.to_s}}
     end
 
+    def method_reference_target(name:, namespace:, owner_kind: :instance)
+      {
+        "Method" => {
+          "namespace" => namespace,
+          "owner_kind" => camel(owner_kind),
+          "name" => name.to_s
+        }
+      }
+    end
+
     def method_param(param)
       {
         "name" => (param[:name] || param["name"]).to_s,

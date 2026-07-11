@@ -273,6 +273,80 @@ fn resolved_reference_definition_query_requires_one_exact_target() {
 }
 
 #[test]
+fn exact_method_reference_uses_engine_resolution_and_lifecycle() {
+    let mut engine = AnalysisEngine::new();
+    let model_file = register_project_file(
+        &mut engine,
+        "app/models/user.rb",
+        "class User; private; def normalize_account; end; end",
+    );
+    let callback_file = register_project_file(
+        &mut engine,
+        "app/models/callback.rb",
+        "before_save :normalize_account",
+    );
+    let user_name = RubyConstant::new("User").unwrap();
+    let user = FullyQualifiedName::namespace(vec![user_name]);
+    let method = RubyMethod::new("normalize_account").unwrap();
+    let method_range = TextRange::new(model_file, 20, 49);
+    let reference_range = TextRange::new(callback_file, 13, 31);
+
+    engine.replace_facts(
+        model_file,
+        FileFacts {
+            graph_nodes: vec![GraphNodeFact::new(
+                user.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(model_file, 0, 10),
+            )],
+            methods: vec![MethodFact::new(
+                FullyQualifiedName::method(user.namespace_parts(), method),
+                user.clone(),
+                method_range,
+            )
+            .with_visibility(crate::method_store::MethodVisibility::Private)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        callback_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::method_target(
+                reference_range,
+                user.namespace_parts(),
+                crate::core::NamespaceKind::Instance,
+                method,
+                None,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(callback_file, 15),
+        vec![method_range],
+        "exact callback target must use normal engine method lookup, including private methods"
+    );
+    assert_eq!(
+        engine
+            .reference_facts_for(&FullyQualifiedName::method(user.namespace_parts(), method))
+            .len(),
+        1,
+        "exact callback target must participate in ordinary method references"
+    );
+
+    engine.replace_facts(callback_file, FileFacts::default(), ResolveMode::Immediate);
+    assert!(
+        AnalysisQuery::new(&engine)
+            .resolved_reference_definition_ranges_at(callback_file, 15)
+            .is_empty(),
+        "removing callback facts must remove exact method navigation"
+    );
+}
+
+#[test]
 fn method_candidate_resolves_when_method_definition_arrives_later() {
     let mut engine = AnalysisEngine::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");

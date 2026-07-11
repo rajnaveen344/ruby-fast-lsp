@@ -282,6 +282,33 @@ impl ReferenceCandidate {
             },
         }
     }
+
+    pub fn method_target(
+        reference_range: TextRange,
+        owner: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        caller: Option<FullyQualifiedName>,
+    ) -> Self {
+        assert!(
+            !owner.is_empty(),
+            "INVARIANT VIOLATED: exact method reference target has no owner namespace. \
+             This is a bug because method resolution requires a concrete owner. \
+             Fix: validate extension method targets before constructing ReferenceCandidate."
+        );
+        Self {
+            range: reference_range,
+            kind: ReferenceCandidateKind::Method {
+                owner: ConstantPath::from_vec(owner),
+                owner_kind,
+                method,
+                is_super: false,
+                access: MethodReferenceAccess::Normal,
+                caller,
+                diagnostics: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

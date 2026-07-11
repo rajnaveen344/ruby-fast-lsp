@@ -6,7 +6,7 @@ server_version = ">=0.2.6, <0.3.0"
 runtime = "mruby-wasm"
 entry = "extension.rb"
 wasm = "extension.wasm"
-checksum_sha256 = "e25208f18d6a5016a4fe40560368754b0facaa1a20f81d8ca1f4ffb8eafcfcef"
+checksum_sha256 = "86a567315acc938c0c0db07f1dd3b7f2e2502f38cf18e8b576424c9205720183"
 capabilities = ["index.call"]
 permissions = []
 
@@ -14,4 +14,19 @@ permissions = []
 output = "extension.wasm"
 
 [indexing]
-call_names = ["belongs_to", "has_one", "has_many"]
+call_names = [
+  "belongs_to", "has_one", "has_many",
+  "before_validation", "after_validation",
+  "before_save", "around_save", "after_save",
+  "before_create", "around_create", "after_create",
+  "before_update", "around_update", "after_update",
+  "before_destroy", "around_destroy", "after_destroy",
+  "before_commit", "after_commit", "after_rollback",
+  "after_create_commit", "after_update_commit", "after_destroy_commit", "after_save_commit",
+  "after_initialize", "after_find", "after_touch",
+  "validate", "validates", "validates_associated",
+  "validates_absence_of", "validates_acceptance_of", "validates_confirmation_of",
+  "validates_exclusion_of", "validates_format_of", "validates_inclusion_of",
+  "validates_length_of", "validates_numericality_of", "validates_presence_of",
+  "validates_size_of", "validates_uniqueness_of", "validates_comparison_of"
+]
