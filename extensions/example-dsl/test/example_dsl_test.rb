@@ -27,6 +27,7 @@ class ExampleDslTest < Minitest::Test
     method_patch = extension.index_call(call).fetch(0).fetch("DefineMethod")
     assert_equal "name", method_patch.fetch("name")
     assert_equal ["ExampleModel"], method_patch.fetch("namespace")
+    assert_equal "Private", method_patch.fetch("visibility")
 
     document = {
       "uri" => "file:///app/example_model.rb",

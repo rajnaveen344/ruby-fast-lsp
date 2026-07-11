@@ -214,6 +214,15 @@ keeps the normal gate toolchain-independent; set
 `RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1` after an SDK build to exercise the actual
 Ruby-authored Wasm.
 
+`DefineMethodPatch` metadata is semantic, not decorative. The extension boundary
+validates method/namespace/type/range/parameter payloads before conversion.
+`file_processor` must preserve declared visibility, signature labels, and an
+extension-provenance `TypeFact` for declared returns. During the same file pass,
+the extension host mirrors the method identity/visibility and return type into
+the collector's local facts so later expressions can infer it without a second
+AST traversal. Final facts still enter the engine only through per-file
+`replace_facts`; edit/reindex removes stale extension methods and types.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

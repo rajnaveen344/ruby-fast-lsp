@@ -403,6 +403,12 @@ Index patches:
 - define type metadata
 - define reference edge
 
+The implemented `define method` contract preserves parameter kinds, public /
+protected / private visibility, and optional named return types. Declared return
+types participate in same-file inference immediately and are stored as
+extension-provenance method-return facts; removing the source DSL call removes
+both method and type facts on normal reindex.
+
 Response patches:
 
 - hover item

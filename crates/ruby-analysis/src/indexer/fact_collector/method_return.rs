@@ -77,6 +77,18 @@ impl FactCollector {
             self.scope_tracker.get_ns_stack(),
             crate::core::NamespaceKind::Instance,
         );
+        let local_method_fqn = FullyQualifiedName::method(namespace.namespace_parts(), method);
+        if self.direct_method_fact_is_visible(
+            &local_method_fqn,
+            &namespace,
+            &namespace,
+            allow_private,
+            &caller_namespace,
+        ) {
+            if let Some(return_type) = self.local_method_return_type(&local_method_fqn) {
+                return Some(return_type);
+            }
+        }
         let callees = if allow_private {
             query.resolve_method_callees(&namespace, &method)?
         } else {

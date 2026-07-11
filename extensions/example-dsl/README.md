@@ -4,7 +4,8 @@ This independent example is the acceptance fixture and copyable starting point
 for the public mruby extension SDK. It demonstrates all of the minimum package
 contracts without importing Ruby Fast LSP server or engine internals:
 
-- `field :name` emits an instance-method semantic patch;
+- `field :name` emits a private instance-method semantic patch with a `String`
+  return type;
 - fields appear as document symbols;
 - fields receive an editor code lens;
 - the generated method participates in ordinary engine-owned navigation.

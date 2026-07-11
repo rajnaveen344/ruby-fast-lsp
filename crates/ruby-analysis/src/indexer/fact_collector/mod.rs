@@ -450,6 +450,24 @@ impl FactCollector {
         );
     }
 
+    pub fn direct_push_method_fact_with_visibility(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        visibility: MethodVisibility,
+    ) {
+        let fqn = FullyQualifiedName::method(namespace.clone(), method);
+        let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
+        self.direct_facts
+            .symbols
+            .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
+        self.direct_facts
+            .methods
+            .push(MethodFact::new(fqn, owner, range).with_visibility(visibility));
+    }
+
     pub fn direct_set_visibility(&mut self, visibility: MethodVisibility) {
         self.scope_tracker.set_current_visibility(visibility);
     }

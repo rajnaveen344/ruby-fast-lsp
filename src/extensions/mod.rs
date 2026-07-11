@@ -30,12 +30,14 @@ use walkdir::WalkDir;
 use crate::config::RubyFastLspConfig;
 use ruby_analysis::core::{
     FullyQualifiedName, MethodCalleeResolution, MethodFact, NamespaceKind, RubyConstant,
-    RubyMethod, SourceKind, SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange,
+    RubyMethod, RubyType as AnalysisRubyType, SourceKind, SymbolFact,
+    SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
 use ruby_analysis::indexer::fact_collector::{FactCollector, FactCollectorExtensionHost};
 use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
+use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
@@ -1470,6 +1472,14 @@ fn process_wasm_call_node(
             ));
             continue;
         }
+        if let Err(err) = validate_index_patch_payloads(&patches) {
+            drop(extension);
+            loaded.fail(format!(
+                "extension `{}` emitted an invalid index patch: {err}",
+                loaded.metadata.id
+            ));
+            continue;
+        }
         emitters.insert(loaded.metadata.id.clone(), Arc::clone(&loaded));
         emitted.extend(patches);
     }
@@ -1646,6 +1656,62 @@ fn validate_index_patch_provenance(
         return Err(spoofed_id);
     }
     Ok(())
+}
+
+fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
+    for patch in patches {
+        match patch {
+            IndexPatch::DefineMethod(method) => {
+                RubyMethod::new(&method.name)
+                    .map_err(|err| format!("invalid method name `{}`: {err}", method.name))?;
+                validate_extension_namespace(&method.namespace, "method namespace")?;
+                validate_source_range(method.location, "method location")?;
+                if method.params.iter().any(|param| param.name.is_empty()) {
+                    return Err("method parameter names must not be empty".to_string());
+                }
+                analysis_ruby_type_from_extension(method.return_type.as_ref())?;
+            }
+            IndexPatch::ApplyMixin(mixin) => {
+                validate_extension_namespace(&mixin.namespace, "mixin namespace")?;
+                validate_extension_namespace(&mixin.mixin, "mixin target")?;
+                validate_source_range(mixin.location, "mixin location")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_extension_namespace(parts: &[String], label: &str) -> Result<(), String> {
+    for part in parts {
+        RubyConstant::new(part)
+            .map_err(|err| format!("invalid {label} component `{part}`: {err}"))?;
+    }
+    Ok(())
+}
+
+fn validate_source_range(range: SourceRange, label: &str) -> Result<(), String> {
+    let start = (range.start.line, range.start.character);
+    let end = (range.end.line, range.end.character);
+    if start > end {
+        return Err(format!(
+            "{label} start {}:{} is after end {}:{}",
+            range.start.line, range.start.character, range.end.line, range.end.character
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn analysis_ruby_type_from_extension(
+    ruby_type: Option<&ruby_fast_lsp_extension_api::RubyType>,
+) -> Result<Option<AnalysisRubyType>, String> {
+    match ruby_type {
+        Some(ruby_fast_lsp_extension_api::RubyType::Named(name)) => {
+            let fqn = FullyQualifiedName::try_from(name.as_str())
+                .map_err(|err| format!("invalid named return type `{name}`: {err}"))?;
+            Ok(Some(AnalysisRubyType::Class(fqn)))
+        }
+        Some(ruby_fast_lsp_extension_api::RubyType::Unknown) | None => Ok(None),
+    }
 }
 
 fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
@@ -2569,6 +2635,52 @@ fn argument_from_node(visitor: &FactCollector, node: &Node) -> Argument {
 }
 
 fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
+    if let IndexPatch::DefineMethod(method) = &patch {
+        let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
+            .expect("INVARIANT VIOLATED: extension return type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.");
+        if let Some(return_type) = return_type {
+            let namespace = method
+                .namespace
+                .iter()
+                .map(|part| RubyConstant::new(part).expect(
+                    "INVARIANT VIOLATED: extension method namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                ))
+                .collect::<Vec<_>>();
+            let ruby_method = RubyMethod::new(&method.name).expect(
+                "INVARIANT VIOLATED: extension method name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+            );
+            let fqn = FullyQualifiedName::method(namespace, ruby_method);
+            let range = visitor
+                .document
+                .lsp_range_to_text_range(range_from_abi(method.location));
+            visitor.direct_push_method_fact_with_visibility(
+                fqn.namespace_parts(),
+                match method.owner_kind {
+                    AbiNamespaceKind::Instance => NamespaceKind::Instance,
+                    AbiNamespaceKind::Singleton => NamespaceKind::Singleton,
+                },
+                ruby_method,
+                range,
+                match method.visibility {
+                    ruby_fast_lsp_extension_api::MethodVisibility::Public => {
+                        AnalysisMethodVisibility::Public
+                    }
+                    ruby_fast_lsp_extension_api::MethodVisibility::Protected => {
+                        AnalysisMethodVisibility::Protected
+                    }
+                    ruby_fast_lsp_extension_api::MethodVisibility::Private => {
+                        AnalysisMethodVisibility::Private
+                    }
+                },
+            );
+            visitor.type_store.add(TypeFact::new(
+                TypeSubject::MethodReturn(fqn),
+                return_type,
+                range,
+                TypeProvenance::Extension,
+            ));
+        }
+    }
     visitor.extension_index_patches.push(patch);
 }
 
@@ -3813,6 +3925,39 @@ commands = ["standardrb"]
             .expect_err("guest patch provenance must not impersonate another extension");
 
         assert_eq!(spoofed, "spoofed-extension");
+    }
+
+    #[test]
+    fn invalid_extension_method_metadata_is_rejected_before_fact_conversion() {
+        let patch = IndexPatch::DefineMethod(ruby_fast_lsp_extension_api::DefineMethodPatch {
+            name: "generated".to_string(),
+            namespace: vec!["Widget".to_string()],
+            owner_kind: AbiNamespaceKind::Instance,
+            visibility: ruby_fast_lsp_extension_api::MethodVisibility::Public,
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 1,
+                    character: 0,
+                },
+                end: SourcePosition {
+                    line: 1,
+                    character: 9,
+                },
+            },
+            params: Vec::new(),
+            return_type: Some(ruby_fast_lsp_extension_api::RubyType::Named(
+                "not a Ruby type".to_string(),
+            )),
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "metadata-test".to_string(),
+                macro_name: "generated".to_string(),
+            },
+        });
+
+        let err = validate_index_patch_payloads(&[patch])
+            .expect_err("invalid extension return type must be rejected at guest boundary");
+
+        assert!(err.contains("invalid named return type"), "got: {err}");
     }
 
     #[test]

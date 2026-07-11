@@ -15,7 +15,7 @@
 //! the actual processing to `FileProcessor` with appropriate options.
 
 use crate::capabilities::diagnostics::generate_diagnostics;
-use crate::extensions::ExtensionRegistryHandle;
+use crate::extensions::{analysis_ruby_type_from_extension, ExtensionRegistryHandle};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
 use log::debug;
@@ -23,12 +23,14 @@ use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
     NamespaceKind as AnalysisNamespaceKind, RubyConstant, RubyMethod, SourceKind, SymbolFact,
-    SymbolKind as AnalysisSymbolKind, TextRange, UnresolvedGraphEdgeFact,
+    SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    UnresolvedGraphEdgeFact,
 };
 use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
@@ -568,17 +570,45 @@ fn add_extension_analysis_facts(
                     analysis_namespace_kind(method.owner_kind),
                 );
                 let range = text_range_from_source_range(document, method.location, "method");
-                facts.symbols.push(SymbolFact::new(
+                if !facts
+                    .symbols
+                    .iter()
+                    .any(|fact| fact.fqn == fqn && fact.range == range)
+                {
+                    facts.symbols.push(SymbolFact::new(
+                        fqn.clone(),
+                        AnalysisSymbolKind::Method,
+                        range,
+                    ));
+                }
+                let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
+                    .expect("INVARIANT VIOLATED: extension return type reached fact conversion without validation. This is a bug because guest patches must be validated before collection. Fix: keep extension payload validation before patch application.");
+                let return_type_label = return_type.as_ref().map(ToString::to_string);
+                let method_fact = MethodFact::with_param_facts(
                     fqn.clone(),
-                    AnalysisSymbolKind::Method,
-                    range,
-                ));
-                facts.methods.push(MethodFact::with_param_facts(
-                    fqn,
-                    owner,
+                    owner.clone(),
                     range,
                     analysis_method_params_from_extension(&method.params),
-                ));
+                )
+                .with_visibility(analysis_method_visibility(method.visibility))
+                .with_signature_metadata(None, return_type_label);
+                if let Some(existing) = facts
+                    .methods
+                    .iter_mut()
+                    .find(|fact| fact.fqn == fqn && fact.owner == owner && fact.range == range)
+                {
+                    *existing = method_fact;
+                } else {
+                    facts.methods.push(method_fact);
+                }
+                if let Some(return_type) = return_type {
+                    facts.types.push(TypeFact::new(
+                        TypeSubject::MethodReturn(fqn),
+                        return_type,
+                        range,
+                        TypeProvenance::Extension,
+                    ));
+                }
             }
             IndexPatch::ApplyMixin(mixin) => {
                 let mut source_parts = ruby_constants(&mixin.namespace, "ApplyMixin namespace");
@@ -729,6 +759,18 @@ fn analysis_namespace_kind(
     match kind {
         ruby_fast_lsp_extension_api::NamespaceKind::Instance => AnalysisNamespaceKind::Instance,
         ruby_fast_lsp_extension_api::NamespaceKind::Singleton => AnalysisNamespaceKind::Singleton,
+    }
+}
+
+fn analysis_method_visibility(
+    visibility: ruby_fast_lsp_extension_api::MethodVisibility,
+) -> AnalysisMethodVisibility {
+    match visibility {
+        ruby_fast_lsp_extension_api::MethodVisibility::Public => AnalysisMethodVisibility::Public,
+        ruby_fast_lsp_extension_api::MethodVisibility::Protected => {
+            AnalysisMethodVisibility::Protected
+        }
+        ruby_fast_lsp_extension_api::MethodVisibility::Private => AnalysisMethodVisibility::Private,
     }
 }
 

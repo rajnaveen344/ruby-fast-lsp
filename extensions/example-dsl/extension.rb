@@ -50,6 +50,7 @@ extension "example-dsl" do
         name: name,
         namespace: ctx.current_namespace,
         owner_kind: :instance,
+        visibility: :private,
         location: argument.range,
         return_type: {"Named" => "String"},
         source: macro_source(ctx)

@@ -773,3 +773,29 @@ At the end of every goal session, record:
   semantic acceptance proof close meaningful Milestone 2 criteria. Reaching the
   7.7 milestone still requires broader stable semantic/response patch families,
   complete hook ingestion, and deterministic lifecycle replacement evidence.
+
+### July 2026: Complete extension method metadata ingestion
+
+- Correctness audit: `DefineMethodPatch` parameters were already retained, but
+  declared visibility and return types were silently discarded during fact
+  conversion. This made the public contract overstate what extensions could
+  influence and weakened Rails-style generated API inference.
+- Type ingestion: named extension return types now become engine-owned
+  `TypeFact::MethodReturn` facts with `Extension` provenance and remain visible
+  in signature metadata. Same-file collection mirrors the validated method and
+  return type into local collector facts, so a later expression can infer the
+  generated method without a second AST traversal.
+- Visibility: public, protected, and private declarations now populate the
+  engine `MethodFact` visibility used by centralized definition/reference/
+  diagnostic policy. The black-box example proves a private generated method
+  resolves as a bare call while an explicit receiver is rejected.
+- Failure isolation: invalid method names, namespaces, parameter names, source
+  ranges, mixin targets, and named return types are rejected at the untrusted
+  guest boundary before fact conversion instead of reaching invariant panics.
+- Lifecycle evidence: the independent external harness proves the generated
+  method hovers as `String`, its private-call policy is enforced, and removing
+  the DSL declaration through `didChange` removes both stale definition and
+  return-type behavior through normal per-file replacement.
+- Rating remains **7.4/10**. This makes an existing semantic patch family honest
+  and production-usable; broader namespace, constant, attribute, type, and
+  reference patch families are still required before Milestone 2 reaches 7.7.

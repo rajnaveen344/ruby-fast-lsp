@@ -5,8 +5,8 @@ use ruby_fast_lsp::server::RubyLanguageServer;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, InitializeParams, Location, PartialResultParams, Position,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, Location, PartialResultParams,
+    Position, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 use tower_lsp::LanguageServer;
@@ -169,6 +169,21 @@ impl FakeEditor {
             ),
             None => Vec::new(),
         }
+    }
+
+    pub async fn hover(&self, filename: &str, line: u32, character: u32) -> Option<Hover> {
+        self.assert_open(filename, "hover");
+        let uri = filename_to_uri(filename);
+        self.server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("INVARIANT VIOLATED: hover request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
     }
 
     pub async fn extension_status(&self) -> Vec<ExtensionStatusReport> {
