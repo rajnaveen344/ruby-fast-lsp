@@ -13,6 +13,8 @@ REBUILD_LSP=false
 SKIP_BUILDS=false
 SELECTED_PLATFORMS=""
 
+node "$ROOT_DIR/editors/check_package_versions.js"
+
 # Define target platforms and architectures as arrays
 ALL_PLATFORMS=("macos-x64" "macos-arm64" "linux-x64" "win32-x64")
 ALL_TARGETS=("x86_64-apple-darwin" "aarch64-apple-darwin" "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu")
@@ -276,9 +278,15 @@ npm install
 echo "Packaging extension..."
 vsce package
 
+EXPECTED_VSIX="$EXTENSION_NAME-$EXTENSION_VERSION.vsix"
+if [ ! -f "$EXPECTED_VSIX" ]; then
+    echo "Error: expected versioned artifact $EXPECTED_VSIX was not produced"
+    exit 1
+fi
+
 # Move the VSIX file to the target directory
 mkdir -p "$TARGET_DIR"
-mv *.vsix "$TARGET_DIR/"
+mv "$EXPECTED_VSIX" "$TARGET_DIR/"
 
 echo "VSIX package created successfully!"
 echo "You can find the VSIX file in the target directory of your project."

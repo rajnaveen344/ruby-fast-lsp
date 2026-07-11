@@ -36,6 +36,7 @@ cargo test                    # Run all tests
 cargo test -- --nocapture     # With output
 cargo build --release         # Release build
 ./editors/vscode/create_vsix.sh --current-platform-only   # Build VS Code extension
+./editors/scripts/smoke_npm_install.sh                    # Pack/install/initialize npm CLI
 ```
 
 ## Critical Reminders
@@ -150,6 +151,13 @@ full-document edit only when output changes. Formatter selection and command
 argv are independent from lint diagnostics. Startup failures, abnormal exits,
 timeouts, invalid output, and unsafe empty output produce no edit and do not
 mutate analysis state.
+
+Distribution versions are checked by `editors/check_package_versions.js` and
+must match the root Cargo package across the VSIX, npm CLI, platform packages,
+optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail
+before packaging when versions drift. The npm install smoke test packs the local
+CLI and current-platform package into a clean temporary project and proves the
+installed wrapper can complete a real LSP initialize handshake.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

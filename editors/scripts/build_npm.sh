@@ -64,6 +64,8 @@ for DEP in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
   sed -i "s|\"@ruby-fast/lsp-${DEP}\": \".*\"|\"@ruby-fast/lsp-${DEP}\": \"${VERSION}\"|" "$NPM_DIR/ruby-fast-lsp/package.json"
 done
 
+node "$EDITORS_DIR/check_package_versions.js"
+
 echo ""
 echo "Done. Built $(echo $PLATFORMS | wc -w | tr -d ' ') platform(s)."
 echo "To publish: ./editors/scripts/publish_npm.sh"

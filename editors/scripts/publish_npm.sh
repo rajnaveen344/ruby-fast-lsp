@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EDITORS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NPM_DIR="$EDITORS_DIR/npm"
 
+node "$EDITORS_DIR/check_package_versions.js"
+
 # Publish platform packages first, then the main CLI package.
 # Usage:
 #   ./editors/scripts/publish_npm.sh              # publish to npm

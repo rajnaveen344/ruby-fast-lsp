@@ -291,12 +291,16 @@ resolved and the intended lint policy is explicit.
 
 ## Packaging Completion
 
-- Keep Cargo, npm package, npm platform packages, and VSIX versions consistent.
-- Ensure packaging output names match the version actually embedded in the
+- Done: keep Cargo, npm package, npm platform packages, and VSIX versions
+  consistent through an executable pre-package check.
+- Done: ensure packaging output names match the version actually embedded in the
   artifact.
-- Resolve shipped npm dependency vulnerabilities.
-- Verify the server starts through the installed npm wrapper over stdio.
-- Verify the packaged VSIX discovers its binary, stubs, and bundled extensions.
+- Done: resolve shipped npm dependency vulnerabilities; the current production
+  dependency audit reports zero findings.
+- Done: verify the server starts through a freshly packed and installed npm
+  wrapper over stdio with a real LSP initialize handshake.
+- Done: verify the packaged VSIX contains its current-platform binary, stubs,
+  safe dependency versions, and bundled RSpec extension.
 - Add distribution targets only when they correspond to intended supported
   platforms; Linux ARM64 is the first likely addition.
 
@@ -549,3 +553,31 @@ At the end of every goal session, record:
 - Rating: current estimate is **7.2/10**. Everyday editor breadth has materially
   improved, but version-inconsistent artifacts and dependency vulnerabilities
   remain real production-readiness gaps.
+
+### July 2026: Distribution consistency and installed-artifact verification
+
+- Version consistency: Cargo, the VSIX manifest and lockfile, the npm CLI, all
+  npm platform packages, and the CLI's optional dependency pins now agree on
+  `0.2.6`.
+- Regression prevention: `editors/check_package_versions.js` fails with every
+  mismatched manifest and runs before VSIX packaging and npm publication. VSIX
+  creation also requires the exact Cargo-versioned artifact name instead of
+  moving an arbitrary `.vsix` file.
+- Dependency safety: the vulnerable transitive `minimatch 5.1.6` and
+  `brace-expansion 2.0.1` packages were upgraded to `5.1.9` and `2.1.2`;
+  `npm audit --audit-level=low` reports zero vulnerabilities.
+- npm evidence: the current platform binary and CLI are packed, installed into
+  a clean temporary npm project, resolved through the public wrapper, and used
+  to complete a real JSON-RPC/LSP initialize handshake.
+- VSIX evidence: packaging now produces `ruby-fast-lsp-0.2.6.vsix`; inspection
+  confirms manifest version `0.2.6`, the current binary, zipped stubs, bundled
+  RSpec Wasm extension, and the remediated dependency versions.
+- Milestone state: Everyday LSP Completeness and its production packaging gate
+  are achieved for the declared scope.
+- Next priority: audit the existing extension implementation against every
+  Production Extension Platform criterion, then close the highest-impact
+  contract, lifecycle, determinism, permission, SDK, and black-box gaps.
+- Rating: current estimate is **7.3/10**. This reaches the Milestone 1 target
+  based on tested daily editor breadth and installable artifacts; Rails,
+  templates, extension-platform maturity, and measured production evidence
+  remain necessary for higher ratings.
