@@ -672,6 +672,9 @@ function activate(context) {
         extensionPath: context.extensionPath,
         extensionPackages,
         extensionDirs: [],
+        extensionSettings: config.get('extensionSettings', {}),
+        workspaceTrusted: vscode.workspace.isTrusted,
+        projectExtensionsEnabled: config.get('projectExtensionsEnabled', true),
         linter: config.get('linter', 'none'),
         linterCommand: config.get('linterCommand', []),
         formatter: config.get('formatter', 'none'),
@@ -738,6 +741,8 @@ function activate(context) {
                 if (client) {
                     const newConfig = vscode.workspace.getConfiguration('rubyFastLsp');
                     const indexing = newConfig.get('indexing', {});
+                    initializationOptions.extensionSettings = newConfig.get('extensionSettings', {});
+                    initializationOptions.projectExtensionsEnabled = newConfig.get('projectExtensionsEnabled', true);
                     if (event.affectsConfiguration('rubyFastLsp.indexing')) {
                         initializationOptions.indexing = indexing;
                         await client.restart();
@@ -755,7 +760,10 @@ function activate(context) {
                                 formatterCommand: newConfig.get('formatterCommand', []),
                                 indexing,
                                 extensionPackages,
-                                extensionDirs: []
+                                extensionDirs: [],
+                                extensionSettings: initializationOptions.extensionSettings,
+                                workspaceTrusted: vscode.workspace.isTrusted,
+                                projectExtensionsEnabled: initializationOptions.projectExtensionsEnabled
                             }
                         }
                     });
@@ -765,6 +773,15 @@ function activate(context) {
                 if (event.affectsConfiguration('rubyFastLsp.showExternalTypes')) {
                     indexProvider.refresh();
                 }
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidGrantWorkspaceTrust(async () => {
+            initializationOptions.workspaceTrusted = true;
+            if (client) {
+                await client.restart();
             }
         })
     );

@@ -100,6 +100,14 @@ pub struct RubyFastLspConfig {
     #[serde(rename = "extensionSettings")]
     pub extension_settings: BTreeMap<String, serde_json::Value>,
 
+    /// Client-supplied trust state. Project-local Wasm is never discovered
+    /// unless the editor explicitly marks the workspace trusted.
+    #[serde(rename = "workspaceTrusted")]
+    pub workspace_trusted: bool,
+
+    #[serde(rename = "projectExtensionsEnabled")]
+    pub project_extensions_enabled: bool,
+
     #[serde(rename = "codeLens.modules.enabled")]
     pub code_lens_modules_enabled: Option<bool>,
 
@@ -132,6 +140,8 @@ impl Default for RubyFastLspConfig {
             extension_packages: Vec::new(),
             extension_dirs: Vec::new(),
             extension_settings: BTreeMap::new(),
+            workspace_trusted: false,
+            project_extensions_enabled: true,
             code_lens_modules_enabled: Some(true),
             log_level: "info".to_string(),
             linter: LinterKind::None,

@@ -17,6 +17,7 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
+use walkdir::WalkDir;
 
 use crate::config::RubyFastLspConfig;
 use ruby_analysis::core::{
@@ -124,12 +125,14 @@ impl ExtensionStatus {
 struct ExtensionLoadConfig {
     package_paths: Vec<ConfiguredExtensionPath>,
     directory_paths: Vec<ConfiguredExtensionPath>,
+    project_package_paths: Vec<ConfiguredExtensionPath>,
     settings: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExtensionPathSource {
     Environment,
+    ProjectLocal,
     InitializationOptions,
 }
 
@@ -203,6 +206,13 @@ struct ExtensionProcessManifest {
 
 impl ExtensionLoadConfig {
     fn from_config(config: &RubyFastLspConfig) -> Self {
+        Self::from_config_and_workspace_roots(config, &[])
+    }
+
+    fn from_config_and_workspace_roots(
+        config: &RubyFastLspConfig,
+        workspace_roots: &[PathBuf],
+    ) -> Self {
         let mut load_config = Self::from_environment();
         load_config
             .package_paths
@@ -227,6 +237,21 @@ impl ExtensionLoadConfig {
                         source: ExtensionPathSource::InitializationOptions,
                     }),
             );
+        if config.workspace_trusted && config.project_extensions_enabled {
+            let mut roots = workspace_roots.to_vec();
+            roots.sort();
+            roots.dedup();
+            for root in roots {
+                load_config.project_package_paths.extend(
+                    discover_project_extension_packages(&root)
+                        .into_iter()
+                        .map(|path| ConfiguredExtensionPath {
+                            path,
+                            source: ExtensionPathSource::ProjectLocal,
+                        }),
+                );
+            }
+        }
         load_config
     }
 
@@ -252,6 +277,70 @@ impl ExtensionLoadConfig {
     }
 }
 
+fn discover_project_extension_packages(workspace_root: &Path) -> Vec<PathBuf> {
+    let mut packages = Vec::new();
+    let hidden_root = workspace_root.join(".ruby-fast-lsp/extensions");
+    if hidden_root.is_dir() {
+        for entry in WalkDir::new(&hidden_root)
+            .min_depth(2)
+            .max_depth(2)
+            .follow_links(false)
+        {
+            match entry {
+                Ok(entry)
+                    if entry.file_type().is_file() && entry.file_name() == "extension.toml" =>
+                {
+                    packages.push(
+                        entry
+                            .path()
+                            .parent()
+                            .expect("INVARIANT VIOLATED: extension.toml discovered without a parent directory. This is a bug because WalkDir entries below a workspace root must have a parent. Fix: preserve the package-directory discovery depth.")
+                            .to_path_buf(),
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => warn!(
+                    "Skipping unreadable project extension entry under `{}`: {}",
+                    hidden_root.display(),
+                    err
+                ),
+            }
+        }
+    }
+
+    let conventional_root = workspace_root.join("ruby_fast_lsp");
+    if conventional_root.is_dir() {
+        for entry in WalkDir::new(&conventional_root)
+            .min_depth(1)
+            .follow_links(false)
+        {
+            match entry {
+                Ok(entry)
+                    if entry.file_type().is_file() && entry.file_name() == "extension.toml" =>
+                {
+                    packages.push(
+                        entry
+                            .path()
+                            .parent()
+                            .expect("INVARIANT VIOLATED: extension.toml discovered without a parent directory. This is a bug because WalkDir entries below a workspace root must have a parent. Fix: preserve manifest-only project discovery.")
+                            .to_path_buf(),
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => warn!(
+                    "Skipping unreadable project extension entry under `{}`: {}",
+                    conventional_root.display(),
+                    err
+                ),
+            }
+        }
+    }
+
+    packages.sort();
+    packages.dedup();
+    packages
+}
+
 impl ExtensionRegistryHandle {
     pub fn from_environment() -> Self {
         Self {
@@ -270,7 +359,16 @@ impl ExtensionRegistryHandle {
     }
 
     pub fn configure_from_config(&self, config: &RubyFastLspConfig) {
-        let load_config = ExtensionLoadConfig::from_config(config);
+        self.configure_from_config_and_workspace_roots(config, &[]);
+    }
+
+    pub fn configure_from_config_and_workspace_roots(
+        &self,
+        config: &RubyFastLspConfig,
+        workspace_roots: &[PathBuf],
+    ) {
+        let load_config =
+            ExtensionLoadConfig::from_config_and_workspace_roots(config, workspace_roots);
         let mut registry = self.inner.write();
         if registry.same_discovery(&load_config) && registry.all_extensions_loaded() {
             registry.update_settings(load_config.settings.clone());
@@ -361,6 +459,7 @@ impl ExtensionRegistry {
     fn same_discovery(&self, config: &ExtensionLoadConfig) -> bool {
         self.load_config.package_paths == config.package_paths
             && self.load_config.directory_paths == config.directory_paths
+            && self.load_config.project_package_paths == config.project_package_paths
     }
 
     fn all_extensions_loaded(&self) -> bool {
@@ -880,6 +979,14 @@ fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExten
             warn!("Skipping Ruby Fast LSP extension directory: {}", err);
         }
     }
+    for configured_path in &config.project_package_paths {
+        if let Err(err) = collect_extension_package(configured_path, false, &mut packages) {
+            warn!(
+                "Skipping project-local Ruby Fast LSP extension package: {}",
+                err
+            );
+        }
+    }
     packages.sort_by(|left, right| {
         extension_package_priority(left)
             .cmp(&extension_package_priority(right))
@@ -917,7 +1024,8 @@ struct ExtensionPackage {
 fn extension_package_priority(package: &ExtensionPackage) -> (u8, u8) {
     let source = match package.source {
         ExtensionPathSource::InitializationOptions => 0,
-        ExtensionPathSource::Environment => 1,
+        ExtensionPathSource::ProjectLocal => 1,
+        ExtensionPathSource::Environment => 2,
     };
     let discovery = if package.explicit_package { 0 } else { 1 };
     (source, discovery)
@@ -1801,8 +1909,14 @@ mod tests {
     use std::fs;
 
     use tempfile::TempDir;
+    use tower_lsp::lsp_types::{
+        DidChangeWorkspaceFoldersParams, InitializeParams, Url, WorkspaceFolder,
+        WorkspaceFoldersChangeEvent,
+    };
+    use tower_lsp::LanguageServer;
 
     use super::*;
+    use crate::server::RubyLanguageServer;
 
     fn copy_rspec_package(destination: &Path, version: &str) {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
@@ -1929,6 +2043,7 @@ call_names = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         });
 
@@ -2006,6 +2121,224 @@ call_names = []
         assert_eq!(registry.status_reports()[0].status, "deactivated");
     }
 
+    #[tokio::test]
+    async fn trusted_workspace_discovers_project_local_extension_package() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby");
+        copy_rspec_package(&package, "0.1.0-project");
+        let root_uri = Url::from_directory_path(temp_dir.path())
+            .expect("test workspace path must convert to a file URI");
+        let server = RubyLanguageServer::default();
+
+        server
+            .initialize(InitializeParams {
+                root_uri: Some(root_uri),
+                initialization_options: Some(serde_json::json!({
+                    "workspaceTrusted": true,
+                    "projectExtensionsEnabled": true
+                })),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("test server initialization must succeed");
+
+        let reports = server.extension_registry.status_reports();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].id, "rspec-ruby");
+        assert_eq!(reports[0].version.as_deref(), Some("0.1.0-project"));
+        assert_eq!(reports[0].status, "loaded");
+    }
+
+    #[tokio::test]
+    async fn dynamic_workspace_change_reconfigures_project_extensions() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        copy_rspec_package(
+            &temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby"),
+            "0.1.0-dynamic-lsp",
+        );
+        let root_uri = Url::from_directory_path(temp_dir.path())
+            .expect("test workspace path must convert to a file URI");
+        let folder = WorkspaceFolder {
+            uri: root_uri,
+            name: "dynamic".to_string(),
+        };
+        let server = RubyLanguageServer::default();
+        server
+            .initialize(InitializeParams {
+                initialization_options: Some(serde_json::json!({
+                    "workspaceTrusted": true,
+                    "projectExtensionsEnabled": true
+                })),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("test server initialization must succeed");
+
+        server
+            .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
+                event: WorkspaceFoldersChangeEvent {
+                    added: vec![folder.clone()],
+                    removed: Vec::new(),
+                },
+            })
+            .await;
+        assert_eq!(
+            server.extension_registry.status_reports()[0]
+                .version
+                .as_deref(),
+            Some("0.1.0-dynamic-lsp")
+        );
+
+        server
+            .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
+                event: WorkspaceFoldersChangeEvent {
+                    added: Vec::new(),
+                    removed: vec![folder],
+                },
+            })
+            .await;
+        assert!(server.extension_registry.status_reports().is_empty());
+    }
+
+    #[test]
+    fn untrusted_or_disabled_workspace_does_not_discover_project_extensions() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby");
+        copy_rspec_package(&package, "0.1.0-project");
+
+        let untrusted = RubyFastLspConfig {
+            workspace_trusted: false,
+            project_extensions_enabled: true,
+            ..RubyFastLspConfig::default()
+        };
+        let disabled = RubyFastLspConfig {
+            workspace_trusted: true,
+            project_extensions_enabled: false,
+            ..RubyFastLspConfig::default()
+        };
+
+        for config in [&untrusted, &disabled] {
+            let load_config = ExtensionLoadConfig::from_config_and_workspace_roots(
+                config,
+                &[temp_dir.path().to_path_buf()],
+            );
+            assert!(
+                load_config.project_package_paths.is_empty(),
+                "project-local Wasm must require both explicit trust and enablement"
+            );
+            assert!(ExtensionRegistry::load(&load_config)
+                .status_reports()
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn conventional_project_tree_is_discovered_recursively() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir
+            .path()
+            .join("ruby_fast_lsp/frameworks/testing/rspec-ruby");
+        copy_rspec_package(&package, "0.1.0-conventional");
+        let config = RubyFastLspConfig {
+            workspace_trusted: true,
+            project_extensions_enabled: true,
+            ..RubyFastLspConfig::default()
+        };
+
+        let registry =
+            ExtensionRegistry::load(&ExtensionLoadConfig::from_config_and_workspace_roots(
+                &config,
+                &[temp_dir.path().to_path_buf()],
+            ));
+
+        assert_eq!(
+            registry.status_reports()[0].version.as_deref(),
+            Some("0.1.0-conventional")
+        );
+    }
+
+    #[test]
+    fn explicit_package_wins_over_project_local_duplicate() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let explicit = temp_dir.path().join("explicit-rspec");
+        let project = temp_dir
+            .path()
+            .join(".ruby-fast-lsp/extensions/project-rspec");
+        copy_rspec_package(&explicit, "0.1.0-explicit");
+        copy_rspec_package(&project, "0.1.0-project");
+        let config = RubyFastLspConfig {
+            extension_packages: vec![explicit.to_string_lossy().into_owned()],
+            workspace_trusted: true,
+            project_extensions_enabled: true,
+            ..RubyFastLspConfig::default()
+        };
+
+        let registry =
+            ExtensionRegistry::load(&ExtensionLoadConfig::from_config_and_workspace_roots(
+                &config,
+                &[temp_dir.path().to_path_buf()],
+            ));
+
+        assert_eq!(registry.status_reports().len(), 1);
+        assert_eq!(
+            registry.status_reports()[0].version.as_deref(),
+            Some("0.1.0-explicit")
+        );
+    }
+
+    #[test]
+    fn project_duplicate_tie_break_is_filesystem_path_not_root_order() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let root_a = temp_dir.path().join("a-root");
+        let root_z = temp_dir.path().join("z-root");
+        copy_rspec_package(
+            &root_a.join(".ruby-fast-lsp/extensions/rspec-ruby"),
+            "0.1.0-a",
+        );
+        copy_rspec_package(
+            &root_z.join(".ruby-fast-lsp/extensions/rspec-ruby"),
+            "0.1.0-z",
+        );
+        let config = RubyFastLspConfig {
+            workspace_trusted: true,
+            project_extensions_enabled: true,
+            ..RubyFastLspConfig::default()
+        };
+
+        let registry = ExtensionRegistry::load(
+            &ExtensionLoadConfig::from_config_and_workspace_roots(&config, &[root_z, root_a]),
+        );
+
+        assert_eq!(registry.status_reports().len(), 1);
+        assert_eq!(
+            registry.status_reports()[0].version.as_deref(),
+            Some("0.1.0-a")
+        );
+    }
+
+    #[test]
+    fn workspace_root_changes_add_and_remove_project_extensions() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        copy_rspec_package(
+            &temp_dir.path().join(".ruby-fast-lsp/extensions/rspec-ruby"),
+            "0.1.0-dynamic",
+        );
+        let config = RubyFastLspConfig {
+            workspace_trusted: true,
+            project_extensions_enabled: true,
+            ..RubyFastLspConfig::default()
+        };
+        let registry = ExtensionRegistryHandle::from_config(&config);
+        assert!(registry.status_reports().is_empty());
+
+        registry
+            .configure_from_config_and_workspace_roots(&config, &[temp_dir.path().to_path_buf()]);
+        assert_eq!(registry.status_reports()[0].status, "loaded");
+
+        registry.configure_from_config_and_workspace_roots(&config, &[]);
+        assert!(registry.status_reports().is_empty());
+    }
+
     #[test]
     fn initialization_package_wins_duplicate_id_independent_of_path_order() {
         let temp_dir = TempDir::new().expect("test temp dir must be created");
@@ -2025,6 +2358,7 @@ call_names = []
                 },
             ],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         });
 
@@ -2060,6 +2394,7 @@ call_names = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2132,6 +2467,7 @@ wasm = "missing.wasm"
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2156,6 +2492,7 @@ wasm = "missing.wasm"
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2197,6 +2534,7 @@ permissions = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2239,6 +2577,7 @@ permissions = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2283,6 +2622,7 @@ commands = ["standardrb"]
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 
@@ -2307,6 +2647,7 @@ commands = ["standardrb"]
                 path: temp_dir.path().to_path_buf(),
                 source: ExtensionPathSource::InitializationOptions,
             }],
+            project_package_paths: Vec::new(),
             settings: BTreeMap::new(),
         };
 

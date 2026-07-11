@@ -86,6 +86,22 @@ Editor clients can pass the same paths through LSP initialization options:
 }
 ```
 
+Trusted workspaces also discover manifest packages from:
+
+- `.ruby-fast-lsp/extensions/*/extension.toml`
+- `ruby_fast_lsp/**/extension.toml`
+
+Project-local discovery requires both `workspaceTrusted: true` from the client
+and `projectExtensionsEnabled: true` (the default). VS Code maps this to its
+workspace trust/Restricted Mode state and restarts the server when trust is
+granted. Other clients must opt in explicitly; omitting trust is fail-closed.
+
+Precedence is deterministic: editor/configured packages and directories win,
+then project-local packages, then environment/development paths. Explicit
+packages win over directory discovery within a source, and filesystem path is
+the final tie-break. A lower-priority valid package may load only when every
+higher-priority package with the same ID fails validation.
+
 Wasm extensions handle matching calls first; built-in native extensions are
 fallback.
 
@@ -422,6 +438,8 @@ Reek, and RuboCop-style tools.
   - `.ruby-fast-lsp/extensions/*/extension.toml`
   - workspace `ruby_fast_lsp/**/extension.toml`
   - optional Bundler/gem scan later
+- Done: project-local discovery is trust-gated, multi-root deterministic, and
+  lower priority than editor/bundled packages but higher than environment paths.
 
 ### Core Extension Targets
 

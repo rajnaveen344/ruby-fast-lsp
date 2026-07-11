@@ -172,6 +172,13 @@ transactionally replace the registry and deactivate the old guests, while LSP
 shutdown deactivates the active registry. Lifecycle output may update private
 guest state but must not contain semantic, response, or command patches.
 
+Project-local extension discovery is fail-closed on workspace trust. Trusted
+roots may contribute manifest packages from `.ruby-fast-lsp/extensions/*` and
+`ruby_fast_lsp/**`; untrusted roots contribute none. Precedence is configured
+or bundled packages, then project-local packages, then environment/dev paths,
+with explicit packages before directory discovery and filesystem path as the
+deterministic final tie-break across multi-root workspaces.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

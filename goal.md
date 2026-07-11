@@ -648,3 +648,28 @@ At the end of every goal session, record:
 - Rating remains **7.3/10**. Milestone 2 still requires watcher routing,
   project-local discovery/trust, process hosting, broader patch families, SDK
   stability, and a minimal third-party acceptance fixture.
+
+### July 2026: Trusted project-local extension discovery
+
+- User-visible: trusted workspaces automatically discover manifest packages
+  under `.ruby-fast-lsp/extensions/*` and recursively under `ruby_fast_lsp/**`.
+  VS Code exposes `projectExtensionsEnabled`, forwards its workspace trust
+  state, and reloads when trust is granted.
+- Trust policy: project-local Wasm is fail-closed; an absent or false client
+  trust signal loads nothing. Users may disable local discovery independently
+  even in trusted workspaces. Explicit editor/bundled packages remain available
+  in Restricted Mode.
+- Determinism: configured/editor packages win over project-local packages,
+  which win over environment/dev paths. Explicit packages beat directory
+  discovery within a source, and filesystem path is the final multi-root
+  duplicate-ID tie-break.
+- Lifecycle: adding or removing workspace roots transactionally rebuilds the
+  discovered set and deactivates replaced/removed guests through the existing
+  bounded lifecycle path.
+- Focused evidence: real LSP initialization discovers a trusted local RSpec
+  package; tests cover untrusted and disabled rejection, both supported layouts,
+  explicit-over-project precedence, root-order-independent duplicate identity,
+  and dynamic root addition/removal.
+- Rating remains **7.3/10**. Milestone 2 still requires watcher routing,
+  process hosting, broader patch families/conflict policy, SDK stability, and a
+  minimal third-party acceptance fixture.

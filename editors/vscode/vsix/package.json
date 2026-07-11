@@ -135,6 +135,17 @@
           "default": [],
           "description": "Optional formatter command and arguments as an argv array, for example [\"bin/standardrb\"]. Empty uses bundle exec rubocop or bundle exec standardrb."
         },
+        "rubyFastLsp.projectExtensionsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Discover manifest-based Wasm extensions inside trusted workspaces under .ruby-fast-lsp/extensions and ruby_fast_lsp. Project extensions never load in Restricted Mode."
+        },
+        "rubyFastLsp.extensionSettings": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "description": "Per-extension settings keyed by extension manifest id. Values are delivered through bounded extension lifecycle events."
+        },
         "rubyFastLsp.indexing": {
           "type": "object",
           "default": {

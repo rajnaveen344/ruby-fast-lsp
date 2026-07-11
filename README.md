@@ -179,6 +179,21 @@ should send the same `indexing` object in initialization options and restart the
 server after changing it. Invalid glob patterns abort workspace indexing with an
 actionable error instead of silently applying a partial policy.
 
+## Project-local extensions
+
+Trusted workspaces can discover manifest packages automatically from
+`.ruby-fast-lsp/extensions/*/extension.toml` and
+`ruby_fast_lsp/**/extension.toml`. VS Code passes its Restricted Mode trust
+state to the server; project-local Wasm never loads from an untrusted workspace.
+Set `rubyFastLsp.projectExtensionsEnabled` to `false` to disable automatic local
+discovery even in trusted workspaces.
+
+Configured and bundled `extensionPackages`/`extensionDirs` have highest
+precedence, followed by project-local packages and then environment/development
+paths. Duplicate IDs within one source use filesystem-path order, making
+multi-root activation deterministic. Every package still passes manifest,
+compatibility, checksum, permission, and Wasm resource validation.
+
 ## See Also
 
 - [Ruby Fast Cop](https://github.com/rajnaveen344/ruby-fast-cop) - A high-performance Ruby linter written in Rust, designed as a companion to Ruby Fast LSP.

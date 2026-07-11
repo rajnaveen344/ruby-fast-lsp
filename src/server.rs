@@ -260,6 +260,18 @@ impl RubyLanguageServer {
         self.workspaces.read().clone()
     }
 
+    pub fn workspace_root_paths(&self) -> Vec<PathBuf> {
+        let mut roots = self
+            .workspaces
+            .read()
+            .iter()
+            .map(|workspace| workspace.root_path.clone())
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
     pub fn get_doc(&self, uri: &Url) -> Option<RubyDocument> {
         self.docs
             .lock()

@@ -39,22 +39,26 @@ pub async fn handle_initialize(
         info!("No parent process ID received, skipping process monitoring");
     }
 
-    // Process initialization options for configuration
-    if let Some(init_options) = params.initialization_options {
-        if let Ok(config) = serde_json::from_value::<RubyFastLspConfig>(init_options) {
-            debug!("Received configuration: {:?}", config);
-            lang_server
-                .extension_registry
-                .configure_from_config(&config);
-            *lang_server.config.lock() = config;
-        } else {
-            warn!("Failed to parse initialization options as configuration");
-        }
-    } else {
-        lang_server
-            .extension_registry
-            .configure_from_config(&RubyFastLspConfig::default());
-    }
+    // Parse configuration before workspace registration, then configure
+    // extensions after roots are known so trusted project-local packages can
+    // participate in deterministic discovery.
+    let config = match params.initialization_options {
+        Some(init_options) => match serde_json::from_value::<RubyFastLspConfig>(init_options) {
+            Ok(config) => {
+                debug!("Received configuration: {:?}", config);
+                config
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to parse initialization options as configuration: {}",
+                    err
+                );
+                RubyFastLspConfig::default()
+            }
+        },
+        None => RubyFastLspConfig::default(),
+    };
+    *lang_server.config.lock() = config.clone();
 
     // Register every workspace folder. Each folder is indexed independently
     // in handle_initialized. Multi-root VS Code
@@ -74,6 +78,9 @@ pub async fn handle_initialize(
     } else {
         warn!("No workspace folder or root URI provided. Files opened ad-hoc will use the orphan index.");
     }
+    lang_server
+        .extension_registry
+        .configure_from_config_and_workspace_roots(&config, &lang_server.workspace_root_paths());
 
     // Build static capabilities
     // Note: Type hierarchy is dynamically registered in handle_initialized
@@ -323,12 +330,21 @@ pub async fn handle_did_change_workspace_folders(
         server.remove_workspace(&removed.uri);
     }
 
+    let mut added_workspaces = Vec::new();
     for added in params.event.added {
         info!("Adding workspace folder: {}", added.uri.as_str());
-        let workspace = server.add_workspace(added.uri.clone());
+        added_workspaces.push(server.add_workspace(added.uri));
+    }
 
+    let config = server.config.lock().clone();
+    server
+        .extension_registry
+        .configure_from_config_and_workspace_roots(&config, &server.workspace_root_paths());
+
+    for workspace in added_workspaces {
         // Spawn coordinator for the new workspace. Mirrors the per-workspace
-        // task spawned in `handle_initialized`, but for runtime additions.
+        // task spawned in `handle_initialized`, but only after extension
+        // discovery includes the new root.
         let server_clone = server.clone();
         let workspace_uri = workspace.root_uri.clone();
         let indexing_complete_flag = workspace.indexing_complete.clone();
@@ -377,7 +393,12 @@ pub async fn handle_did_change_configuration(
 
                 // Apply log level immediately (works without restart)
                 config.apply_log_level();
-                server.extension_registry.configure_from_config(&config);
+                server
+                    .extension_registry
+                    .configure_from_config_and_workspace_roots(
+                        &config,
+                        &server.workspace_root_paths(),
+                    );
 
                 *server.config.lock() = config.clone();
 
@@ -422,6 +443,12 @@ fn preserve_initialization_only_config(
     }
     if !settings.contains_key("extensionSettings") {
         config.extension_settings = current.extension_settings.clone();
+    }
+    if !settings.contains_key("workspaceTrusted") {
+        config.workspace_trusted = current.workspace_trusted;
+    }
+    if !settings.contains_key("projectExtensionsEnabled") {
+        config.project_extensions_enabled = current.project_extensions_enabled;
     }
 }
 
