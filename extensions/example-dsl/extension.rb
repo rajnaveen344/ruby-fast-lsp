@@ -56,7 +56,10 @@ extension "example-dsl" do
         name: "DEFAULT_NAME",
         namespace: ["GeneratedRecord"],
         location: argument.range,
-        ruby_type: {"Named" => "String"},
+        ruby_type: hash_type(
+          keys: [named_type("Symbol")],
+          values: [named_type("String")]
+        ),
         source: macro_source(ctx)
       ),
       define_method(
@@ -65,7 +68,7 @@ extension "example-dsl" do
         owner_kind: :instance,
         visibility: :private,
         location: argument.range,
-        return_type: {"Named" => "String"},
+        return_type: nilable_type(array_type(named_type("String"))),
         source: macro_source(ctx)
       )
     ]

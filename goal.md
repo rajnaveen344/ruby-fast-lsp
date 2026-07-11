@@ -864,3 +864,22 @@ At the end of every goal session, record:
 - Rating remains **7.4/10**. The next Milestone 2 priorities are stable generated
   reference/relationship and richer type patch families, followed by complete
   lifecycle replacement and packaged-extension evidence.
+
+### July 2026: Structured extension type contracts
+
+- Public contract: extension types now represent named classes, arrays, hashes,
+  unions, and unknown values as structured ABI data. The mruby SDK adds
+  `named_type`, `array_type`, `hash_type`, `union_type`, and `nilable_type`,
+  enabling Rails-style collection and optional generated APIs without parsing
+  type-expression strings in the server.
+- Safety and determinism: recursive conversion validates every Ruby name,
+  rejects empty composite members, and bounds nesting depth and total nodes.
+  Composite members are normalized and deduplicated before semantic conflict
+  comparison, so equivalent guest types merge independently of member order.
+- Engine evidence: the independent example extension declares a nilable
+  `Array<String>` method return and `Hash<Symbol, String>` constant. Public
+  black-box hover tests prove both reach existing engine type queries and stale
+  composite facts still disappear through `didChange` replacement.
+- Rating remains **7.4/10**. Rich generated signatures materially improve the
+  extension foundation, but generated references/relationships and complete
+  lifecycle/package evidence remain before the 7.7 milestone is justified.

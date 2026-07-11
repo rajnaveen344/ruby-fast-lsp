@@ -99,8 +99,8 @@ async fn independent_extension_package_uses_only_public_contracts() {
     assert!(
         return_type_hover
             .as_ref()
-            .is_some_and(|hover| format!("{:?}", hover.contents).contains("String")),
-        "extension-declared return type must make the generated method hover as String, got {return_type_hover:?}"
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("(Array<String> | NilClass)")),
+        "extension-declared return type must make the generated method hover as nilable Array<String>, got {return_type_hover:?}"
     );
 
     let private_explicit_definitions = editor.goto_definition("app/example_model.rb", 4, 10).await;
@@ -130,8 +130,8 @@ async fn independent_extension_package_uses_only_public_contracts() {
     assert!(
         constant_hover
             .as_ref()
-            .is_some_and(|hover| format!("{:?}", hover.contents).contains("String")),
-        "extension-declared constant type must hover as String, got {constant_hover:?}"
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("Hash<Symbol, String>")),
+        "extension-declared constant type must hover as Hash<Symbol, String>, got {constant_hover:?}"
     );
 
     editor

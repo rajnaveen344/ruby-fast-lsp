@@ -339,6 +339,12 @@ pub enum MethodVisibility {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RubyType {
     Named(String),
+    Array(Vec<RubyType>),
+    Hash {
+        keys: Vec<RubyType>,
+        values: Vec<RubyType>,
+    },
+    Union(Vec<RubyType>),
     Unknown,
 }
 

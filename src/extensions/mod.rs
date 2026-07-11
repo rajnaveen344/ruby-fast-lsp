@@ -1732,14 +1732,91 @@ fn validate_source_range(range: SourceRange, label: &str) -> Result<(), String> 
 pub(crate) fn analysis_ruby_type_from_extension(
     ruby_type: Option<&ruby_fast_lsp_extension_api::RubyType>,
 ) -> Result<Option<AnalysisRubyType>, String> {
-    match ruby_type {
-        Some(ruby_fast_lsp_extension_api::RubyType::Named(name)) => {
-            let fqn = FullyQualifiedName::try_from(name.as_str())
-                .map_err(|err| format!("invalid named return type `{name}`: {err}"))?;
-            Ok(Some(AnalysisRubyType::Class(fqn)))
-        }
-        Some(ruby_fast_lsp_extension_api::RubyType::Unknown) | None => Ok(None),
+    let Some(ruby_type) = ruby_type else {
+        return Ok(None);
+    };
+    if ruby_type == &ruby_fast_lsp_extension_api::RubyType::Unknown {
+        return Ok(None);
     }
+    let mut node_count = 0;
+    let converted = analysis_ruby_type_from_extension_inner(ruby_type, 0, &mut node_count)?;
+    if converted == AnalysisRubyType::Unknown {
+        Ok(None)
+    } else {
+        Ok(Some(converted))
+    }
+}
+
+fn analysis_ruby_type_from_extension_inner(
+    ruby_type: &ruby_fast_lsp_extension_api::RubyType,
+    depth: usize,
+    node_count: &mut usize,
+) -> Result<AnalysisRubyType, String> {
+    const MAX_TYPE_DEPTH: usize = 8;
+    const MAX_TYPE_NODES: usize = 64;
+    if depth > MAX_TYPE_DEPTH {
+        return Err(format!(
+            "extension Ruby type nesting exceeds maximum depth {MAX_TYPE_DEPTH}"
+        ));
+    }
+    *node_count += 1;
+    if *node_count > MAX_TYPE_NODES {
+        return Err(format!(
+            "extension Ruby type exceeds maximum node count {MAX_TYPE_NODES}"
+        ));
+    }
+
+    match ruby_type {
+        ruby_fast_lsp_extension_api::RubyType::Named(name) => {
+            let fqn = FullyQualifiedName::try_from(name.as_str())
+                .map_err(|err| format!("invalid named Ruby type `{name}`: {err}"))?;
+            Ok(AnalysisRubyType::Class(fqn))
+        }
+        ruby_fast_lsp_extension_api::RubyType::Array(element_types) => {
+            let elements =
+                convert_extension_type_list(element_types, depth + 1, node_count, "array element")?;
+            Ok(AnalysisRubyType::Array(elements))
+        }
+        ruby_fast_lsp_extension_api::RubyType::Hash { keys, values } => {
+            let keys = convert_extension_type_list(keys, depth + 1, node_count, "hash key")?;
+            let values = convert_extension_type_list(values, depth + 1, node_count, "hash value")?;
+            Ok(AnalysisRubyType::Hash(keys, values))
+        }
+        ruby_fast_lsp_extension_api::RubyType::Union(types) => {
+            let types = convert_extension_type_list(types, depth + 1, node_count, "union")?;
+            Ok(AnalysisRubyType::union(types))
+        }
+        ruby_fast_lsp_extension_api::RubyType::Unknown => Ok(AnalysisRubyType::Unknown),
+    }
+}
+
+fn convert_extension_type_list(
+    types: &[ruby_fast_lsp_extension_api::RubyType],
+    depth: usize,
+    node_count: &mut usize,
+    label: &str,
+) -> Result<Vec<AnalysisRubyType>, String> {
+    if types.is_empty() {
+        return Err(format!("extension {label} type list must not be empty"));
+    }
+    let mut converted = types
+        .iter()
+        .map(|ruby_type| analysis_ruby_type_from_extension_inner(ruby_type, depth, node_count))
+        .collect::<Result<Vec<_>, _>>()?;
+    converted.sort_by_key(|ruby_type| format!("{ruby_type:?}"));
+    converted.dedup();
+    Ok(converted)
+}
+
+fn extension_ruby_types_semantically_equal(
+    left: Option<&ruby_fast_lsp_extension_api::RubyType>,
+    right: Option<&ruby_fast_lsp_extension_api::RubyType>,
+) -> bool {
+    analysis_ruby_type_from_extension(left).expect(
+        "INVARIANT VIOLATED: invalid left extension Ruby type reached conflict resolution. This is a bug because patch payloads must be validated before deterministic merging. Fix: keep validation before resolve_index_patch_conflicts.",
+    ) == analysis_ruby_type_from_extension(right).expect(
+        "INVARIANT VIOLATED: invalid right extension Ruby type reached conflict resolution. This is a bug because patch payloads must be validated before deterministic merging. Fix: keep validation before resolve_index_patch_conflicts.",
+    )
 }
 
 fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
@@ -1753,7 +1830,10 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
             left.namespace == right.namespace
                 && left.name == right.name
                 && left.location == right.location
-                && left.ruby_type == right.ruby_type
+                && extension_ruby_types_semantically_equal(
+                    left.ruby_type.as_ref(),
+                    right.ruby_type.as_ref(),
+                )
         }
         (IndexPatch::DefineMethod(left), IndexPatch::DefineMethod(right)) => {
             left.name == right.name
@@ -1762,7 +1842,10 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
                 && left.visibility == right.visibility
                 && left.location == right.location
                 && left.params == right.params
-                && left.return_type == right.return_type
+                && extension_ruby_types_semantically_equal(
+                    left.return_type.as_ref(),
+                    right.return_type.as_ref(),
+                )
         }
         (IndexPatch::ApplyMixin(left), IndexPatch::ApplyMixin(right)) => {
             left.namespace == right.namespace
@@ -4079,6 +4162,50 @@ commands = ["standardrb"]
     }
 
     #[test]
+    fn structured_extension_types_are_canonical_and_order_independent() {
+        use ruby_fast_lsp_extension_api::RubyType as ExtensionRubyType;
+
+        let left = ExtensionRubyType::Union(vec![
+            ExtensionRubyType::Array(vec![ExtensionRubyType::Named("String".to_string())]),
+            ExtensionRubyType::Named("NilClass".to_string()),
+        ]);
+        let right = ExtensionRubyType::Union(vec![
+            ExtensionRubyType::Named("NilClass".to_string()),
+            ExtensionRubyType::Array(vec![ExtensionRubyType::Named("String".to_string())]),
+        ]);
+
+        assert!(extension_ruby_types_semantically_equal(
+            Some(&left),
+            Some(&right)
+        ));
+        assert_eq!(
+            analysis_ruby_type_from_extension(Some(&left))
+                .expect("valid structured type must convert")
+                .expect("structured type must produce an analysis type")
+                .to_string(),
+            "(Array<String> | NilClass)"
+        );
+    }
+
+    #[test]
+    fn malformed_or_excessively_nested_extension_types_are_rejected() {
+        use ruby_fast_lsp_extension_api::RubyType as ExtensionRubyType;
+
+        let empty_array = ExtensionRubyType::Array(Vec::new());
+        let empty_err = analysis_ruby_type_from_extension(Some(&empty_array))
+            .expect_err("empty collection type payloads must be rejected");
+        assert!(empty_err.contains("must not be empty"), "got: {empty_err}");
+
+        let mut nested = ExtensionRubyType::Named("String".to_string());
+        for _ in 0..10 {
+            nested = ExtensionRubyType::Array(vec![nested]);
+        }
+        let depth_err = analysis_ruby_type_from_extension(Some(&nested))
+            .expect_err("deeply nested guest types must be bounded");
+        assert!(depth_err.contains("maximum depth"), "got: {depth_err}");
+    }
+
+    #[test]
     fn extension_index_patch_provenance_must_match_manifest_identity() {
         let patch = IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
             namespace: vec!["Widget".to_string()],
@@ -4138,7 +4265,7 @@ commands = ["standardrb"]
         let err = validate_index_patch_payloads(&[patch])
             .expect_err("invalid extension return type must be rejected at guest boundary");
 
-        assert!(err.contains("invalid named return type"), "got: {err}");
+        assert!(err.contains("invalid named Ruby type"), "got: {err}");
     }
 
     #[test]

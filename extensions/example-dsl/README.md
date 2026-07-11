@@ -4,10 +4,11 @@ This independent example is the acceptance fixture and copyable starting point
 for the public mruby extension SDK. It demonstrates all of the minimum package
 contracts without importing Ruby Fast LSP server or engine internals:
 
-- `field :name` emits a private instance-method semantic patch with a `String`
-  return type;
+- `field :name` emits a private instance-method semantic patch with a nilable
+  `Array<String>` return type;
 - the same declaration emits a generated `GeneratedRecord` class and typed
-  `GeneratedRecord::DEFAULT_NAME` constant through public semantic patches;
+  `GeneratedRecord::DEFAULT_NAME` constant with a `Hash<Symbol, String>` type
+  through public semantic patches;
 - fields appear as document symbols;
 - fields receive an editor code lens;
 - the generated namespace, constant, and method participate in ordinary

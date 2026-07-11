@@ -232,6 +232,14 @@ symbol, graph, and extension-provenance type facts through the per-file engine
 write path. The collector mirrors them during the same traversal so later
 references can resolve, and reindex removes all generated facts.
 
+Extension `RubyType` values are structured domain data: `Named`, `Array`,
+`Hash`, `Union`, or `Unknown`. Do not parse guest-provided type-expression
+strings. The extension boundary recursively validates names, non-empty
+collection/union members, maximum depth and node count, then converts to the
+existing `ruby-analysis::core::RubyType`. Composite member order is normalized
+before conflict comparison so equivalent unions, arrays, and hashes merge
+deterministically. The mruby SDK exposes constructors including `nilable_type`.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

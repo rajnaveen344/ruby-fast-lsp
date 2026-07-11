@@ -32,12 +32,25 @@ class ExampleDslTest < Minitest::Test
     constant_patch = patches.fetch(1).fetch("DefineConstant")
     assert_equal "DEFAULT_NAME", constant_patch.fetch("name")
     assert_equal ["GeneratedRecord"], constant_patch.fetch("namespace")
-    assert_equal({"Named" => "String"}, constant_patch.fetch("ruby_type"))
+    assert_equal(
+      {"Hash" => {
+        "keys" => [{"Named" => "Symbol"}],
+        "values" => [{"Named" => "String"}]
+      }},
+      constant_patch.fetch("ruby_type")
+    )
 
     method_patch = patches.fetch(2).fetch("DefineMethod")
     assert_equal "name", method_patch.fetch("name")
     assert_equal ["ExampleModel"], method_patch.fetch("namespace")
     assert_equal "Private", method_patch.fetch("visibility")
+    assert_equal(
+      {"Union" => [
+        {"Array" => [{"Named" => "String"}]},
+        {"Named" => "NilClass"}
+      ]},
+      method_patch.fetch("return_type")
+    )
 
     document = {
       "uri" => "file:///app/example_model.rb",

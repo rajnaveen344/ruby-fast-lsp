@@ -419,6 +419,26 @@ module RubyFastLspExtension
       }
     end
 
+    def named_type(name)
+      {"Named" => name.to_s}
+    end
+
+    def array_type(*element_types)
+      {"Array" => element_types}
+    end
+
+    def hash_type(keys:, values:)
+      {"Hash" => {"keys" => keys, "values" => values}}
+    end
+
+    def union_type(*types)
+      {"Union" => types}
+    end
+
+    def nilable_type(ruby_type)
+      union_type(ruby_type, named_type("NilClass"))
+    end
+
     def method_param(param)
       {
         "name" => (param[:name] || param["name"]).to_s,
