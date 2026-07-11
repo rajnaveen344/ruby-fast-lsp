@@ -1000,6 +1000,7 @@ end
         assert!(coordinator.is_ruby_file(&PathBuf::from("test.rb")));
         assert!(coordinator.is_ruby_file(&PathBuf::from("test.ruby")));
         assert!(coordinator.is_ruby_file(&PathBuf::from("test.rake")));
+        assert!(coordinator.is_ruby_file(&PathBuf::from("show.html.erb")));
         assert!(coordinator.is_ruby_file(&PathBuf::from("Rakefile")));
         assert!(coordinator.is_ruby_file(&PathBuf::from("Gemfile")));
         assert!(coordinator.is_ruby_file(&PathBuf::from("Guardfile")));

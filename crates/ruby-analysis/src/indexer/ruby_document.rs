@@ -2,13 +2,14 @@ use crate::core::{RubyType, SourceFileId, TextRange};
 use ruby_prism::Location as PrismLocation;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
-use crate::{LVScopeId, SourceDocument, VariableScopes};
+use crate::{mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
 pub struct RubyDocument {
     pub uri: Url,
     pub content: String,
+    embedded: Option<EmbeddedRuby>,
     pub version: i32,
     /// The version at which this document was last indexed (None if never indexed)
     pub indexed_version: Option<i32>,
@@ -33,10 +34,16 @@ impl RubyDocument {
         version: i32,
         analysis_file_id: SourceFileId,
     ) -> Self {
+        let embedded = if uri.path().ends_with(".erb") {
+            Some(mask_erb(&content))
+        } else {
+            None
+        };
         Self {
             uri,
             source: SourceDocument::new(content.clone(), analysis_file_id),
             content,
+            embedded,
             version,
             indexed_version: None,
             inlay_hints: Vec::new(),
@@ -46,7 +53,20 @@ impl RubyDocument {
 
     /// Parses the document content and returns a Prism ParseResult
     pub fn parse(&self) -> ruby_prism::ParseResult<'_> {
-        ruby_prism::parse(self.content.as_bytes())
+        ruby_prism::parse(self.analysis_content().as_bytes())
+    }
+
+    pub fn analysis_content(&self) -> &str {
+        self.embedded
+            .as_ref()
+            .map(EmbeddedRuby::source)
+            .unwrap_or(&self.content)
+    }
+
+    pub fn is_ruby_position(&self, position: Position) -> bool {
+        self.embedded
+            .as_ref()
+            .is_none_or(|embedded| embedded.is_ruby_offset(self.position_to_offset(position)))
     }
 
     pub fn get_comments(&self) -> &[(usize, usize)] {
@@ -56,6 +76,11 @@ impl RubyDocument {
     /// Updates document content and version, recomputing line offsets
     /// Clears variable scopes since they will be re-indexed.
     pub fn update(&mut self, content: String, version: i32) {
+        self.embedded = if self.uri.path().ends_with(".erb") {
+            Some(mask_erb(&content))
+        } else {
+            None
+        };
         self.source.update(content.clone());
         self.content = content;
         self.version = version;

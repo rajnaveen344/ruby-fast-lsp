@@ -152,6 +152,21 @@ argv are independent from lint diagnostics. Startup failures, abnormal exits,
 timeouts, invalid output, and unsafe empty output produce no edit and do not
 mutate analysis state.
 
+ERB analysis uses `ruby_analysis::indexer::mask_erb`. It replaces host-language
+bytes one-for-one, preserves CR/LF and complete Ruby tag bodies, and therefore
+keeps every Prism byte range in the original template coordinate space. Never
+parse raw `.erb` content or compact extracted snippets in an LSP feature: use a
+`RubyDocument`'s analysis content/parse result while converting ranges through
+the original document. Host positions must not receive Ruby completion, and
+Ruby formatter/linter integrations must not edit templates until explicit
+host-language delegation exists.
+
+Rails controller actions expose `ruby-fast-lsp.rails.openView` code lenses
+through the ordinary extension response contract. The Rails guest owns only
+controller/action discovery; the VS Code adapter validates workspace-safe
+conventional view candidates and performs the editor open operation. Do not put
+filesystem or editor-command execution into the guest or semantic engine.
+
 Distribution versions are checked by `editors/check_package_versions.js` and
 must match the root Cargo package across the VSIX, npm CLI, platform packages,
 optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail

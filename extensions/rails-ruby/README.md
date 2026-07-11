@@ -39,6 +39,14 @@ receivers are deliberately ignored, and the receiver's terminal constant must
 end in `Job` so unrelated libraries with similarly named APIs are not
 reinterpreted as Rails jobs.
 
+Public actions in conventional `app/controllers/**/*_controller.rb` files
+contribute an `Open View` code lens through the public extension response
+contract. The guest sends only the controller URI, normalized controller path,
+and action name; the VS Code adapter owns workspace-safe file resolution and
+opens the first existing `.html.erb`, `.turbo_stream.erb`, or `.json.jbuilder`
+candidate. Private and protected methods are excluded, and missing views do not
+create guessed semantic facts.
+
 Instance-side model DSL facts declared inside an `ActiveSupport::Concern`
 `included` block remain owned by the concern module and flow to including
 classes through the engine's ordinary mixin/MRO graph. This includes generated
@@ -50,7 +58,7 @@ Conventional target names use deterministic inflection: snake case is
 camelized and collection names use a small singularization rule. Options such
 as `through`, `source`, custom foreign keys, conditional validation semantics,
 validator classes, and dynamic `class_name` values are not inferred yet.
-Route helpers are currently projected into controller inheritance, not view/
+Route helpers are currently projected into controller inheritance, not view
 template contexts. Routes with `only` or `except` conservatively emit controller
 navigation but no helper set; `member`/`collection`, shallow routes, mounted
 engines, and the full Active Support inflector remain future route work.

@@ -41,7 +41,7 @@ pub async fn handle_code_lens(
     let query = EngineQuery::with_doc_and_engine(doc_arc, lang_server.analysis_engine.clone());
 
     // 4. Delegate to query layer.
-    let lens_data = query.get_code_lenses(uri, &content);
+    let lens_data = query.get_code_lenses(uri);
 
     // 5. Convert Vec<CodeLensData> → Vec<CodeLens>.
     let mut lenses: Vec<CodeLens> = lens_data.into_iter().map(to_lsp_code_lens).collect();

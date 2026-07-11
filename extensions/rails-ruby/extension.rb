@@ -225,9 +225,76 @@ module RailsRuby
 
     "#{namespaces.join("_")}_#{helper}"
   end
+
+  def self.controller_path(uri)
+    marker = "/app/controllers/"
+    marker_index = uri.to_s.index(marker)
+    return nil unless marker_index
+
+    relative = uri.to_s[(marker_index + marker.length)..-1].to_s
+    suffix = "_controller.rb"
+    return nil unless relative.end_with?(suffix)
+
+    controller = relative[0...(relative.length - suffix.length)]
+    parts = controller.split("/")
+    return nil if parts.empty? || parts.any? { |part| !method_name?(part) }
+
+    controller
+  end
+
+  def self.controller_actions(document)
+    controller = controller_path(document.uri)
+    return [] unless controller
+
+    actions = []
+    visibility = "public"
+    document.text.to_s.split("\n").each_with_index do |line, index|
+      stripped = line.lstrip
+      if ["public", "protected", "private"].include?(stripped)
+        visibility = stripped
+        next
+      end
+      next unless visibility == "public" && stripped.start_with?("def ")
+
+      name = String.new
+      stripped[4..-1].to_s.each_char do |character|
+        break if [" ", "(", "=", ";"].include?(character)
+
+        name << character
+      end
+      next unless method_name?(name)
+
+      indent = line.length - stripped.length
+      actions << {
+        "controller" => controller,
+        "action" => name,
+        "range" => source_range(index, indent + 4, indent + 4 + name.length)
+      }
+    end
+    actions
+  end
+
+  def self.source_range(line, start_char, end_char)
+    {
+      "start" => {"line" => line, "character" => start_char},
+      "end" => {"line" => line, "character" => end_char}
+    }
+  end
 end
 
 extension "rails-ruby" do
+  on_code_lens do |document|
+    RailsRuby.controller_actions(document).map do |action|
+      code_lens_patch(
+        title: "Open View",
+        command: "ruby-fast-lsp.rails.openView",
+        range: action["range"],
+        arguments: [document.uri.to_s, action["controller"], action["action"]],
+        source: extension_source("controller_action")
+      )
+    end
+  end
+
   RailsRuby::ACTIVE_JOB_ENTRY_POINTS.each do |entry_point|
     on_call entry_point do |ctx|
       job = RailsRuby.constant_receiver(ctx.receiver)

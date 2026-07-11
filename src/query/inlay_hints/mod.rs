@@ -49,9 +49,10 @@ impl EngineQuery {
         &self,
         document: &RubyDocument,
         range: &Range,
-        content: &str,
+        _content: &str,
     ) -> Vec<InlayHintData> {
         // Step 2: Parse AST
+        let content = document.analysis_content();
         let parse_result = ruby_prism::parse(content.as_bytes());
         let root = parse_result.node();
 

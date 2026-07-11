@@ -671,10 +671,8 @@ impl FakeEditor {
     pub async fn diagnostics(&self, filename: &str) -> Vec<Diagnostic> {
         self.assert_open(filename, "diagnostics");
         let uri = Self::filename_to_uri(filename);
-        let (content, _) = &self.buffers[filename];
-
         let document = self.server.docs.lock().get(&uri).unwrap().read().clone();
-        let parse_result = ruby_prism::parse(content.as_bytes());
+        let parse_result = document.parse();
 
         let mut diagnostics =
             crate::capabilities::diagnostics::generate_diagnostics(&parse_result, &document);

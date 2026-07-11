@@ -1,6 +1,7 @@
 use crate::core::RubyConstant;
 use crate::{
-    analyzer_utils as utils, Identifier, IdentifierType, IdentifierVisitor, LVScopeId, RubyDocument,
+    analyzer_utils as utils, mask_erb, Identifier, IdentifierType, IdentifierVisitor, LVScopeId,
+    RubyDocument,
 };
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use tower_lsp::lsp_types::{Position, Url};
@@ -9,6 +10,7 @@ use tower_lsp::lsp_types::{Position, Url};
 pub struct RubyPrismAnalyzer {
     pub uri: Url,
     pub code: String,
+    analysis_code: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +25,16 @@ pub struct SignatureHelpTarget {
 
 impl RubyPrismAnalyzer {
     pub fn new(uri: Url, code: String) -> Self {
-        Self { uri, code }
+        let analysis_code = if uri.path().ends_with(".erb") {
+            mask_erb(&code).source().to_string()
+        } else {
+            code.clone()
+        };
+        Self {
+            uri,
+            code,
+            analysis_code,
+        }
     }
 
     /// Returns the identifier, identifier type, and the ancestors stack at the time of the lookup.
@@ -37,7 +48,7 @@ impl RubyPrismAnalyzer {
         LVScopeId,
         crate::core::NamespaceKind,
     ) {
-        let parse_result = ruby_prism::parse(self.code.as_bytes());
+        let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         // Create a RubyDocument with a dummy URI since we only need it for position handling
         let document = RubyDocument::new(self.uri.clone(), self.code.clone(), 0);
         let root_node = parse_result.node();
@@ -49,9 +60,9 @@ impl RubyPrismAnalyzer {
     }
 
     pub fn get_signature_help_target(&self, byte_offset: u32) -> Option<SignatureHelpTarget> {
-        let parse_result = ruby_prism::parse(self.code.as_bytes());
+        let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         let root_node = parse_result.node();
-        let mut finder = SignatureCallSiteFinder::new(byte_offset as usize, &self.code);
+        let mut finder = SignatureCallSiteFinder::new(byte_offset as usize, &self.analysis_code);
         finder.visit(&root_node);
         let call_site = finder.best?;
 
@@ -79,7 +90,7 @@ impl RubyPrismAnalyzer {
 
     /// Get the namespace context (enclosing module/class) at a given position.
     pub fn get_namespace_at_position(&self, position: Position) -> Vec<RubyConstant> {
-        let parse_result = ruby_prism::parse(self.code.as_bytes());
+        let parse_result = ruby_prism::parse(self.analysis_code.as_bytes());
         let root_node = parse_result.node();
 
         let mut namespace_stack = Vec::new();

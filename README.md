@@ -153,6 +153,24 @@ buffer through stdin. Unchanged output produces no edit; startup failures,
 timeouts, invalid UTF-8, empty output for a non-empty source, and abnormal exits
 are reported without changing the document or semantic index.
 
+ERB templates are not sent to Ruby formatters or linters. Ruby Fast LSP masks
+the host-language bytes for semantic analysis, but it does not yet delegate
+HTML formatting or validation to another language server.
+
+## ERB templates
+
+The VS Code extension activates for `.erb` files and analyzes Ruby inside
+`<% ... %>` and `<%= ... %>` regions. Definition, references, hover,
+completion, diagnostics, symbols, semantic tokens, selection and folding
+ranges, inlay hints, rename analysis, and code lenses use an offset-preserving
+Ruby projection, so results retain their original template UTF-16 positions
+even when surrounding HTML contains multibyte text.
+
+ERB comments (`<%# ... %>`), escaped tags (`<%% ... %>`), and host-language
+text are excluded from Ruby analysis. Unclosed tags are masked rather than
+guessed. HTML language-server delegation is not currently provided, so Ruby
+Fast LSP complements rather than replaces HTML tooling inside template files.
+
 ## Indexing configuration
 
 Project indexing accepts workspace-relative glob patterns and explicit gem
@@ -193,6 +211,12 @@ malformed or non-file targets.
 Minitest discovery is intentionally limited to conventional `test/` or
 `*_test.rb` files, `*Test` classes, `def test_*`, and Rails-style `test "…"`
 declarations.
+
+Public controller actions in conventional `app/controllers/**/*_controller.rb`
+files receive an **Open View** code lens. VS Code opens the first existing
+conventional template in this order: `.html.erb`, `.turbo_stream.erb`, then
+`.json.jbuilder`. Private/protected methods and paths outside the controller
+convention do not receive this lens.
 
 ## Project-local extensions
 

@@ -81,6 +81,30 @@ async fn formats_current_unsaved_buffer_with_utf16_full_document_edit() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn erb_is_never_sent_to_a_ruby_formatter() {
+    let (_temp, command, captured_stdin) = fake_formatter("corrupted", 0);
+    let mut editor = FakeEditor::new().await;
+    *editor.server().config.lock() = RubyFastLspConfig {
+        formatter: FormatterKind::Standard,
+        formatter_command: vec![command],
+        ..RubyFastLspConfig::default()
+    };
+    editor
+        .open("app/views/users/show.html.erb", "<p><%= User.name %></p>\n")
+        .await;
+
+    assert!(editor
+        .format("app/views/users/show.html.erb")
+        .await
+        .is_empty());
+    assert!(
+        !captured_stdin.exists(),
+        "ERB host documents must never be passed to a Ruby formatter"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn formatter_failure_and_unchanged_output_return_no_edits() {
     let (_failed_temp, failed_command, _) = fake_formatter("ignored", 2);
     let mut editor = FakeEditor::new().await;

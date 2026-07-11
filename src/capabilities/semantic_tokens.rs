@@ -42,7 +42,7 @@ pub fn get_semantic_tokens_full(server: &RubyLanguageServer, uri: Url) -> Semant
 
     let doc_guard = document.read();
     let parse_start = Instant::now();
-    let parse_result = ruby_prism::parse(doc_guard.content.as_bytes());
+    let parse_result = doc_guard.parse();
     let parse_time = parse_start.elapsed();
     debug!("[PERF] semantic token parse took {:?}", parse_time);
 

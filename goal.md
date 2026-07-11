@@ -231,6 +231,42 @@ Completion criteria:
 - The public extension documentation is sufficient to build an extension
   without reading server internals.
 
+### Extension architecture continuity
+
+Milestone 2 is an established foundation, not a future rewrite target. Future
+work must preserve and extend these public seams:
+
+- `crates/extension-api` owns the versioned guest contract and domain patch
+  vocabulary.
+- `src/extensions` owns the untrusted Wasm host, lifecycle, discovery, trust,
+  permissions, resource limits, provenance checks, deterministic conflicts,
+  process brokering, and status reporting.
+- Extension output enters analysis only as validated per-file facts through the
+  normal engine replacement lifecycle; extensions never mutate engine or LSP
+  state directly.
+- RSpec, Minitest, Rails, and the example DSL package must remain ordinary
+  consumers of the same public contracts. Framework-specific privileged hooks
+  are prohibited.
+
+Remaining extension-platform work toward 9/10 is evolutionary:
+
+1. Add a new semantic patch or event only when a real framework workflow cannot
+   be expressed by the existing vocabulary, and keep it framework-neutral.
+2. For every new contract, require serialization compatibility, validation,
+   deterministic conflict identity, provenance, failure isolation, edit/reindex
+   removal, and actual-Wasm black-box coverage.
+3. Keep SDK and authoring documentation synchronized with the implemented ABI,
+   and prove third-party usability without importing server internals.
+4. Preserve packaged-artifact smoke coverage for every bundled extension and
+   verify that developer paths cannot mask missing packaged assets.
+5. Treat runtime introspection as optional, trusted, permission-bounded input;
+   static analysis must remain useful and deterministic without a running app.
+
+Do not replace this architecture with direct framework logic in the indexer,
+public engine-store access, LSP-shaped guest contracts, or a second semantic
+write path. Any proposed change to these boundaries requires an explicit
+architecture rationale and regression evidence.
+
 ## Milestone 3: Credible Rails Development
 
 Target rating: **8.1/10**.
@@ -240,7 +276,7 @@ Build a first-class Rails extension supporting the highest-value workflows:
 1. Done: Active Record associations.
 2. Done: validations and callbacks.
 3. Done: route and URL helpers.
-4. Partial: route-to-controller navigation is done; controller-to-view remains.
+4. Done: route-to-controller and conventional controller-to-view navigation.
 5. Done for ordinary composition: Active Support concern instance and
    `class_methods` navigation; dependency declarations remain an enhancement.
 6. Done: Active Job enqueue entry points.
@@ -273,8 +309,9 @@ Target rating: **8.6/10**.
 
 Implement:
 
-1. ERB parsing and stable source-range mapping.
-2. Ruby LSP features inside ERB regions.
+1. Done: ERB parsing and stable source-range mapping.
+2. Done for the current Ruby feature surface: Ruby LSP features inside ERB
+   regions; HTML delegation remains separate.
 3. HTML request delegation in the VS Code extension where practical.
 4. `.rake`, `.gemspec`, Thor, and common Ruby extension handling.
 5. Clear generated, vendored, dependency, and excluded-source policy.
@@ -1192,3 +1229,44 @@ At the end of every goal session, record:
   controller-to-view navigation, which should be designed with the ERB/source-
   mapping work rather than as a Ruby-only path guess. The next priority is that
   template/navigation seam, followed by Milestone 4 ERB support.
+
+### July 2026: Offset-stable ERB analysis and controller-to-view navigation
+
+- ERB projection: `.erb` files are indexed through an offset-preserving masked
+  Ruby source. Host bytes are replaced one-for-one, newlines and Ruby tag bodies
+  remain at their template offsets, executable tag boundaries become statement
+  separators, and comments, escaped tags, and unclosed tags are not guessed as
+  Ruby. UTF-16 conversion continues to use the original template document.
+- Feature integration: definition, references, hover, completion, diagnostics,
+  document symbols, semantic tokens, selection/folding ranges, inlay hints,
+  rename analysis, and module code lenses parse the mapped source. Completion
+  is suppressed at host positions, while edit/reindex removes stale ERB facts.
+  RuboCop/Standard linting and formatting deliberately skip ERB until explicit
+  host-language delegation exists.
+- Editor surface: VS Code activates and synchronizes Ruby Fast LSP for the `erb`
+  language. HTML request delegation is still incomplete and documented rather
+  than being simulated by unsafe full-template Ruby edits.
+- Rails views: the public Rails Wasm guest adds `Open View` lenses to public
+  actions in conventional controller files. The guest emits controller/action
+  domain arguments only; the VS Code adapter validates traversal-safe paths and
+  opens the first existing `.html.erb`, `.turbo_stream.erb`, or `.json.jbuilder`
+  candidate. Private actions and non-controller files are excluded.
+- Architecture: no Rails filesystem lookup entered the indexer or engine, and
+  no ERB coordinate policy entered the LSP adapter. The existing public
+  extension response contract and `ruby-analysis::indexer` source ownership
+  remain intact.
+- Evidence: four mapper tests cover parsing, multibyte host text, trim markers,
+  comments/escaped/unclosed tags; four root ERB lifecycle tests cover semantic
+  navigation, completion isolation, local references, code lenses, formatting
+  suppression, and reindex removal. Rails has 19 source-contract tests with 57
+  assertions plus eight deterministic and rebuilt-Wasm black-box tests. Six
+  Node tests cover process/debug commands and safe ordered view candidates.
+  The full gate passes with 980 root tests, all workspace tests including 337
+  `ruby-analysis` tests, the 55-test release simulator, release build, and a
+  packaged VSIX initialize/status smoke with RSpec, Rails, and Minitest loaded.
+- Rating increases to **8.2/10**. Milestone 3's implementation list is complete
+  and Milestone 4's core ERB mapping/Ruby feature surface is usable. A manual
+  representative Rails-app editor smoke remains missing evidence for the full
+  Milestone 3 completion criterion. The next highest-priority Milestone 4 work
+  is practical HTML delegation, followed by auditing `.rake`, `.gemspec`, Thor,
+  generated/native declarations, and source-inclusion policy.

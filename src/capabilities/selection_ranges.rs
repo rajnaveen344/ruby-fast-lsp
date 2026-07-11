@@ -17,7 +17,11 @@ pub async fn handle_selection_ranges(
         .iter()
         .map(|position| document.position_to_analysis_offset(*position))
         .collect::<Vec<_>>();
-    let chains = selection_range_chains(document.analysis_file_id(), &document.content, &offsets);
+    let chains = selection_range_chains(
+        document.analysis_file_id(),
+        document.analysis_content(),
+        &offsets,
+    );
 
     Some(
         chains

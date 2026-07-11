@@ -355,6 +355,9 @@ async fn append_external_linter_diagnostics(
     content: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if uri.path().ends_with(".erb") {
+        return;
+    }
     let config = server.config.lock().clone();
     if config.linter == crate::config::LinterKind::None {
         return;

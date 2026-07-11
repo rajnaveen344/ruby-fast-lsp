@@ -3,6 +3,7 @@
   (data (i32.const 1024) "__NAMES_DATA__")
   (data (i32.const 2048) "__INDEX_DATA__")
   (data (i32.const 8192) "__EMPTY_DATA__")
+  (data (i32.const 12000) "__RESPONSE_DATA__")
   (func (export "alloc") (param $len i32) (result i32)
     i32.const 32768)
   (func (export "dealloc") (param $ptr i32) (param $len i32))
@@ -22,5 +23,15 @@
     if (result i64)
       i64.const __INDEX_PACKED__
     else
-      i64.const __EMPTY_PACKED__
+      local.get $ptr
+      i32.const 10
+      i32.add
+      i32.load8_u
+      i32.const 114
+      i32.eq
+      if (result i64)
+        i64.const __RESPONSE_PACKED__
+      else
+        i64.const __EMPTY_PACKED__
+      end
     end))

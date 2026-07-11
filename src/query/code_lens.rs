@@ -57,19 +57,18 @@ impl EngineQuery {
     ///
     /// Returns one `CodeLensData` per mixin-type bucket and one for classes,
     /// for every module that has at least one usage.
-    pub fn get_code_lenses(&self, uri: &Url, content: &str) -> Vec<CodeLensData> {
-        // 1. Parse AST and collect (FQN, start_offset, end_offset) for each module.
-        let modules = module_definitions_for_lens(content);
-
-        if modules.is_empty() {
-            return Vec::new();
-        }
-
-        // 2. We need offset→position conversion. Use attached document.
+    pub fn get_code_lenses(&self, uri: &Url) -> Vec<CodeLensData> {
+        // 1. Parse the document's Ruby analysis projection. For ERB this preserves
+        // template byte offsets while masking host-language text.
         let doc_arc = self
             .doc()
             .expect("INVARIANT VIOLATED: get_code_lenses requires a document via with_doc_and_engine(). Fix: call EngineQuery::with_doc_and_engine() before get_code_lenses()");
         let document = doc_arc.read();
+        let modules = module_definitions_for_lens(document.analysis_content());
+
+        if modules.is_empty() {
+            return Vec::new();
+        }
 
         let mut results = Vec::new();
 

@@ -28,7 +28,7 @@ pub async fn handle_document_symbols(
     };
 
     // Parse Ruby code using Prism
-    let parse_result = ruby_prism::parse(document.content.as_bytes());
+    let parse_result = document.parse();
     let parse_time = start_time.elapsed();
     debug!("[PERF] Document symbols parse took {:?}", parse_time);
 

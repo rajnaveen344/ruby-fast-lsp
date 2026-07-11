@@ -305,4 +305,30 @@ class RailsRubyTest < Minitest::Test
 
     assert_empty extension.index_call(job_context)
   end
+
+  def test_controller_actions_emit_open_view_lenses
+    document = {
+      "uri" => "file:///repo/app/controllers/admin/users_controller.rb",
+      "text" => "class Admin::UsersController < ApplicationController\n  def show\n  end\n  private\n  def secret\n  end\nend\n"
+    }
+
+    lenses = extension.code_lens(document).map { |patch| patch.fetch("CodeLens") }
+
+    assert_equal ["Open View"], lenses.map { |lens| lens.fetch("title") }
+    assert_equal "ruby-fast-lsp.rails.openView", lenses.fetch(0).fetch("command")
+    assert_equal(
+      ["file:///repo/app/controllers/admin/users_controller.rb", "admin/users", "show"],
+      lenses.fetch(0).fetch("arguments")
+    )
+    assert_equal 1, lenses.fetch(0).dig("range", "start", "line")
+  end
+
+  def test_open_view_lenses_ignore_non_controller_files
+    document = {
+      "uri" => "file:///repo/app/models/user.rb",
+      "text" => "class User\n  def show\n  end\nend\n"
+    }
+
+    assert_empty extension.code_lens(document)
+  end
 end

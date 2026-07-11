@@ -34,6 +34,9 @@ pub async fn find_completion_at_position(
             return CompletionResponse::Array(vec![]);
         }
     };
+    if !document.is_ruby_position(position) {
+        return CompletionResponse::Array(Vec::new());
+    }
     let analyzer = RubyPrismAnalyzer::new(uri.clone(), document.content.clone());
 
     // Check if completion was triggered by a trigger character
@@ -286,7 +289,7 @@ pub async fn find_completion_at_position(
         // arguments, array elements, hash values, string interpolations, etc.)
         if !is_dot_trigger {
             let byte_offset = position_to_offset(&document.content, position);
-            let parse_result = ruby_prism::parse(document.content.as_bytes());
+            let parse_result = document.parse();
             let root = parse_result.node();
 
             if is_in_statement_position(&root, byte_offset) {

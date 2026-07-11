@@ -55,4 +55,20 @@ function debugConfiguration(name, invocation, cwd) {
     };
 }
 
-module.exports = { debugConfiguration, minitestInvocation, rspecInvocation };
+function railsViewRelativePaths(controller, action) {
+    if (!/^[a-z_][a-z0-9_]*(\/[a-z_][a-z0-9_]*)*$/.test(controller)) {
+        throw new Error(`Rails view command received an invalid controller path: ${controller}`);
+    }
+    if (!/^[a-z_][a-z0-9_]*$/.test(action)) {
+        throw new Error(`Rails view command received an invalid action name: ${action}`);
+    }
+    const base = `app/views/${controller}/${action}`;
+    return [`${base}.html.erb`, `${base}.turbo_stream.erb`, `${base}.json.jbuilder`];
+}
+
+module.exports = {
+    debugConfiguration,
+    minitestInvocation,
+    railsViewRelativePaths,
+    rspecInvocation
+};

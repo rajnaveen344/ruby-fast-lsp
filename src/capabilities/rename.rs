@@ -31,9 +31,9 @@ pub async fn handle_prepare_rename(
 
     let doc = RubyDocument::new(uri.clone(), content.clone(), version);
     let cursor_offset = doc.position_to_offset(position);
-    let parse_result = ruby_prism::parse(content.as_bytes());
+    let parse_result = doc.parse();
     let root = parse_result.node();
-    let local_ranges = RenameVisitor::find_rename_targets(doc, cursor_offset, &root);
+    let local_ranges = RenameVisitor::find_rename_targets(doc.clone(), cursor_offset, &root);
     if let Some(range) = local_ranges
         .into_iter()
         .find(|range| range_contains(*range, position))
@@ -79,10 +79,10 @@ pub async fn handle_rename(
     // Parse and traverse the AST to find all rename targets
     let doc = RubyDocument::new(uri.clone(), content.clone(), 0);
     let cursor_offset = doc.position_to_offset(position);
-    let parse_result = ruby_prism::parse(content.as_bytes());
+    let parse_result = doc.parse();
     let root = parse_result.node();
 
-    let ranges = RenameVisitor::find_rename_targets(doc, cursor_offset, &root);
+    let ranges = RenameVisitor::find_rename_targets(doc.clone(), cursor_offset, &root);
 
     let mut changes = HashMap::new();
     if !ranges.is_empty() {

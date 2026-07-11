@@ -2,7 +2,12 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
-const { debugConfiguration, minitestInvocation, rspecInvocation } = require('./test_commands');
+const {
+    debugConfiguration,
+    minitestInvocation,
+    railsViewRelativePaths,
+    rspecInvocation
+} = require('./test_commands');
 
 // Create output channel for logging
 let outputChannel;
@@ -701,9 +706,12 @@ function activate(context) {
     };
 
     const clientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'ruby' }],
+        documentSelector: [
+            { scheme: 'file', language: 'ruby' },
+            { scheme: 'file', language: 'erb' }
+        ],
         synchronize: {
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.rb'),
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{rb,erb}'),
             configurationSection: 'rubyFastLsp'
         },
         initializationOptions,
@@ -1057,6 +1065,32 @@ function activate(context) {
         }
     );
 
+    const openRailsViewCommand = vscode.commands.registerCommand('ruby-fast-lsp.rails.openView',
+        async (controllerUriString, controller, action) => {
+            try {
+                const controllerUri = vscode.Uri.parse(controllerUriString);
+                const workspace = vscode.workspace.getWorkspaceFolder(controllerUri);
+                if (!workspace) {
+                    throw new Error('the controller is not inside an open workspace');
+                }
+                for (const relative of railsViewRelativePaths(controller, action)) {
+                    const candidate = vscode.Uri.file(path.join(workspace.uri.fsPath, relative));
+                    if (fs.existsSync(candidate.fsPath)) {
+                        const document = await vscode.workspace.openTextDocument(candidate);
+                        return vscode.window.showTextDocument(document);
+                    }
+                }
+                vscode.window.showInformationMessage(
+                    `No view found for ${controller}#${action}`
+                );
+                return undefined;
+            } catch (error) {
+                vscode.window.showErrorMessage(`Unable to open Rails view: ${error.message}`);
+                return undefined;
+            }
+        }
+    );
+
     // Register toggle external types command
     const toggleExternalTypesCommand = vscode.commands.registerCommand('rubyIndex.toggleExternalTypes', async () => {
         const config = vscode.workspace.getConfiguration('rubyFastLsp');
@@ -1071,7 +1105,7 @@ function activate(context) {
         indexProvider.refresh();
     });
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, searchCommand, toggleExternalTypesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, openRailsViewCommand, searchCommand, toggleExternalTypesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {
@@ -1086,7 +1120,7 @@ function activate(context) {
     // Auto-refresh when active editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(() => {
-            if (vscode.window.activeTextEditor?.document.languageId === 'ruby') {
+            if (['ruby', 'erb'].includes(vscode.window.activeTextEditor?.document.languageId)) {
                 indexProvider.refresh();
             }
         })
@@ -1095,7 +1129,7 @@ function activate(context) {
     // Auto-refresh index tree when Ruby files are saved or changed
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument((document) => {
-            if (document.languageId === 'ruby') {
+            if (['ruby', 'erb'].includes(document.languageId)) {
                 // Debounce the refresh to avoid excessive updates
                 setTimeout(() => {
                     indexProvider.refresh();
@@ -1108,7 +1142,7 @@ function activate(context) {
     let changeTimeout;
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument((event) => {
-            if (event.document.languageId === 'ruby') {
+            if (['ruby', 'erb'].includes(event.document.languageId)) {
                 // Clear previous timeout to debounce rapid typing
                 if (changeTimeout) {
                     clearTimeout(changeTimeout);
@@ -1124,7 +1158,7 @@ function activate(context) {
     // Auto-refresh when Ruby files are opened or closed
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument((document) => {
-            if (document.languageId === 'ruby') {
+            if (['ruby', 'erb'].includes(document.languageId)) {
                 setTimeout(() => {
                     indexProvider.refresh();
                 }, 500);
@@ -1134,7 +1168,7 @@ function activate(context) {
 
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((document) => {
-            if (document.languageId === 'ruby') {
+            if (['ruby', 'erb'].includes(document.languageId)) {
                 setTimeout(() => {
                     indexProvider.refresh();
                 }, 500);

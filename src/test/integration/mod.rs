@@ -6,6 +6,7 @@ mod code_lens;
 mod completion;
 mod diagnostics;
 mod document_highlights;
+mod erb;
 mod extensions;
 mod folding_range;
 mod formatting;

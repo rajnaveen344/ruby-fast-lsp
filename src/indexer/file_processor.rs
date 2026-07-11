@@ -28,11 +28,12 @@ use ruby_analysis::core::{
 };
 use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 use ruby_analysis::indexer::fact_collector::FactCollector;
-use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
+use ruby_analysis::indexer::{mask_erb, AnalysisIndexer};
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, NamespaceDeclarationKind, SourceRange};
 use ruby_prism::Visit;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,6 +52,14 @@ enum FileResolution {
     Full,
     CurrentFile,
     Deferred,
+}
+
+fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
+    if uri.path().ends_with(".erb") {
+        Cow::Owned(mask_erb(content).source().to_string())
+    } else {
+        Cow::Borrowed(content)
+    }
 }
 
 // ============================================================================
@@ -153,7 +162,8 @@ impl FileProcessor {
                 uri.path().split('/').next_back().unwrap_or("unknown")
             );
             // Still parse for syntax diagnostics
-            let parse_result = ruby_prism::parse(content.as_bytes());
+            let analysis_source = analysis_source(uri, content);
+            let parse_result = ruby_prism::parse(analysis_source.as_bytes());
             let source_kind = self.analysis_source_kind_for_uri(server, uri);
             let analysis_file_id = server.open_or_update_analysis_file_with_kind(
                 uri,
@@ -174,7 +184,8 @@ impl FileProcessor {
         }
 
         // 1. Parse ONLY ONCE
-        let parse_result = ruby_prism::parse(content.as_bytes());
+        let analysis_source = analysis_source(uri, content);
+        let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
         let analysis_file_id =
@@ -201,8 +212,13 @@ impl FileProcessor {
         let affected_uris = HashSet::new();
 
         // 3. Collect facts.
-        let direct_facts_seed =
-            collect_direct_facts(server, &node, content, document.analysis_file_id(), None);
+        let direct_facts_seed = collect_direct_facts(
+            server,
+            &node,
+            analysis_source.as_ref(),
+            document.analysis_file_id(),
+            None,
+        );
         replace_analysis_facts_for_file(
             server,
             document.analysis_file_id(),
@@ -353,11 +369,18 @@ impl FileProcessor {
             analysis_file_id,
         );
 
-        let parse_result = ruby_prism::parse(content.as_bytes());
+        let analysis_source = analysis_source(uri, content);
+        let parse_result = ruby_prism::parse(analysis_source.as_bytes());
         let node = parse_result.node();
 
         let direct_facts_seed = if resolve_references {
-            collect_direct_facts(server, &node, content, analysis_file_id, known_namespaces)
+            collect_direct_facts(
+                server,
+                &node,
+                analysis_source.as_ref(),
+                analysis_file_id,
+                known_namespaces,
+            )
         } else {
             ruby_analysis::indexer::AnalysisIndex::default()
         };

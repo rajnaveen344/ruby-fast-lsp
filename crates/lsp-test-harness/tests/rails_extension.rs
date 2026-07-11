@@ -10,6 +10,13 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn rails_package(index_output: &str) -> (TempDir, std::path::PathBuf) {
+    rails_package_with_response(index_output, "empty_output.json")
+}
+
+fn rails_package_with_response(
+    index_output: &str,
+    response_output: &str,
+) -> (TempDir, std::path::PathBuf) {
     let source = workspace_root().join("extensions/rails-ruby");
     let temp = TempDir::new().expect("rails extension temp package must be created");
     let package = temp.path().join("rails-ruby");
@@ -39,6 +46,7 @@ fn rails_package(index_output: &str) -> (TempDir, std::path::PathBuf) {
         ("NAMES", 1024_u64, "indexed_call_names.json"),
         ("INDEX", 2048_u64, index_output),
         ("EMPTY", 8192_u64, "empty_output.json"),
+        ("RESPONSE", 12000_u64, response_output),
     ] {
         let payload = std::fs::read(source.join(file))
             .unwrap_or_else(|err| panic!("rails fixture `{file}` must be readable: {err}"));
@@ -57,6 +65,41 @@ fn rails_package(index_output: &str) -> (TempDir, std::path::PathBuf) {
     std::fs::write(package.join("extension.wasm"), wasm)
         .expect("rails extension fixture Wasm must be written");
     (temp, package)
+}
+
+#[tokio::test]
+async fn controller_actions_expose_open_view_lenses() {
+    let (_temp, package) =
+        rails_package_with_response("empty_output.json", "view_response_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/controllers/admin/users_controller.rb",
+            "class Admin::UsersController < ApplicationController\n  def show\n  end\nend\n",
+        )
+        .await;
+
+    let lenses = editor
+        .code_lens("app/controllers/admin/users_controller.rb")
+        .await;
+    let open_view = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref())
+        .find(|command| command.title == "Open View")
+        .expect("public controller action must expose an Open View lens");
+    assert_eq!(open_view.command, "ruby-fast-lsp.rails.openView");
+    let arguments = open_view
+        .arguments
+        .as_ref()
+        .expect("Open View command must carry controller/action arguments");
+    assert!(
+        arguments[0]
+            .as_str()
+            .is_some_and(|uri| uri.ends_with("/app/controllers/admin/users_controller.rb")),
+        "Open View must carry the controller URI, got {arguments:?}"
+    );
+    assert_eq!(arguments[1], serde_json::json!("admin/users"));
+    assert_eq!(arguments[2], serde_json::json!("show"));
 }
 
 #[tokio::test]

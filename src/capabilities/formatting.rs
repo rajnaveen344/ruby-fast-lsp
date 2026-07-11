@@ -20,6 +20,9 @@ pub async fn handle_document_formatting(
     }
 
     let uri = params.text_document.uri;
+    if uri.path().ends_with(".erb") {
+        return None;
+    }
     let document = server.get_doc(&uri)?;
     let content = document.content;
     let file_path = uri.to_file_path().ok()?;
@@ -163,6 +166,9 @@ pub async fn handle_document_on_type_formatting(
     params: DocumentOnTypeFormattingParams,
 ) -> Option<Vec<TextEdit>> {
     let uri = &params.text_document_position.text_document.uri;
+    if uri.path().ends_with(".erb") {
+        return None;
+    }
     let position = params.text_document_position.position;
     let trigger_character = &params.ch;
 

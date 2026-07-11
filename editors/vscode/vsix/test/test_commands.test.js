@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
     debugConfiguration,
     minitestInvocation,
+    railsViewRelativePaths,
     rspecInvocation
 } = require('../test_commands');
 
@@ -73,4 +74,14 @@ test('debug commands launch an rdbg configuration instead of a notification', ()
             cwd: '/repo'
         }
     );
+});
+
+test('Rails view candidates are ordered and traversal-safe', () => {
+    assert.deepEqual(railsViewRelativePaths('admin/users', 'show'), [
+        'app/views/admin/users/show.html.erb',
+        'app/views/admin/users/show.turbo_stream.erb',
+        'app/views/admin/users/show.json.jbuilder'
+    ]);
+    assert.throws(() => railsViewRelativePaths('../users', 'show'), /invalid controller path/);
+    assert.throws(() => railsViewRelativePaths('users', '../show'), /invalid action name/);
 });

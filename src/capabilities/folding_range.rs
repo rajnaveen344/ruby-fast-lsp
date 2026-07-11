@@ -193,7 +193,7 @@ pub async fn handle_folding_range(
     _params: FoldingRangeParams,
 ) -> Result<Option<Vec<FoldingRange>>, tower_lsp::jsonrpc::Error> {
     // Parse the Ruby code
-    let parse_result = ruby_prism::parse(document.content.as_bytes());
+    let parse_result = document.parse();
     let node = parse_result.node();
 
     // Create visitor and collect folding ranges

@@ -20,11 +20,14 @@ use crate::config::IndexingConfig;
 /// Check if a file should be indexed based on its extension and name
 ///
 /// Returns true for:
-/// - Files with .rb, .ruby, .rake, or .gemspec extensions
+/// - Files with .rb, .ruby, .rake, .gemspec, or .erb extensions
 /// - Special Ruby files without extensions (Rakefile, Gemfile, etc.)
 pub fn should_index_file(path: &Path) -> bool {
     if let Some(extension) = path.extension() {
-        matches!(extension.to_str(), Some("rb" | "ruby" | "rake" | "gemspec"))
+        matches!(
+            extension.to_str(),
+            Some("rb" | "ruby" | "rake" | "gemspec" | "erb")
+        )
     } else {
         // Check for files without extensions that might be Ruby
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
@@ -215,6 +218,7 @@ mod tests {
         assert!(should_index_file(&PathBuf::from("test.rb")));
         assert!(should_index_file(&PathBuf::from("test.rake")));
         assert!(should_index_file(&PathBuf::from("test.gemspec")));
+        assert!(should_index_file(&PathBuf::from("show.html.erb")));
 
         // Test special Ruby files
         assert!(should_index_file(&PathBuf::from("Rakefile")));
@@ -252,6 +256,7 @@ mod tests {
         std::fs::create_dir_all(root.join("vendor/generated")).unwrap();
         std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
         std::fs::write(root.join("app/user.rb"), "class User; end").unwrap();
+        std::fs::write(root.join("app/show.html.erb"), "<%= User %>").unwrap();
         std::fs::write(root.join("bin/console"), "puts :console").unwrap();
         std::fs::write(root.join("vendor/generated/model.rb"), "class Model; end").unwrap();
         std::fs::write(root.join("vendor/generated/keep.rb"), "class Keep; end").unwrap();
@@ -271,7 +276,11 @@ mod tests {
 
         assert_eq!(
             relative,
-            vec![PathBuf::from("app/user.rb"), PathBuf::from("bin/console")]
+            vec![
+                PathBuf::from("app/show.html.erb"),
+                PathBuf::from("app/user.rb"),
+                PathBuf::from("bin/console")
+            ]
         );
     }
 

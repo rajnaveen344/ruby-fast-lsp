@@ -29,7 +29,8 @@
     "development"
   ],
   "activationEvents": [
-    "onLanguage:ruby"
+    "onLanguage:ruby",
+    "onLanguage:erb"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -46,6 +47,16 @@
           ".gemspec",
           "Gemfile",
           "Rakefile"
+        ]
+      },
+      {
+        "id": "erb",
+        "aliases": [
+          "ERB",
+          "erb"
+        ],
+        "extensions": [
+          ".erb"
         ]
       }
     ],
@@ -235,6 +246,10 @@
       {
         "command": "ruby-fast-lsp.minitest.debug",
         "title": "Debug Minitest"
+      },
+      {
+        "command": "ruby-fast-lsp.rails.openView",
+        "title": "Open Rails View"
       }
     ],
     "menus": {
