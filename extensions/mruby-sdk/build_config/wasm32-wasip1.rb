@@ -9,7 +9,6 @@ MRuby::CrossBuild.new("wasm32-wasip1") do |conf|
   end
 
   conf.toolchain :clang
-
   conf.cc.command = "#{toolchain}/bin/clang"
   conf.cc.flags << "--target=wasm32-wasip1"
   conf.cc.defines << "MRB_USE_WASM_TRAP_EXCEPTION" if ENV["WASI_TRAP_EXCEPTIONS"] == "1"
@@ -34,10 +33,8 @@ MRuby::CrossBuild.new("wasm32-wasip1") do |conf|
     conf.linker.flags << "-wasm-enable-sjlj"
   end
   conf.linker.flags << "-Oz"
-
   conf.archiver.command = "#{toolchain}/bin/llvm-ar"
 
   conf.enable_cxx_exception if ENV["WASI_USE_CXX_EXCEPTION"] == "1"
-
   conf.gembox "stdlib"
 end

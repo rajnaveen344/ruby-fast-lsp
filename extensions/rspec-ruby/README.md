@@ -42,8 +42,10 @@ WASI_SDK_PATH=/path/to/wasi-sdk \
 extensions/rspec-ruby/scripts/build-wasm.sh
 ```
 
-The build patches mruby for trap-only Wasm exceptions. Ruby raises inside the
-extension abort the guest; valid macro calls return JSON patches.
+Both wrappers delegate to the reusable package-agnostic builder in
+`extensions/mruby-sdk`. The shared build patches mruby for trap-only Wasm
+exceptions. Ruby raises inside the extension abort the guest; valid macro calls
+return JSON patches.
 
 ## Verification
 

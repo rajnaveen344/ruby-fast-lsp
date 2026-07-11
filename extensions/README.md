@@ -57,6 +57,8 @@ sequenceDiagram
 - `crates/extension-rspec`: native Rust extension used as the in-process fallback/reference implementation.
 - `extensions/mruby-sdk`: tiny Ruby DSL for authoring patch-based extensions.
 - `extensions/rspec-ruby`: Ruby-authored RSpec extension package compiled to mruby Wasm.
+- `extensions/example-dsl`: independent, copyable third-party package and
+  public-contract acceptance fixture.
 - `crates/lsp-test-harness`: reusable black-box `FakeEditor` crate for extension
   tests that must drive the real LSP server from outside the core crate.
 

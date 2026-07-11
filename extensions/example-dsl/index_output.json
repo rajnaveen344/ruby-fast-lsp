@@ -1,0 +1,1 @@
+{"index_patches":[{"DefineMethod":{"name":"name","namespace":["ExampleModel"],"owner_kind":"Instance","visibility":"Public","location":{"start":{"line":1,"character":8},"end":{"line":1,"character":13}},"params":[],"return_type":{"Named":"String"},"source":{"extension_id":"example-dsl","macro_name":"field"}}}],"response_patches":[],"command_patches":[],"process_requests":[]}

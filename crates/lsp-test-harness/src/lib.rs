@@ -4,9 +4,10 @@ use ruby_fast_lsp::extensions::{ExtensionStatusParams, ExtensionStatusReport};
 use ruby_fast_lsp::server::RubyLanguageServer;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, InitializeParams,
-    PartialResultParams, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, InitializeParams, Location, PartialResultParams, Position,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 use tower_lsp::LanguageServer;
 
@@ -137,6 +138,37 @@ impl FakeEditor {
             .await
             .expect("INVARIANT VIOLATED: code_lens request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
             .unwrap_or_default()
+    }
+
+    pub async fn goto_definition(
+        &self,
+        filename: &str,
+        line: u32,
+        character: u32,
+    ) -> Vec<Location> {
+        self.assert_open(filename, "goto_definition");
+        let uri = filename_to_uri(filename);
+        let response = self
+            .server
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .expect("INVARIANT VIOLATED: goto_definition request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.");
+
+        match response {
+            Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
+            Some(GotoDefinitionResponse::Array(locations)) => locations,
+            Some(GotoDefinitionResponse::Link(_)) => panic!(
+                "INVARIANT VIOLATED: goto_definition returned location links. This is a bug because Ruby Fast LSP currently returns locations. Fix: update the black-box harness when the server advertises location-link responses."
+            ),
+            None => Vec::new(),
+        }
     }
 
     pub async fn extension_status(&self) -> Vec<ExtensionStatusReport> {

@@ -2155,6 +2155,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-lsp",
+ "wat",
 ]
 
 [[package]]

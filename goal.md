@@ -746,3 +746,30 @@ At the end of every goal session, record:
 - Rating remains **7.3/10**. The next Milestone 2 priority is expanding stable
   semantic patch families needed by a third-party acceptance extension, then
   shipping the SDK/package template and black-box authoring fixture.
+
+### July 2026: Reusable extension SDK builder and third-party acceptance package
+
+- Authoring surface: `extensions/mruby-sdk` now owns the package-agnostic mruby
+  configuration, trap-only exception patch, Wasm C shim, direct builder, and
+  reproducible Docker builder. The bundled RSpec extension delegates to this
+  toolchain instead of owning a privileged or copied build path.
+- Template: `extensions/example-dsl` is a copyable independent package using
+  only the public Ruby SDK. Its `field :name` DSL emits an instance-method fact,
+  document symbol, and code lens; source-level tests document expected payloads.
+- Black-box evidence: the external LSP harness now supports definition lookup.
+  A real initialize/open/query test loads the example manifest and proves the
+  generated DSL method participates in engine-owned goto-definition alongside
+  its document symbol and code lens.
+- Reproducibility: the default acceptance test compiles a checked-in WAT/JSON
+  representation of the public ABI, avoiding a redundant mruby dependency in
+  the normal gate. The actual Ruby source was also built through the generic
+  Docker toolchain and passed the same black-box test via
+  `RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1`; this caught and removed an MRI-only
+  regular-expression dependency from the template.
+- Bundled compatibility: RSpec rebuilt successfully through the shared builder,
+  its checksum was refreshed, both Wasm host acceptance tests passed, and its
+  package validates through the public extension CLI.
+- Rating increases to **7.4/10**. The reusable author path and independent
+  semantic acceptance proof close meaningful Milestone 2 criteria. Reaching the
+  7.7 milestone still requires broader stable semantic/response patch families,
+  complete hook ingestion, and deterministic lifecycle replacement evidence.

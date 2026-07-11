@@ -203,6 +203,17 @@ incompatible patches are rejected and all conflicting guests are disabled.
 Never let extension traversal, filesystem, or timing order decide semantic
 truth, and never move this guest trust/provenance policy into `ruby-analysis`.
 
+The reusable mruby authoring/build surface lives in `extensions/mruby-sdk`;
+package-specific builders must delegate to it rather than copying the Wasm shim,
+mruby configuration, or exception patch. `extensions/example-dsl` is the
+independent public-contract template and acceptance package. Its black-box test
+under `crates/lsp-test-harness` must prove manifest loading, a semantic DSL
+method visible to engine-owned definition lookup, document symbols, and code
+lenses without importing server internals. The deterministic WAT/JSON fixture
+keeps the normal gate toolchain-independent; set
+`RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1` after an SDK build to exercise the actual
+Ruby-authored Wasm.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable
