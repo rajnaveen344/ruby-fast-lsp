@@ -546,6 +546,7 @@ pub fn validate_extension_package(path: &Path) -> Result<ExtensionStatusReport, 
             path: path.to_path_buf(),
             source: ExtensionPathSource::InitializationOptions,
         },
+        true,
         &mut packages,
     )
     .map_err(|err| err.to_string())?;
@@ -754,7 +755,7 @@ fn process_wasm_call_node(
 fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExtension>> {
     let mut packages = Vec::new();
     for configured_path in &config.package_paths {
-        if let Err(err) = collect_extension_package(configured_path, &mut packages) {
+        if let Err(err) = collect_extension_package(configured_path, true, &mut packages) {
             warn!("Skipping Ruby Fast LSP extension package: {}", err);
         }
     }
@@ -763,13 +764,25 @@ fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExten
             warn!("Skipping Ruby Fast LSP extension directory: {}", err);
         }
     }
-    packages.sort_by(|left, right| left.wasm_path.cmp(&right.wasm_path));
+    packages.sort_by(|left, right| {
+        extension_package_priority(left)
+            .cmp(&extension_package_priority(right))
+            .then_with(|| left.wasm_path.cmp(&right.wasm_path))
+    });
     packages.dedup_by(|left, right| left.wasm_path == right.wasm_path);
 
+    let mut extension_ids = BTreeSet::new();
     packages
         .into_iter()
         .filter_map(|package| match load_wasm_extension(package) {
-            Ok(extension) => Some(extension),
+            Ok(extension) if extension_ids.insert(extension.metadata.id.clone()) => Some(extension),
+            Ok(extension) => {
+                warn!(
+                    "Skipping duplicate Ruby Fast LSP extension id `{}` from lower-priority package",
+                    extension.metadata.id
+                );
+                None
+            }
             Err(err) => {
                 warn!("Skipping Ruby Fast LSP extension: {}", err);
                 None
@@ -781,10 +794,22 @@ fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExten
 struct ExtensionPackage {
     wasm_path: PathBuf,
     manifest: Option<ExtensionManifest>,
+    source: ExtensionPathSource,
+    explicit_package: bool,
+}
+
+fn extension_package_priority(package: &ExtensionPackage) -> (u8, u8) {
+    let source = match package.source {
+        ExtensionPathSource::InitializationOptions => 0,
+        ExtensionPathSource::Environment => 1,
+    };
+    let discovery = if package.explicit_package { 0 } else { 1 };
+    (source, discovery)
 }
 
 fn collect_extension_package(
     configured_path: &ConfiguredExtensionPath,
+    explicit_package: bool,
     output: &mut Vec<ExtensionPackage>,
 ) -> Result<(), ExtensionLoadError> {
     let path = &configured_path.path;
@@ -804,6 +829,8 @@ fn collect_extension_package(
         output.push(ExtensionPackage {
             wasm_path: path.to_path_buf(),
             manifest: None,
+            source: configured_path.source,
+            explicit_package,
         });
         return Ok(());
     }
@@ -822,6 +849,8 @@ fn collect_extension_package(
         output.push(ExtensionPackage {
             wasm_path,
             manifest: Some(manifest),
+            source: configured_path.source,
+            explicit_package,
         });
         return Ok(());
     }
@@ -868,7 +897,7 @@ fn collect_extension_directory(
                 path: entry_path,
                 source: configured_path.source,
             };
-            if let Err(err) = collect_extension_package(&entry_path, output) {
+            if let Err(err) = collect_extension_package(&entry_path, false, output) {
                 warn!("Skipping Ruby Fast LSP extension package: {}", err);
             }
         } else if entry_path.extension().and_then(|ext| ext.to_str()) == Some("wasm") {
@@ -882,6 +911,8 @@ fn collect_extension_directory(
             output.push(ExtensionPackage {
                 wasm_path: entry_path,
                 manifest: None,
+                source: configured_path.source,
+                explicit_package: false,
             });
         }
     }
@@ -1656,6 +1687,52 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    fn copy_rspec_package(destination: &Path, version: &str) {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
+        let wasm_relative = Path::new("target/wasm32-wasip1/release/rspec-ruby.wasm");
+        fs::create_dir_all(destination.join(wasm_relative).parent().unwrap())
+            .expect("test package wasm directory must be created");
+        let manifest = fs::read_to_string(source.join("extension.toml"))
+            .expect("bundled RSpec manifest must be readable")
+            .replace("version = \"0.1.0\"", &format!("version = \"{version}\""));
+        fs::write(destination.join("extension.toml"), manifest)
+            .expect("test manifest must be written");
+        fs::copy(source.join(wasm_relative), destination.join(wasm_relative))
+            .expect("bundled RSpec wasm must be copied");
+    }
+
+    #[test]
+    fn initialization_package_wins_duplicate_id_independent_of_path_order() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let environment_package = temp_dir.path().join("a-environment");
+        let initialization_package = temp_dir.path().join("z-initialization");
+        copy_rspec_package(&environment_package, "0.1.0-environment");
+        copy_rspec_package(&initialization_package, "0.1.0-initialization");
+        let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+            package_paths: vec![
+                ConfiguredExtensionPath {
+                    path: environment_package,
+                    source: ExtensionPathSource::Environment,
+                },
+                ConfiguredExtensionPath {
+                    path: initialization_package,
+                    source: ExtensionPathSource::InitializationOptions,
+                },
+            ],
+            directory_paths: Vec::new(),
+        });
+
+        let reports = registry.status_reports();
+
+        assert_eq!(
+            reports.len(),
+            1,
+            "duplicate extension IDs must not both execute"
+        );
+        assert_eq!(reports[0].id, "rspec-ruby");
+        assert_eq!(reports[0].version.as_deref(), Some("0.1.0-initialization"));
+    }
 
     #[test]
     fn initialization_options_do_not_load_direct_wasm_files() {

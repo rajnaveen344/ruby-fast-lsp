@@ -581,3 +581,24 @@ At the end of every goal session, record:
   based on tested daily editor breadth and installable artifacts; Rails,
   templates, extension-platform maturity, and measured production evidence
   remain necessary for higher ratings.
+
+### July 2026: Deterministic extension identity precedence
+
+- Correctness: only one valid extension package may execute for a manifest
+  `id`; lower-priority duplicates are rejected before event dispatch or semantic
+  patch application.
+- Precedence: initialization-option sources override environment sources,
+  explicit package paths override packages found through a directory within the
+  same source, and filesystem path provides the deterministic final
+  ordering.
+- Failure behavior: an invalid higher-priority package does not reserve its ID;
+  the next valid candidate may load. A valid winner cannot be displaced by a
+  lower-priority duplicate.
+- Focused evidence: a regression fixture loads identical RSpec Wasm bytes from
+  reverse-lexicographic environment and initialization packages with different
+  manifest versions, proving that exactly the configured package wins rather
+  than both executing or path order deciding.
+- Rating remains **7.3/10**. This closes one production extension-registry
+  invariant, but Milestone 2 still lacks complete lifecycle events, project-
+  local discovery, settings/watchers/process hosting, wall-clock isolation,
+  broader patch families, and a third-party acceptance fixture.

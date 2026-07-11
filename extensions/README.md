@@ -292,6 +292,12 @@ What remains to reach 9.5+/10:
 Current registry slice:
 
 - `ExtensionRegistry` owns loaded Wasm extension slots.
+- Discovery precedence is deterministic: initialization-option sources override
+  environment sources, explicit package paths override directory discovery
+  within the same source, and filesystem path breaks remaining ties.
+- Extension identity is unique. After the highest-priority valid package for an
+  `id` loads, lower-priority duplicates are rejected before they can dispatch
+  events or contribute semantic patches.
 - Global registry lock is used only to swap configuration or clone extension
   handles.
 - Each Wasm extension has its own lock and status.
