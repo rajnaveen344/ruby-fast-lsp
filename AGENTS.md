@@ -176,6 +176,14 @@ controller/action discovery; the VS Code adapter validates workspace-safe
 conventional view candidates and performs the editor open operation. Do not put
 filesystem or editor-command execution into the guest or semantic engine.
 
+Common Ruby source kinds are canonicalized in
+`editors/vscode/vsix/ruby_file_kinds.json`. The VS Code manifest and watcher
+patterns consume or are tested against that list, and the server discovery test
+requires its extension/filename tables to match. Update the canonical JSON,
+Rust policy, manifest, watcher tests, and packaged smoke together; do not add a
+file kind to only one surface. `.erb`, `.rhtml`, and `.rhtm` all use embedded
+Ruby mapping and must retain formatter/linter safeguards.
+
 Distribution versions are checked by `editors/check_package_versions.js` and
 must match the root Cargo package across the VSIX, npm CLI, platform packages,
 optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail

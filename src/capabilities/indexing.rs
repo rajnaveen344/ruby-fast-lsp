@@ -355,7 +355,7 @@ async fn append_external_linter_diagnostics(
     content: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if uri.path().ends_with(".erb") {
+    if ruby_analysis::indexer::is_erb_path(uri.path()) {
         return;
     }
     let config = server.config.lock().clone();

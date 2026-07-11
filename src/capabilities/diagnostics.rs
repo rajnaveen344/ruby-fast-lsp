@@ -313,10 +313,18 @@ fn extract_syntax_diagnostics(
         }
     }
 
-    let warnings: Vec<_> = parse_result
-        .warnings()
-        .filter(|w| w.message() != PRISM_UNREACHABLE_MSG)
-        .collect();
+    // Prism sees an ERB output expression as an ordinary statement and may
+    // report it as useless in void context. The template host consumes that
+    // value, so parser warnings are not sound for the mapped document. Syntax
+    // errors and Ruby Fast LSP's AST/engine diagnostics remain enabled.
+    let warnings: Vec<_> = if document.is_embedded() {
+        Vec::new()
+    } else {
+        parse_result
+            .warnings()
+            .filter(|w| w.message() != PRISM_UNREACHABLE_MSG)
+            .collect()
+    };
     if !warnings.is_empty() {
         debug!("Found {} warnings in document", warnings.len());
 

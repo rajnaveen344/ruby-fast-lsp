@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 const { registerErbHtmlProviders } = require('./erb_html');
+const { fileWatcherPatterns } = require('./ruby_file_kinds');
 const {
     debugConfiguration,
     minitestInvocation,
@@ -715,7 +716,9 @@ function activate(context) {
             { scheme: 'file', language: 'erb' }
         ],
         synchronize: {
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{rb,erb}'),
+            fileEvents: fileWatcherPatterns().map((pattern) =>
+                vscode.workspace.createFileSystemWatcher(pattern)
+            ),
             configurationSection: 'rubyFastLsp'
         },
         initializationOptions,

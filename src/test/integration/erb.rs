@@ -173,3 +173,26 @@ async fn erb_code_lenses_parse_only_embedded_ruby() {
         "module lenses must use the same mapped Ruby source as indexing: {lenses:?}"
     );
 }
+
+#[tokio::test]
+async fn legacy_rhtml_templates_use_the_same_embedded_ruby_mapping() {
+    let mut editor = FakeEditor::new().await;
+    editor.open("app/models/user.rb", "class User\nend\n").await;
+    editor
+        .open(
+            "app/views/users/show.rhtml",
+            "<main>host</main><%= User %>\n",
+        )
+        .await;
+
+    let definitions = editor
+        .goto_def_at("app/views/users/show.rhtml", 0, 22)
+        .await;
+    assert_eq!(definitions.len(), 1);
+    assert!(definitions[0].uri.path().ends_with("/app/models/user.rb"));
+    let diagnostics = editor.diagnostics("app/views/users/show.rhtml").await;
+    assert!(
+        diagnostics.is_empty(),
+        "legacy ERB host text must not create Ruby diagnostics: {diagnostics:?}"
+    );
+}

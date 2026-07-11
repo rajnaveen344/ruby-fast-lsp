@@ -17,27 +17,75 @@ use crate::config::IndexingConfig;
 // File Detection
 // ============================================================================
 
-/// Check if a file should be indexed based on its extension and name
+// Keep these tables synchronized with the canonical editor policy. The test
+// below fails if server discovery and the packaged client list drift.
+const RUBY_EXTENSIONS: &[&str] = &[
+    "rb",
+    "builder",
+    "eye",
+    "fcgi",
+    "gemspec",
+    "god",
+    "irbrc",
+    "jbuilder",
+    "mspec",
+    "pluginspec",
+    "podspec",
+    "prawn",
+    "pryrc",
+    "rabl",
+    "rake",
+    "rbi",
+    "rbuild",
+    "rbw",
+    "rbx",
+    "ru",
+    "ruby",
+    "spec",
+    "thor",
+    "watchr",
+];
+
+const ERB_EXTENSIONS: &[&str] = &["erb", "rhtml", "rhtm"];
+
+const RUBY_FILENAMES: &[&str] = &[
+    ".irbrc",
+    ".pryrc",
+    ".simplecov",
+    "Appraisals",
+    "Berksfile",
+    "Brewfile",
+    "Buildfile",
+    "Capfile",
+    "Dangerfile",
+    "Deliverfile",
+    "Fastfile",
+    "Gemfile",
+    "Guardfile",
+    "Jarfile",
+    "Mavenfile",
+    "Podfile",
+    "Puppetfile",
+    "Rakefile",
+    "Snapfile",
+    "Steepfile",
+    "Thorfile",
+    "Vagrantfile",
+];
+
+/// Check if a file should be indexed based on its extension and name.
 ///
-/// Returns true for:
-/// - Files with .rb, .ruby, .rake, .gemspec, or .erb extensions
-/// - Special Ruby files without extensions (Rakefile, Gemfile, etc.)
+/// Returns true for common Ruby/ERB extensions and conventional Ruby DSL
+/// filenames.
 pub fn should_index_file(path: &Path) -> bool {
     if let Some(extension) = path.extension() {
-        matches!(
-            extension.to_str(),
-            Some("rb" | "ruby" | "rake" | "gemspec" | "erb")
-        )
+        extension.to_str().is_some_and(|extension| {
+            RUBY_EXTENSIONS.contains(&extension) || ERB_EXTENSIONS.contains(&extension)
+        })
     } else {
-        // Check for files without extensions that might be Ruby
-        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            matches!(
-                file_name,
-                "Rakefile" | "Gemfile" | "Guardfile" | "Capfile" | "Vagrantfile"
-            )
-        } else {
-            false
-        }
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| RUBY_FILENAMES.contains(&name))
     }
 }
 
@@ -219,16 +267,55 @@ mod tests {
         assert!(should_index_file(&PathBuf::from("test.rake")));
         assert!(should_index_file(&PathBuf::from("test.gemspec")));
         assert!(should_index_file(&PathBuf::from("show.html.erb")));
+        assert!(should_index_file(&PathBuf::from("config.ru")));
+        assert!(should_index_file(&PathBuf::from("tasks.thor")));
+        assert!(should_index_file(&PathBuf::from("show.json.jbuilder")));
+        assert!(should_index_file(&PathBuf::from("types.rbi")));
+        assert!(should_index_file(&PathBuf::from("plugin.podspec")));
 
         // Test special Ruby files
         assert!(should_index_file(&PathBuf::from("Rakefile")));
         assert!(should_index_file(&PathBuf::from("Gemfile")));
         assert!(should_index_file(&PathBuf::from("Guardfile")));
+        assert!(should_index_file(&PathBuf::from("Thorfile")));
+        assert!(should_index_file(&PathBuf::from("Fastfile")));
+        assert!(should_index_file(&PathBuf::from(".simplecov")));
 
         // Test non-Ruby files
         assert!(!should_index_file(&PathBuf::from("test.txt")));
         assert!(!should_index_file(&PathBuf::from("test.js")));
         assert!(!should_index_file(&PathBuf::from("README.md")));
+    }
+
+    #[test]
+    fn editor_file_kind_policy_matches_server_discovery() {
+        let policy: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/vscode/vsix/ruby_file_kinds.json"
+        ))
+        .expect("canonical Ruby file-kind policy must be valid JSON");
+        let extensions = |key: &str| {
+            policy[key]
+                .as_array()
+                .expect("file-kind extensions must be an array")
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .expect("file-kind extension must be a string")
+                        .trim_start_matches('.')
+                })
+                .collect::<Vec<_>>()
+        };
+        let filenames = policy["rubyFilenames"]
+            .as_array()
+            .expect("Ruby filenames must be an array")
+            .iter()
+            .map(|value| value.as_str().expect("Ruby filename must be a string"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(extensions("rubyExtensions"), RUBY_EXTENSIONS);
+        assert_eq!(extensions("erbExtensions"), ERB_EXTENSIONS);
+        assert_eq!(filenames, RUBY_FILENAMES);
     }
 
     #[test]

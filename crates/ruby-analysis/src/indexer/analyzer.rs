@@ -1,7 +1,7 @@
 use crate::core::RubyConstant;
 use crate::{
-    analyzer_utils as utils, mask_erb, Identifier, IdentifierType, IdentifierVisitor, LVScopeId,
-    RubyDocument,
+    analyzer_utils as utils, is_erb_path, mask_erb, Identifier, IdentifierType, IdentifierVisitor,
+    LVScopeId, RubyDocument,
 };
 use ruby_prism::{visit_call_node, CallNode, Visit};
 use tower_lsp::lsp_types::{Position, Url};
@@ -25,7 +25,7 @@ pub struct SignatureHelpTarget {
 
 impl RubyPrismAnalyzer {
     pub fn new(uri: Url, code: String) -> Self {
-        let analysis_code = if uri.path().ends_with(".erb") {
+        let analysis_code = if is_erb_path(uri.path()) {
             mask_erb(&code).source().to_string()
         } else {
             code.clone()

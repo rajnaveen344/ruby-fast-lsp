@@ -81,7 +81,7 @@ async fn formats_current_unsaved_buffer_with_utf16_full_document_edit() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn erb_is_never_sent_to_a_ruby_formatter() {
+async fn embedded_templates_are_never_sent_to_a_ruby_formatter() {
     let (_temp, command, captured_stdin) = fake_formatter("corrupted", 0);
     let mut editor = FakeEditor::new().await;
     *editor.server().config.lock() = RubyFastLspConfig {
@@ -92,14 +92,21 @@ async fn erb_is_never_sent_to_a_ruby_formatter() {
     editor
         .open("app/views/users/show.html.erb", "<p><%= User.name %></p>\n")
         .await;
+    editor
+        .open("app/views/users/legacy.rhtml", "<p><%= User.name %></p>\n")
+        .await;
 
     assert!(editor
         .format("app/views/users/show.html.erb")
         .await
         .is_empty());
+    assert!(editor
+        .format("app/views/users/legacy.rhtml")
+        .await
+        .is_empty());
     assert!(
         !captured_stdin.exists(),
-        "ERB host documents must never be passed to a Ruby formatter"
+        "embedded host documents must never be passed to a Ruby formatter"
     );
 }
 

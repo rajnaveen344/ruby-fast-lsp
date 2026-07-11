@@ -44,6 +44,8 @@ const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');
 for (const required of [
     binary,
     path.join(extensionRoot, 'erb_html.js'),
+    path.join(extensionRoot, 'ruby_file_kinds.js'),
+    path.join(extensionRoot, 'ruby_file_kinds.json'),
     path.join(rspecPackage, 'extension.toml'),
     path.join(railsPackage, 'extension.toml'),
     path.join(minitestPackage, 'extension.toml')
@@ -56,6 +58,16 @@ for (const required of [
 if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
 
 const { createErbHtmlDocument } = require(path.join(extensionRoot, 'erb_html.js'));
+const fileKinds = require(path.join(extensionRoot, 'ruby_file_kinds.js'));
+const packagedManifest = require(path.join(extensionRoot, 'package.json'));
+const packagedRuby = packagedManifest.contributes.languages.find(language => language.id === 'ruby');
+const packagedErbLanguage = packagedManifest.contributes.languages.find(language => language.id === 'erb');
+if (JSON.stringify(packagedRuby?.extensions) !== JSON.stringify(fileKinds.RUBY_EXTENSIONS) ||
+    JSON.stringify(packagedRuby?.filenames) !== JSON.stringify(fileKinds.RUBY_FILENAMES) ||
+    JSON.stringify(packagedErbLanguage?.extensions) !== JSON.stringify(fileKinds.ERB_EXTENSIONS)) {
+    fs.rmSync(temp, { recursive: true, force: true });
+    throw new Error('Packaged VSIX Ruby/ERB language declarations drifted from canonical file kinds');
+}
 const packagedErb = createErbHtmlDocument(
     'file:///app/views/users/show.html.erb',
     1,

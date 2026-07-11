@@ -785,6 +785,17 @@ end
 
         /// Create project files with dependencies
         fn create_project_files(&self) {
+            fs::write(
+                self.project_root.join("Thorfile"),
+                "class DeploymentTasks\nend\n",
+            )
+            .expect("Failed to write Thorfile");
+            fs::write(
+                self.project_root.join("config.ru"),
+                "class RackApplication\nend\n",
+            )
+            .expect("Failed to write config.ru");
+
             // Create main application file
             let main_app = r#"
 require 'set'
@@ -955,6 +966,25 @@ end
         let result = coordinator.run_complete_indexing(&server).await;
         assert!(result.is_ok(), "Indexing should complete successfully");
 
+        let engine = server.analysis_engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        for path in [
+            fixture.project_root().join("Thorfile"),
+            fixture.project_root().join("config.ru"),
+        ] {
+            let file_id = query.file_id(&path).unwrap_or_else(|| {
+                panic!(
+                    "common Ruby entry point was not registered: {}",
+                    path.display()
+                )
+            });
+            assert!(
+                !query.symbol_facts_in_file(file_id).is_empty(),
+                "common Ruby entry point produced no semantic facts: {}",
+                path.display()
+            );
+        }
+
         // Verify that Ruby lib directories were discovered
         let lib_dirs = coordinator.get_ruby_library_paths();
         assert!(
@@ -988,6 +1018,8 @@ end
         assert!(file_names.contains(&"user.rb".to_string()));
         assert!(file_names.contains(&"user_service.rb".to_string()));
         assert!(file_names.contains(&"user_test.rb".to_string()));
+        assert!(file_names.contains(&"Thorfile".to_string()));
+        assert!(file_names.contains(&"config.ru".to_string()));
     }
 
     #[tokio::test]

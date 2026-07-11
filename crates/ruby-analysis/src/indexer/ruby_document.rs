@@ -2,7 +2,7 @@ use crate::core::{RubyType, SourceFileId, TextRange};
 use ruby_prism::Location as PrismLocation;
 use tower_lsp::lsp_types::{InlayHint, Location as LspLocation, Position, Range, Url};
 
-use crate::{mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes};
+use crate::{is_erb_path, mask_erb, EmbeddedRuby, LVScopeId, SourceDocument, VariableScopes};
 
 /// A document representation that handles conversions between byte offsets and LSP positions
 #[derive(Clone)]
@@ -34,7 +34,7 @@ impl RubyDocument {
         version: i32,
         analysis_file_id: SourceFileId,
     ) -> Self {
-        let embedded = if uri.path().ends_with(".erb") {
+        let embedded = if is_erb_path(uri.path()) {
             Some(mask_erb(&content))
         } else {
             None
@@ -63,6 +63,10 @@ impl RubyDocument {
             .unwrap_or(&self.content)
     }
 
+    pub fn is_embedded(&self) -> bool {
+        self.embedded.is_some()
+    }
+
     pub fn is_ruby_position(&self, position: Position) -> bool {
         self.embedded
             .as_ref()
@@ -76,7 +80,7 @@ impl RubyDocument {
     /// Updates document content and version, recomputing line offsets
     /// Clears variable scopes since they will be re-indexed.
     pub fn update(&mut self, content: String, version: i32) {
-        self.embedded = if self.uri.path().ends_with(".erb") {
+        self.embedded = if is_erb_path(self.uri.path()) {
             Some(mask_erb(&content))
         } else {
             None

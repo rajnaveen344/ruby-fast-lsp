@@ -29,7 +29,7 @@ use ruby_analysis::core::{
 use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
-use ruby_analysis::indexer::{mask_erb, AnalysisIndexer};
+use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
 use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, NamespaceDeclarationKind, SourceRange};
 use ruby_prism::Visit;
@@ -55,7 +55,7 @@ enum FileResolution {
 }
 
 fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
-    if uri.path().ends_with(".erb") {
+    if is_erb_path(uri.path()) {
         Cow::Owned(mask_erb(content).source().to_string())
     } else {
         Cow::Borrowed(content)

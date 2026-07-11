@@ -77,7 +77,13 @@ The binary will be at `target/release/ruby-fast-lsp`.
       "extensionToLanguage": {
         ".rb": "ruby",
         ".rake": "ruby",
-        ".gemspec": "ruby"
+        ".gemspec": "ruby",
+        ".ru": "ruby",
+        ".thor": "ruby",
+        ".jbuilder": "ruby",
+        ".rbi": "ruby",
+        ".erb": "erb",
+        ".rhtml": "erb"
       }
     }
   }
@@ -182,6 +188,14 @@ add nonstandard Ruby entry points such as `bin/console`; `excludedPatterns`
 always win, and `.git` is never traversed. Explicitly included gems augment
 dependencies inferred from source, while excluded gems are omitted even when
 they are direct or transitive dependencies.
+
+The default source policy covers the common Ruby entry points advertised by
+Shopify Ruby LSP: `.rb`, `.rake`, `.gemspec`, `.ru`, `.thor`, `.jbuilder`,
+`.rbi`, `.podspec`, and related Ruby DSL extensions; conventional files such as
+`Gemfile`, `Rakefile`, `Thorfile`, `Fastfile`, `Dangerfile`, `Podfile`, and
+`.simplecov`; and `.erb`, `.rhtml`, and `.rhtm` templates. VS Code language
+association, filesystem watchers, and server discovery are checked against the
+canonical list in `editors/vscode/vsix/ruby_file_kinds.json`.
 
 ```json
 {

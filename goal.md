@@ -315,7 +315,8 @@ Implement:
 3. Done for range-safe read/query features: HTML completion, hover, symbols,
    folding, selection ranges, and highlights in VS Code. Whole-document HTML
    formatting/diagnostics and edit-producing features remain intentionally out.
-4. `.rake`, `.gemspec`, Thor, and common Ruby extension handling.
+4. Done: `.rake`, `.gemspec`, Thor, and common Ruby extension/filename
+   handling across discovery, VS Code association, watchers, and packaging.
 5. Clear generated, vendored, dependency, and excluded-source policy.
 6. A strategy for declarations from native extensions or generated APIs.
 
@@ -1306,3 +1307,37 @@ At the end of every goal session, record:
   complete for their declared range-safe scope. The next priority is auditing
   `.rake`, `.gemspec`, Thor, and other common Ruby entry points end to end,
   followed by generated/native declaration and source-inclusion policy.
+
+### July 2026: Competitive common Ruby entry-point coverage
+
+- Competitive audit: the current Shopify Ruby LSP VS Code manifest defines 24
+  Ruby extensions, 22 conventional Ruby filenames, and three ERB extensions.
+  Ruby Fast LSP previously discovered only a small server subset, advertised an
+  even smaller editor subset, and watched only `.rb`/`.erb` changes.
+- Canonical policy: `ruby_file_kinds.json` now records the shared set used by
+  server discovery tests, VS Code language associations, filesystem watcher
+  construction, Node contract tests, and packaged-artifact validation. This
+  covers `.rake`, `.gemspec`, `.ru`, `.thor`, `.jbuilder`, `.rbi`, `.podspec`,
+  related Ruby DSL extensions, and conventional names including `Thorfile`,
+  `Fastfile`, `Dangerfile`, `Podfile`, and `.simplecov`.
+- Lifecycle: cold workspace indexing now proves `Thorfile` and `config.ru` are
+  registered and emit engine-owned symbol facts. VS Code watches both extension
+  and conventional-filename groups, so unopened file changes reach the LSP
+  instead of relying only on initial indexing or document-open events.
+- Template aliases: `.rhtml` and `.rhtm` join `.erb` in server discovery, VS
+  Code association, Ruby/HTML projections, completion isolation, diagnostics,
+  and formatter/linter safeguards. Prism warnings are suppressed for embedded
+  templates because output expressions are not void in the host; syntax errors
+  and engine semantic diagnostics remain enabled.
+- Evidence: red-first tests failed for `.ru`/Thor discovery, `.rhtml`
+  definition, missing editor policy, and the stale packaged VSIX. Focused tests
+  then proved policy parity, cold semantic indexing, legacy-template navigation,
+  false-warning suppression, and formatting isolation. The full gate passes
+  with 982 root tests, all workspace tests including 338 `ruby-analysis` tests,
+  the 55-test release simulator, 12 Node tests, release build, zero npm audit
+  findings, and an extracted VSIX whose manifest matches its packaged policy.
+- Rating increases to **8.4/10**. Milestone 4 item 4 is complete at parity with
+  the verified Shopify file-kind surface. The next priority is item 5: turn the
+  existing generated, vendored, dependency, included/excluded, and trust rules
+  into one explicit source-ownership policy with lifecycle and packaging
+  evidence, then address native/generated declarations in item 6.

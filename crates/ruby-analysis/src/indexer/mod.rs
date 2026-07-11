@@ -30,7 +30,7 @@ pub use analysis_indexer::{AnalysisIndex, AnalysisIndexer};
 pub use analyzer::{RubyPrismAnalyzer, SignatureHelpTarget};
 pub use code_lens::{module_definitions_for_lens, ModuleDefinitionForLens};
 pub use document_symbols::{DocumentSymbolsVisitor, MethodVisibility, RubySymbolContext};
-pub use erb::{mask_erb, EmbeddedRuby};
+pub use erb::{is_erb_path, mask_erb, EmbeddedRuby};
 pub use hover::{identifier_to_hover_target, HoverTarget};
 pub use identifier::{Identifier, MethodReceiver};
 pub use identifier_visitor::{IdentifierType, IdentifierVisitor};

@@ -43,10 +43,53 @@
         ],
         "extensions": [
           ".rb",
-          ".rake",
+          ".builder",
+          ".eye",
+          ".fcgi",
           ".gemspec",
+          ".god",
+          ".irbrc",
+          ".jbuilder",
+          ".mspec",
+          ".pluginspec",
+          ".podspec",
+          ".prawn",
+          ".pryrc",
+          ".rabl",
+          ".rake",
+          ".rbi",
+          ".rbuild",
+          ".rbw",
+          ".rbx",
+          ".ru",
+          ".ruby",
+          ".spec",
+          ".thor",
+          ".watchr"
+        ],
+        "filenames": [
+          ".irbrc",
+          ".pryrc",
+          ".simplecov",
+          "Appraisals",
+          "Berksfile",
+          "Brewfile",
+          "Buildfile",
+          "Capfile",
+          "Dangerfile",
+          "Deliverfile",
+          "Fastfile",
           "Gemfile",
-          "Rakefile"
+          "Guardfile",
+          "Jarfile",
+          "Mavenfile",
+          "Podfile",
+          "Puppetfile",
+          "Rakefile",
+          "Snapfile",
+          "Steepfile",
+          "Thorfile",
+          "Vagrantfile"
         ]
       },
       {
@@ -56,7 +99,9 @@
           "erb"
         ],
         "extensions": [
-          ".erb"
+          ".erb",
+          ".rhtml",
+          ".rhtm"
         ]
       }
     ],

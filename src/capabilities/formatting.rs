@@ -2,6 +2,7 @@ use crate::config::FormatterKind;
 use crate::linter::format_document;
 use crate::server::RubyLanguageServer;
 use log::warn;
+use ruby_analysis::indexer::is_erb_path;
 use ruby_prism::{parse, Visit};
 use std::path::Path;
 use std::time::Duration;
@@ -20,7 +21,7 @@ pub async fn handle_document_formatting(
     }
 
     let uri = params.text_document.uri;
-    if uri.path().ends_with(".erb") {
+    if is_erb_path(uri.path()) {
         return None;
     }
     let document = server.get_doc(&uri)?;
@@ -166,7 +167,7 @@ pub async fn handle_document_on_type_formatting(
     params: DocumentOnTypeFormattingParams,
 ) -> Option<Vec<TextEdit>> {
     let uri = &params.text_document_position.text_document.uri;
-    if uri.path().ends_with(".erb") {
+    if is_erb_path(uri.path()) {
         return None;
     }
     let position = params.text_document_position.position;

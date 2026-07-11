@@ -23,6 +23,12 @@ impl EmbeddedRuby {
     }
 }
 
+pub fn is_erb_path(path: &str) -> bool {
+    [".erb", ".rhtml", ".rhtm"]
+        .iter()
+        .any(|extension| path.ends_with(extension))
+}
+
 pub fn mask_erb(template: &str) -> EmbeddedRuby {
     let bytes = template.as_bytes();
     let mut masked = vec![b' '; bytes.len()];
@@ -97,7 +103,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::mask_erb;
+    use super::{is_erb_path, mask_erb};
     use crate::core::SourceFileId;
     use crate::indexer::SourceDocument;
 
@@ -164,5 +170,14 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn recognizes_supported_embedded_template_paths() {
+        assert!(is_erb_path("/views/show.html.erb"));
+        assert!(is_erb_path("/views/show.rhtml"));
+        assert!(is_erb_path("/views/show.rhtm"));
+        assert!(!is_erb_path("/views/show.html"));
+        assert!(!is_erb_path("/views/not_erb"));
     }
 }
