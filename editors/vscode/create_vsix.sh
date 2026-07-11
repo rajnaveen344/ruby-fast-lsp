@@ -269,6 +269,10 @@ cp "$ROOT_DIR/extensions/rspec-ruby/README.md" "$EXTENSION_DIR/extensions/rspec-
 cp \
     "$ROOT_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/rspec-ruby.wasm" \
     "$EXTENSION_DIR/extensions/rspec-ruby/target/wasm32-wasip1/release/"
+mkdir -p "$EXTENSION_DIR/extensions/rails-ruby"
+cp "$ROOT_DIR/extensions/rails-ruby/extension.toml" "$EXTENSION_DIR/extensions/rails-ruby/"
+cp "$ROOT_DIR/extensions/rails-ruby/README.md" "$EXTENSION_DIR/extensions/rails-ruby/"
+cp "$ROOT_DIR/extensions/rails-ruby/extension.wasm" "$EXTENSION_DIR/extensions/rails-ruby/"
 
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"

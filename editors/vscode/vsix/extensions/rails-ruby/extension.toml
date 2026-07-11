@@ -1,0 +1,17 @@
+id = "rails-ruby"
+name = "Rails Ruby"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.6, <0.3.0"
+runtime = "mruby-wasm"
+entry = "extension.rb"
+wasm = "extension.wasm"
+checksum_sha256 = "301de32a29c6bd9378fdbb0631cc6e1e45838e4a562a7735e4a5c3e7d7e363b4"
+capabilities = ["index.call"]
+permissions = []
+
+[build]
+output = "extension.wasm"
+
+[indexing]
+call_names = ["belongs_to", "has_one", "has_many"]

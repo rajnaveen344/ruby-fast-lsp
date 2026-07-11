@@ -1016,3 +1016,27 @@ At the end of every goal session, record:
   then validations/callbacks and route helpers. Optional runtime enrichment
   must use the bounded process/cache/reindex seam rather than privileged core
   access.
+
+### July 2026: Static Active Record association foundation
+
+- Rails package: `extensions/rails-ruby` is a bundled mruby Wasm guest using
+  only the public SDK and `index.call` capability. No Rails macro names or
+  framework resolution policy entered the core indexer or analysis engine.
+- Association semantics: `belongs_to`, `has_one`, and `has_many` emit public
+  reader/writer method facts, structured nilable or collection return types,
+  and exact references from DSL arguments to conventionally inferred target
+  classes. The engine remains the final owner of navigation and type queries.
+- Lifecycle evidence: an external black-box LSP test proves association-target
+  navigation, generated-reader definition lookup, structured hover output, and
+  stale method/type removal after `didChange`. It passes both a deterministic
+  WAT/JSON ABI fixture and the Ruby-authored Wasm built by the shared SDK.
+- Distribution: VSIX packaging includes Rails beside RSpec, extension startup
+  discovers both packages deterministically, and the archive smoke test now
+  requires both guests to reach `loaded` status using their packaged Wasm.
+- Deliberate limits: target inference is convention-only. `class_name`,
+  `through`, `source`, polymorphic associations, namespaced inflection, and
+  custom keys remain future Rails work rather than guessed semantics.
+- Rating increases to **7.8/10**. This is the first user-facing Milestone 3
+  slice. Reaching 8.1 still requires validations/callbacks, route helpers, and
+  stronger Rails naming/options coverage; the next highest-value increment is
+  association options followed by validations and callbacks.

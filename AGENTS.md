@@ -233,6 +233,16 @@ keeps the normal gate toolchain-independent; set
 `RUBY_FAST_LSP_TEST_BUILT_EXAMPLE=1` after an SDK build to exercise the actual
 Ruby-authored Wasm.
 
+`extensions/rails-ruby` is the bundled Rails guest and must remain a normal
+consumer of the public mruby SDK and extension patch vocabulary. Its initial
+static Active Record contract recognizes `belongs_to`, `has_one`, and
+`has_many`, emitting generated public reader/writer methods, structured return
+types, and exact references to conventionally inferred target classes. The
+deterministic WAT fixture and Ruby-authored Wasm black-box test must both prove
+navigation, hover/type behavior, and stale-fact removal after edits. Keep Rails
+inflection and DSL policy in this extension; do not add association names or
+framework-specific resolution to `ruby-analysis` or the server indexer.
+
 `DefineMethodPatch` metadata is semantic, not decorative. The extension boundary
 validates method/namespace/type/range/parameter payloads before conversion.
 `file_processor` must preserve declared visibility, signature labels, and an

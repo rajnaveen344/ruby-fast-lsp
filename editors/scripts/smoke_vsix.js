@@ -39,7 +39,12 @@ const extensionRoot = path.join(temp, 'extension');
 const binaryName = process.platform === 'win32' ? 'ruby-fast-lsp.exe' : 'ruby-fast-lsp';
 const binary = path.join(extensionRoot, 'bin', platform, binaryName);
 const rspecPackage = path.join(extensionRoot, 'extensions', 'rspec-ruby');
-for (const required of [binary, path.join(rspecPackage, 'extension.toml')]) {
+const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
+for (const required of [
+    binary,
+    path.join(rspecPackage, 'extension.toml'),
+    path.join(railsPackage, 'extension.toml')
+]) {
     if (!fs.existsSync(required)) {
         fs.rmSync(temp, { recursive: true, force: true });
         throw new Error(`Packaged VSIX is missing required path: ${required}`);
@@ -77,7 +82,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec on ${platformKey}.\n`);
+        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec and Rails on ${platformKey}.\n`);
     }
 }
 
@@ -104,6 +109,10 @@ function handleResponse(response) {
     const rspec = statuses.find(status => status.id === 'rspec-ruby');
     if (!rspec || rspec.status !== 'loaded') {
         return finish(new Error(`Bundled RSpec extension did not load: ${JSON.stringify(statuses)}`));
+    }
+    const rails = statuses.find(status => status.id === 'rails-ruby');
+    if (!rails || rails.status !== 'loaded') {
+        return finish(new Error(`Bundled Rails extension did not load: ${JSON.stringify(statuses)}`));
     }
     finish();
 }
@@ -140,7 +149,7 @@ child.stdin.write(frame({
         capabilities: {},
         initializationOptions: {
             extensionPath: extensionRoot,
-            extensionPackages: [rspecPackage],
+            extensionPackages: [rspecPackage, railsPackage],
             extensionDirs: [],
             extensionSettings: {},
             workspaceTrusted: false,
