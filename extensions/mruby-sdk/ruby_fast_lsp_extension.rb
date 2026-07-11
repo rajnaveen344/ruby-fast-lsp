@@ -478,6 +478,18 @@ module RubyFastLspExtension
       }
     end
 
+    def set_superclass(namespace:, superclass:, location:, source:, absolute: false)
+      {
+        "SetSuperclass" => {
+          "namespace" => namespace,
+          "superclass" => superclass,
+          "absolute" => absolute,
+          "location" => location,
+          "source" => source
+        }
+      }
+    end
+
     def document_symbol(name:, kind:, range:, selection_range:, source:, detail: nil)
       {
         "DocumentSymbol" => {

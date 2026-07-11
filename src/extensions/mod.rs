@@ -1542,6 +1542,9 @@ enum IndexPatchIdentity {
         owner_kind: String,
         name: String,
     },
+    Superclass {
+        namespace: Vec<String>,
+    },
     Mixin {
         namespace: Vec<String>,
         target_kind: String,
@@ -1567,6 +1570,9 @@ impl IndexPatchIdentity {
             } => {
                 let separator = if owner_kind == "singleton" { "." } else { "#" };
                 format!("{}{separator}{name}", namespace.join("::"))
+            }
+            Self::Superclass { namespace } => {
+                format!("{} superclass", namespace.join("::"))
             }
             Self::Mixin {
                 namespace,
@@ -1653,6 +1659,9 @@ fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
             owner_kind: namespace_kind_name(method.owner_kind).to_string(),
             name: method.name.clone(),
         },
+        IndexPatch::SetSuperclass(superclass) => IndexPatchIdentity::Superclass {
+            namespace: superclass.namespace.clone(),
+        },
         IndexPatch::ApplyMixin(mixin) => IndexPatchIdentity::Mixin {
             namespace: mixin.namespace.clone(),
             target_kind: namespace_kind_name(mixin.target_kind).to_string(),
@@ -1680,6 +1689,7 @@ fn index_patch_extension_id(patch: &IndexPatch) -> &str {
         IndexPatch::DefineConstant(constant) => &constant.source.extension_id,
         IndexPatch::AddReference(reference) => &reference.source.extension_id,
         IndexPatch::DefineMethod(method) => &method.source.extension_id,
+        IndexPatch::SetSuperclass(superclass) => &superclass.source.extension_id,
         IndexPatch::ApplyMixin(mixin) => &mixin.source.extension_id,
     }
 }
@@ -1728,11 +1738,50 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
                 }
                 analysis_ruby_type_from_extension(method.return_type.as_ref())?;
             }
+            IndexPatch::SetSuperclass(superclass) => {
+                if superclass.namespace.is_empty() {
+                    return Err("superclass namespace must not be empty".to_string());
+                }
+                if superclass.superclass.is_empty() {
+                    return Err("superclass target must not be empty".to_string());
+                }
+                validate_extension_namespace(&superclass.namespace, "superclass namespace")?;
+                validate_extension_namespace(&superclass.superclass, "superclass target")?;
+                validate_source_range(superclass.location, "superclass location")?;
+            }
             IndexPatch::ApplyMixin(mixin) => {
                 validate_extension_namespace(&mixin.namespace, "mixin namespace")?;
                 validate_extension_namespace(&mixin.mixin, "mixin target")?;
                 validate_source_range(mixin.location, "mixin location")?;
             }
+        }
+    }
+    for superclass in patches.iter().filter_map(|patch| match patch {
+        IndexPatch::SetSuperclass(superclass) => Some(superclass),
+        IndexPatch::DefineNamespace(_)
+        | IndexPatch::DefineConstant(_)
+        | IndexPatch::AddReference(_)
+        | IndexPatch::DefineMethod(_)
+        | IndexPatch::ApplyMixin(_) => None,
+    }) {
+        let declares_class = patches.iter().any(|patch| match patch {
+            IndexPatch::DefineNamespace(namespace) => {
+                namespace.namespace == superclass.namespace
+                    && namespace.kind
+                        == ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class
+                    && namespace.source.extension_id == superclass.source.extension_id
+            }
+            IndexPatch::DefineConstant(_)
+            | IndexPatch::AddReference(_)
+            | IndexPatch::DefineMethod(_)
+            | IndexPatch::SetSuperclass(_)
+            | IndexPatch::ApplyMixin(_) => false,
+        });
+        if !declares_class {
+            return Err(format!(
+                "superclass patch for `{}` requires a matching generated class declaration from the same extension output",
+                superclass.namespace.join("::")
+            ));
         }
     }
     Ok(())
@@ -1898,6 +1947,12 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
                     right.return_type.as_ref(),
                 )
         }
+        (IndexPatch::SetSuperclass(left), IndexPatch::SetSuperclass(right)) => {
+            left.namespace == right.namespace
+                && left.superclass == right.superclass
+                && left.absolute == right.absolute
+                && left.location == right.location
+        }
         (IndexPatch::ApplyMixin(left), IndexPatch::ApplyMixin(right)) => {
             left.namespace == right.namespace
                 && left.target_kind == right.target_kind
@@ -1910,18 +1965,28 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
         | (IndexPatch::DefineNamespace(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineNamespace(_), IndexPatch::DefineMethod(_))
         | (IndexPatch::DefineNamespace(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineNamespace(_), IndexPatch::SetSuperclass(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::DefineMethod(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::SetSuperclass(_))
         | (IndexPatch::AddReference(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::AddReference(_), IndexPatch::DefineConstant(_))
         | (IndexPatch::AddReference(_), IndexPatch::DefineMethod(_))
         | (IndexPatch::AddReference(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::AddReference(_), IndexPatch::SetSuperclass(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::DefineConstant(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::SetSuperclass(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::AddReference(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::SetSuperclass(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::SetSuperclass(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineConstant(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::AddReference(_))
@@ -3009,6 +3074,7 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                 ));
             }
         }
+        IndexPatch::SetSuperclass(_) => {}
         IndexPatch::ApplyMixin(_) => {}
     }
     visitor.extension_index_patches.push(patch);
@@ -4338,6 +4404,101 @@ commands = ["standardrb"]
 
         assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
         assert!(err.message.contains("reference at 1:8-1:13"));
+    }
+
+    #[test]
+    fn incompatible_generated_superclasses_are_rejected_deterministically() {
+        let patch = |extension_id: &str, superclass: &str| {
+            IndexPatch::SetSuperclass(ruby_fast_lsp_extension_api::SetSuperclassPatch {
+                namespace: vec!["GeneratedRecord".to_string()],
+                superclass: vec![superclass.to_string()],
+                absolute: true,
+                location: SourceRange {
+                    start: SourcePosition {
+                        line: 1,
+                        character: 8,
+                    },
+                    end: SourcePosition {
+                        line: 1,
+                        character: 13,
+                    },
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: extension_id.to_string(),
+                    macro_name: "model".to_string(),
+                },
+            })
+        };
+
+        let err = resolve_index_patch_conflicts(vec![
+            patch("z-extension", "ApplicationRecord"),
+            patch("a-extension", "ActiveRecordBase"),
+        ])
+        .expect_err("one generated class must not acquire competing superclasses");
+
+        assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
+        assert!(err.message.contains("GeneratedRecord superclass"));
+    }
+
+    #[test]
+    fn invalid_generated_superclass_is_rejected_before_fact_conversion() {
+        let patch = IndexPatch::SetSuperclass(ruby_fast_lsp_extension_api::SetSuperclassPatch {
+            namespace: vec!["GeneratedRecord".to_string()],
+            superclass: Vec::new(),
+            absolute: true,
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 1,
+                    character: 8,
+                },
+                end: SourcePosition {
+                    line: 1,
+                    character: 13,
+                },
+            },
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "superclass-test".to_string(),
+                macro_name: "model".to_string(),
+            },
+        });
+
+        let err = validate_index_patch_payloads(&[patch])
+            .expect_err("empty superclass targets must be rejected at the guest boundary");
+        assert!(
+            err.contains("superclass target must not be empty"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn generated_superclass_requires_class_declaration_from_same_guest_output() {
+        let patch = IndexPatch::SetSuperclass(ruby_fast_lsp_extension_api::SetSuperclassPatch {
+            namespace: vec!["GeneratedRecord".to_string()],
+            superclass: vec!["BaseRecord".to_string()],
+            absolute: true,
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 1,
+                    character: 8,
+                },
+                end: SourcePosition {
+                    line: 1,
+                    character: 13,
+                },
+            },
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "superclass-test".to_string(),
+                macro_name: "model".to_string(),
+            },
+        });
+
+        let err = validate_index_patch_payloads(&[patch]).expect_err(
+            "a superclass patch must not override a parser-owned or separately generated class",
+        );
+        assert!(
+            err.contains("requires a matching generated class declaration"),
+            "got: {err}"
+        );
     }
 
     #[test]

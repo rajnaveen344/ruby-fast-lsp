@@ -271,7 +271,8 @@ flowchart TD
 Rules:
 
 - Core index stores normalized Ruby facts: classes, modules, methods, constants,
-  references, generated DSL declarations, signatures, includes, and extends.
+  references, generated DSL declarations, signatures, superclass relationships,
+  includes, and extends.
 - Extension state stores private runtime/config/cache data only.
 - Extensions never mutate the analysis engine directly.
 - Extensions emit patches; server validates and applies patches.
@@ -281,6 +282,13 @@ Rules:
 Example: Rails extension state may cache routes, schema, view paths, and runner
 snapshots. The core index still owns generated association methods like
 `User#company` and `User#company=`.
+
+Generated inheritance uses `SetSuperclass` together with a matching
+`DefineNamespace` class patch from the same guest callback. This restriction
+prevents extensions from replacing parser-owned superclass declarations. The
+host validates and merges the relationship deterministically, then converts it
+to ordinary `Superclass` graph facts; engine MRO and hierarchy queries remain
+the only semantic authority.
 
 ## Roadmap to 9/10 Extension Infra
 

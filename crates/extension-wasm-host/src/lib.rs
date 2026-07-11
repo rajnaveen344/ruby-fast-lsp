@@ -577,6 +577,7 @@ mod tests {
                 | IndexPatch::DefineConstant(_)
                 | IndexPatch::AddReference(_)
                 | IndexPatch::DefineMethod(_)
+                | IndexPatch::SetSuperclass(_)
                 | IndexPatch::ApplyMixin(_) => None,
             })
             .expect(

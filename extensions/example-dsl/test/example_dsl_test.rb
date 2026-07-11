@@ -35,7 +35,12 @@ class ExampleDslTest < Minitest::Test
     assert_equal ["GeneratedRecord"], namespace_patch.fetch("namespace")
     assert_equal "Class", namespace_patch.fetch("kind")
 
-    constant_patch = patches.fetch(2).fetch("DefineConstant")
+    superclass_patch = patches.fetch(2).fetch("SetSuperclass")
+    assert_equal ["GeneratedRecord"], superclass_patch.fetch("namespace")
+    assert_equal ["BaseRecord"], superclass_patch.fetch("superclass")
+    assert_equal true, superclass_patch.fetch("absolute")
+
+    constant_patch = patches.fetch(3).fetch("DefineConstant")
     assert_equal "DEFAULT_NAME", constant_patch.fetch("name")
     assert_equal ["GeneratedRecord"], constant_patch.fetch("namespace")
     assert_equal(
@@ -46,7 +51,7 @@ class ExampleDslTest < Minitest::Test
       constant_patch.fetch("ruby_type")
     )
 
-    method_patch = patches.fetch(3).fetch("DefineMethod")
+    method_patch = patches.fetch(4).fetch("DefineMethod")
     assert_equal "name", method_patch.fetch("name")
     assert_equal ["ExampleModel"], method_patch.fetch("namespace")
     assert_equal "Private", method_patch.fetch("visibility")

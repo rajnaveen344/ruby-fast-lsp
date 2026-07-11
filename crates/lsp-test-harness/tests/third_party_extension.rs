@@ -70,7 +70,7 @@ async fn independent_extension_package_uses_only_public_contracts() {
     editor
         .open(
             "app/example_model.rb",
-            "class ExampleModel\n  field :name\n  def display\n    name.upcase\n    self.name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n  end\nend\n",
+            "class ExampleModel\n  field :name\n  def display\n    name.upcase\n    self.name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n    GeneratedRecord.new.inherited_name\n  end\nend\n\nclass BaseRecord\n  def inherited_name\n    \"base\"\n  end\nend\n",
         )
         .await;
 
@@ -149,10 +149,19 @@ async fn independent_extension_package_uses_only_public_contracts() {
         "extension-declared constant type must hover as Hash<Symbol, String>, got {constant_hover:?}"
     );
 
+    let inherited_definition = editor.goto_definition("app/example_model.rb", 7, 25).await;
+    assert_eq!(
+        inherited_definition.len(),
+        1,
+        "the generated class superclass must participate in engine-owned MRO lookup"
+    );
+    assert_eq!(inherited_definition[0].range.start.line, 12);
+    assert_eq!(inherited_definition[0].range.start.character, 2);
+
     editor
         .set(
             "app/example_model.rb",
-            "class ExampleModel\n  def display\n    name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n  end\nend\n",
+            "class ExampleModel\n  def display\n    name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n    GeneratedRecord.new.inherited_name\n  end\nend\n\nclass BaseRecord\n  def inherited_name\n    \"base\"\n  end\nend\n",
         )
         .await;
     let stale_definitions = editor.goto_definition("app/example_model.rb", 2, 6).await;
@@ -183,5 +192,10 @@ async fn independent_extension_package_uses_only_public_contracts() {
     assert!(
         stale_constant.is_empty(),
         "removing the DSL declaration must remove its generated constant, got {stale_constant:?}"
+    );
+    let stale_inherited_definition = editor.goto_definition("app/example_model.rb", 5, 25).await;
+    assert!(
+        stale_inherited_definition.is_empty(),
+        "removing the DSL declaration must remove its generated superclass edge, got {stale_inherited_definition:?}"
     );
 }

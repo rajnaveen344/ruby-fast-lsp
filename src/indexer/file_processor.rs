@@ -707,6 +707,44 @@ fn add_extension_analysis_facts(
                     ));
                 }
             }
+            IndexPatch::SetSuperclass(superclass) => {
+                let source_parts = ruby_constants(&superclass.namespace, "SetSuperclass namespace");
+                let source = FullyQualifiedName::namespace(source_parts.clone());
+                let target_parts = ruby_constants(&superclass.superclass, "SetSuperclass target");
+                let range =
+                    text_range_from_source_range(document, superclass.location, "superclass");
+                let context = FullyQualifiedName::namespace(source_parts.clone());
+                if let Some(target) = resolve_extension_namespace(
+                    &known_namespaces,
+                    &target_parts,
+                    superclass.absolute,
+                    &context,
+                ) {
+                    let source_singleton = source.to_singleton_namespace().expect(
+                        "INVARIANT VIOLATED: generated class namespace could not convert to singleton. This is a bug because validated class declarations must support Ruby singleton inheritance. Fix: construct SetSuperclass sources from FullyQualifiedName::namespace.",
+                    );
+                    if let Some(target_singleton) = target.to_singleton_namespace() {
+                        facts.graph_edges.push(GraphEdgeFact::new(
+                            source_singleton,
+                            target_singleton,
+                            GraphEdgeKind::Superclass,
+                            range,
+                        ));
+                    }
+                }
+                push_extension_graph_edge(
+                    facts,
+                    &known_namespaces,
+                    ExtensionGraphEdge {
+                        source,
+                        target_parts: &target_parts,
+                        absolute: superclass.absolute,
+                        context,
+                        kind: GraphEdgeKind::Superclass,
+                        range,
+                    },
+                );
+            }
             IndexPatch::ApplyMixin(mixin) => {
                 let mut source_parts = ruby_constants(&mixin.namespace, "ApplyMixin namespace");
                 if source_parts.is_empty() {

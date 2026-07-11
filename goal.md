@@ -949,3 +949,33 @@ At the end of every goal session, record:
 - Rating remains **7.5/10**. Safe reload/replacement is now evidenced; remaining
   Milestone 2 work is the Rails-oriented relationship vocabulary and a final
   criterion-by-criterion extension-platform audit before considering 7.7.
+
+### July 2026: Extension-generated superclass relationships
+
+- Public contract: additive `SetSuperclassPatch` lets a guest connect a
+  generated class to a relative or absolute superclass using domain names and
+  a source range. The mruby SDK exposes `set_superclass`; no engine store or LSP
+  type crosses the guest boundary.
+- Ownership safety: the host accepts inheritance only when the same guest
+  callback also emits a matching generated class declaration. Extensions cannot
+  replace parser-owned superclass declarations. Namespace, target, range, and
+  provenance are validated before fact conversion.
+- Determinism: superclass identity is the generated class, so competing parents
+  conflict regardless of extension or traversal order and all conflicting
+  guests are rejected through the existing observable failure path.
+- Engine integration: accepted relationships become ordinary resolved or
+  unresolved `Superclass` graph facts, with singleton inheritance mirrored when
+  immediately resolvable. Existing engine MRO, hierarchy, and method lookup
+  remain the sole semantic policy.
+- Public acceptance evidence: the independent example package generates
+  `GeneratedRecord < BaseRecord`; black-box navigation resolves an inherited
+  method through engine MRO, and `didChange` removal of the DSL declaration
+  removes the stale superclass edge. The same test passes with the deterministic
+  WAT fixture and a Ruby-authored Wasm rebuilt through the public SDK. SDK
+  serialization, malformed target, ownership, deterministic conflict, RSpec
+  compatibility, and the 55-test release simulator are green.
+- Rating increases to **7.6/10**. The stable patch vocabulary now covers the
+  explicitly planned namespace, constant, method/signature, structured type,
+  reference, mixin, and inheritance relationships. A criterion-by-criterion
+  Milestone 2 audit is still required before claiming its 7.7 target and
+  beginning the Rails extension.

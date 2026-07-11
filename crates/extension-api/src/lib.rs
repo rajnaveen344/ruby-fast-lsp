@@ -165,6 +165,7 @@ pub enum IndexPatch {
     DefineConstant(DefineConstantPatch),
     AddReference(ReferencePatch),
     DefineMethod(DefineMethodPatch),
+    SetSuperclass(SetSuperclassPatch),
     ApplyMixin(ApplyMixinPatch),
 }
 
@@ -323,6 +324,15 @@ pub struct ApplyMixinPatch {
     pub mixin: Vec<String>,
     pub absolute: bool,
     pub kind: MixinKind,
+    pub location: SourceRange,
+    pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetSuperclassPatch {
+    pub namespace: Vec<String>,
+    pub superclass: Vec<String>,
+    pub absolute: bool,
     pub location: SourceRange,
     pub source: PatchSource,
 }

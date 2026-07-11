@@ -57,6 +57,13 @@ extension "example-dsl" do
         location: argument.range,
         source: macro_source(ctx)
       ),
+      set_superclass(
+        namespace: ["GeneratedRecord"],
+        superclass: ["BaseRecord"],
+        location: argument.range,
+        source: macro_source(ctx),
+        absolute: true
+      ),
       define_constant(
         name: "DEFAULT_NAME",
         namespace: ["GeneratedRecord"],

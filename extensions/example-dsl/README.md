@@ -9,10 +9,12 @@ contracts without importing Ruby Fast LSP server or engine internals:
 - the same declaration emits a generated `GeneratedRecord` class and typed
   `GeneratedRecord::DEFAULT_NAME` constant with a `Hash<Symbol, String>` type
   through public semantic patches;
+- `GeneratedRecord` inherits `BaseRecord` through the public `set_superclass`
+  relationship patch, and inherited method lookup uses the ordinary engine MRO;
 - fields appear as document symbols;
 - fields receive an editor code lens;
 - the generated namespace, constant, and method participate in ordinary
-  engine-owned navigation and type hover, and disappear on reindex.
+  engine-owned navigation and type hover, and disappear on reindex;
 - the `field` argument is an engine-owned semantic reference to the generated
   class, so find-references includes the DSL declaration and removes it after
   an edit.

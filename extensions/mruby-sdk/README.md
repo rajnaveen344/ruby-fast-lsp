@@ -17,7 +17,10 @@ Copy `extensions/example-dsl`, change its manifest ID, and implement handlers
 in `extension.rb`. The example demonstrates generated namespace, typed
 constant, and method semantic patches, document symbols, code lenses,
 source-level tests, and black-box LSP acceptance. The corresponding SDK helpers
-are `define_namespace`, `define_constant`, `define_method`, and `apply_mixin`.
+are `define_namespace`, `define_constant`, `define_method`, `set_superclass`, and
+`apply_mixin`. `set_superclass` is accepted only alongside the matching
+generated class declaration from the same callback, so an extension cannot
+override parser-owned inheritance.
 Generated method returns and constants can use `named_type`, `array_type`,
 `hash_type`, `union_type`, and `nilable_type`; these produce structured ABI
 types rather than strings that the server would need to parse.
