@@ -783,6 +783,7 @@ mod tests {
             enclosing_calls: vec![ruby_fast_lsp_extension_api::ResolvedCall {
                 method_name: "describe".to_string(),
                 receiver: Receiver::Constant(vec!["RSpec".to_string()]),
+                arguments: Vec::new(),
                 resolved_callees: vec![ruby_fast_lsp_extension_api::ResolvedCallee {
                     owner: vec!["RSpec".to_string()],
                     owner_kind: NamespaceKind::Singleton,

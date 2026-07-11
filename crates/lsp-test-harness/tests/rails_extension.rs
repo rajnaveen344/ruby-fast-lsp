@@ -186,3 +186,131 @@ async fn callbacks_and_custom_validations_reference_private_methods() {
         "removing callback declarations must remove stale method references, got {references:?}"
     );
 }
+
+#[tokio::test]
+async fn routes_generate_typed_helpers_and_controller_action_navigation() {
+    let (_temp, package) = rails_package("route_index_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/controllers/application_controller.rb",
+            "class ApplicationController\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "app/controllers/users_controller.rb",
+            "class UsersController < ApplicationController\n  def show\n  end\n  def links\n    users_path\n    account_path\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "config/routes.rb",
+            "Rails.application.routes.draw do\n  resources :users\n  get \"/account\", to: \"users#show\", as: :account\nend\n",
+        )
+        .await;
+
+    let resource_controller = editor.goto_definition("config/routes.rb", 1, 15).await;
+    assert_eq!(
+        resource_controller.len(),
+        1,
+        "resources must target its controller"
+    );
+    assert!(resource_controller[0]
+        .uri
+        .path()
+        .ends_with("/app/controllers/users_controller.rb"));
+
+    let explicit_controller = editor.goto_definition("config/routes.rb", 2, 25).await;
+    assert_eq!(
+        explicit_controller.len(),
+        1,
+        "route controller segment must navigate"
+    );
+    assert_eq!(explicit_controller[0].range.start.line, 0);
+    let explicit_action = editor.goto_definition("config/routes.rb", 2, 31).await;
+    assert_eq!(
+        explicit_action.len(),
+        1,
+        "route action segment must navigate"
+    );
+    assert_eq!(explicit_action[0].range.start.line, 1);
+
+    let resource_helper = editor
+        .goto_definition("app/controllers/users_controller.rb", 4, 6)
+        .await;
+    assert_eq!(
+        resource_helper.len(),
+        1,
+        "resource helper must resolve through ApplicationController"
+    );
+    assert_eq!(resource_helper[0].range.start.line, 1);
+    let named_helper = editor
+        .goto_definition("app/controllers/users_controller.rb", 5, 6)
+        .await;
+    assert_eq!(named_helper.len(), 1, "named route helper must resolve");
+    assert_eq!(named_helper[0].range.start.line, 2);
+    let hover = editor
+        .hover("app/controllers/users_controller.rb", 5, 6)
+        .await;
+    assert!(
+        hover
+            .as_ref()
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("String")),
+        "route helper must carry its String return type, got {hover:?}"
+    );
+
+    editor
+        .set(
+            "config/routes.rb",
+            "Rails.application.routes.draw do\nend\n",
+        )
+        .await;
+    assert!(
+        editor
+            .goto_definition("app/controllers/users_controller.rb", 4, 6)
+            .await
+            .is_empty(),
+        "removing routes must remove stale generated helpers"
+    );
+}
+
+#[tokio::test]
+async fn namespaced_resources_use_lexical_route_frame_arguments() {
+    let (_temp, package) = rails_package("nested_route_index_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/controllers/application_controller.rb",
+            "class ApplicationController\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "app/controllers/admin/users_controller.rb",
+            "module Admin\n  class UsersController < ApplicationController\n    def index\n    end\n    def links\n      admin_users_path\n    end\n  end\nend\n",
+        )
+        .await;
+    editor
+        .open(
+            "config/routes.rb",
+            "Rails.application.routes.draw do\n  namespace :admin do\n    resources :users\n  end\nend\n",
+        )
+        .await;
+
+    let controller = editor.goto_definition("config/routes.rb", 2, 17).await;
+    assert_eq!(
+        controller.len(),
+        1,
+        "nested resource must target Admin::UsersController"
+    );
+    assert!(controller[0]
+        .uri
+        .path()
+        .ends_with("/app/controllers/admin/users_controller.rb"));
+    let helper = editor
+        .goto_definition("app/controllers/admin/users_controller.rb", 5, 8)
+        .await;
+    assert_eq!(helper.len(), 1, "namespaced resource helper must resolve");
+    assert_eq!(helper[0].range.start.line, 2);
+}

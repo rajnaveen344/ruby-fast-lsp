@@ -13,7 +13,7 @@ class RailsRubyTest < Minitest::Test
     RubyFastLspExtensionEntrypoint.ruby_fast_lsp_extension
   end
 
-  def context(method_name, association, keywords = [])
+  def context(method_name, association, keywords = [], enclosing_calls = [])
     {
       "method_name" => method_name,
       "receiver" => "None",
@@ -26,7 +26,18 @@ class RailsRubyTest < Minitest::Test
       "call_range" => RANGE,
       "message_range" => RANGE,
       "resolved_callees" => [],
-      "enclosing_calls" => []
+      "enclosing_calls" => enclosing_calls
+    }
+  end
+
+  def routes_draw_frame
+    {
+      "method_name" => "draw",
+      "receiver" => {"MethodCall" => {"method_name" => "routes"}},
+      "arguments" => [],
+      "resolved_callees" => [],
+      "call_range" => RANGE,
+      "message_range" => RANGE
     }
   end
 
@@ -126,5 +137,140 @@ class RailsRubyTest < Minitest::Test
 
     reference = patches.fetch(0).fetch("AddReference")
     assert_equal "account", reference.dig("target", "Method", "name")
+  end
+
+  def test_resources_generates_rest_helpers_and_controller_reference
+    patches = extension.index_call(context("resources", "users", [], [routes_draw_frame]))
+
+    reference = patches.fetch(0).fetch("AddReference")
+    assert_equal({"Namespace" => ["UsersController"]}, reference.fetch("target"))
+    methods = patches.drop(1).map { |patch| patch.fetch("DefineMethod") }
+    assert_equal(
+      %w[users_path users_url new_user_path new_user_url edit_user_path edit_user_url user_path user_url],
+      methods.map { |method| method.fetch("name") }
+    )
+    assert methods.all? { |method| method.fetch("namespace") == ["ApplicationController"] }
+    assert methods.all? { |method| method.fetch("return_type") == {"Named" => "String"} }
+  end
+
+  def test_named_route_generates_helpers_and_controller_action_references
+    route_range = {
+      "start" => {"line" => 2, "character" => 17},
+      "end" => {"line" => 2, "character" => 27}
+    }
+    name_range = {
+      "start" => {"line" => 2, "character" => 33},
+      "end" => {"line" => 2, "character" => 40}
+    }
+    route_context = context("get", "/account", [
+      {
+        "keyword" => {"name" => "to", "range" => route_range},
+        "value" => {"String" => "users#show"},
+        "range" => route_range
+      },
+      {
+        "keyword" => {"name" => "as", "range" => name_range},
+        "value" => {"Symbol" => "account"},
+        "range" => name_range
+      }
+    ], [routes_draw_frame])
+    patches = extension.index_call(route_context)
+
+    assert_equal({"Namespace" => ["UsersController"]}, patches.fetch(0).dig("AddReference", "target"))
+    assert_equal(
+      {
+        "Method" => {
+          "namespace" => ["UsersController"],
+          "owner_kind" => "Instance",
+          "name" => "show"
+        }
+      },
+      patches.fetch(1).dig("AddReference", "target")
+    )
+    assert_equal %w[account_path account_url], patches.drop(2).map { |patch| patch.dig("DefineMethod", "name") }
+  end
+
+
+  def test_nested_namespace_prefixes_helpers_and_controller_target
+    namespace_frame = {
+      "method_name" => "namespace",
+      "receiver" => "None",
+      "arguments" => [{"value" => {"Symbol" => "admin"}, "range" => RANGE}],
+      "resolved_callees" => [],
+      "call_range" => RANGE,
+      "message_range" => RANGE
+    }
+    patches = extension.index_call(context("resources", "users", [], [routes_draw_frame, namespace_frame]))
+
+    assert_equal(
+      {"Namespace" => ["Admin", "UsersController"]},
+      patches.fetch(0).dig("AddReference", "target")
+    )
+    assert_equal(
+      %w[admin_users_path admin_users_url new_admin_user_path new_admin_user_url edit_admin_user_path edit_admin_user_url admin_user_path admin_user_url],
+      patches.drop(1).map { |patch| patch.dig("DefineMethod", "name") }
+    )
+  end
+
+  def test_scope_module_and_as_prefix_controller_and_helpers
+    scope_frame = {
+      "method_name" => "scope",
+      "receiver" => "None",
+      "arguments" => [
+        {
+          "keyword" => {"name" => "module", "range" => RANGE},
+          "value" => {"Symbol" => "admin"},
+          "range" => RANGE
+        },
+        {
+          "keyword" => {"name" => "as", "range" => RANGE},
+          "value" => {"Symbol" => "admin"},
+          "range" => RANGE
+        }
+      ],
+      "resolved_callees" => [],
+      "call_range" => RANGE,
+      "message_range" => RANGE
+    }
+    patches = extension.index_call(context("resources", "users", [], [routes_draw_frame, scope_frame]))
+
+    assert_equal(
+      {"Namespace" => ["Admin", "UsersController"]},
+      patches.fetch(0).dig("AddReference", "target")
+    )
+    assert_equal "admin_users_path", patches.fetch(1).dig("DefineMethod", "name")
+  end
+
+  def test_resources_uses_common_irregular_singular_route_name
+    patches = extension.index_call(context("resources", "people", [], [routes_draw_frame]))
+    names = patches.drop(1).map { |patch| patch.dig("DefineMethod", "name") }
+
+    assert_includes names, "person_path"
+    assert_includes names, "new_person_path"
+    refute_includes names, "new_people_path"
+  end
+
+  def test_namespaced_irregular_resource_singularizes_before_prefix
+    namespace_frame = {
+      "method_name" => "namespace",
+      "receiver" => "None",
+      "arguments" => [{"value" => {"Symbol" => "admin"}, "range" => RANGE}],
+      "resolved_callees" => [],
+      "call_range" => RANGE,
+      "message_range" => RANGE
+    }
+    patches = extension.index_call(context("resources", "people", [], [routes_draw_frame, namespace_frame]))
+    names = patches.drop(1).map { |patch| patch.dig("DefineMethod", "name") }
+
+    assert_includes names, "new_admin_person_path"
+    refute_includes names, "new_admin_people_path"
+  end
+
+  def test_resources_outside_routes_draw_are_ignored
+    unrelated_draw = routes_draw_frame.merge(
+      "receiver" => {"MethodCall" => {"method_name" => "canvas"}}
+    )
+
+    assert_empty extension.index_call(context("resources", "users", [], [unrelated_draw]))
   end
 end

@@ -6,7 +6,7 @@ server_version = ">=0.2.6, <0.3.0"
 runtime = "mruby-wasm"
 entry = "extension.rb"
 wasm = "extension.wasm"
-checksum_sha256 = "86a567315acc938c0c0db07f1dd3b7f2e2502f38cf18e8b576424c9205720183"
+checksum_sha256 = "67a18112a6b8afe7242ec74c70377fe06d4ff7928f80818ca912d1593e47b245"
 capabilities = ["index.call"]
 permissions = []
 
@@ -14,6 +14,7 @@ permissions = []
 output = "extension.wasm"
 
 [indexing]
+frame_call_names = ["draw", "namespace", "scope"]
 call_names = [
   "belongs_to", "has_one", "has_many",
   "before_validation", "after_validation",
@@ -28,5 +29,6 @@ call_names = [
   "validates_absence_of", "validates_acceptance_of", "validates_confirmation_of",
   "validates_exclusion_of", "validates_format_of", "validates_inclusion_of",
   "validates_length_of", "validates_numericality_of", "validates_presence_of",
-  "validates_size_of", "validates_uniqueness_of", "validates_comparison_of"
+  "validates_size_of", "validates_uniqueness_of", "validates_comparison_of",
+  "resources", "resource", "get", "post", "put", "patch", "delete", "match", "root"
 ]

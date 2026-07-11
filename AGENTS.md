@@ -240,7 +240,10 @@ static Active Record contract recognizes `belongs_to`, `has_one`, and
 `has_many`, emitting generated public reader/writer methods, structured return
 types, and exact references to conventionally inferred target classes. Active
 Record callbacks and custom `validate` symbols emit exact method references;
-the extension never performs method lookup itself. The
+the extension never performs method lookup itself. Route declarations use
+public frame arguments, generated method facts, and exact references for
+controller/action navigation; helper availability currently follows
+`ApplicationController` inheritance. The
 deterministic WAT fixture and Ruby-authored Wasm black-box test must both prove
 navigation, hover/type behavior, and stale-fact removal after edits. Keep Rails
 inflection and DSL policy in this extension; do not add association names or
@@ -253,6 +256,14 @@ compatibility. Keep keyword extraction generic in `src/extensions`; option
 meaning such as Rails `class_name` or `polymorphic` belongs in the consuming
 guest. Unsupported/dynamic values must remain explicit rather than being
 coerced into guessed strings.
+
+Manifest `[indexing].frame_call_names` declares lexical DSL frames separately
+from guest handler `call_names`. Loaded frame calls are tracked even when the
+guest has no handler for the frame itself, and `ResolvedCall.arguments`
+preserves literal/keyword values plus ranges for nested handlers. Frame names
+must be valid Ruby method names and are part of deterministic manifest reload
+identity. Keep frame tracking framework-neutral; a guest must verify its own
+root frame before interpreting nested calls.
 
 `DefineMethodPatch` metadata is semantic, not decorative. The extension boundary
 validates method/namespace/type/range/parameter payloads before conversion.

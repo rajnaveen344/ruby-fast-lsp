@@ -22,10 +22,25 @@ method references. These references use normal engine MRO,
 private-method, ambiguity, find-references, and edit-removal behavior. Proc and
 block callbacks remain ordinary Ruby code and need no synthetic method target.
 
+Routes inside `Rails.application.routes.draw` support `resources`, `resource`,
+`root`, and named `get`/`post`/`put`/`patch`/`delete`/`match` declarations.
+Resource and named routes contribute `_path` and `_url` methods to
+`ApplicationController`, with `String` return types and permissive positional/
+keyword signatures. Controller subclasses therefore navigate from helper calls
+back to the route declaration. Conventional resource controller targets and
+explicit `to: "users#show"` controller/action segments are semantic references.
+Nested `namespace` and `scope module:/as:` frames prefix controller targets and
+helper names; common irregular plurals such as `people` use explicit stable
+singular forms.
+
 Conventional target names use deterministic inflection: snake case is
 camelized and collection names use a small singularization rule. Options such
 as `through`, `source`, custom foreign keys, conditional validation semantics,
 validator classes, and dynamic `class_name` values are not inferred yet.
+Route helpers are currently projected into controller inheritance, not view/
+template contexts. Routes with `only` or `except` conservatively emit controller
+navigation but no helper set; `member`/`collection`, shallow routes, mounted
+engines, and the full Active Support inflector remain future route work.
 
 Run the source contract tests with:
 

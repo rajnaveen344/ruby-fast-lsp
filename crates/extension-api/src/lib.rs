@@ -113,6 +113,8 @@ pub struct CallContext {
 pub struct ResolvedCall {
     pub method_name: String,
     pub receiver: Receiver,
+    #[serde(default)]
+    pub arguments: Vec<Argument>,
     pub resolved_callees: Vec<ResolvedCallee>,
     pub call_range: SourceRange,
     pub message_range: SourceRange,
@@ -372,6 +374,25 @@ mod tests {
                 .expect("pre-keyword ABI argument must remain compatible")
                 .keyword,
             None
+        );
+    }
+
+    #[test]
+    fn enclosing_call_preserves_literal_arguments_for_dsl_frames() {
+        let json = r#"{
+            "method_name":"namespace",
+            "receiver":"None",
+            "arguments":[{"value":{"Symbol":"admin"},"range":{"start":{"line":1,"character":12},"end":{"line":1,"character":18}}}],
+            "resolved_callees":[],
+            "call_range":{"start":{"line":1,"character":2},"end":{"line":3,"character":5}},
+            "message_range":{"start":{"line":1,"character":2},"end":{"line":1,"character":11}}
+        }"#;
+        let call: ResolvedCall =
+            serde_json::from_str(json).expect("enclosing DSL frame must deserialize");
+        assert_eq!(call.arguments.len(), 1);
+        assert_eq!(
+            call.arguments[0].value,
+            ArgumentValue::Symbol("admin".to_string())
         );
     }
 }

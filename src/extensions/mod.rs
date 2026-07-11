@@ -98,6 +98,7 @@ struct LoadedWasmExtension {
     extension: Mutex<ruby_fast_lsp_extension_wasm_host::WasmExtension>,
     status: Mutex<ExtensionStatus>,
     indexed_call_names: BTreeSet<String>,
+    frame_call_names: BTreeSet<String>,
     semantic_targets: Vec<ExtensionMethodTarget>,
     watched_file_matcher: GlobSet,
 }
@@ -201,6 +202,8 @@ struct ExtensionBuildManifest {
 #[derive(Clone, Debug, Deserialize)]
 struct ExtensionIndexingManifest {
     call_names: Vec<String>,
+    #[serde(default)]
+    frame_call_names: Vec<String>,
     #[serde(default)]
     targets: Vec<ExtensionMethodTargetManifest>,
 }
@@ -629,6 +632,12 @@ impl ExtensionRegistry {
             return true;
         }
 
+        if self.extensions.iter().any(|extension| {
+            extension.is_loaded() && extension.frame_call_names.contains(method_name)
+        }) {
+            return true;
+        }
+
         if !visitor.extension_call_stack.is_empty()
             && self.extensions.iter().any(|extension| {
                 extension.is_loaded() && extension.can_run_inside_extension_frame(visitor, node)
@@ -711,6 +720,7 @@ impl LoadedWasmExtension {
         metadata: ExtensionMetadata,
         extension: ruby_fast_lsp_extension_wasm_host::WasmExtension,
         semantic_targets: Vec<ExtensionMethodTarget>,
+        frame_call_names: BTreeSet<String>,
     ) -> Self {
         let indexed_call_names = extension
             .indexed_call_names()
@@ -727,6 +737,7 @@ impl LoadedWasmExtension {
             extension: Mutex::new(extension),
             status: Mutex::new(ExtensionStatus::Discovered),
             indexed_call_names,
+            frame_call_names,
             semantic_targets,
             watched_file_matcher,
         }
@@ -846,10 +857,8 @@ fn tracked_call_names(extensions: &[Arc<LoadedWasmExtension>]) -> BTreeSet<Strin
         .map(|name| (*name).to_string())
         .collect::<BTreeSet<_>>();
     for extension in extensions {
-        if !extension.is_loaded() {
-            continue;
-        }
         names.extend(extension.indexed_call_names.iter().cloned());
+        names.extend(extension.frame_call_names.iter().cloned());
     }
     names
 }
@@ -2407,11 +2416,18 @@ fn load_wasm_extension(
         .map(parse_manifest_method_targets)
         .transpose()?
         .unwrap_or_default();
+    let frame_call_names = package
+        .manifest
+        .as_ref()
+        .and_then(|manifest| manifest.indexing.as_ref())
+        .map(|indexing| indexing.frame_call_names.iter().cloned().collect())
+        .unwrap_or_default();
 
     Ok(Arc::new(LoadedWasmExtension::new(
         metadata,
         extension,
         semantic_targets,
+        frame_call_names,
     )))
 }
 
@@ -2448,6 +2464,22 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
             "Extension `{}` declares settings_schema without `settings` capability",
             manifest.id
         );
+    }
+    if let Some(indexing) = &manifest.indexing {
+        validate_manifest_list("indexing call name", &manifest.id, &indexing.call_names)?;
+        validate_manifest_list(
+            "indexing frame call name",
+            &manifest.id,
+            &indexing.frame_call_names,
+        )?;
+        for name in &indexing.frame_call_names {
+            RubyMethod::new(name).map_err(|err| {
+                ExtensionLoadError::new(format!(
+                    "extension `{}` indexing frame call name `{name}` is invalid: {err}",
+                    manifest.id
+                ))
+            })?;
+        }
     }
     if let Some(watching) = &manifest.watching {
         validate_manifest_list("watched file glob", &manifest.id, &watching.globs)?;
@@ -2812,6 +2844,15 @@ pub fn resolved_call_for_stack(visitor: &FactCollector, node: &CallNode) -> Reso
     ResolvedCall {
         method_name,
         receiver: receiver.clone(),
+        arguments: node
+            .arguments()
+            .map(|args| {
+                args.arguments()
+                    .iter()
+                    .flat_map(|arg| arguments_from_node(visitor, &arg))
+                    .collect()
+            })
+            .unwrap_or_default(),
         resolved_callees,
         call_range: source_range(visitor, &node.location()),
         message_range: node
@@ -4092,6 +4133,49 @@ frame = true
             "INVARIANT VIOLATED: extension semantic target parsing changed. \
              This is a bug because extension dispatch must be gated by resolved method target. \
              Fix: preserve owner, owner_kind, method, and frame fields."
+        );
+    }
+
+    #[test]
+    fn manifest_frame_call_names_are_validated_separately_from_guest_handlers() {
+        let manifest: ExtensionManifest = toml::from_str(
+            r#"
+id = "frames"
+abi_version = 1
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+
+[indexing]
+call_names = ["resources"]
+frame_call_names = ["draw", "namespace"]
+"#,
+        )
+        .expect("frame manifest must parse");
+
+        validate_manifest(&manifest).expect("valid Ruby frame names must be accepted");
+        assert_eq!(
+            manifest.indexing.unwrap().frame_call_names,
+            ["draw", "namespace"],
+            "frame call names must not need fake guest handlers"
+        );
+
+        let invalid: ExtensionManifest = toml::from_str(
+            r#"
+id = "frames"
+abi_version = 1
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+
+[indexing]
+call_names = ["resources"]
+frame_call_names = ["not a call"]
+"#,
+        )
+        .expect("invalid frame name must remain syntactically valid TOML");
+        let error = validate_manifest(&invalid).expect_err("invalid Ruby frame names must fail");
+        assert!(
+            error.to_string().contains("frame call name"),
+            "got: {error}"
         );
     }
 

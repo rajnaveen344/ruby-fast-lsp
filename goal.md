@@ -1099,3 +1099,35 @@ At the end of every goal session, record:
   Milestone 3 work is route/URL helpers and route-to-controller navigation;
   richer validator classes and conditional validation semantics remain later
   refinements.
+
+### July 2026: Static Rails routes and typed URL helpers
+
+- Generic lexical frames: manifests may declare validated
+  `[indexing].frame_call_names` independently from guest handlers. Frame calls
+  retain literal and keyword arguments in `ResolvedCall`; activation state and
+  deterministic manifest fingerprints still govern dispatch. This is a public
+  DSL primitive, not a Rails-specific indexer hook.
+- Route navigation: `resources`/`resource` declarations reference conventional
+  or explicit controllers. Named HTTP routes and `root` parse literal
+  `to: "controller#action"` targets into exact controller and engine-owned
+  method references, with separate source subranges for each segment.
+- Helpers: resource and named routes generate `_path` and `_url` methods on
+  `ApplicationController`, with `String` returns and rest/keyword-rest
+  signatures. Normal inheritance makes them available in controller subclasses;
+  go-to-definition returns the route declaration and edits remove stale facts.
+- Nested DSLs: `namespace` and `scope module:/as:` frame arguments produce
+  deterministic controller/helper prefixes. A common explicit irregular
+  singular set prevents wrong helpers such as `new_people_path` while avoiding
+  a claim of complete Active Support inflection.
+- Conservative limits: `only`/`except` routes emit controller navigation but no
+  guessed helper subset. View/template helper projection, `member`/`collection`,
+  shallow routes, mounted engines, and complete inflection remain incomplete.
+- Evidence: red-first SDK and Rails source tests cover frame arguments, nested
+  scopes, route targets, helper metadata, and irregular names. Deterministic WAT
+  and rebuilt Ruby-authored Wasm black-box tests prove controller/action
+  navigation, inherited typed helpers, namespace prefixes, and edit removal.
+- Rating remains **8.0/10**. This is meaningful Milestone 3 breadth, but its 8.1
+  target is not yet earned while controller-to-view navigation, Active Support
+  concerns, Active Job entry points, and Minitest workflows remain incomplete.
+  The next priority is Active Support concerns and Active Job, followed by
+  Minitest discovery and test commands.

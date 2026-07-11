@@ -83,6 +83,7 @@ pub trait FactCollectorExtensionHost: std::fmt::Debug + Send + Sync {
         ResolvedCall {
             method_name: String::from_utf8_lossy(node.name().as_slice()).to_string(),
             receiver: Receiver::Expression,
+            arguments: Vec::new(),
             resolved_callees: Vec::new(),
             call_range,
             message_range,

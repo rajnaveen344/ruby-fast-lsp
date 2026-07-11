@@ -39,6 +39,14 @@ are flattened into ordinary `Argument` objects with `keyword_name`,
 exact option lookup. This is additive to the ABI: positional arguments and
 older guest payloads continue to omit keyword metadata.
 
+Lexical DSLs may declare `[indexing].frame_call_names` independently from guest
+handler `call_names`. Matching calls are retained in `ctx.enclosing_calls`, and
+each frame includes the same literal/keyword `arguments` contract. This lets a
+guest interpret nested DSL scope without adding fake semantic methods or
+hard-coding framework frames in the core. Frame names must be valid Ruby method
+names; guests must still verify that a child call belongs to their intended
+root frame before emitting patches.
+
 Runtime-backed extensions may return `reindex_files` from
 `on_process_completed`. Each entry names an event-related `workspace_root` and
 a workspace-relative `path`. The host validates and bounds these requests, then
