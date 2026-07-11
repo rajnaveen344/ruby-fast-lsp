@@ -159,6 +159,13 @@ before packaging when versions drift. The npm install smoke test packs the local
 CLI and current-platform package into a clean temporary project and proves the
 installed wrapper can complete a real LSP initialize handshake.
 
+Current-platform VSIX packaging must run `editors/scripts/smoke_vsix.js` on the
+produced archive before moving it to `target/`. The smoke test extracts the
+actual VSIX, executes its packaged platform binary, initializes it with the
+bundled RSpec package path from that same extraction, and requires extension
+status `loaded`. It clears developer extension-path environment variables so a
+local package cannot mask a missing, invalid, or checksum-broken bundled copy.
+
 Wasm extensions are bounded by payload, memory, fuel, and wall-clock limits.
 Each loaded extension owns one cancellable Wasmtime epoch ticker; every guest
 call boundary resets its fuel and 500 ms epoch deadline, including allocation

@@ -908,3 +908,23 @@ At the end of every goal session, record:
 - Rating remains **7.4/10**. Declaration relationships now participate in core
   reference queries; complete lifecycle replacement/package evidence and the
   remaining Rails-oriented relationship vocabulary are still needed for 7.7.
+
+### July 2026: Executable packaged-VSIX extension smoke
+
+- Installed-artifact evidence: current-platform VSIX creation now extracts the
+  produced archive, executes the binary from inside it, completes a real LSP
+  initialize handshake, and queries extension status using the bundled RSpec
+  package path from the same extracted artifact.
+- Failure detection: packaging fails unless RSpec reports `loaded`, covering
+  the packaged directory layout, manifest parsing, ABI compatibility, checksum,
+  Wasm instantiation, activation, and status plumbing together.
+- Isolation: the smoke child clears developer extension package/directory
+  environment variables, preventing a local RSpec build from masking a broken
+  or missing bundled package.
+- Scope discipline: this is one release-artifact smoke, not a duplicate semantic
+  suite; simulator and focused extension tests remain responsible for language
+  semantics.
+- Rating increases to **7.5/10**. The packaged VSIX completion criterion and
+  several stable semantic patch families now have direct evidence. Milestone 2
+  still needs explicit safe reload/replacement coverage and the remaining
+  Rails-oriented relationship hooks before its 7.7 target is justified.

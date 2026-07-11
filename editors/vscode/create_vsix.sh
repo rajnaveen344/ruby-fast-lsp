@@ -284,6 +284,14 @@ if [ ! -f "$EXPECTED_VSIX" ]; then
     exit 1
 fi
 
+for platform in "${PLATFORMS[@]}"; do
+    if [ "$platform" == "$CURRENT_PLATFORM" ]; then
+        echo "Smoke testing packaged binary and bundled extensions..."
+        node "$ROOT_DIR/editors/scripts/smoke_vsix.js" "$EXTENSION_DIR/$EXPECTED_VSIX"
+        break
+    fi
+done
+
 # Move the VSIX file to the target directory
 mkdir -p "$TARGET_DIR"
 mv "$EXPECTED_VSIX" "$TARGET_DIR/"
