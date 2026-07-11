@@ -121,6 +121,20 @@
           "default": [],
           "description": "Optional linter command and arguments as an argv array, for example [\"bin/rubocop\"]. Empty uses bundle exec rubocop or bundle exec standardrb."
         },
+        "rubyFastLsp.formatter": {
+          "type": "string",
+          "enum": ["none", "rubocop", "standard"],
+          "default": "none",
+          "description": "Format complete Ruby documents with safe RuboCop autocorrection or Standard formatting."
+        },
+        "rubyFastLsp.formatterCommand": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Optional formatter command and arguments as an argv array, for example [\"bin/standardrb\"]. Empty uses bundle exec rubocop or bundle exec standardrb."
+        },
         "rubyFastLsp.indexing": {
           "type": "object",
           "default": {

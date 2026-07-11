@@ -12,6 +12,34 @@ pub enum LinterKind {
     Standard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FormatterKind {
+    #[default]
+    None,
+    #[serde(rename = "rubocop")]
+    RuboCop,
+    Standard,
+}
+
+impl FormatterKind {
+    pub fn executable(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RuboCop => Some("rubocop"),
+            Self::Standard => Some("standardrb"),
+        }
+    }
+
+    pub fn data_name(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RuboCop => Some("rubocop"),
+            Self::Standard => Some("standard"),
+        }
+    }
+}
+
 impl LinterKind {
     pub fn executable(self) -> Option<&'static str> {
         match self {
@@ -86,6 +114,13 @@ pub struct RubyFastLspConfig {
     #[serde(rename = "linterCommand")]
     pub linter_command: Vec<String>,
 
+    /// Optional external full-document formatter.
+    pub formatter: FormatterKind,
+
+    /// Structured formatter command argv. Empty uses `bundle exec <formatter>`.
+    #[serde(rename = "formatterCommand")]
+    pub formatter_command: Vec<String>,
+
     pub indexing: IndexingConfig,
 }
 
@@ -101,6 +136,8 @@ impl Default for RubyFastLspConfig {
             log_level: "info".to_string(),
             linter: LinterKind::None,
             linter_command: Vec::new(),
+            formatter: FormatterKind::None,
+            formatter_command: Vec::new(),
             indexing: IndexingConfig::default(),
         }
     }

@@ -134,6 +134,25 @@ Correctable offenses offer a preferred `Quick Fix` that runs RuboCop's safe
 and returns an editor-applied document edit. Unsafe RuboCop corrections are not
 applied.
 
+## Full-document formatting
+
+VS Code can format the current unsaved Ruby buffer with RuboCop's safe
+`--autocorrect` mode or Standard's `--fix` mode. Formatting is opt-in and
+independent from lint diagnostics:
+
+```json
+{
+  "rubyFastLsp.formatter": "standard",
+  "rubyFastLsp.formatterCommand": ["bin/standardrb"]
+}
+```
+
+When `formatterCommand` is empty, the server runs `bundle exec rubocop` or
+`bundle exec standardrb` in the workspace root. Commands receive the current
+buffer through stdin. Unchanged output produces no edit; startup failures,
+timeouts, invalid UTF-8, empty output for a non-empty source, and abnormal exits
+are reported without changing the document or semantic index.
+
 ## Indexing configuration
 
 Project indexing accepts workspace-relative glob patterns and explicit gem

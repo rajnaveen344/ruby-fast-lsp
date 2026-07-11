@@ -1,4 +1,4 @@
-use crate::config::{LinterKind, RubyFastLspConfig};
+use crate::config::{FormatterKind, LinterKind, RubyFastLspConfig};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::path::Path;
@@ -130,11 +130,6 @@ pub async fn fix_document(
         ));
     }
     let command_argv = resolved_command(config);
-    let (program, initial_args) = command_argv.split_first().expect(
-        "INVARIANT VIOLATED: linter fix command argv is empty after resolution. \
-         This is a bug because enabled linters must always resolve to a program. \
-         Fix: preserve the default command or validate configured argv before execution.",
-    );
     let fix_flag = match config.linter {
         LinterKind::RuboCop => "--autocorrect",
         LinterKind::Standard => "--fix",
@@ -144,6 +139,80 @@ pub async fn fix_document(
              Fix: preserve the disabled-linter guard above."
         ),
     };
+    run_correction(
+        &command_argv,
+        config.linter.data_name().expect(
+            "INVARIANT VIOLATED: enabled linter has no data name. This is a bug because correction errors must identify their tool. Fix: add the LinterKind mapping.",
+        ),
+        fix_flag,
+        workspace_root,
+        file_path,
+        content,
+        timeout,
+    )
+    .await
+}
+
+pub async fn format_document(
+    config: &RubyFastLspConfig,
+    workspace_root: &Path,
+    file_path: &Path,
+    content: &str,
+    timeout: Duration,
+) -> Result<String> {
+    if config.formatter == FormatterKind::None {
+        return Err(anyhow!(
+            "cannot format while the external formatter is disabled"
+        ));
+    }
+    let command_argv = if config.formatter_command.is_empty() {
+        vec![
+            "bundle".to_string(),
+            "exec".to_string(),
+            config
+                .formatter
+                .executable()
+                .expect(
+                    "INVARIANT VIOLATED: enabled formatter has no executable. This is a bug because every enabled formatter must resolve to a program. Fix: add the FormatterKind executable mapping.",
+                )
+                .to_string(),
+        ]
+    } else {
+        config.formatter_command.clone()
+    };
+    let fix_flag = match config.formatter {
+        FormatterKind::RuboCop => "--autocorrect",
+        FormatterKind::Standard => "--fix",
+        FormatterKind::None => unreachable!(
+            "INVARIANT VIOLATED: disabled formatter reached flag selection. This is a bug because format_document rejects FormatterKind::None first. Fix: preserve that guard."
+        ),
+    };
+    run_correction(
+        &command_argv,
+        config.formatter.data_name().expect(
+            "INVARIANT VIOLATED: enabled formatter has no data name. This is a bug because formatter errors must identify their tool. Fix: add the FormatterKind mapping.",
+        ),
+        fix_flag,
+        workspace_root,
+        file_path,
+        content,
+        timeout,
+    )
+    .await
+}
+
+async fn run_correction(
+    command_argv: &[String],
+    tool_name: &str,
+    fix_flag: &str,
+    workspace_root: &Path,
+    file_path: &Path,
+    content: &str,
+    timeout: Duration,
+) -> Result<String> {
+    let (program, initial_args) = command_argv.split_first().expect(
+        "INVARIANT VIOLATED: correction command argv is empty after resolution. This is a bug because enabled tools must always resolve to a program. Fix: preserve default commands or validate configured argv before execution.",
+    );
     let stdin_path = file_path.strip_prefix(workspace_root).unwrap_or(file_path);
     let mut child = Command::new(program)
         .args(initial_args)
@@ -158,7 +227,7 @@ pub async fn fix_document(
         .with_context(|| {
             format!(
                 "failed to start safe {} fix command `{}` in {}",
-                config.linter.data_name().unwrap_or("configured"),
+                tool_name,
                 command_argv.join(" "),
                 workspace_root.display()
             )
@@ -179,7 +248,7 @@ pub async fn fix_document(
         .map_err(|_| {
             anyhow!(
                 "safe {} fix timed out after {} ms while checking {}",
-                config.linter.data_name().unwrap_or("configured"),
+                tool_name,
                 timeout.as_millis(),
                 file_path.display()
             )
@@ -188,7 +257,7 @@ pub async fn fix_document(
     if !matches!(output.status.code(), Some(0) | Some(1)) {
         return Err(anyhow!(
             "safe {} fix failed for {} with exit status {:?}: {}",
-            config.linter.data_name().unwrap_or("configured"),
+            tool_name,
             file_path.display(),
             output.status.code(),
             String::from_utf8_lossy(&output.stderr).trim()
@@ -198,7 +267,7 @@ pub async fn fix_document(
     if fixed.is_empty() && !content.is_empty() {
         return Err(anyhow!(
             "safe {} fix returned empty source for non-empty document {}",
-            config.linter.data_name().unwrap_or("configured"),
+            tool_name,
             file_path.display()
         ));
     }
@@ -318,7 +387,7 @@ fn linter_severity(severity: &str) -> DiagnosticSeverity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LinterKind, RubyFastLspConfig};
+    use crate::config::{FormatterKind, LinterKind, RubyFastLspConfig};
     use std::fs;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -486,6 +555,46 @@ mod tests {
         let args = fs::read_to_string(captured_args).unwrap();
         assert!(args.contains("--fix --stderr --force-exclusion --stdin"));
         assert!(!args.contains("--fix-unsafely"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rubocop_formatter_uses_safe_autocorrect_and_current_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let executable = temp.path().join("fake-rubocop");
+        let captured_args = temp.path().join("format-args.txt");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\ncat\n",
+            captured_args.display()
+        );
+        fs::write(&executable, script).unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).unwrap();
+        let config = RubyFastLspConfig {
+            formatter: FormatterKind::RuboCop,
+            formatter_command: vec![executable.to_string_lossy().to_string()],
+            ..RubyFastLspConfig::default()
+        };
+
+        let source = "puts \"current buffer\"\n";
+        let formatted = format_document(
+            &config,
+            temp.path(),
+            &temp.path().join("sample.rb"),
+            source,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(formatted, source);
+        let args = fs::read_to_string(captured_args).unwrap();
+        assert!(args.contains("--autocorrect --stderr --force-exclusion --stdin"));
+        assert!(!args.contains("--autocorrect-all"));
+        assert!(args.ends_with("sample.rb"));
     }
 
     #[test]

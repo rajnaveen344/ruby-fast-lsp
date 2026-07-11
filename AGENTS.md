@@ -143,6 +143,14 @@ augment statically inferred roots, while excluded gems win over direct and
 transitive requirements. The VS Code extension restarts the server after this
 configuration changes so removed sources cannot leave stale engine facts.
 
+Full-document formatting is available through opt-in RuboCop or Standard
+integration. It consumes the current unsaved buffer over stdin, uses RuboCop's
+safe `--autocorrect` or Standard's `--fix`, and returns one UTF-16-correct
+full-document edit only when output changes. Formatter selection and command
+argv are independent from lint diagnostics. Startup failures, abnormal exits,
+timeouts, invalid output, and unsafe empty output produce no edit and do not
+mutate analysis state.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

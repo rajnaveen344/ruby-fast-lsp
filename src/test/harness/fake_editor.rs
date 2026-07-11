@@ -53,14 +53,15 @@ use tower_lsp::lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams,
     CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTriggerKind,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentHighlight,
-    DocumentHighlightParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InlayHint,
-    InlayHintParams, Location, NumberOrString, PartialResultParams, Position,
-    PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams, SelectionRange,
-    SelectionRangeParams, SignatureHelp, SignatureHelpParams, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentHighlight, DocumentHighlightParams, DocumentSymbol, DocumentSymbolParams,
+    DocumentSymbolResponse, FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, InitializeParams, InlayHint, InlayHintParams, Location, NumberOrString,
+    PartialResultParams, Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams,
+    RenameParams, SelectionRange, SelectionRangeParams, SignatureHelp, SignatureHelpParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextEdit, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceEdit,
 };
 use tower_lsp::LanguageServer;
 
@@ -556,6 +557,27 @@ impl FakeEditor {
         };
         self.server
             .selection_range(params)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    /// Requests full-document formatting for the current unsaved buffer.
+    pub async fn format(&self, filename: &str) -> Vec<TextEdit> {
+        self.assert_open(filename, "format");
+        self.server
+            .formatting(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Self::filename_to_uri(filename),
+                },
+                options: FormattingOptions {
+                    tab_size: 2,
+                    insert_spaces: true,
+                    ..FormattingOptions::default()
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
             .await
             .ok()
             .flatten()

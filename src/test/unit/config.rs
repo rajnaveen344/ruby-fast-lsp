@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{LinterKind, RubyFastLspConfig};
+    use crate::config::{FormatterKind, LinterKind, RubyFastLspConfig};
     use serde_json::json;
 
     #[test]
@@ -39,6 +39,18 @@ mod tests {
         let output = serde_json::to_value(config).unwrap();
 
         assert_eq!(output["indexing"], input["indexing"]);
+    }
+
+    #[test]
+    fn test_formatter_configuration_deserialization() {
+        let config: RubyFastLspConfig = serde_json::from_value(json!({
+            "formatter": "standard",
+            "formatterCommand": ["bin/standardrb"]
+        }))
+        .unwrap();
+
+        assert_eq!(config.formatter, FormatterKind::Standard);
+        assert_eq!(config.formatter_command, vec!["bin/standardrb"]);
     }
 
     #[test]

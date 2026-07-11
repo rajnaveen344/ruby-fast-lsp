@@ -1,3 +1,4 @@
+use crate::capabilities::formatting::full_document_range;
 use crate::config::LinterKind;
 use crate::linter::fix_document;
 use crate::server::RubyLanguageServer;
@@ -6,8 +7,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic, Position, Range,
-    TextEdit, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic, TextEdit,
+    WorkspaceEdit,
 };
 
 pub async fn handle_code_actions(
@@ -104,13 +105,4 @@ fn is_correctable_linter_diagnostic(diagnostic: &Diagnostic, linter: LinterKind)
     };
     data.get("linter").and_then(serde_json::Value::as_str) == linter.data_name()
         && data.get("correctable").and_then(serde_json::Value::as_bool) == Some(true)
-}
-
-fn full_document_range(content: &str) -> Range {
-    let line = content.bytes().filter(|byte| *byte == b'\n').count() as u32;
-    let last_line = content.rsplit('\n').next().unwrap_or("");
-    Range::new(
-        Position::new(0, 0),
-        Position::new(line, last_line.encode_utf16().count() as u32),
-    )
 }

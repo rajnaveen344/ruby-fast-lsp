@@ -8,6 +8,7 @@ mod diagnostics;
 mod document_highlights;
 mod extensions;
 mod folding_range;
+mod formatting;
 mod goto;
 mod hover;
 mod implementation;

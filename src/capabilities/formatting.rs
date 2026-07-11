@@ -1,8 +1,73 @@
+use crate::config::FormatterKind;
+use crate::linter::format_document;
 use crate::server::RubyLanguageServer;
+use log::warn;
 use ruby_prism::{parse, Visit};
+use std::path::Path;
+use std::time::Duration;
 use tower_lsp::lsp_types::{
-    DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams, Range, TextEdit,
+    DocumentFormattingParams, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams,
+    MessageType, Position, Range, TextEdit,
 };
+
+pub async fn handle_document_formatting(
+    server: &RubyLanguageServer,
+    params: DocumentFormattingParams,
+) -> Option<Vec<TextEdit>> {
+    let config = server.config.lock().clone();
+    if config.formatter == FormatterKind::None {
+        return None;
+    }
+
+    let uri = params.text_document.uri;
+    let document = server.get_doc(&uri)?;
+    let content = document.content;
+    let file_path = uri.to_file_path().ok()?;
+    let workspace_root = server
+        .workspace_for_uri(&uri)
+        .map(|workspace| workspace.root_path)
+        .or_else(|| file_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| Path::new(".").to_path_buf());
+    let formatted = match format_document(
+        &config,
+        &workspace_root,
+        &file_path,
+        &content,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(formatted) => formatted,
+        Err(error) => {
+            let message = format!(
+                "Ruby formatting failed for {}: {error:#}",
+                file_path.display()
+            );
+            warn!("{message}. No text edit was returned.");
+            if let Some(client) = &server.client {
+                client.show_message(MessageType::ERROR, message).await;
+            }
+            return None;
+        }
+    };
+    if formatted == content {
+        return None;
+    }
+
+    Some(vec![TextEdit::new(
+        full_document_range(&content),
+        formatted,
+    )])
+}
+
+pub(crate) fn full_document_range(content: &str) -> Range {
+    let line = content.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let last_line = content.rsplit('\n').next().unwrap_or("");
+    Range::new(
+        Position::new(0, 0),
+        Position::new(line, last_line.encode_utf16().count() as u32),
+    )
+}
 
 /// Visitor to detect if we have a conditional assignment pattern
 struct ConditionalAssignmentVisitor {

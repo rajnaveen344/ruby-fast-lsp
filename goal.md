@@ -110,7 +110,9 @@ Priority order:
    include/exclude configuration, with exclusion precedence, nonstandard source
    support, deterministic discovery, invalid-glob errors, transitive dependency
    filtering, and VS Code restart behavior that prevents stale facts.
-8. Full-document formatting through external formatter integration.
+8. Done: opt-in full-document RuboCop and Standard formatting using the current
+   unsaved buffer, safe correction modes, structured command argv, UTF-16 edit
+   ranges, failure isolation, lifecycle coverage, and packaged VS Code settings.
 
 Completion criteria:
 
@@ -519,3 +521,31 @@ At the end of every goal session, record:
 - Rating: current estimate is **6.9/10**. This closes a meaningful project-
   scale replacement workflow, but Milestone 1 and its 7.3 target still require
   full-document formatting and complete packaged verification.
+
+### July 2026: Safe full-document formatting
+
+- User-visible: the server advertises full-document formatting and VS Code
+  exposes independent `rubyFastLsp.formatter` and `formatterCommand` settings
+  for RuboCop or Standard.
+- Safety: RuboCop uses `--autocorrect`, never `--autocorrect-all`; Standard uses
+  `--fix`. The formatter runs only on an explicit formatting request, consumes
+  the current unsaved buffer over stdin, and runs in the workspace root.
+- Correctness: changed output becomes one full-document edit whose end position
+  uses LSP UTF-16 units. Unchanged output returns no edit, and applying the edit
+  through the editor lifecycle updates the analysis document through the normal
+  `didChange` path.
+- Isolation: disabled formatters, startup failures, timeouts, abnormal exits,
+  non-UTF-8 output, and empty output for non-empty source return no edit and
+  cannot mutate document or engine state. Interactive clients receive an error
+  message as well as server logs.
+- Focused evidence: configuration, capability advertisement, safe argv/stdin,
+  unsaved-buffer, UTF-16 range, editor-application lifecycle, unchanged output,
+  and failure tests pass.
+- Milestone state: all Everyday LSP Completeness feature items are implemented.
+  Production packaging blockers still prevent treating the 7.3 target as fully
+  achieved.
+- Next priority: align Cargo/npm/VSIX versions and resolve shipped npm audit
+  findings before beginning broad Production Extension Platform expansion.
+- Rating: current estimate is **7.2/10**. Everyday editor breadth has materially
+  improved, but version-inconsistent artifacts and dependency vulnerabilities
+  remain real production-readiness gaps.

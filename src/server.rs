@@ -26,13 +26,13 @@ use tower_lsp::lsp_types::{
     CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams, CompletionItem,
     CompletionParams, CompletionResponse, Diagnostic, DidChangeConfigurationParams,
     DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentHighlight,
-    DocumentHighlightParams, DocumentOnTypeFormattingParams, DocumentSymbolParams,
-    DocumentSymbolResponse, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
-    GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, InlayHintParams,
-    Location, PrepareRenameResponse, ReferenceParams, RenameParams, SelectionRange,
-    SelectionRangeParams, SemanticTokensParams, SemanticTokensResult, SignatureHelp,
-    SignatureHelpParams, SymbolInformation, TextDocumentPositionParams, TextEdit,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentHighlight, DocumentHighlightParams, DocumentOnTypeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+    InitializedParams, InlayHintParams, Location, PrepareRenameResponse, ReferenceParams,
+    RenameParams, SelectionRange, SelectionRangeParams, SemanticTokensParams, SemanticTokensResult,
+    SignatureHelp, SignatureHelpParams, SymbolInformation, TextDocumentPositionParams, TextEdit,
     TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
     TypeHierarchySupertypesParams, Url, WorkspaceEdit, WorkspaceSymbolParams,
 };
@@ -714,6 +714,17 @@ impl LanguageServer for RubyLanguageServer {
         );
 
         result
+    }
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> LspResult<Option<Vec<TextEdit>>> {
+        info!(
+            "Document formatting request received for {:?}",
+            params.text_document.uri.path()
+        );
+        request::handle_document_formatting(self, params).await
     }
 
     async fn folding_range(

@@ -674,6 +674,8 @@ function activate(context) {
         extensionDirs: [],
         linter: config.get('linter', 'none'),
         linterCommand: config.get('linterCommand', []),
+        formatter: config.get('formatter', 'none'),
+        formatterCommand: config.get('formatterCommand', []),
         indexing: config.get('indexing', {})
     };
 
@@ -749,6 +751,8 @@ function activate(context) {
                                 logLevel: newConfig.get('logLevel', 'info'),
                                 linter: newConfig.get('linter', 'none'),
                                 linterCommand: newConfig.get('linterCommand', []),
+                                formatter: newConfig.get('formatter', 'none'),
+                                formatterCommand: newConfig.get('formatterCommand', []),
                                 indexing,
                                 extensionPackages,
                                 extensionDirs: []

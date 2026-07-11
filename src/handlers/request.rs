@@ -173,6 +173,13 @@ pub async fn handle_document_on_type_formatting(
     Ok(formatting::handle_document_on_type_formatting(lang_server, params).await)
 }
 
+pub async fn handle_document_formatting(
+    lang_server: &RubyLanguageServer,
+    params: DocumentFormattingParams,
+) -> LspResult<Option<Vec<TextEdit>>> {
+    Ok(formatting::handle_document_formatting(lang_server, params).await)
+}
+
 pub async fn handle_folding_range(
     lang_server: &RubyLanguageServer,
     params: FoldingRangeParams,
