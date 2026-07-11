@@ -46,6 +46,19 @@ extension "example-dsl" do
     next [] unless name
 
     [
+      define_namespace(
+        namespace: ["GeneratedRecord"],
+        kind: :class,
+        location: argument.range,
+        source: macro_source(ctx)
+      ),
+      define_constant(
+        name: "DEFAULT_NAME",
+        namespace: ["GeneratedRecord"],
+        location: argument.range,
+        ruby_type: {"Named" => "String"},
+        source: macro_source(ctx)
+      ),
       define_method(
         name: name,
         namespace: ctx.current_namespace,

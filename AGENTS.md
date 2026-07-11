@@ -223,6 +223,15 @@ the collector's local facts so later expressions can infer it without a second
 AST traversal. Final facts still enter the engine only through per-file
 `replace_facts`; edit/reindex removes stale extension methods and types.
 
+`DefineNamespacePatch` and `DefineConstantPatch` are the public contracts for
+generated class/module declarations and typed value constants. The extension
+boundary validates Ruby names, types, ranges, provenance, and deterministic
+declaration identity; a class/module/value declaration for the same FQN cannot
+silently coexist with an incompatible patch. Accepted patches become ordinary
+symbol, graph, and extension-provenance type facts through the per-file engine
+write path. The collector mirrors them during the same traversal so later
+references can resolve, and reindex removes all generated facts.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

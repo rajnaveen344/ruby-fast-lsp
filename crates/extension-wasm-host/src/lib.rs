@@ -573,7 +573,10 @@ mod tests {
             .iter()
             .find_map(|patch| match patch {
                 IndexPatch::DefineMethod(method) if method.name == "user" => Some(method),
-                IndexPatch::DefineMethod(_) | IndexPatch::ApplyMixin(_) => None,
+                IndexPatch::DefineNamespace(_)
+                | IndexPatch::DefineConstant(_)
+                | IndexPatch::DefineMethod(_)
+                | IndexPatch::ApplyMixin(_) => None,
             })
             .expect(
                 "INVARIANT VIOLATED: rspec let did not emit user helper DefineMethod. \

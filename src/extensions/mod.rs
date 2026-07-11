@@ -29,8 +29,8 @@ use walkdir::WalkDir;
 
 use crate::config::RubyFastLspConfig;
 use ruby_analysis::core::{
-    FullyQualifiedName, MethodCalleeResolution, MethodFact, NamespaceKind, RubyConstant,
-    RubyMethod, RubyType as AnalysisRubyType, SourceKind, SymbolFact,
+    FullyQualifiedName, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
+    RubyConstant, RubyMethod, RubyType as AnalysisRubyType, SourceKind, SymbolFact,
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
@@ -1522,6 +1522,9 @@ fn process_wasm_call_node(
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum IndexPatchIdentity {
+    Declaration {
+        path: Vec<String>,
+    },
     Method {
         namespace: Vec<String>,
         owner_kind: String,
@@ -1538,6 +1541,7 @@ enum IndexPatchIdentity {
 impl IndexPatchIdentity {
     fn display(&self) -> String {
         match self {
+            Self::Declaration { path } => path.join("::"),
             Self::Method {
                 namespace,
                 owner_kind,
@@ -1612,6 +1616,14 @@ fn resolve_index_patch_conflicts(
 
 fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
     match patch {
+        IndexPatch::DefineNamespace(namespace) => IndexPatchIdentity::Declaration {
+            path: namespace.namespace.clone(),
+        },
+        IndexPatch::DefineConstant(constant) => {
+            let mut path = constant.namespace.clone();
+            path.push(constant.name.clone());
+            IndexPatchIdentity::Declaration { path }
+        }
         IndexPatch::DefineMethod(method) => IndexPatchIdentity::Method {
             namespace: method.namespace.clone(),
             owner_kind: namespace_kind_name(method.owner_kind).to_string(),
@@ -1640,6 +1652,8 @@ fn namespace_kind_name(kind: AbiNamespaceKind) -> &'static str {
 
 fn index_patch_extension_id(patch: &IndexPatch) -> &str {
     match patch {
+        IndexPatch::DefineNamespace(namespace) => &namespace.source.extension_id,
+        IndexPatch::DefineConstant(constant) => &constant.source.extension_id,
         IndexPatch::DefineMethod(method) => &method.source.extension_id,
         IndexPatch::ApplyMixin(mixin) => &mixin.source.extension_id,
     }
@@ -1661,6 +1675,20 @@ fn validate_index_patch_provenance(
 fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
     for patch in patches {
         match patch {
+            IndexPatch::DefineNamespace(namespace) => {
+                if namespace.namespace.is_empty() {
+                    return Err("namespace declaration must not be empty".to_string());
+                }
+                validate_extension_namespace(&namespace.namespace, "namespace declaration")?;
+                validate_source_range(namespace.location, "namespace location")?;
+            }
+            IndexPatch::DefineConstant(constant) => {
+                validate_extension_namespace(&constant.namespace, "constant namespace")?;
+                RubyConstant::new(&constant.name)
+                    .map_err(|err| format!("invalid constant name `{}`: {err}", constant.name))?;
+                validate_source_range(constant.location, "constant location")?;
+                analysis_ruby_type_from_extension(constant.ruby_type.as_ref())?;
+            }
             IndexPatch::DefineMethod(method) => {
                 RubyMethod::new(&method.name)
                     .map_err(|err| format!("invalid method name `{}`: {err}", method.name))?;
@@ -1716,6 +1744,17 @@ pub(crate) fn analysis_ruby_type_from_extension(
 
 fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
     match (left, right) {
+        (IndexPatch::DefineNamespace(left), IndexPatch::DefineNamespace(right)) => {
+            left.namespace == right.namespace
+                && left.kind == right.kind
+                && left.location == right.location
+        }
+        (IndexPatch::DefineConstant(left), IndexPatch::DefineConstant(right)) => {
+            left.namespace == right.namespace
+                && left.name == right.name
+                && left.location == right.location
+                && left.ruby_type == right.ruby_type
+        }
         (IndexPatch::DefineMethod(left), IndexPatch::DefineMethod(right)) => {
             left.name == right.name
                 && left.namespace == right.namespace
@@ -1733,7 +1772,17 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
                 && left.kind == right.kind
                 && left.location == right.location
         }
-        (IndexPatch::DefineMethod(_), IndexPatch::ApplyMixin(_))
+        (IndexPatch::DefineNamespace(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::DefineNamespace(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::DefineNamespace(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::DefineConstant(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineMethod(_)) => false,
     }
 }
@@ -2635,10 +2684,70 @@ fn argument_from_node(visitor: &FactCollector, node: &Node) -> Argument {
 }
 
 fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
-    if let IndexPatch::DefineMethod(method) = &patch {
-        let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
-            .expect("INVARIANT VIOLATED: extension return type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.");
-        if let Some(return_type) = return_type {
+    match &patch {
+        IndexPatch::DefineNamespace(namespace) => {
+            let parts = namespace
+                .namespace
+                .iter()
+                .map(|part| RubyConstant::new(part).expect(
+                    "INVARIANT VIOLATED: extension namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                ))
+                .collect::<Vec<_>>();
+            let range = visitor
+                .document
+                .lsp_range_to_text_range(range_from_abi(namespace.location));
+            visitor.direct_push_namespace_facts(
+                FullyQualifiedName::namespace(parts),
+                match namespace.kind {
+                    ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class => {
+                        GraphNodeKind::Class
+                    }
+                    ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Module => {
+                        GraphNodeKind::Module
+                    }
+                },
+                range,
+                range,
+            );
+        }
+        IndexPatch::DefineConstant(constant) => {
+            let mut parts = constant
+                .namespace
+                .iter()
+                .map(|part| RubyConstant::new(part).expect(
+                    "INVARIANT VIOLATED: extension constant namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                ))
+                .collect::<Vec<_>>();
+            parts.push(RubyConstant::new(&constant.name).expect(
+                "INVARIANT VIOLATED: extension constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+            ));
+            let fqn = FullyQualifiedName::constant(parts);
+            let range = visitor
+                .document
+                .lsp_range_to_text_range(range_from_abi(constant.location));
+            visitor.direct_facts.symbols.push(SymbolFact::new(
+                fqn.clone(),
+                AnalysisSymbolKind::Constant,
+                range,
+            ));
+            if let Some(ruby_type) =
+                analysis_ruby_type_from_extension(constant.ruby_type.as_ref()).expect(
+                    "INVARIANT VIOLATED: extension constant type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                )
+            {
+                let fact = TypeFact::new(
+                    TypeSubject::Constant(fqn),
+                    ruby_type,
+                    range,
+                    TypeProvenance::Extension,
+                );
+                visitor.type_store.add(fact.clone());
+                visitor.direct_facts.types.push(fact);
+            }
+        }
+        IndexPatch::DefineMethod(method) => {
+            let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
+                .expect("INVARIANT VIOLATED: extension return type reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.");
             let namespace = method
                 .namespace
                 .iter()
@@ -2673,13 +2782,16 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                     }
                 },
             );
-            visitor.type_store.add(TypeFact::new(
-                TypeSubject::MethodReturn(fqn),
-                return_type,
-                range,
-                TypeProvenance::Extension,
-            ));
+            if let Some(return_type) = return_type {
+                visitor.type_store.add(TypeFact::new(
+                    TypeSubject::MethodReturn(fqn),
+                    return_type,
+                    range,
+                    TypeProvenance::Extension,
+                ));
+            }
         }
+        IndexPatch::ApplyMixin(_) => {}
     }
     visitor.extension_index_patches.push(patch);
 }
@@ -3895,6 +4007,75 @@ commands = ["standardrb"]
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(index_patch_extension_id(&resolved[0]), "a-extension");
+    }
+
+    #[test]
+    fn incompatible_generated_namespace_kinds_are_rejected_deterministically() {
+        let patch = |extension_id: &str, kind| {
+            IndexPatch::DefineNamespace(ruby_fast_lsp_extension_api::DefineNamespacePatch {
+                namespace: vec!["GeneratedRecord".to_string()],
+                kind,
+                location: SourceRange {
+                    start: SourcePosition {
+                        line: 1,
+                        character: 8,
+                    },
+                    end: SourcePosition {
+                        line: 1,
+                        character: 13,
+                    },
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: extension_id.to_string(),
+                    macro_name: "field".to_string(),
+                },
+            })
+        };
+
+        let err = resolve_index_patch_conflicts(vec![
+            patch(
+                "z-extension",
+                ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Class,
+            ),
+            patch(
+                "a-extension",
+                ruby_fast_lsp_extension_api::NamespaceDeclarationKind::Module,
+            ),
+        ])
+        .expect_err("class and module declarations for one namespace must conflict");
+
+        assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
+        assert!(err.message.contains("GeneratedRecord"));
+    }
+
+    #[test]
+    fn invalid_generated_constant_metadata_is_rejected_before_fact_conversion() {
+        let patch = IndexPatch::DefineConstant(ruby_fast_lsp_extension_api::DefineConstantPatch {
+            namespace: vec!["GeneratedRecord".to_string()],
+            name: "not-a-constant".to_string(),
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 1,
+                    character: 8,
+                },
+                end: SourcePosition {
+                    line: 1,
+                    character: 13,
+                },
+            },
+            ruby_type: Some(ruby_fast_lsp_extension_api::RubyType::Named(
+                "String".to_string(),
+            )),
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "constant-test".to_string(),
+                macro_name: "field".to_string(),
+            },
+        });
+
+        let err = validate_index_patch_payloads(&[patch])
+            .expect_err("invalid generated constant names must be rejected at guest boundary");
+
+        assert!(err.contains("invalid constant name"), "got: {err}");
     }
 
     #[test]

@@ -171,6 +171,49 @@ Architecture requirements:
 - Runtime introspection is an optional extension input. Static indexing must
   remain useful when the runtime process is unavailable.
 
+Planned extension architecture:
+
+1. `crates/extension-api` is the versioned, serializable guest contract. It
+   exposes domain events, ranges, Ruby names/types, semantic patches, response
+   patches, command requests, capabilities, and permissions; it must not expose
+   engine stores, server objects, or LSP protocol types.
+2. `src/extensions` is the untrusted-guest boundary and runtime host. It owns
+   discovery, manifests, compatibility and checksum checks, activation,
+   lifecycle events, settings and watched-file delivery, process brokering,
+   resource limits, provenance validation, deterministic ordering, conflict
+   resolution, failure isolation, and observable status.
+3. Extension semantic output is converted into ordinary per-file analysis
+   facts before `AnalysisEngine::replace_facts`. Extensions never write engine
+   stores directly, and stale extension facts disappear through the same
+   reindex lifecycle as parser-produced facts.
+4. `ruby-analysis::engine` remains the sole owner of final symbol, method,
+   reference, graph, type, and diagnostic truth. Normal engine resolution and
+   query APIs must treat accepted extension facts exactly like equivalent
+   parser-produced facts.
+5. The stable semantic patch vocabulary must cover generated namespaces,
+   methods and parameters, typed constants, mixins/inheritance, references,
+   diagnostics, and the declaration relationships needed by Rails and other
+   DSL-heavy libraries. New patch families require validation, deterministic
+   conflict identity, provenance, lifecycle removal, and black-box query tests.
+6. RSpec is the bundled reference extension, while a separately packaged
+   example extension proves that an external author can use the SDK, build a
+   Wasm artifact, pass validation, and contribute semantic/editor behavior
+   without modifying the server. Rails must use only these same public paths.
+7. Optional runtime knowledge enters through permission-bounded process
+   requests and versioned events. Runtime output becomes validated patches; it
+   cannot bypass static indexing, mutate server state, or make core Ruby
+   analysis depend on a running application.
+
+Implementation order:
+
+1. Finish the general semantic patch vocabulary and its deterministic merge
+   rules.
+2. Prove every patch family through SDK serialization, invalid-input tests,
+   actual-Wasm black-box tests, edit/reindex removal, and simulator coverage
+   where it exercises reusable engine semantics.
+3. Complete lifecycle/reload and packaged-extension smoke coverage.
+4. Build Rails support exclusively on the stabilized public contracts.
+
 Completion criteria:
 
 - The bundled RSpec extension uses only supported public extension contracts.
@@ -799,3 +842,25 @@ At the end of every goal session, record:
 - Rating remains **7.4/10**. This makes an existing semantic patch family honest
   and production-usable; broader namespace, constant, attribute, type, and
   reference patch families are still required before Milestone 2 reaches 7.7.
+
+### July 2026: Generated namespace and typed constant patches
+
+- Public contract: additive `DefineNamespacePatch` and `DefineConstantPatch`
+  variants let third-party guests declare generated classes/modules and typed
+  value constants without engine or LSP access. The mruby SDK exposes matching
+  `define_namespace` and `define_constant` helpers.
+- Determinism and safety: namespace components, constant names, source ranges,
+  named types, and manifest provenance are validated at the guest boundary.
+  Declaration conflicts share FQN identity, so incompatible class, module, or
+  value declarations are rejected deterministically before fact conversion.
+- Engine ownership: accepted declarations become ordinary symbol, graph, and
+  extension-provenance type facts through the normal per-file replacement path;
+  the collector mirrors them during the active traversal for later references.
+- Public acceptance evidence: the independent example package generates a
+  class and typed constant; black-box LSP tests prove definition and `String`
+  hover behavior and prove `didChange` removes stale namespace, constant, and
+  type facts. The same test passes with both the deterministic WAT fixture and
+  an actual Ruby-authored Wasm rebuilt through the public SDK.
+- Rating remains **7.4/10**. The next Milestone 2 priorities are stable generated
+  reference/relationship and richer type patch families, followed by complete
+  lifecycle replacement and packaged-extension evidence.

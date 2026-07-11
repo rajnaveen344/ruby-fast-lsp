@@ -396,6 +396,29 @@ module RubyFastLspExtension
       }
     end
 
+    def define_namespace(namespace:, kind:, location:, source:)
+      {
+        "DefineNamespace" => {
+          "namespace" => namespace,
+          "kind" => camel(kind),
+          "location" => location,
+          "source" => source
+        }
+      }
+    end
+
+    def define_constant(name:, namespace:, location:, source:, ruby_type: nil)
+      {
+        "DefineConstant" => {
+          "namespace" => namespace,
+          "name" => name.to_s,
+          "location" => location,
+          "ruby_type" => ruby_type,
+          "source" => source
+        }
+      }
+    end
+
     def method_param(param)
       {
         "name" => (param[:name] || param["name"]).to_s,

@@ -14,8 +14,10 @@ No extension gets direct access to the analysis engine.
 ## Start from the example
 
 Copy `extensions/example-dsl`, change its manifest ID, and implement handlers
-in `extension.rb`. The example demonstrates a method semantic patch, document
-symbols, code lenses, source-level tests, and black-box LSP acceptance.
+in `extension.rb`. The example demonstrates generated namespace, typed
+constant, and method semantic patches, document symbols, code lenses,
+source-level tests, and black-box LSP acceptance. The corresponding SDK helpers
+are `define_namespace`, `define_constant`, `define_method`, and `apply_mixin`.
 
 Every package contains `extension.toml`, `extension.rb`, `runtime.rb`, and the
 built Wasm path declared by its manifest.

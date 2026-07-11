@@ -70,7 +70,7 @@ async fn independent_extension_package_uses_only_public_contracts() {
     editor
         .open(
             "app/example_model.rb",
-            "class ExampleModel\n  field :name\n  def display\n    name.upcase\n    self.name\n  end\nend\n",
+            "class ExampleModel\n  field :name\n  def display\n    name.upcase\n    self.name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n  end\nend\n",
         )
         .await;
 
@@ -109,10 +109,35 @@ async fn independent_extension_package_uses_only_public_contracts() {
         "extension-declared private method must reject an explicit receiver, got {private_explicit_definitions:?}"
     );
 
+    let namespace_definitions = editor.goto_definition("app/example_model.rb", 5, 6).await;
+    assert_eq!(
+        namespace_definitions.len(),
+        1,
+        "expected one generated namespace definition"
+    );
+    assert_eq!(namespace_definitions[0].range.start.line, 1);
+    assert_eq!(namespace_definitions[0].range.start.character, 8);
+
+    let constant_definitions = editor.goto_definition("app/example_model.rb", 6, 23).await;
+    assert_eq!(
+        constant_definitions.len(),
+        1,
+        "expected one generated typed constant definition"
+    );
+    assert_eq!(constant_definitions[0].range.start.line, 1);
+    assert_eq!(constant_definitions[0].range.start.character, 8);
+    let constant_hover = editor.hover("app/example_model.rb", 6, 23).await;
+    assert!(
+        constant_hover
+            .as_ref()
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("String")),
+        "extension-declared constant type must hover as String, got {constant_hover:?}"
+    );
+
     editor
         .set(
             "app/example_model.rb",
-            "class ExampleModel\n  def display\n    name\n  end\nend\n",
+            "class ExampleModel\n  def display\n    name\n    GeneratedRecord\n    GeneratedRecord::DEFAULT_NAME\n  end\nend\n",
         )
         .await;
     let stale_definitions = editor.goto_definition("app/example_model.rb", 2, 6).await;
@@ -126,5 +151,15 @@ async fn independent_extension_package_uses_only_public_contracts() {
             .as_ref()
             .is_some_and(|hover| format!("{:?}", hover.contents).contains("String")),
         "removing the DSL declaration must remove its generated return type, got {stale_hover:?}"
+    );
+    let stale_namespace = editor.goto_definition("app/example_model.rb", 3, 6).await;
+    assert!(
+        stale_namespace.is_empty(),
+        "removing the DSL declaration must remove its generated namespace, got {stale_namespace:?}"
+    );
+    let stale_constant = editor.goto_definition("app/example_model.rb", 4, 23).await;
+    assert!(
+        stale_constant.is_empty(),
+        "removing the DSL declaration must remove its generated constant, got {stale_constant:?}"
     );
 }

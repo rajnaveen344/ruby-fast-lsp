@@ -31,7 +31,7 @@ use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::AnalysisIndexer;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::method_store::MethodVisibility as AnalysisMethodVisibility;
-use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, SourceRange};
+use ruby_fast_lsp_extension_api::{IndexPatch, MixinKind, NamespaceDeclarationKind, SourceRange};
 use ruby_prism::Visit;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -554,6 +554,98 @@ fn add_extension_analysis_facts(
 
     for patch in patches {
         match patch {
+            IndexPatch::DefineNamespace(namespace) => {
+                let parts = ruby_constants(&namespace.namespace, "DefineNamespace namespace");
+                let fqn = FullyQualifiedName::namespace(parts);
+                let range = text_range_from_source_range(document, namespace.location, "namespace");
+                let kind = match namespace.kind {
+                    NamespaceDeclarationKind::Class => GraphNodeKind::Class,
+                    NamespaceDeclarationKind::Module => GraphNodeKind::Module,
+                };
+                if !facts
+                    .symbols
+                    .iter()
+                    .any(|fact| fact.fqn == fqn && fact.range == range)
+                {
+                    facts.symbols.push(SymbolFact::new(
+                        fqn.clone(),
+                        match kind {
+                            GraphNodeKind::Class => AnalysisSymbolKind::Class,
+                            GraphNodeKind::Module => AnalysisSymbolKind::Module,
+                        },
+                        range,
+                    ));
+                }
+                if !facts
+                    .graph_nodes
+                    .iter()
+                    .any(|fact| fact.fqn == fqn && fact.kind == kind && fact.range == range)
+                {
+                    facts
+                        .graph_nodes
+                        .push(GraphNodeFact::new(fqn.clone(), kind, range));
+                    facts.graph_nodes.push(GraphNodeFact::new(
+                        fqn.to_singleton_namespace().expect(
+                            "INVARIANT VIOLATED: extension namespace could not convert to singleton. This is a bug because validated namespace declarations must produce namespace FQNs. Fix: construct DefineNamespace facts from FullyQualifiedName::namespace.",
+                        ),
+                        kind,
+                        range,
+                    ));
+                }
+                let namespace_type = TypeFact::new(
+                    TypeSubject::Constant(FullyQualifiedName::constant(fqn.namespace_parts())),
+                    match kind {
+                        GraphNodeKind::Class => {
+                            ruby_analysis::core::RubyType::ClassReference(fqn.clone())
+                        }
+                        GraphNodeKind::Module => {
+                            ruby_analysis::core::RubyType::ModuleReference(fqn.clone())
+                        }
+                    },
+                    range,
+                    TypeProvenance::Extension,
+                );
+                if !facts.types.contains(&namespace_type) {
+                    facts.types.push(namespace_type);
+                }
+                known_namespaces.insert(fqn);
+            }
+            IndexPatch::DefineConstant(constant) => {
+                let mut parts = ruby_constants(&constant.namespace, "DefineConstant namespace");
+                parts.push(RubyConstant::new(&constant.name).unwrap_or_else(|err| {
+                    panic!(
+                        "INVARIANT VIOLATED: extension emitted invalid constant `{}`: {}. This is a bug because constant patches must be validated before fact conversion. Fix: reject invalid DefineConstant patches at the extension boundary.",
+                        constant.name, err
+                    )
+                }));
+                let fqn = FullyQualifiedName::constant(parts);
+                let range = text_range_from_source_range(document, constant.location, "constant");
+                if !facts
+                    .symbols
+                    .iter()
+                    .any(|fact| fact.fqn == fqn && fact.range == range)
+                {
+                    facts.symbols.push(SymbolFact::new(
+                        fqn.clone(),
+                        AnalysisSymbolKind::Constant,
+                        range,
+                    ));
+                }
+                if let Some(ruby_type) =
+                    analysis_ruby_type_from_extension(constant.ruby_type.as_ref())
+                        .expect("INVARIANT VIOLATED: extension constant type reached fact conversion without validation. This is a bug because guest patches must be validated before collection. Fix: keep extension payload validation before patch application.")
+                {
+                    let type_fact = TypeFact::new(
+                        TypeSubject::Constant(fqn),
+                        ruby_type,
+                        range,
+                        TypeProvenance::Extension,
+                    );
+                    if !facts.types.contains(&type_fact) {
+                        facts.types.push(type_fact);
+                    }
+                }
+            }
             IndexPatch::DefineMethod(method) => {
                 let namespace = ruby_constants(&method.namespace, "DefineMethod namespace");
                 let ruby_method = RubyMethod::new(&method.name).unwrap_or_else(|err| {

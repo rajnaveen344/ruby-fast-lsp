@@ -161,6 +161,8 @@ pub enum ArgumentValue {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndexPatch {
+    DefineNamespace(DefineNamespacePatch),
+    DefineConstant(DefineConstantPatch),
     DefineMethod(DefineMethodPatch),
     ApplyMixin(ApplyMixinPatch),
 }
@@ -254,6 +256,29 @@ pub struct DefineMethodPatch {
     #[serde(default)]
     pub params: Vec<MethodParamPatch>,
     pub return_type: Option<RubyType>,
+    pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefineNamespacePatch {
+    pub namespace: Vec<String>,
+    pub kind: NamespaceDeclarationKind,
+    pub location: SourceRange,
+    pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NamespaceDeclarationKind {
+    Class,
+    Module,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefineConstantPatch {
+    pub namespace: Vec<String>,
+    pub name: String,
+    pub location: SourceRange,
+    pub ruby_type: Option<RubyType>,
     pub source: PatchSource,
 }
 
