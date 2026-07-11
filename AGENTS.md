@@ -195,6 +195,14 @@ Policy violations disable only the requesting extension; spawn failures,
 nonzero exits, and timeouts are isolated results and do not mutate analysis
 state.
 
+Extension index patches are validated and conflict-resolved in `src/extensions`
+before `src/indexer/file_processor.rs` converts them into engine facts. Patch
+`source.extension_id` must match the loaded manifest ID. Equivalent method or
+mixin patches for the same semantic identity are deduplicated by extension ID;
+incompatible patches are rejected and all conflicting guests are disabled.
+Never let extension traversal, filesystem, or timing order decide semantic
+truth, and never move this guest trust/provenance policy into `ruby-analysis`.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

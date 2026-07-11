@@ -420,8 +420,14 @@ Command patches:
 - apply workspace edit
 - show notification/progress
 
-Every patch carries `extension_id`, source macro/event, priority, and conflict
-mode. Server owns merge/conflict policy.
+Every patch carries `extension_id` and its source macro/event. The server
+validates that provenance against the loaded manifest before ingestion. For the
+current semantic patch families, equivalent facts for one semantic identity are
+deduplicated deterministically by extension ID; incompatible facts are rejected
+and every conflicting guest is disabled. This fail-closed policy prevents
+extension ordering or timing from creating ambiguous engine state. Explicit
+priority/override modes may be added only with a versioned contract and tests
+for every patch family.
 
 ### Settings and Watchers
 

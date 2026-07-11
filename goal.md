@@ -722,3 +722,27 @@ At the end of every goal session, record:
   while Milestone 2 still requires broader deterministic patch families and
   conflict policy, SDK/package-template stability, and a minimal third-party
   acceptance fixture.
+
+### July 2026: Deterministic extension semantic-patch conflicts
+
+- Provenance: every index patch is checked against the emitting guest's loaded
+  manifest ID, so an extension cannot impersonate another extension in facts or
+  status attribution.
+- Semantic identity: method patches conflict by owner namespace/kind and method
+  name; mixin patches conflict by source namespace/kind, target, and operation.
+  The policy is independent of discovery order, traversal order, and timing.
+- Merge policy: semantically equivalent patches are deduplicated with the
+  lexicographically smallest extension ID retained for stable attribution.
+  Incompatible patches are rejected before fact conversion and every
+  conflicting guest is disabled with an observable status error, preventing
+  ambiguous engine state.
+- Architecture: guest provenance and conflict validation remain at the server
+  extension boundary; `file_processor` converts only accepted domain patches
+  through the normal per-file engine replacement path. No extension trust or
+  ordering policy entered `ruby-analysis`.
+- Focused evidence: red-first tests cover deterministic incompatible-method
+  rejection, equivalent-mixin deduplication, and manifest provenance denial;
+  the complete extension test group remains green.
+- Rating remains **7.3/10**. The next Milestone 2 priority is expanding stable
+  semantic patch families needed by a third-party acceptance extension, then
+  shipping the SDK/package template and black-box authoring fixture.

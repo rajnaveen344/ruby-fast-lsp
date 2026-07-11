@@ -1425,8 +1425,9 @@ fn process_wasm_call_node(
     node: &CallNode,
 ) -> bool {
     let method_name = utils::utf8_str(node.name().as_slice());
-    let mut handled = false;
     let extensions = registry.extensions();
+    let mut emitted = Vec::new();
+    let mut emitters = BTreeMap::new();
 
     for loaded in extensions {
         if !loaded.is_loaded() {
@@ -1461,13 +1462,214 @@ fn process_wasm_call_node(
         if patches.is_empty() {
             continue;
         }
-        for patch in patches {
-            apply_patch(visitor, patch);
+        if let Err(spoofed_id) = validate_index_patch_provenance(&loaded.metadata.id, &patches) {
+            drop(extension);
+            loaded.fail(format!(
+                "extension `{}` emitted an index patch attributed to `{spoofed_id}`; patch provenance must match the loaded manifest id",
+                loaded.metadata.id
+            ));
+            continue;
         }
-        handled = true;
+        emitters.insert(loaded.metadata.id.clone(), Arc::clone(&loaded));
+        emitted.extend(patches);
     }
 
-    handled
+    if emitted.is_empty() {
+        return false;
+    }
+    let mut pending = emitted;
+    let patches = loop {
+        match resolve_index_patch_conflicts(pending.clone()) {
+            Ok(patches) => break patches,
+            Err(conflict) => {
+                let rejected_ids = conflict
+                    .extension_ids
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                for extension_id in &conflict.extension_ids {
+                    let loaded = emitters.get(extension_id).expect(
+                        "INVARIANT VIOLATED: conflicting patch source has no emitting extension. This is a bug because provenance is validated before conflict resolution. Fix: keep emitter registration adjacent to accepted patch collection.",
+                    );
+                    loaded.fail(conflict.message.clone());
+                }
+                warn!(
+                    "Rejecting conflicting extension index patches: {}",
+                    conflict.message
+                );
+                pending.retain(|patch| !rejected_ids.contains(index_patch_extension_id(patch)));
+                if pending.is_empty() {
+                    return false;
+                }
+            }
+        }
+    };
+    for patch in patches {
+        apply_patch(visitor, patch);
+    }
+    true
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum IndexPatchIdentity {
+    Method {
+        namespace: Vec<String>,
+        owner_kind: String,
+        name: String,
+    },
+    Mixin {
+        namespace: Vec<String>,
+        target_kind: String,
+        mixin: Vec<String>,
+        kind: String,
+    },
+}
+
+impl IndexPatchIdentity {
+    fn display(&self) -> String {
+        match self {
+            Self::Method {
+                namespace,
+                owner_kind,
+                name,
+            } => {
+                let separator = if owner_kind == "singleton" { "." } else { "#" };
+                format!("{}{separator}{name}", namespace.join("::"))
+            }
+            Self::Mixin {
+                namespace,
+                target_kind,
+                mixin,
+                kind,
+            } => format!(
+                "{} ({target_kind}) {kind} {}",
+                namespace.join("::"),
+                mixin.join("::")
+            ),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct IndexPatchConflict {
+    extension_ids: Vec<String>,
+    message: String,
+}
+
+fn resolve_index_patch_conflicts(
+    mut patches: Vec<IndexPatch>,
+) -> Result<Vec<IndexPatch>, IndexPatchConflict> {
+    patches.sort_by(|left, right| {
+        index_patch_identity(left)
+            .cmp(&index_patch_identity(right))
+            .then_with(|| index_patch_extension_id(left).cmp(index_patch_extension_id(right)))
+    });
+    let mut resolved = Vec::new();
+    let mut index = 0;
+    while index < patches.len() {
+        let identity = index_patch_identity(&patches[index]);
+        let mut end = index + 1;
+        while end < patches.len() && index_patch_identity(&patches[end]) == identity {
+            end += 1;
+        }
+        let group = &patches[index..end];
+        if group
+            .iter()
+            .skip(1)
+            .any(|patch| !index_patch_payload_eq(&group[0], patch))
+        {
+            let extension_ids = group
+                .iter()
+                .map(index_patch_extension_id)
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            return Err(IndexPatchConflict {
+                message: format!(
+                    "extensions {} emitted incompatible index patches for `{}`; conflicting semantic facts are rejected deterministically",
+                    extension_ids.join(", "),
+                    identity.display()
+                ),
+                extension_ids,
+            });
+        }
+        resolved.push(group[0].clone());
+        index = end;
+    }
+    Ok(resolved)
+}
+
+fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
+    match patch {
+        IndexPatch::DefineMethod(method) => IndexPatchIdentity::Method {
+            namespace: method.namespace.clone(),
+            owner_kind: namespace_kind_name(method.owner_kind).to_string(),
+            name: method.name.clone(),
+        },
+        IndexPatch::ApplyMixin(mixin) => IndexPatchIdentity::Mixin {
+            namespace: mixin.namespace.clone(),
+            target_kind: namespace_kind_name(mixin.target_kind).to_string(),
+            mixin: mixin.mixin.clone(),
+            kind: match mixin.kind {
+                ruby_fast_lsp_extension_api::MixinKind::Include => "include",
+                ruby_fast_lsp_extension_api::MixinKind::Prepend => "prepend",
+                ruby_fast_lsp_extension_api::MixinKind::Extend => "extend",
+            }
+            .to_string(),
+        },
+    }
+}
+
+fn namespace_kind_name(kind: AbiNamespaceKind) -> &'static str {
+    match kind {
+        AbiNamespaceKind::Instance => "instance",
+        AbiNamespaceKind::Singleton => "singleton",
+    }
+}
+
+fn index_patch_extension_id(patch: &IndexPatch) -> &str {
+    match patch {
+        IndexPatch::DefineMethod(method) => &method.source.extension_id,
+        IndexPatch::ApplyMixin(mixin) => &mixin.source.extension_id,
+    }
+}
+
+fn validate_index_patch_provenance(
+    expected_extension_id: &str,
+    patches: &[IndexPatch],
+) -> Result<(), String> {
+    if let Some(spoofed_id) = patches.iter().find_map(|patch| {
+        let source_id = index_patch_extension_id(patch);
+        (source_id != expected_extension_id).then(|| source_id.to_string())
+    }) {
+        return Err(spoofed_id);
+    }
+    Ok(())
+}
+
+fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
+    match (left, right) {
+        (IndexPatch::DefineMethod(left), IndexPatch::DefineMethod(right)) => {
+            left.name == right.name
+                && left.namespace == right.namespace
+                && left.owner_kind == right.owner_kind
+                && left.visibility == right.visibility
+                && left.location == right.location
+                && left.params == right.params
+                && left.return_type == right.return_type
+        }
+        (IndexPatch::ApplyMixin(left), IndexPatch::ApplyMixin(right)) => {
+            left.namespace == right.namespace
+                && left.target_kind == right.target_kind
+                && left.mixin == right.mixin
+                && left.absolute == right.absolute
+                && left.kind == right.kind
+                && left.location == right.location
+        }
+        (IndexPatch::DefineMethod(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::DefineMethod(_)) => false,
+    }
 }
 
 fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExtension>> {
@@ -3501,6 +3703,116 @@ commands = ["standardrb"]
 
         assert_eq!(result.status, ProcessResultStatus::TimedOut);
         assert_eq!(result.exit_code, None);
+    }
+
+    #[test]
+    fn incompatible_extension_index_patches_are_rejected_deterministically() {
+        let patch = |extension_id: &str, return_type| {
+            IndexPatch::DefineMethod(ruby_fast_lsp_extension_api::DefineMethodPatch {
+                name: "factory".to_string(),
+                namespace: vec!["Widget".to_string()],
+                owner_kind: AbiNamespaceKind::Singleton,
+                visibility: ruby_fast_lsp_extension_api::MethodVisibility::Public,
+                location: SourceRange {
+                    start: SourcePosition {
+                        line: 1,
+                        character: 2,
+                    },
+                    end: SourcePosition {
+                        line: 1,
+                        character: 9,
+                    },
+                },
+                params: Vec::new(),
+                return_type,
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: extension_id.to_string(),
+                    macro_name: "factory".to_string(),
+                },
+            })
+        };
+        let left = patch(
+            "z-extension",
+            Some(ruby_fast_lsp_extension_api::RubyType::Named(
+                "String".to_string(),
+            )),
+        );
+        let right = patch(
+            "a-extension",
+            Some(ruby_fast_lsp_extension_api::RubyType::Named(
+                "Integer".to_string(),
+            )),
+        );
+
+        let err = resolve_index_patch_conflicts(vec![left, right])
+            .expect_err("incompatible patches for one semantic identity must be rejected");
+
+        assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
+        assert!(err.message.contains("Widget.factory"));
+    }
+
+    #[test]
+    fn equivalent_extension_index_patches_are_deduplicated() {
+        let patch = |extension_id: &str| {
+            IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
+                namespace: vec!["Widget".to_string()],
+                target_kind: AbiNamespaceKind::Instance,
+                mixin: vec!["Shared".to_string()],
+                absolute: true,
+                kind: ruby_fast_lsp_extension_api::MixinKind::Include,
+                location: SourceRange {
+                    start: SourcePosition {
+                        line: 2,
+                        character: 0,
+                    },
+                    end: SourcePosition {
+                        line: 2,
+                        character: 7,
+                    },
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: extension_id.to_string(),
+                    macro_name: "shared".to_string(),
+                },
+            })
+        };
+
+        let resolved =
+            resolve_index_patch_conflicts(vec![patch("z-extension"), patch("a-extension")])
+                .expect("equivalent semantic patches must merge without ambiguity");
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(index_patch_extension_id(&resolved[0]), "a-extension");
+    }
+
+    #[test]
+    fn extension_index_patch_provenance_must_match_manifest_identity() {
+        let patch = IndexPatch::ApplyMixin(ruby_fast_lsp_extension_api::ApplyMixinPatch {
+            namespace: vec!["Widget".to_string()],
+            target_kind: AbiNamespaceKind::Instance,
+            mixin: vec!["Shared".to_string()],
+            absolute: true,
+            kind: ruby_fast_lsp_extension_api::MixinKind::Include,
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: SourcePosition {
+                    line: 0,
+                    character: 1,
+                },
+            },
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "spoofed-extension".to_string(),
+                macro_name: "shared".to_string(),
+            },
+        });
+
+        let spoofed = validate_index_patch_provenance("loaded-extension", &[patch])
+            .expect_err("guest patch provenance must not impersonate another extension");
+
+        assert_eq!(spoofed, "spoofed-extension");
     }
 
     #[test]
