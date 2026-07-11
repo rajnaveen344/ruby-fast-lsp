@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as ProcessCommand;
 use tower_lsp::lsp_types::{
-    CodeLens, Command, DocumentSymbol, FileChangeType, FileEvent, Position, Range, SymbolKind,
+    CodeLens, Command, DocumentSymbol, FileChangeType, FileEvent, Position, Range, SymbolKind, Url,
 };
 use walkdir::WalkDir;
 
@@ -438,8 +438,9 @@ impl ExtensionRegistryHandle {
         workspace_trusted: bool,
         workspace_roots: &[PathBuf],
         changes: &[FileEvent],
-    ) {
+    ) -> Vec<Url> {
         let pending = handle_watched_file_changes_with_registry(self, workspace_roots, changes);
+        let mut reindex_uris = BTreeSet::new();
         for pending in pending {
             if !pending.loaded.is_loaded() {
                 continue;
@@ -474,7 +475,21 @@ impl ExtensionRegistryHandle {
                     if output.index_patches.is_empty()
                         && output.response_patches.is_empty()
                         && output.command_patches.is_empty()
-                        && output.process_requests.is_empty() => {}
+                        && output.process_requests.is_empty() =>
+                {
+                    match validate_extension_reindex_files(
+                        &pending.loaded.metadata.id,
+                        workspace_roots,
+                        &pending.event_roots,
+                        &output.reindex_files,
+                    ) {
+                        Ok(uris) => reindex_uris.extend(uris),
+                        Err(err) => {
+                            drop(extension);
+                            pending.loaded.fail(err.to_string());
+                        }
+                    }
+                }
                 Ok(_) => {
                     drop(extension);
                     pending.loaded.fail(format!(
@@ -491,6 +506,7 @@ impl ExtensionRegistryHandle {
                 }
             }
         }
+        reindex_uris.into_iter().collect()
     }
 
     fn extensions(&self) -> Vec<Arc<LoadedWasmExtension>> {
@@ -1312,6 +1328,79 @@ fn validate_extension_process_request(
         workspace_root,
         timeout,
     })
+}
+
+const MAX_RUNTIME_REINDEX_FILES: usize = 256;
+
+fn validate_extension_reindex_files(
+    extension_id: &str,
+    workspace_roots: &[PathBuf],
+    event_roots: &[PathBuf],
+    requests: &[ruby_fast_lsp_extension_api::ReindexFile],
+) -> Result<Vec<Url>, ExtensionLoadError> {
+    if requests.len() > MAX_RUNTIME_REINDEX_FILES {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` requested {} runtime reindex files, exceeding the limit of {MAX_RUNTIME_REINDEX_FILES}",
+            requests.len()
+        )));
+    }
+    let roots = workspace_roots.iter().cloned().collect::<BTreeSet<_>>();
+    let event_roots = event_roots.iter().cloned().collect::<BTreeSet<_>>();
+    let mut uris = BTreeSet::new();
+    for request in requests {
+        let root = roots
+            .iter()
+            .find(|root| normalized_path(root) == request.workspace_root)
+            .filter(|root| event_roots.contains(*root))
+            .ok_or_else(|| {
+                ExtensionLoadError::new(format!(
+                    "extension `{extension_id}` requested runtime reindex outside event-related workspace root `{}`",
+                    request.workspace_root
+                ))
+            })?;
+        let relative = Path::new(&request.path);
+        if relative.as_os_str().is_empty()
+            || relative.is_absolute()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{extension_id}` runtime reindex path `{}` must be workspace-relative without traversal",
+                request.path
+            )));
+        }
+        let canonical_root = fs::canonicalize(root).map_err(|err| {
+            ExtensionLoadError::new(format!(
+                "extension `{extension_id}` runtime reindex workspace root `{}` could not be canonicalized: {err}",
+                request.workspace_root
+            ))
+        })?;
+        let requested_path = root.join(relative);
+        let canonical_path = fs::canonicalize(&requested_path).map_err(|err| {
+            ExtensionLoadError::new(format!(
+                "extension `{extension_id}` runtime reindex path `{}` is not an existing file: {err}",
+                request.path
+            ))
+        })?;
+        if !canonical_path.starts_with(&canonical_root) || !canonical_path.is_file() {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{extension_id}` runtime reindex path `{}` resolves outside its workspace root or is not a file",
+                request.path
+            )));
+        }
+        let uri = Url::from_file_path(canonical_path).map_err(|_| {
+            ExtensionLoadError::new(format!(
+                "extension `{extension_id}` runtime reindex path `{}` could not convert to a file URI",
+                request.path
+            ))
+        })?;
+        uris.insert(uri);
+    }
+    Ok(uris.into_iter().collect())
 }
 
 fn normalized_path(path: &Path) -> String {
@@ -4468,6 +4557,49 @@ commands = ["standardrb"]
             err.contains("superclass target must not be empty"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn runtime_reindex_requests_are_scoped_to_related_workspace_roots() {
+        let temp = TempDir::new().expect("runtime reindex temp workspace must be created");
+        let root = temp.path().join("workspace");
+        let model = root.join("app/models/user.rb");
+        fs::create_dir_all(model.parent().expect("model path must have parent"))
+            .expect("runtime reindex model directory must be created");
+        fs::write(&model, "class User\nend\n")
+            .expect("runtime reindex model fixture must be written");
+        let root_label = normalized_path(&root);
+        let unrelated = temp.path().join("other");
+        let requests = vec![ruby_fast_lsp_extension_api::ReindexFile {
+            workspace_root: root_label.clone(),
+            path: "app/models/user.rb".to_string(),
+        }];
+
+        let uris = validate_extension_reindex_files(
+            "rails-ruby",
+            &[root.clone(), unrelated],
+            std::slice::from_ref(&root),
+            &requests,
+        )
+        .expect("a related workspace-relative runtime reindex request must be accepted");
+        assert_eq!(uris.len(), 1);
+        assert_eq!(
+            uris[0].to_file_path().expect("file URI"),
+            fs::canonicalize(model).expect("model fixture must canonicalize")
+        );
+
+        let traversal = vec![ruby_fast_lsp_extension_api::ReindexFile {
+            workspace_root: root_label,
+            path: "../secret.rb".to_string(),
+        }];
+        let err = validate_extension_reindex_files(
+            "rails-ruby",
+            std::slice::from_ref(&root),
+            std::slice::from_ref(&root),
+            &traversal,
+        )
+        .expect_err("runtime reindex requests must reject parent traversal");
+        assert!(err.to_string().contains("workspace-relative"), "got: {err}");
     }
 
     #[test]

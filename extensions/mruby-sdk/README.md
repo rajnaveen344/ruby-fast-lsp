@@ -28,6 +28,12 @@ DSL tokens can become semantic references through `add_reference` with either
 `namespace_reference_target` or `constant_reference_target`. The server owns
 the resulting reference index and query behavior.
 
+Runtime-backed extensions may return `reindex_files` from
+`on_process_completed`. Each entry names an event-related `workspace_root` and
+a workspace-relative `path`. The host validates and bounds these requests, then
+routes them through normal file reindexing; cached runtime knowledge can affect
+semantic patches only when ordinary call hooks run again.
+
 Every package contains `extension.toml`, `extension.rb`, `runtime.rb`, and the
 built Wasm path declared by its manifest.
 

@@ -325,10 +325,10 @@ pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDoc
 
 pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
-    params: DidChangeWatchedFilesParams,
+    mut params: DidChangeWatchedFilesParams,
 ) {
     let workspace_trusted = server.config.lock().workspace_trusted;
-    server
+    let reindex_uris = server
         .extension_registry
         .handle_watched_file_changes(
             workspace_trusted,
@@ -336,6 +336,12 @@ pub async fn handle_did_change_watched_files(
             &params.changes,
         )
         .await;
+    params
+        .changes
+        .extend(reindex_uris.into_iter().map(|uri| FileEvent {
+            uri,
+            typ: FileChangeType::CHANGED,
+        }));
     refresh_extension_watch_registration(server).await;
     indexing::handle_watched_files_changed(server, params).await;
 }

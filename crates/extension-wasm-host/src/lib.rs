@@ -330,6 +330,7 @@ impl WasmExtension {
                 response_patches: Vec::new(),
                 command_patches: Vec::new(),
                 process_requests: Vec::new(),
+                reindex_files: Vec::new(),
             });
         };
         let input = serde_json::to_vec(event).context("failed to encode ExtensionEvent JSON")?;

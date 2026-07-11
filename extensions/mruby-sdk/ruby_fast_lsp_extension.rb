@@ -325,14 +325,15 @@ module RubyFastLspExtension
         empty_output.merge("process_requests" => requests)
       when "process.completed"
         results = raw_event["process_results"] || raw_event[:process_results] || []
-        @process_completed_handler.call(results) if @process_completed_handler
-        empty_output
+        reindex_files = @process_completed_handler ? (@process_completed_handler.call(results) || []) : []
+        empty_output.merge("reindex_files" => reindex_files)
       when "index.call.enter"
         {
           "index_patches" => index_call(raw_event["call"] || raw_event[:call]),
           "response_patches" => [],
           "command_patches" => [],
-          "process_requests" => []
+          "process_requests" => [],
+          "reindex_files" => []
         }
       when "request.document_symbol"
         {
@@ -363,7 +364,8 @@ module RubyFastLspExtension
         "index_patches" => [],
         "response_patches" => [],
         "command_patches" => [],
-        "process_requests" => []
+        "process_requests" => [],
+        "reindex_files" => []
       }
     end
 

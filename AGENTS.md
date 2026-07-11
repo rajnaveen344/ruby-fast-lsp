@@ -207,6 +207,12 @@ caps timeouts at 10 seconds, and returns results through `process.completed`.
 Policy violations disable only the requesting extension; spawn failures,
 nonzero exits, and timeouts are isolated results and do not mutate analysis
 state.
+`process.completed` may return bounded `reindex_files` entries scoped to the
+workspace roots related to the triggering event. The host rejects absolute or
+traversing paths, deduplicates valid file URIs, and routes them through ordinary
+watched-file reindexing. Runtime callbacks never return semantic patches
+directly; cached runtime knowledge becomes facts only when normal call hooks run
+again through validation and per-file engine replacement.
 
 Extension index patches are validated and conflict-resolved in `src/extensions`
 before `src/indexer/file_processor.rs` converts them into engine facts. Patch

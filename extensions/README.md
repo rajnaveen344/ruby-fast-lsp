@@ -473,6 +473,10 @@ Reek, and RuboCop-style tools.
 - Done: wasm guests receive `process.completed` with exit status, bounded
   stdout/stderr, and truncation flags; spawn failures and nonzero exits remain
   isolated results while policy violations disable the requesting guest.
+- Done: completion callbacks may request bounded reindexing of files under the
+  event-related workspace roots. Paths are validated against absolute/traversal
+  escape, deduplicated, and fed through normal file processing so runtime state
+  cannot bypass semantic patch validation or engine replacement.
 
 ### Discovery and Installation
 

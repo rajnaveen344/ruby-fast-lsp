@@ -267,7 +267,10 @@ class RSpecRubyExtensionTest < Minitest::Test
         timeout_ms: 2_000
       )]
     end
-    extension.on_process_completed { |results| received = results }
+    extension.on_process_completed do |results|
+      received = results
+      [{"workspace_root" => "/repo", "path" => "app/models/user.rb"}]
+    end
 
     output = extension.handle_event("event" => "files.changed", "files" => [])
     request = output.fetch("process_requests").fetch(0)
@@ -279,5 +282,9 @@ class RSpecRubyExtensionTest < Minitest::Test
     completion = extension.handle_event("event" => "process.completed", "process_results" => results)
     assert_equal results, received
     assert_equal [], completion.fetch("process_requests")
+    assert_equal(
+      [{"workspace_root" => "/repo", "path" => "app/models/user.rb"}],
+      completion.fetch("reindex_files")
+    )
   end
 end

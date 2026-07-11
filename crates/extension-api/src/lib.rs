@@ -46,6 +46,8 @@ pub struct ExtensionOutput {
     pub command_patches: Vec<CommandPatch>,
     #[serde(default)]
     pub process_requests: Vec<ProcessRequest>,
+    #[serde(default)]
+    pub reindex_files: Vec<ReindexFile>,
 }
 
 impl ExtensionOutput {
@@ -55,8 +57,15 @@ impl ExtensionOutput {
             response_patches: Vec::new(),
             command_patches: Vec::new(),
             process_requests: Vec::new(),
+            reindex_files: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ReindexFile {
+    pub workspace_root: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

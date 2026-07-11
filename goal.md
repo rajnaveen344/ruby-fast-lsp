@@ -979,3 +979,40 @@ At the end of every goal session, record:
   reference, mixin, and inheritance relationships. A criterion-by-criterion
   Milestone 2 audit is still required before claiming its 7.7 target and
   beginning the Rails extension.
+
+### July 2026: Milestone 2 completion audit and runtime reindex seam
+
+- Audit result: all ten Production Extension Platform implementation items now
+  have code and focused evidence: version/compatibility gates; complete manifest
+  validation; domain-only contracts; deterministic discovery/merge/conflicts;
+  activation/settings/reload/deactivation; failure isolation; Wasm/process
+  limits and permissions; trusted multi-source discovery; the public SDK,
+  template, documentation, and black-box harness; and declaration, response,
+  watcher, and optional runtime hooks.
+- Runtime gap closed: `ExtensionOutput` now has a version-compatible,
+  default-empty `reindex_files` result. A `process.completed` callback may ask
+  for at most 256 files under workspace roots related to its triggering event.
+  Absolute paths, traversal, unknown roots, and unrelated roots are rejected;
+  accepted URIs are sorted/deduplicated and enter ordinary watched-file
+  processing.
+- Architecture: runtime callbacks still cannot return semantic patches or touch
+  engine state. They update private guest caches and request reindexing; normal
+  call hooks then emit validated/conflict-resolved patches through per-file
+  `replace_facts`. Static indexing remains useful without a runtime process.
+- Completion-criterion evidence: RSpec and the independent example use only the
+  public ABI; deterministic WAT and Ruby-authored Wasm acceptance cover semantic
+  facts, symbols, lenses, navigation, types, and edit removal; incompatibility,
+  checksum, permission, fuel, memory, wall deadline, malformed/oversized output,
+  and traps are isolated; same-input ordering is deterministic; status is a
+  separate command; the packaged VSIX loads bundled RSpec; and the copyable SDK
+  documentation builds without server internals.
+- Focused evidence: the runtime path has a red-first root/traversal validation
+  test and an SDK callback serialization test. The preceding full gate proved
+  973 root tests, all workspace tests, the 55-test release simulator, release
+  build, packaged VSIX execution, and bundled-RSpec activation.
+- Rating increases to **7.7/10**. Milestone 2 is complete for its declared
+  scope. The next highest-priority work is Milestone 3: begin the Rails extension
+  with static Active Record associations using only these public contracts,
+  then validations/callbacks and route helpers. Optional runtime enrichment
+  must use the bounded process/cache/reindex seam rather than privileged core
+  access.
