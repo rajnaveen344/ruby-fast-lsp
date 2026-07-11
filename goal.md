@@ -311,8 +311,10 @@ Implement:
 
 1. Done: ERB parsing and stable source-range mapping.
 2. Done for the current Ruby feature surface: Ruby LSP features inside ERB
-   regions; HTML delegation remains separate.
-3. HTML request delegation in the VS Code extension where practical.
+   regions; HTML delegation is owned separately by VS Code.
+3. Done for range-safe read/query features: HTML completion, hover, symbols,
+   folding, selection ranges, and highlights in VS Code. Whole-document HTML
+   formatting/diagnostics and edit-producing features remain intentionally out.
 4. `.rake`, `.gemspec`, Thor, and common Ruby extension handling.
 5. Clear generated, vendored, dependency, and excluded-source policy.
 6. A strategy for declarations from native extensions or generated APIs.
@@ -1270,3 +1272,37 @@ At the end of every goal session, record:
   Milestone 3 completion criterion. The next highest-priority Milestone 4 work
   is practical HTML delegation, followed by auditing `.rake`, `.gemspec`, Thor,
   generated/native declarations, and source-inclusion policy.
+
+### July 2026: Range-safe HTML features inside ERB
+
+- Host projection: the VS Code adapter now constructs a complementary HTML
+  document that retains host markup and masks every complete or unclosed ERB
+  region one UTF-16 code unit at a time while preserving CR/LF. It asserts that
+  projected length is identical to the template, so HTML ranges require no
+  translation and cannot drift around multibyte Ruby or host text.
+- User-visible features: `vscode-html-languageservice` provides completion,
+  hover, document symbols, folding ranges, selection ranges, and matching-tag
+  highlights in ERB host regions. Ruby positions return no HTML completion,
+  hover, or highlights; HTML selection at a Ruby cursor is deliberately reduced
+  to an empty point so it cannot swallow embedded semantic ranges.
+- Ownership: HTML UX remains entirely in the VS Code adapter. The Rust server
+  continues to own Ruby semantics and its byte-stable Prism projection; no HTML
+  types, policy, or dependency entered `ruby-analysis` or the engine.
+- Conservative policy: whole-document HTML formatting and tag rename remain
+  disabled until a range-safe merge policy proves they cannot overwrite Ruby.
+  HTML diagnostics and links/colors remain future host-provider work with their
+  own false-positive/lifecycle requirements. ERB is still never sent to RuboCop
+  or Standard.
+- Evidence: red-first Node tests cover missing delegation, UTF-16 projection,
+  comments/escaped/unclosed tags, real HTML completion/hover/symbol/folding/
+  selection/highlight results, Ruby isolation, and VS Code flat-symbol adapter
+  conversion. The packaged smoke first rejected the previous VSIX for missing
+  the service, then passed against the rebuilt artifact and exercised host
+  completion plus Ruby suppression from the extracted package. The full gate
+  passes with 980 root tests, all workspace tests including 337
+  `ruby-analysis` tests, the 55-test release simulator, 10 Node tests, release
+  build, zero npm audit findings, and packaged RSpec/Rails/Minitest status.
+- Rating increases to **8.3/10**. Milestone 4's three template/editor items are
+  complete for their declared range-safe scope. The next priority is auditing
+  `.rake`, `.gemspec`, Thor, and other common Ruby entry points end to end,
+  followed by generated/native declaration and source-inclusion policy.

@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+const { registerErbHtmlProviders } = require('./erb_html');
 const {
     debugConfiguration,
     minitestInvocation,
@@ -676,6 +677,9 @@ function activate(context) {
     // Create single output channel for both extension and LSP server logs
     outputChannel = vscode.window.createOutputChannel('Ruby Fast LSP');
     context.subscriptions.push(outputChannel);
+    registerErbHtmlProviders(vscode, context, (message) => {
+        outputChannel.appendLine(`[Ruby Fast LSP] ${message}`);
+    });
 
     // Extract zipped stubs to the extension folder on first run
     // This ensures go-to-definition shows proper file paths

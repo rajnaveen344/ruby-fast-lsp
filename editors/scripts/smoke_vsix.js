@@ -43,6 +43,7 @@ const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
 const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');
 for (const required of [
     binary,
+    path.join(extensionRoot, 'erb_html.js'),
     path.join(rspecPackage, 'extension.toml'),
     path.join(railsPackage, 'extension.toml'),
     path.join(minitestPackage, 'extension.toml')
@@ -53,6 +54,21 @@ for (const required of [
     }
 }
 if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+
+const { createErbHtmlDocument } = require(path.join(extensionRoot, 'erb_html.js'));
+const packagedErb = createErbHtmlDocument(
+    'file:///app/views/users/show.html.erb',
+    1,
+    '<main><section cl></section><%= User.name %></main>'
+);
+if (!packagedErb.complete({ line: 0, character: 17 }).items.some(item => item.label === 'class')) {
+    fs.rmSync(temp, { recursive: true, force: true });
+    throw new Error('Packaged ERB HTML service did not return host-language completion');
+}
+if (packagedErb.complete({ line: 0, character: 38 }).items.length !== 0) {
+    fs.rmSync(temp, { recursive: true, force: true });
+    throw new Error('Packaged ERB HTML service leaked completion into a Ruby region');
+}
 
 const childEnv = { ...process.env, RUST_LOG: 'error' };
 delete childEnv.RUBY_FAST_LSP_EXTENSION_PATHS;
@@ -84,7 +100,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, and Minitest on ${platformKey}.\n`);
+        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, and Minitest plus packaged ERB HTML features on ${platformKey}.\n`);
     }
 }
 

@@ -158,8 +158,17 @@ keeps every Prism byte range in the original template coordinate space. Never
 parse raw `.erb` content or compact extracted snippets in an LSP feature: use a
 `RubyDocument`'s analysis content/parse result while converting ranges through
 the original document. Host positions must not receive Ruby completion, and
-Ruby formatter/linter integrations must not edit templates until explicit
-host-language delegation exists.
+Ruby formatter/linter integrations must not edit templates.
+
+The VS Code adapter owns complementary ERB host-language behavior through
+`editors/vscode/vsix/erb_html.js`. Its HTML projection preserves original
+UTF-16 length, retains host markup, and masks every complete or unclosed ERB
+region before calling `vscode-html-languageservice`. Keep this separate from
+the Rust byte-offset projection: the server owns Ruby semantics, while the
+editor adapter owns HTML UX. Do not delegate whole-document formatting or other
+edits unless a range-safe merge policy proves embedded Ruby cannot be
+overwritten. HTML diagnostics require their own false-positive and lifecycle
+policy before publication.
 
 Rails controller actions expose `ruby-fast-lsp.rails.openView` code lenses
 through the ordinary extension response contract. The Rails guest owns only

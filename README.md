@@ -153,9 +153,9 @@ buffer through stdin. Unchanged output produces no edit; startup failures,
 timeouts, invalid UTF-8, empty output for a non-empty source, and abnormal exits
 are reported without changing the document or semantic index.
 
-ERB templates are not sent to Ruby formatters or linters. Ruby Fast LSP masks
-the host-language bytes for semantic analysis, but it does not yet delegate
-HTML formatting or validation to another language server.
+ERB templates are not sent to Ruby formatters or linters. HTML formatting is
+also intentionally disabled because whole-document edits could overwrite
+embedded Ruby; HTML validation is not yet delegated from the host projection.
 
 ## ERB templates
 
@@ -168,8 +168,11 @@ even when surrounding HTML contains multibyte text.
 
 ERB comments (`<%# ... %>`), escaped tags (`<%% ... %>`), and host-language
 text are excluded from Ruby analysis. Unclosed tags are masked rather than
-guessed. HTML language-server delegation is not currently provided, so Ruby
-Fast LSP complements rather than replaces HTML tooling inside template files.
+guessed. In VS Code, an offset-stable complementary HTML projection provides
+host-language completion, hover, document symbols, folding, selection ranges,
+and document highlights. Ruby regions are blanked one UTF-16 code unit at a
+time, so HTML results cannot target embedded Ruby. Formatting, diagnostics,
+links, colors, and rename are not currently delegated to the HTML service.
 
 ## Indexing configuration
 
