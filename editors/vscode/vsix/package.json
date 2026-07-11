@@ -121,6 +121,42 @@
           "default": [],
           "description": "Optional linter command and arguments as an argv array, for example [\"bin/rubocop\"]. Empty uses bundle exec rubocop or bundle exec standardrb."
         },
+        "rubyFastLsp.indexing": {
+          "type": "object",
+          "default": {
+            "excludedPatterns": [],
+            "includedPatterns": [],
+            "excludedGems": [],
+            "includedGems": []
+          },
+          "properties": {
+            "excludedPatterns": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Workspace-relative glob patterns to exclude from indexing. Exclusions override included patterns."
+            },
+            "includedPatterns": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Workspace-relative glob patterns that add Ruby sources with nonstandard names or extensions."
+            },
+            "excludedGems": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Gem names to omit even when directly or transitively required."
+            },
+            "includedGems": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Gem names to index in addition to dependencies inferred from project source."
+            }
+          },
+          "description": "Control project source and dependency indexing. Changing this setting restarts the language server to rebuild semantic state."
+        },
         "rubyFastLsp.showExternalTypes": {
           "type": "boolean",
           "default": false,

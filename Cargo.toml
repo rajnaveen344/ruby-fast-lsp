@@ -81,6 +81,7 @@ rayon = "1.10"
 # Perf corpus: tar.zst decode for bench/perf-test fixtures
 tar = "0.4"
 zstd = "0.13"
+globset = "0.4"
 
 # Platform-specific dependencies for parent process monitoring
 [target.'cfg(unix)'.dependencies]

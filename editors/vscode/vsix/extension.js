@@ -666,6 +666,16 @@ function activate(context) {
 
     const config = vscode.workspace.getConfiguration('rubyFastLsp');
     const extensionPackages = getBundledExtensionPackages(context.extensionPath);
+    const initializationOptions = {
+        rubyVersion: config.get('rubyVersion', 'auto'),
+        stubsPath: config.get('stubsPath', ''),
+        extensionPath: context.extensionPath,
+        extensionPackages,
+        extensionDirs: [],
+        linter: config.get('linter', 'none'),
+        linterCommand: config.get('linterCommand', []),
+        indexing: config.get('indexing', {})
+    };
 
     const serverOptions = {
         command: getServerPath(),
@@ -679,15 +689,7 @@ function activate(context) {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/*.rb'),
             configurationSection: 'rubyFastLsp'
         },
-        initializationOptions: {
-            rubyVersion: config.get('rubyVersion', 'auto'),
-            stubsPath: config.get('stubsPath', ''),
-            extensionPath: context.extensionPath,
-            extensionPackages,
-            extensionDirs: [],
-            linter: config.get('linter', 'none'),
-            linterCommand: config.get('linterCommand', [])
-        },
+        initializationOptions,
         outputChannel: outputChannel
     };
 
@@ -728,11 +730,17 @@ function activate(context) {
 
     // Handle configuration changes
     context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(event => {
+        vscode.workspace.onDidChangeConfiguration(async event => {
             if (event.affectsConfiguration('rubyFastLsp')) {
                 // Notify the server about configuration changes
                 if (client) {
                     const newConfig = vscode.workspace.getConfiguration('rubyFastLsp');
+                    const indexing = newConfig.get('indexing', {});
+                    if (event.affectsConfiguration('rubyFastLsp.indexing')) {
+                        initializationOptions.indexing = indexing;
+                        await client.restart();
+                        return;
+                    }
                     client.sendNotification('workspace/didChangeConfiguration', {
                         settings: {
                             rubyFastLsp: {
@@ -741,6 +749,7 @@ function activate(context) {
                                 logLevel: newConfig.get('logLevel', 'info'),
                                 linter: newConfig.get('linter', 'none'),
                                 linterCommand: newConfig.get('linterCommand', []),
+                                indexing,
                                 extensionPackages,
                                 extensionDirs: []
                             }

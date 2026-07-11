@@ -1,3 +1,4 @@
+use crate::config::IndexingConfig;
 use crate::indexer::file_processor::FileProcessor;
 use crate::server::RubyLanguageServer;
 use crate::utils;
@@ -17,15 +18,21 @@ pub struct IndexerProject {
     file_processor: FileProcessor,
     required_stdlib: Arc<Mutex<HashSet<String>>>,
     required_gems: Arc<Mutex<HashSet<String>>>,
+    indexing_config: IndexingConfig,
 }
 
 impl IndexerProject {
-    pub fn new(workspace_root: PathBuf, file_processor: FileProcessor) -> Self {
+    pub fn new(
+        workspace_root: PathBuf,
+        file_processor: FileProcessor,
+        indexing_config: IndexingConfig,
+    ) -> Self {
         Self {
             workspace_root,
             file_processor,
             required_stdlib: Arc::new(Mutex::new(HashSet::new())),
             required_gems: Arc::new(Mutex::new(HashSet::new())),
+            indexing_config,
         }
     }
 
@@ -41,7 +48,7 @@ impl IndexerProject {
         self.clear_dependencies();
 
         // Collect all Ruby files in the project
-        let ruby_files = self.collect_project_files();
+        let ruby_files = self.collect_project_files()?;
         let total_files = ruby_files.len();
         info!("Found {} Ruby files in project", total_files);
 
@@ -60,20 +67,18 @@ impl IndexerProject {
     }
 
     /// Collect all Ruby files in the project
-    fn collect_project_files(&self) -> Vec<PathBuf> {
-        // Simply collect all Ruby files from the workspace root recursively
-        // This ensures we don't miss any Ruby files regardless of project structure
-        utils::collect_ruby_files(&self.workspace_root)
+    fn collect_project_files(&self) -> Result<Vec<PathBuf>> {
+        utils::collect_project_files(&self.workspace_root, &self.indexing_config)
     }
 
     /// Quick scan for dependencies without full indexing.
     /// This reads project files and extracts require/gem statements to determine
     /// which gems and stdlib modules are needed.
-    pub fn scan_for_dependencies(&self) {
+    pub fn scan_for_dependencies(&self) -> Result<()> {
         info!("Scanning project files for dependencies...");
         self.clear_dependencies();
 
-        let ruby_files = self.collect_project_files();
+        let ruby_files = self.collect_project_files()?;
         let required_stdlib = &self.required_stdlib;
         let required_gems = &self.required_gems;
 
@@ -88,6 +93,7 @@ impl IndexerProject {
             required_stdlib.lock().len(),
             required_gems.lock().len()
         );
+        Ok(())
     }
 
     /// Collect facts from files and track their dependencies (Parallelized with rayon)
@@ -346,5 +352,39 @@ impl IndexerProject {
     /// Get a reference to the core indexer
     pub fn file_processor(&self) -> &FileProcessor {
         &self.file_processor
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::IndexingConfig;
+    use tempfile::TempDir;
+
+    #[test]
+    fn configured_project_files_drive_dependency_scanning() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+        std::fs::write(root.join("app.rb"), "gem 'rack'\n").unwrap();
+        std::fs::write(root.join("bin/console"), "gem 'rails'\n").unwrap();
+        std::fs::write(root.join("vendor/generated.rb"), "gem 'debug'\n").unwrap();
+
+        let indexer = IndexerProject::new(
+            root.to_path_buf(),
+            FileProcessor::new(),
+            IndexingConfig {
+                included_patterns: vec!["bin/*".to_string()],
+                excluded_patterns: vec!["vendor/**/*".to_string()],
+                ..IndexingConfig::default()
+            },
+        );
+
+        indexer.scan_for_dependencies().unwrap();
+
+        assert!(indexer.requires_gem("rack"));
+        assert!(indexer.requires_gem("rails"));
+        assert!(!indexer.requires_gem("debug"));
     }
 }

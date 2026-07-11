@@ -134,6 +134,32 @@ Correctable offenses offer a preferred `Quick Fix` that runs RuboCop's safe
 and returns an editor-applied document edit. Unsafe RuboCop corrections are not
 applied.
 
+## Indexing configuration
+
+Project indexing accepts workspace-relative glob patterns and explicit gem
+selection. Standard Ruby files are indexed by default. `includedPatterns` can
+add nonstandard Ruby entry points such as `bin/console`; `excludedPatterns`
+always win, and `.git` is never traversed. Explicitly included gems augment
+dependencies inferred from source, while excluded gems are omitted even when
+they are direct or transitive dependencies.
+
+```json
+{
+  "rubyFastLsp.indexing": {
+    "includedPatterns": ["bin/*"],
+    "excludedPatterns": ["vendor/**/*", "tmp/**/*.rb"],
+    "includedGems": ["rails"],
+    "excludedGems": ["debug"]
+  }
+}
+```
+
+The VS Code extension restarts the language server when this setting changes so
+that excluded files cannot leave stale semantic facts behind. Other LSP clients
+should send the same `indexing` object in initialization options and restart the
+server after changing it. Invalid glob patterns abort workspace indexing with an
+actionable error instead of silently applying a partial policy.
+
 ## See Also
 
 - [Ruby Fast Cop](https://github.com/rajnaveen344/ruby-fast-cop) - A high-performance Ruby linter written in Rust, designed as a companion to Ruby Fast LSP.

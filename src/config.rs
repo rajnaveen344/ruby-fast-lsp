@@ -38,6 +38,22 @@ impl LinterKind {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IndexingConfig {
+    #[serde(rename = "excludedPatterns")]
+    pub excluded_patterns: Vec<String>,
+
+    #[serde(rename = "includedPatterns")]
+    pub included_patterns: Vec<String>,
+
+    #[serde(rename = "excludedGems")]
+    pub excluded_gems: Vec<String>,
+
+    #[serde(rename = "includedGems")]
+    pub included_gems: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RubyFastLspConfig {
@@ -69,6 +85,8 @@ pub struct RubyFastLspConfig {
     /// Structured command argv. Empty uses `bundle exec <linter>`.
     #[serde(rename = "linterCommand")]
     pub linter_command: Vec<String>,
+
+    pub indexing: IndexingConfig,
 }
 
 impl Default for RubyFastLspConfig {
@@ -83,6 +101,7 @@ impl Default for RubyFastLspConfig {
             log_level: "info".to_string(),
             linter: LinterKind::None,
             linter_command: Vec::new(),
+            indexing: IndexingConfig::default(),
         }
     }
 }

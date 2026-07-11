@@ -41,6 +41,7 @@ pub struct GemInfo {
 pub struct IndexerGem {
     workspace_root: Option<PathBuf>,
     required_gems: HashSet<String>,
+    excluded_gems: HashSet<String>,
     discovered_gems: HashMap<String, Vec<GemInfo>>,
     gem_paths: Vec<PathBuf>,
     file_processor: Option<FileProcessor>,
@@ -51,6 +52,7 @@ impl IndexerGem {
         Self {
             workspace_root,
             required_gems: HashSet::new(),
+            excluded_gems: HashSet::new(),
             discovered_gems: HashMap::new(),
             gem_paths: Vec::new(),
             file_processor: None,
@@ -73,6 +75,12 @@ impl IndexerGem {
             "Set {} required gems for indexing",
             self.required_gems.len()
         );
+    }
+
+    /// Exclude gems even when they are required directly or transitively.
+    pub fn set_excluded_gems(&mut self, gems: HashSet<String>) {
+        self.excluded_gems = gems;
+        debug!("Set {} excluded gems", self.excluded_gems.len());
     }
 
     /// Add a required gem to the project
@@ -164,6 +172,9 @@ impl IndexerGem {
             .await;
 
             if let Some(gem_info) = self.select_preferred_version(gem_versions) {
+                if self.excluded_gems.contains(&gem_info.name) {
+                    continue;
+                }
                 info!("Indexing gem: {} v{}", gem_info.name, gem_info.version);
                 indexed_files.extend(self.index_gem_files(gem_info, server));
             }
@@ -532,6 +543,9 @@ impl IndexerGem {
         let mut queue = roots.into_iter().collect::<VecDeque<String>>();
 
         while let Some(name) = queue.pop_front() {
+            if self.excluded_gems.contains(&name) {
+                continue;
+            }
             if !seen.insert(name.clone()) {
                 continue;
             }
@@ -762,6 +776,29 @@ mod tests {
                 "rspec-support".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_excluded_gems_win_over_roots_and_transitive_dependencies() {
+        let mut indexer = create_test_indexer();
+        indexer.set_required_gems(HashSet::from(["rails".to_string(), "debug".to_string()]));
+        indexer.set_excluded_gems(HashSet::from([
+            "debug".to_string(),
+            "activesupport".to_string(),
+        ]));
+        indexer.discovered_gems.insert(
+            "rails".to_string(),
+            vec![GemInfo {
+                name: "rails".to_string(),
+                version: "8.0.0".to_string(),
+                path: PathBuf::from("/tmp/rails"),
+                lib_paths: vec![PathBuf::from("/tmp/rails/lib")],
+                dependencies: vec!["activesupport".to_string()],
+                is_default: false,
+            }],
+        );
+
+        assert_eq!(indexer.required_gems_with_dependencies(), vec!["rails"]);
     }
 
     #[test]

@@ -25,6 +25,23 @@ mod tests {
     }
 
     #[test]
+    fn test_indexing_configuration_round_trips() {
+        let input = json!({
+            "indexing": {
+                "excludedPatterns": ["vendor/**/*", "tmp/**/*.rb"],
+                "includedPatterns": ["bin/*"],
+                "excludedGems": ["debug"],
+                "includedGems": ["rails"]
+            }
+        });
+
+        let config: RubyFastLspConfig = serde_json::from_value(input.clone()).unwrap();
+        let output = serde_json::to_value(config).unwrap();
+
+        assert_eq!(output["indexing"], input["indexing"]);
+    }
+
+    #[test]
     fn test_config_deserialization() {
         let json_config = json!({
             "rubyVersion": "3.0"

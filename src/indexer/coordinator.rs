@@ -1,4 +1,4 @@
-use crate::config::RubyFastLspConfig;
+use crate::config::{IndexingConfig, RubyFastLspConfig};
 use crate::extensions::ExtensionRegistryHandle;
 use crate::indexer::file_processor::FileProcessor;
 use crate::indexer::indexer_gem::IndexerGem;
@@ -14,6 +14,7 @@ use ruby_analysis::core::{
     DiagnosticFact, DiagnosticSeverity as AnalysisDiagnosticSeverity, TextRange,
 };
 use ruby_analysis::engine::SourceFile;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -54,6 +55,28 @@ fn lsp_diagnostic_severity(severity: AnalysisDiagnosticSeverity) -> DiagnosticSe
         AnalysisDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
         AnalysisDiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
     }
+}
+
+fn configured_gem_selection(
+    inferred: Vec<String>,
+    config: &IndexingConfig,
+) -> (HashSet<String>, HashSet<String>) {
+    let excluded = config
+        .excluded_gems
+        .iter()
+        .filter(|name| !name.is_empty())
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut required = inferred.into_iter().collect::<HashSet<_>>();
+    required.extend(
+        config
+            .included_gems
+            .iter()
+            .filter(|name| !name.is_empty())
+            .cloned(),
+    );
+    required.retain(|name| !excluded.contains(name));
+    (required, excluded)
 }
 
 fn lsp_range_for_text_range_fast(file: &SourceFile, range: TextRange) -> Option<Range> {
@@ -168,7 +191,7 @@ impl IndexingCoordinator {
         let facts_start = Instant::now();
 
         // Step 4: Quick scan project files for dependencies (no indexing yet)
-        self.scan_project_dependencies();
+        self.scan_project_dependencies()?;
 
         // Step 5: Collect facts from gems (uses discovered required gems)
         self.index_gems(server).await?;
@@ -302,15 +325,17 @@ impl IndexingCoordinator {
 
     /// Quick scan for dependencies without indexing.
     /// Creates project indexer and scans for required gems/stdlib modules.
-    fn scan_project_dependencies(&mut self) {
+    fn scan_project_dependencies(&mut self) -> Result<()> {
         // Create a temporary project indexer just for dependency scanning
         // We'll create a proper one later for actual indexing
         let temp_indexer = IndexerProject::new(
             self.workspace_root.clone(),
             self.file_processor.as_ref().unwrap().clone(),
+            self.config.indexing.clone(),
         );
-        temp_indexer.scan_for_dependencies();
+        temp_indexer.scan_for_dependencies()?;
         self.project_indexer = Some(temp_indexer);
+        Ok(())
     }
 
     /// Collect facts from project files (skips already-indexed files)
@@ -321,6 +346,7 @@ impl IndexingCoordinator {
             let mut project_indexer = IndexerProject::new(
                 self.workspace_root.clone(),
                 self.file_processor.as_ref().unwrap().clone(),
+                self.config.indexing.clone(),
             );
             project_indexer.collect_project_facts(server).await?;
             self.project_indexer = Some(project_indexer);
@@ -409,11 +435,13 @@ impl IndexingCoordinator {
 
     /// Index the gems (external libraries)
     async fn index_gems(&mut self, server: &RubyLanguageServer) -> Result<()> {
-        let required_gems = self.get_required_gems();
+        let (required_gems, excluded_gems) =
+            configured_gem_selection(self.get_required_gems(), &self.config.indexing);
 
         let mut gem_indexer = IndexerGem::new(Some(self.workspace_root.clone()));
         gem_indexer.set_file_processor();
-        gem_indexer.set_required_gems(required_gems.into_iter().collect());
+        gem_indexer.set_required_gems(required_gems);
+        gem_indexer.set_excluded_gems(excluded_gems);
         gem_indexer.index_gems(true, server).await?; // selective = true
         self.gem_indexer = Some(gem_indexer);
         Ok(())
@@ -891,6 +919,27 @@ end
     /// Create a test server instance
     fn create_test_server() -> RubyLanguageServer {
         RubyLanguageServer::default()
+    }
+
+    #[test]
+    fn test_configured_gem_selection_augments_inferred_and_preserves_exclusions() {
+        let indexing = crate::config::IndexingConfig {
+            included_gems: vec!["rails".to_string(), "debug".to_string()],
+            excluded_gems: vec!["debug".to_string(), "rack".to_string()],
+            ..crate::config::IndexingConfig::default()
+        };
+
+        let (required, excluded) =
+            configured_gem_selection(vec!["rack".to_string(), "rspec".to_string()], &indexing);
+
+        assert_eq!(
+            required,
+            HashSet::from(["rails".to_string(), "rspec".to_string()])
+        );
+        assert_eq!(
+            excluded,
+            HashSet::from(["debug".to_string(), "rack".to_string()])
+        );
     }
 
     #[tokio::test]

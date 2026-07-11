@@ -6,8 +6,12 @@
 //! - Path utilities for distinguishing project vs external files
 
 use anyhow::Result;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
+use walkdir::{DirEntry, WalkDir};
+
+use crate::config::IndexingConfig;
 
 // ============================================================================
 // File Detection
@@ -52,6 +56,76 @@ pub fn collect_ruby_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_ruby_files_recursive(dir, &mut files);
     files
+}
+
+/// Collect project files using workspace-relative glob configuration.
+///
+/// Standard Ruby files are included by default. Included patterns may add
+/// nonstandard files such as `bin/console`. Excluded patterns are applied last
+/// and therefore always win. `.git` is never traversed.
+pub fn collect_project_files(dir: &Path, config: &IndexingConfig) -> Result<Vec<PathBuf>> {
+    let included = build_glob_set("includedPatterns", &config.included_patterns)?;
+    let excluded = build_glob_set("excludedPatterns", &config.excluded_patterns)?;
+    let mut files = Vec::new();
+
+    for entry in WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(is_not_git_directory)
+    {
+        let entry = entry.map_err(|error| {
+            anyhow::anyhow!(
+                "Failed to walk project directory {}: {}",
+                dir.display(),
+                error
+            )
+        })?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let relative = entry.path().strip_prefix(dir).map_err(|error| {
+            anyhow::anyhow!(
+                "INVARIANT VIOLATED: walked path {} is outside workspace {}: {}. This is a bug because project globs must be workspace-relative. Fix: keep WalkDir rooted at the workspace.",
+                entry.path().display(),
+                dir.display(),
+                error
+            )
+        })?;
+        let is_included = should_index_file(entry.path()) || included.is_match(relative);
+        if is_included && !excluded.is_match(relative) {
+            files.push(entry.into_path());
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn build_glob_set(setting: &str, patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        let glob = Glob::new(pattern).map_err(|error| {
+            anyhow::anyhow!(
+                "Invalid rubyFastLsp.indexing.{} glob {:?}: {}",
+                setting,
+                pattern,
+                error
+            )
+        })?;
+        builder.add(glob);
+    }
+    builder.build().map_err(|error| {
+        anyhow::anyhow!(
+            "Failed to compile rubyFastLsp.indexing.{} globs: {}",
+            setting,
+            error
+        )
+    })
+}
+
+fn is_not_git_directory(entry: &DirEntry) -> bool {
+    !(entry.file_type().is_dir() && entry.file_name() == ".git")
 }
 
 /// Recursively collect Ruby files from a directory (internal helper)
@@ -133,6 +207,7 @@ pub async fn read_file_async(path: &Path) -> Result<String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     #[test]
     fn test_should_index_file() {
@@ -166,5 +241,50 @@ mod tests {
         let gem_uri =
             Url::parse("file:///usr/lib/ruby/gems/3.0.0/gems/rails-7.0.0/lib/rails.rb").unwrap();
         assert!(!is_project_file(&gem_uri));
+    }
+
+    #[test]
+    fn test_collect_project_files_applies_patterns_with_exclusions_winning() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(root.join("vendor/generated")).unwrap();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::write(root.join("app/user.rb"), "class User; end").unwrap();
+        std::fs::write(root.join("bin/console"), "puts :console").unwrap();
+        std::fs::write(root.join("vendor/generated/model.rb"), "class Model; end").unwrap();
+        std::fs::write(root.join("vendor/generated/keep.rb"), "class Keep; end").unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), "puts :hidden").unwrap();
+
+        let config = IndexingConfig {
+            included_patterns: vec!["bin/*".to_string(), "vendor/generated/keep.rb".to_string()],
+            excluded_patterns: vec!["vendor/**/*".to_string()],
+            ..IndexingConfig::default()
+        };
+
+        let files = collect_project_files(root, &config).unwrap();
+        let relative = files
+            .iter()
+            .map(|path| path.strip_prefix(root).unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            relative,
+            vec![PathBuf::from("app/user.rb"), PathBuf::from("bin/console")]
+        );
+    }
+
+    #[test]
+    fn test_collect_project_files_rejects_invalid_glob() {
+        let workspace = TempDir::new().unwrap();
+        let config = IndexingConfig {
+            excluded_patterns: vec!["[invalid".to_string()],
+            ..IndexingConfig::default()
+        };
+
+        let error = collect_project_files(workspace.path(), &config).unwrap_err();
+
+        assert!(error.to_string().contains("[invalid"));
     }
 }

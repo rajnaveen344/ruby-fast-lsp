@@ -106,7 +106,10 @@ Priority order:
 6. Done: syntax-aware selection ranges from identifier/message tokens through
    expressions, statements, and enclosing scopes, with multi-position,
    malformed-buffer, UTF-16, and edit lifecycle coverage.
-7. Index include/exclude and dependency configuration.
+7. Done: workspace-relative index include/exclude patterns and explicit gem
+   include/exclude configuration, with exclusion precedence, nonstandard source
+   support, deterministic discovery, invalid-glob errors, transitive dependency
+   filtering, and VS Code restart behavior that prevents stale facts.
 8. Full-document formatting through external formatter integration.
 
 Completion criteria:
@@ -490,3 +493,29 @@ At the end of every goal session, record:
 - Rating remains **6.8/10**. Selection ranges complete another editor workflow,
   but indexing configuration and full-document formatting still gate Milestone
   1 completeness.
+
+### July 2026: Configurable project and dependency indexing
+
+- User-visible: `rubyFastLsp.indexing` exposes `includedPatterns`,
+  `excludedPatterns`, `includedGems`, and `excludedGems` in VS Code and LSP
+  initialization options.
+- Source policy: standard Ruby files remain included by default; workspace-
+  relative included globs can add nonstandard files such as `bin/console`,
+  exclusions always win, `.git` is never traversed, and results are sorted for
+  deterministic indexing.
+- Dependency policy: explicitly included gems augment source-inferred roots;
+  excluded gems win over both direct roots and transitive dependencies.
+- Lifecycle safety: changing the setting in VS Code restarts the language
+  server, rebuilding semantic state instead of retaining stale facts for newly
+  excluded files. Other clients are documented to restart after changes.
+- Failure behavior: invalid glob syntax aborts workspace indexing with the
+  setting name and offending pattern instead of silently applying a partial
+  configuration.
+- Focused evidence: configuration round-trip, glob precedence, `.git`, invalid
+  glob, dependency-scan reuse, explicit gem selection, and transitive exclusion
+  tests pass; the 55-test release simulator remains green.
+- Next priority: full-document formatting through the existing external-tool
+  integration direction.
+- Rating: current estimate is **6.9/10**. This closes a meaningful project-
+  scale replacement workflow, but Milestone 1 and its 7.3 target still require
+  full-document formatting and complete packaged verification.

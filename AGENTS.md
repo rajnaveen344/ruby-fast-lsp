@@ -135,6 +135,14 @@ AST containment ranges, then converted to nested LSP responses in `src/`. The
 collector supports multiple positions, malformed and empty buffers, UTF-16
 positions, and current unsaved document content.
 
+Project indexing supports workspace-relative `includedPatterns` and
+`excludedPatterns`, plus explicit `includedGems` and `excludedGems`. Standard
+Ruby files remain the default; included patterns may add nonstandard source
+names, exclusions always win, and `.git` is never traversed. Included gems
+augment statically inferred roots, while excluded gems win over direct and
+transitive requirements. The VS Code extension restarts the server after this
+configuration changes so removed sources cannot leave stale engine facts.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable
