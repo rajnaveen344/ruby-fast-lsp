@@ -136,6 +136,7 @@ call_names = ["let", "let!", "subject", "subject!"]
 Optional file watcher and process declarations:
 
 ```toml
+capabilities = ["watching"]
 permissions = ["process.exec"]
 
 [watching]
@@ -144,6 +145,21 @@ globs = [".rubocop.yml", "config/routes.rb"]
 [process]
 commands = ["bundle", "ruby", "rails", "standardrb", "rubyfmt", "reek"]
 ```
+
+Watcher globs are workspace-relative. Absolute paths, parent traversal, invalid
+glob syntax, and `[watching]` without the `watching` capability reject the
+package. When the client supports dynamic registration, the server registers
+the sorted union through `workspace/didChangeWatchedFiles` and refreshes it
+after extension or workspace changes. Clients without dynamic registration may
+send the same standard notification through their own watcher setup.
+
+Each loaded extension receives only its matching, in-workspace changes through
+`files.changed`. Changes contain `workspace_root`, normalized relative `path`,
+`uri`, and `kind` (`Created`, `Changed`, or `Deleted`); nested workspaces use the
+deepest root, and duplicate events are removed deterministically. The mruby SDK
+exposes `on_watched_files_changed`. The callback may update private extension
+state, but watcher patches are rejected until they have a dedicated
+engine-owned ingestion contract.
 
 Editor clients may pass per-extension settings during initialize:
 
@@ -356,6 +372,7 @@ may optimize this without changing the event contract:
 
 Events:
 
+- `files.changed`
 - `index.call.enter`
 - `index.call.leave`
 - `index.class.enter`
@@ -412,10 +429,11 @@ mode. Server owns merge/conflict policy.
   `lifecycle.activate` and `settings.changed` events.
 - Done: package reload and server shutdown send bounded
   `lifecycle.deactivate` events, and lifecycle failures disable only that guest.
-- Let manifests declare watched file globs.
-- Register file watchers through LSP when the client supports them.
-- Route changes for files such as `.rubocop.yml`, `.standard.yml`,
-  `config/routes.rb`, and `db/schema.rb`.
+- Done: manifests declare validated workspace-relative watched-file globs; the
+  server dynamically registers their deterministic union when supported.
+- Done: matching changes such as `.rubocop.yml`, `.standard.yml`,
+  `config/routes.rb`, and `db/schema.rb` route through bounded `files.changed`
+  events and isolate failing guests.
 
 ### External Process Host
 

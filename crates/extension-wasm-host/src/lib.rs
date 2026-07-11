@@ -288,6 +288,7 @@ impl WasmExtension {
                 call: Some(ctx.clone()),
                 document: None,
                 settings: None,
+                files: None,
             };
             return self.handle_event(&event).map(|output| output.index_patches);
         }
@@ -518,6 +519,7 @@ mod tests {
                 call: Some(let_context()),
                 document: None,
                 settings: None,
+                files: None,
             })
             .unwrap();
         assert_eq!(output.index_patches.len(), 1);
@@ -603,6 +605,7 @@ mod tests {
                         .to_string(),
                 }),
                 settings: None,
+                files: None,
             })
             .unwrap();
 

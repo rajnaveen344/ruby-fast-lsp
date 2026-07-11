@@ -1,22 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use log::warn;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CallContext, DocumentContext, Extension, ExtensionEvent, IndexPatch,
     NamespaceKind as AbiNamespaceKind, Receiver, ResolvedCall, ResolvedCallee, ResponsePatch,
-    SourcePosition, SourceRange,
+    SourcePosition, SourceRange, WatchedFileChange, WatchedFileChangeKind,
 };
 use ruby_prism::{CallNode, Node};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tower_lsp::lsp_types::{CodeLens, Command, DocumentSymbol, Position, Range, SymbolKind};
+use tower_lsp::lsp_types::{
+    CodeLens, Command, DocumentSymbol, FileChangeType, FileEvent, Position, Range, SymbolKind,
+};
 use walkdir::WalkDir;
 
 use crate::config::RubyFastLspConfig;
@@ -80,6 +83,7 @@ struct LoadedWasmExtension {
     status: Mutex<ExtensionStatus>,
     indexed_call_names: BTreeSet<String>,
     semantic_targets: Vec<ExtensionMethodTarget>,
+    watched_file_matcher: GlobSet,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -409,6 +413,14 @@ impl ExtensionRegistryHandle {
         code_lenses_with_registry(self, uri, text)
     }
 
+    pub fn watcher_globs(&self) -> Vec<String> {
+        self.inner.read().watcher_globs()
+    }
+
+    pub fn handle_watched_file_changes(&self, workspace_roots: &[PathBuf], changes: &[FileEvent]) {
+        handle_watched_file_changes_with_registry(self, workspace_roots, changes);
+    }
+
     fn extensions(&self) -> Vec<Arc<LoadedWasmExtension>> {
         self.inner.read().extensions()
     }
@@ -545,6 +557,16 @@ impl ExtensionRegistry {
             .collect()
     }
 
+    fn watcher_globs(&self) -> Vec<String> {
+        self.extensions
+            .iter()
+            .filter(|extension| extension.is_loaded())
+            .flat_map(|extension| extension.metadata.watched_files.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     fn has_loaded_wasm_for_call(&self, method_name: &str) -> bool {
         self.extensions
             .iter()
@@ -602,12 +624,18 @@ impl LoadedWasmExtension {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
+        let watched_file_matcher = build_watched_file_matcher(
+            &metadata.id,
+            &metadata.watched_files,
+        )
+        .expect("INVARIANT VIOLATED: validated extension watcher globs failed to compile while constructing a loaded extension. This is a bug because manifest validation and runtime matching use the same compiler. Fix: keep watcher validation before Wasm instantiation.");
         Self {
             metadata,
             extension: Mutex::new(extension),
             status: Mutex::new(ExtensionStatus::Discovered),
             indexed_call_names,
             semantic_targets,
+            watched_file_matcher,
         }
     }
 
@@ -621,6 +649,7 @@ impl LoadedWasmExtension {
             call: None,
             document: None,
             settings,
+            files: None,
         };
         let mut extension = self.extension.lock();
         match extension.handle_event(&event) {
@@ -878,6 +907,7 @@ fn handle_response_event(
             text: text.to_string(),
         }),
         settings: None,
+        files: None,
     };
     let extensions = registry.extensions();
 
@@ -914,6 +944,112 @@ fn handle_response_event(
             }
         }
     }
+}
+
+fn handle_watched_file_changes_with_registry(
+    registry: &ExtensionRegistryHandle,
+    workspace_roots: &[PathBuf],
+    changes: &[FileEvent],
+) {
+    let candidates = watched_file_candidates(workspace_roots, changes);
+    if candidates.is_empty() {
+        return;
+    }
+
+    for loaded in registry.extensions() {
+        if !loaded.is_loaded() || loaded.metadata.watched_files.is_empty() {
+            continue;
+        }
+        let matched = candidates
+            .iter()
+            .filter(|change| loaded.watched_file_matcher.is_match(&change.path))
+            .cloned()
+            .collect::<Vec<_>>();
+        if matched.is_empty() {
+            continue;
+        }
+
+        let event = ExtensionEvent {
+            event: "files.changed".to_string(),
+            call: None,
+            document: None,
+            settings: None,
+            files: Some(matched),
+        };
+        let mut extension = loaded.extension.lock();
+        match extension.handle_event(&event) {
+            Ok(output)
+                if output.index_patches.is_empty()
+                    && output.response_patches.is_empty()
+                    && output.command_patches.is_empty() => {}
+            Ok(_) => {
+                drop(extension);
+                loaded.fail(format!(
+                    "extension `{}` returned patches from `files.changed`; watched-file events may update private extension state only",
+                    loaded.metadata.id
+                ));
+            }
+            Err(err) => {
+                drop(extension);
+                loaded.fail(format!(
+                    "extension `{}` files.changed failed: {err}",
+                    loaded.metadata.id
+                ));
+            }
+        }
+    }
+}
+
+fn watched_file_candidates(
+    workspace_roots: &[PathBuf],
+    changes: &[FileEvent],
+) -> Vec<WatchedFileChange> {
+    let mut roots = workspace_roots.to_vec();
+    roots.sort_by(|left, right| {
+        right
+            .as_os_str()
+            .len()
+            .cmp(&left.as_os_str().len())
+            .then_with(|| left.cmp(right))
+    });
+    roots.dedup();
+
+    let mut candidates = BTreeSet::new();
+    for change in changes {
+        let Ok(file_path) = change.uri.to_file_path() else {
+            warn!(
+                "Ignoring extension watched-file event with non-file URI `{}`",
+                change.uri
+            );
+            continue;
+        };
+        let Some(root) = roots.iter().find(|root| file_path.starts_with(root)) else {
+            continue;
+        };
+        let relative = file_path.strip_prefix(root).expect(
+            "INVARIANT VIOLATED: watched file selected a workspace root that is not its prefix. This is a bug because the root was chosen with starts_with. Fix: keep root selection and strip_prefix adjacent.",
+        );
+        let kind = if change.typ == FileChangeType::CREATED {
+            WatchedFileChangeKind::Created
+        } else if change.typ == FileChangeType::CHANGED {
+            WatchedFileChangeKind::Changed
+        } else if change.typ == FileChangeType::DELETED {
+            WatchedFileChangeKind::Deleted
+        } else {
+            warn!(
+                "Ignoring extension watched-file event with unsupported change type for `{}`",
+                change.uri
+            );
+            continue;
+        };
+        candidates.insert(WatchedFileChange {
+            workspace_root: root.to_string_lossy().replace('\\', "/"),
+            path: relative.to_string_lossy().replace('\\', "/"),
+            uri: change.uri.to_string(),
+            kind,
+        });
+    }
+    candidates.into_iter().collect()
 }
 
 fn process_wasm_call_node(
@@ -1280,6 +1416,17 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
     }
     if let Some(watching) = &manifest.watching {
         validate_manifest_list("watched file glob", &manifest.id, &watching.globs)?;
+        if !manifest
+            .capabilities
+            .iter()
+            .any(|capability| capability == "watching")
+        {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{}` declares watched files without `watching` capability",
+                manifest.id
+            )));
+        }
+        build_watched_file_matcher(&manifest.id, &watching.globs)?;
     }
     if let Some(process) = &manifest.process {
         validate_manifest_list("process command", &manifest.id, &process.commands)?;
@@ -1295,6 +1442,48 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
         }
     }
     Ok(())
+}
+
+fn build_watched_file_matcher(
+    extension_id: &str,
+    globs: &[String],
+) -> Result<GlobSet, ExtensionLoadError> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in globs {
+        let path = Path::new(pattern);
+        let has_windows_drive_prefix = pattern
+            .as_bytes()
+            .get(1)
+            .is_some_and(|character| *character == b':');
+        if path.is_absolute()
+            || pattern.starts_with('/')
+            || pattern.starts_with('\\')
+            || pattern.contains('\\')
+            || has_windows_drive_prefix
+            || pattern.split('/').any(|component| component == "..")
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{extension_id}` watched file glob `{pattern}` must be workspace-relative and cannot contain parent traversal"
+            )));
+        }
+        let glob = Glob::new(pattern).map_err(|err| {
+            ExtensionLoadError::new(format!(
+                "extension `{extension_id}` has invalid watched file glob `{pattern}`: {err}"
+            ))
+        })?;
+        builder.add(glob);
+    }
+    builder.build().map_err(|err| {
+        ExtensionLoadError::new(format!(
+            "extension `{extension_id}` failed to compile watched file globs: {err}"
+        ))
+    })
 }
 
 fn validate_manifest_checksum(
@@ -1910,8 +2099,8 @@ mod tests {
 
     use tempfile::TempDir;
     use tower_lsp::lsp_types::{
-        DidChangeWorkspaceFoldersParams, InitializeParams, Url, WorkspaceFolder,
-        WorkspaceFoldersChangeEvent,
+        DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams, FileChangeType, FileEvent,
+        InitializeParams, Url, WorkspaceFolder, WorkspaceFoldersChangeEvent,
     };
     use tower_lsp::LanguageServer;
 
@@ -2029,6 +2218,64 @@ call_names = []
 "#,
         )
         .expect("test settings manifest must be written");
+    }
+
+    fn write_watched_file_failure_package(destination: &Path) {
+        fs::create_dir_all(destination).expect("test package directory must be created");
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "[]")
+              (data (i32.const 2048) "{\"index_patches\":[],\"response_patches\":[],\"command_patches\":[]}")
+              (func (export "alloc") (param $len i32) (result i32)
+                i32.const 4096)
+              (func (export "dealloc") (param $ptr i32) (param $len i32))
+              (func (export "abi_version") (result i32)
+                i32.const 1)
+              (func (export "indexed_call_names") (result i64)
+                i64.const 4398046511106)
+              (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 4398046511106)
+              (func (export "handle_event") (param $ptr i32) (param $len i32) (result i64)
+                local.get $ptr
+                i32.const 10
+                i32.add
+                i32.load8_u
+                i32.const 102
+                i32.eq
+                if (result i64)
+                  i64.const 0
+                else
+                  i64.const 8796093022271
+                end)
+            )
+            "#,
+        )
+        .expect("test watched-file Wasm must compile");
+        fs::write(destination.join("extension.wasm"), wasm)
+            .expect("test watched-file Wasm must be written");
+        fs::write(
+            destination.join("extension.toml"),
+            r#"
+id = "watched-file-failure"
+name = "Watched File Failure"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.0, <0.3.0"
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+capabilities = ["watching"]
+permissions = []
+
+[indexing]
+call_names = []
+
+[watching]
+globs = ["config/routes.rb"]
+"#,
+        )
+        .expect("test watched-file manifest must be written");
     }
 
     #[test]
@@ -2337,6 +2584,127 @@ call_names = []
 
         registry.configure_from_config_and_workspace_roots(&config, &[]);
         assert!(registry.status_reports().is_empty());
+    }
+
+    #[tokio::test]
+    async fn matching_watched_file_change_is_routed_to_manifest_extension() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("watched-file-failure");
+        write_watched_file_failure_package(&package);
+        let root_uri = Url::from_directory_path(temp_dir.path())
+            .expect("test workspace path must convert to a file URI");
+        let config = RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        };
+        let server = RubyLanguageServer::default();
+        server.add_workspace(root_uri);
+        server.extension_registry.configure_from_config(&config);
+        assert_eq!(
+            server.extension_registry.status_reports()[0].status,
+            "loaded"
+        );
+
+        crate::handlers::notification::handle_did_change_watched_files(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent::new(
+                    Url::from_file_path(temp_dir.path().join("README.md"))
+                        .expect("test nonmatching path must convert to URI"),
+                    FileChangeType::CHANGED,
+                )],
+            },
+        )
+        .await;
+        assert_eq!(
+            server.extension_registry.status_reports()[0].status,
+            "loaded"
+        );
+
+        crate::handlers::notification::handle_did_change_watched_files(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent::new(
+                    Url::from_file_path(temp_dir.path().join("config/routes.rb"))
+                        .expect("test matching path must convert to URI"),
+                    FileChangeType::CHANGED,
+                )],
+            },
+        )
+        .await;
+
+        let report = &server.extension_registry.status_reports()[0];
+        assert_eq!(report.status, "failed");
+        assert!(
+            report
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("files.changed")),
+            "INVARIANT VIOLATED: watched-file failure lacks event context. This is a bug because extension watcher failures must be diagnosable. Fix: retain files.changed in extension status."
+        );
+    }
+
+    #[test]
+    fn watched_file_candidates_use_deepest_root_and_deduplicate() {
+        let root = PathBuf::from("/workspace");
+        let nested = root.join("engines/payments");
+        let uri = Url::from_file_path(nested.join("config/routes.rb"))
+            .expect("test watched path must convert to URI");
+        let event = FileEvent::new(uri.clone(), FileChangeType::CHANGED);
+
+        let candidates = watched_file_candidates(&[root, nested.clone()], &[event.clone(), event]);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].workspace_root,
+            nested.to_string_lossy().replace('\\', "/")
+        );
+        assert_eq!(candidates[0].path, "config/routes.rb");
+        assert_eq!(candidates[0].uri, uri.to_string());
+        assert_eq!(candidates[0].kind, WatchedFileChangeKind::Changed);
+    }
+
+    #[test]
+    fn watched_file_globs_must_be_valid_workspace_relative_patterns() {
+        let matcher = build_watched_file_matcher(
+            "watch-test",
+            &["config/**/*.rb".to_string(), ".rubocop.yml".to_string()],
+        )
+        .expect("valid watcher globs must compile");
+        assert!(matcher.is_match("config/routes.rb"));
+        assert!(matcher.is_match("config/environments/test.rb"));
+        assert!(!matcher.is_match("app/models/user.rb"));
+
+        for invalid in [
+            "../outside.yml",
+            "/absolute.yml",
+            "C:/absolute.yml",
+            "config\\routes.rb",
+            "[",
+        ] {
+            let err = build_watched_file_matcher("watch-test", &[invalid.to_string()])
+                .expect_err("invalid or escaping watcher glob must be rejected");
+            assert!(
+                err.to_string().contains("watched file glob"),
+                "watcher validation error must identify the manifest field"
+            );
+        }
+
+        let manifest: ExtensionManifest = toml::from_str(
+            r#"
+id = "missing-capability"
+abi_version = 1
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+
+[watching]
+globs = ["config/routes.rb"]
+"#,
+        )
+        .expect("test watcher manifest must parse");
+        let err = validate_manifest(&manifest)
+            .expect_err("watching declaration without capability must fail");
+        assert!(err.to_string().contains("without `watching` capability"));
     }
 
     #[test]

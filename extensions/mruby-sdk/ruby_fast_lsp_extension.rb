@@ -265,6 +265,10 @@ module RubyFastLspExtension
       @deactivation_handler = block
     end
 
+    def on_watched_files_changed(&block)
+      @watched_files_handler = block
+    end
+
     def on_document_symbols(&block)
       @document_symbol_handler = block
     end
@@ -299,6 +303,10 @@ module RubyFastLspExtension
         empty_output
       when "lifecycle.deactivate"
         @deactivation_handler.call if @deactivation_handler
+        empty_output
+      when "files.changed"
+        files = raw_event["files"] || raw_event[:files] || []
+        @watched_files_handler.call(files) if @watched_files_handler
         empty_output
       when "index.call.enter"
         {

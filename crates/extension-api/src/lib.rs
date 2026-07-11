@@ -18,6 +18,23 @@ pub struct ExtensionEvent {
     pub document: Option<DocumentContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<WatchedFileChange>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WatchedFileChange {
+    pub workspace_root: String,
+    pub path: String,
+    pub uri: String,
+    pub kind: WatchedFileChangeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum WatchedFileChangeKind {
+    Created,
+    Changed,
+    Deleted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

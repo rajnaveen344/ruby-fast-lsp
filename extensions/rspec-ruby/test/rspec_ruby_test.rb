@@ -238,4 +238,22 @@ class RSpecRubyExtensionTest < Minitest::Test
     titles = output.fetch("response_patches").map { |patch| patch.fetch("CodeLens").fetch("title") }
     assert_equal ["Run RSpec", "Debug RSpec", "Run RSpec", "Debug RSpec"], titles
   end
+
+  def test_watched_file_event_updates_private_extension_state
+    received = nil
+    extension.on_watched_files_changed { |files| received = files }
+    files = [{
+      "workspace_root" => "/repo",
+      "path" => "config/routes.rb",
+      "uri" => "file:///repo/config/routes.rb",
+      "kind" => "Changed"
+    }]
+
+    output = extension.handle_event("event" => "files.changed", "files" => files)
+
+    assert_equal files, received
+    assert_equal [], output.fetch("index_patches")
+    assert_equal [], output.fetch("response_patches")
+    assert_equal [], output.fetch("command_patches")
+  end
 end

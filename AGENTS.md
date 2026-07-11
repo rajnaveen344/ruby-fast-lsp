@@ -179,6 +179,14 @@ or bundled packages, then project-local packages, then environment/dev paths,
 with explicit packages before directory discovery and filesystem path as the
 deterministic final tie-break across multi-root workspaces.
 
+Manifest `[watching]` globs require the `watching` capability and must be valid
+workspace-relative patterns without parent traversal. Supporting clients receive
+a dynamically refreshed, sorted registration. Incoming file changes are scoped
+to the deepest workspace root, normalized, sorted/deduplicated, matched per
+extension, and delivered through bounded `files.changed` events. Watch callbacks
+may update private guest state but cannot directly return patches into engine or
+editor state.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

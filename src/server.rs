@@ -112,6 +112,8 @@ pub struct RubyLanguageServer {
     pub analysis_engine: Arc<RwLock<AnalysisEngine>>,
     pub config: Arc<Mutex<RubyFastLspConfig>>,
     pub extension_registry: ExtensionRegistryHandle,
+    pub extension_watch_dynamic_registration: Arc<AtomicBool>,
+    pub extension_watch_registration: Arc<tokio::sync::Mutex<Vec<String>>>,
     pub namespace_tree_cache: Arc<Mutex<Option<(u64, NamespaceTreeResponse)>>>,
     pub cache_invalidation_timer: Arc<Mutex<Option<Instant>>>,
     /// Timer for debounced reindexing on document changes
@@ -134,6 +136,8 @@ impl RubyLanguageServer {
             analysis_engine: Arc::new(RwLock::new(AnalysisEngine::new())),
             config: Arc::new(Mutex::new(config)),
             extension_registry,
+            extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
+            extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             namespace_tree_cache: Arc::new(Mutex::new(None)),
             cache_invalidation_timer: Arc::new(Mutex::new(None)),
             reindex_timer: Arc::new(Mutex::new(None)),
@@ -421,6 +425,8 @@ impl Default for RubyLanguageServer {
             #[cfg(test)]
             published_diagnostics: Arc::new(Mutex::new(HashMap::new())),
             extension_registry: ExtensionRegistryHandle::from_environment(),
+            extension_watch_dynamic_registration: Arc::new(AtomicBool::new(false)),
+            extension_watch_registration: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
 }

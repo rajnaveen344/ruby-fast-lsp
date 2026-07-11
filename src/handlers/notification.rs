@@ -8,7 +8,7 @@ use crate::config::RubyFastLspConfig;
 use crate::server::RubyLanguageServer;
 use crate::utils::detect_system_ruby_version;
 use log::{debug, info, warn};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
@@ -17,6 +17,16 @@ pub async fn handle_initialize(
     lang_server: &RubyLanguageServer,
     params: InitializeParams,
 ) -> LspResult<InitializeResult> {
+    let extension_watch_dynamic_registration = params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+        .and_then(|watched_files| watched_files.dynamic_registration)
+        .unwrap_or(false);
+    lang_server
+        .extension_watch_dynamic_registration
+        .store(extension_watch_dynamic_registration, Ordering::Release);
     let workspace_folders = params.workspace_folders;
     let root_uri = params.root_uri;
 
@@ -191,6 +201,8 @@ pub async fn handle_initialized(server: &RubyLanguageServer, _params: Initialize
         }
     }
 
+    refresh_extension_watch_registration(server).await;
+
     let config = server.config.lock().clone();
 
     // Determine Ruby version based on configuration
@@ -315,6 +327,10 @@ pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
     params: DidChangeWatchedFilesParams,
 ) {
+    server
+        .extension_registry
+        .handle_watched_file_changes(&server.workspace_root_paths(), &params.changes);
+    refresh_extension_watch_registration(server).await;
     indexing::handle_watched_files_changed(server, params).await;
 }
 
@@ -340,6 +356,7 @@ pub async fn handle_did_change_workspace_folders(
     server
         .extension_registry
         .configure_from_config_and_workspace_roots(&config, &server.workspace_root_paths());
+    refresh_extension_watch_registration(server).await;
 
     for workspace in added_workspaces {
         // Spawn coordinator for the new workspace. Mirrors the per-workspace
@@ -399,6 +416,7 @@ pub async fn handle_did_change_configuration(
                         &config,
                         &server.workspace_root_paths(),
                     );
+                refresh_extension_watch_registration(server).await;
 
                 *server.config.lock() = config.clone();
 
@@ -420,6 +438,75 @@ pub async fn handle_did_change_configuration(
                 warn!("Failed to parse configuration from settings");
             }
         }
+    }
+}
+
+async fn refresh_extension_watch_registration(server: &RubyLanguageServer) {
+    if !server
+        .extension_watch_dynamic_registration
+        .load(Ordering::Acquire)
+    {
+        return;
+    }
+    let Some(client) = &server.client else {
+        return;
+    };
+
+    let desired = server.extension_registry.watcher_globs();
+    let mut current = server.extension_watch_registration.lock().await;
+    if *current == desired {
+        return;
+    }
+
+    if !current.is_empty() {
+        let unregistration = Unregistration {
+            id: "ruby-fast-lsp-extension-watchers".to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+        };
+        if let Err(err) = client.unregister_capability(vec![unregistration]).await {
+            warn!("Failed to unregister extension file watchers: {:?}", err);
+            return;
+        }
+        current.clear();
+    }
+
+    if desired.is_empty() {
+        return;
+    }
+    let registration = extension_watch_registration(&desired);
+    match client.register_capability(vec![registration]).await {
+        Ok(()) => {
+            info!(
+                "Registered {} extension watched-file glob(s)",
+                desired.len()
+            );
+            *current = desired;
+        }
+        Err(err) => warn!("Failed to register extension file watchers: {:?}", err),
+    }
+}
+
+fn extension_watch_registration(globs: &[String]) -> Registration {
+    let options = DidChangeWatchedFilesRegistrationOptions {
+        watchers: globs
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|pattern| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(pattern),
+                kind: None,
+            })
+            .collect(),
+    };
+    Registration {
+        id: "ruby-fast-lsp-extension-watchers".to_string(),
+        method: "workspace/didChangeWatchedFiles".to_string(),
+        register_options: Some(
+            serde_json::to_value(options).expect(
+                "INVARIANT VIOLATED: typed watched-file registration options failed to serialize. This is a bug because lsp-types registration values must serialize. Fix: preserve serializable watcher option fields.",
+            ),
+        ),
     }
 }
 
@@ -456,4 +543,30 @@ pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
     server.extension_registry.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_watch_registration_is_sorted_typed_lsp_registration() {
+        let registration = extension_watch_registration(&[
+            "config/**/*.yml".to_string(),
+            ".rubocop.yml".to_string(),
+            "config/**/*.yml".to_string(),
+        ]);
+
+        assert_eq!(registration.id, "ruby-fast-lsp-extension-watchers");
+        assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
+        assert_eq!(
+            registration.register_options,
+            Some(serde_json::json!({
+                "watchers": [
+                    {"globPattern": ".rubocop.yml"},
+                    {"globPattern": "config/**/*.yml"}
+                ]
+            }))
+        );
+    }
 }

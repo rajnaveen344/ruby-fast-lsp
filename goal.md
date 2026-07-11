@@ -673,3 +673,29 @@ At the end of every goal session, record:
 - Rating remains **7.3/10**. Milestone 2 still requires watcher routing,
   process hosting, broader patch families/conflict policy, SDK stability, and a
   minimal third-party acceptance fixture.
+
+### July 2026: Manifest-driven extension file watchers
+
+- Registration: loaded manifests contribute validated workspace-relative globs;
+  clients advertising dynamic watched-file registration receive their sorted,
+  deduplicated union. Configuration and multi-root changes unregister stale
+  patterns and register the replacement set.
+- Routing: standard LSP file events are assigned to the deepest workspace root,
+  normalized to relative paths, sorted/deduplicated, matched independently per
+  extension, and delivered as a versioned `files.changed` domain event with
+  created/changed/deleted kinds.
+- Safety: absolute patterns, parent traversal, malformed glob syntax, and
+  watcher declarations without the `watching` capability reject the package.
+  Guest calls retain payload, memory, fuel, and wall limits; malformed output or
+  traps disable only the receiving extension and remain visible in status.
+- State boundary: watcher callbacks may refresh private route/schema/config
+  caches but cannot return semantic, response, or command patches until a
+  dedicated engine-owned ingestion contract exists.
+- SDK/editor evidence: the mruby SDK exposes `on_watched_files_changed`; VS Code
+  supports the server's dynamic registration alongside its Ruby source watcher.
+  Focused tests prove handler-level matching/nonmatching behavior, failure
+  isolation, nested-root selection, deduplication, glob validation, typed LSP
+  registration, and SDK callback behavior.
+- Rating remains **7.3/10**. Milestone 2 still requires process hosting,
+  broader patch families/conflict policy, SDK/package-template stability, and a
+  minimal third-party acceptance fixture.
