@@ -1,0 +1,1 @@
+{"index_patches":[{"AddReference":{"target":{"Method":{"namespace":["Billing","EmailJob"],"owner_kind":"Instance","name":"perform"}},"location":{"start":{"line":7,"character":18},"end":{"line":7,"character":31}},"source":{"extension_id":"rails-ruby","macro_name":"perform_later"}}}],"response_patches":[],"command_patches":[],"process_requests":[],"reindex_files":[]}

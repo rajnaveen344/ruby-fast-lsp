@@ -314,3 +314,104 @@ async fn namespaced_resources_use_lexical_route_frame_arguments() {
     assert_eq!(helper.len(), 1, "namespaced resource helper must resolve");
     assert_eq!(helper[0].range.start.line, 2);
 }
+
+#[tokio::test]
+async fn active_job_enqueue_entry_point_navigates_to_perform() {
+    let (_temp, package) = rails_package("job_index_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/jobs/billing/email_job.rb",
+            "module Billing\n  class EmailJob < ActiveJob::Base\n    def perform(user)\n    end\n  end\nend\n\nBilling::EmailJob.perform_later(user)\n",
+        )
+        .await;
+
+    let statuses = editor.extension_status().await;
+    assert!(
+        statuses
+            .iter()
+            .any(|status| status.id == "rails-ruby" && status.status == "loaded"),
+        "Active Job indexing must keep the extension loaded, got {statuses:?}"
+    );
+
+    let definition = editor
+        .goto_definition("app/jobs/billing/email_job.rb", 7, 24)
+        .await;
+    assert_eq!(
+        definition.len(),
+        1,
+        "perform_later must navigate to the job's perform method"
+    );
+    assert_eq!(definition[0].range.start.line, 2);
+
+    let references = editor
+        .references("app/jobs/billing/email_job.rb", 2, 8)
+        .await;
+    assert!(
+        references.iter().any(|location| {
+            location.range.start.line == 7 && location.range.start.character == 18
+        }),
+        "enqueue entry point must enter ordinary engine method references, got {references:?}"
+    );
+
+    editor
+        .set(
+            "app/jobs/billing/email_job.rb",
+            "module Billing\n  class EmailJob < ActiveJob::Base\n    def perform(user)\n    end\n  end\nend\n",
+        )
+        .await;
+    let references = editor
+        .references("app/jobs/billing/email_job.rb", 2, 8)
+        .await;
+    assert!(
+        references
+            .iter()
+            .all(|location| location.range.start.line != 7),
+        "removing the enqueue call must remove its stale perform reference, got {references:?}"
+    );
+}
+
+#[tokio::test]
+async fn active_support_concern_model_facts_flow_through_includers() {
+    let (_temp, package) = rails_package("concern_index_output.json");
+    let mut editor = FakeEditor::with_extension_package(package).await;
+    editor
+        .open(
+            "app/models/concerns/accountable.rb",
+            "class Account\nend\n\nmodule Accountable\n  extend ActiveSupport::Concern\n  included do\n    belongs_to :account\n  end\nend\n\nclass User\n  include Accountable\n  def display\n    account\n  end\nend\n",
+        )
+        .await;
+
+    let definition = editor
+        .goto_definition("app/models/concerns/accountable.rb", 13, 6)
+        .await;
+    assert_eq!(
+        definition.len(),
+        1,
+        "model facts declared in a concern must resolve through the includer's MRO"
+    );
+    assert_eq!(definition[0].range.start.line, 6);
+    let hover = editor
+        .hover("app/models/concerns/accountable.rb", 13, 6)
+        .await;
+    assert!(
+        hover
+            .as_ref()
+            .is_some_and(|hover| format!("{:?}", hover.contents).contains("Account")),
+        "concern-provided association must retain its type, got {hover:?}"
+    );
+
+    editor
+        .set(
+            "app/models/concerns/accountable.rb",
+            "class Account\nend\n\nmodule Accountable\n  extend ActiveSupport::Concern\nend\n\nclass User\n  include Accountable\n  def display\n    account\n  end\nend\n",
+        )
+        .await;
+    assert!(
+        editor
+            .goto_definition("app/models/concerns/accountable.rb", 10, 6)
+            .await
+            .is_empty(),
+        "removing a concern DSL declaration must remove inherited generated facts"
+    );
+}

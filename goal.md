@@ -1131,3 +1131,31 @@ At the end of every goal session, record:
   concerns, Active Job entry points, and Minitest workflows remain incomplete.
   The next priority is Active Support concerns and Active Job, followed by
   Minitest discovery and test commands.
+
+### July 2026: Active Job entry points and concern MRO evidence
+
+- Active Job navigation: `perform_later` and `perform_now` on literal constant
+  receivers ending in `Job` emit exact method-reference candidates targeting
+  that job's instance `perform`. Engine method resolution remains responsible
+  for identity, visibility, ambiguity, definitions, and find-references.
+- Conservative scope: local/dynamic receivers and non-`Job` constants are
+  ignored rather than guessed, preventing similarly named non-Rails APIs from
+  acquiring synthetic navigation.
+- Active Support concerns: model DSL facts declared inside a concern's
+  `included` block stay on the concern module and reach including models through
+  the existing parser-produced include edge and engine-owned MRO. No Rails guest
+  duplicates mixin or ancestor lookup policy. Existing simulator coverage also
+  proves `class_methods` block definitions become class methods on includers.
+- Lifecycle evidence: deterministic and rebuilt Ruby-authored Wasm black-box
+  tests prove enqueue-to-`perform` navigation, ordinary method references,
+  concern-provided typed association lookup through an includer, and stale-fact
+  removal after edits. Rails source tests prove both enqueue entry points and
+  reject dynamic receivers.
+- Deliberate concern gap: concern-specific dependency declarations remain
+  incomplete; existing instance and `class_methods` composition covers the
+  ordinary navigation workflow without a privileged Rails indexer hook.
+- Rating remains **8.0/10**. Active Job closes another frequent Rails navigation
+  path and common instance-side concern composition is now evidenced, but the
+  8.1 milestone still lacks controller-to-view navigation and complete test
+  workflows. The next highest-priority cohesive work is Minitest discovery plus
+  run/debug commands, shared with the existing RSpec command surface.

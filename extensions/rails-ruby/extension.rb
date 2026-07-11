@@ -34,6 +34,7 @@ module RailsRuby
   ].freeze
 
   HTTP_ROUTES = ["get", "post", "put", "patch", "delete", "match"].freeze
+  ACTIVE_JOB_ENTRY_POINTS = ["perform_later", "perform_now"].freeze
 
   def self.singularize(name)
     irregular = IRREGULAR_SINGULARS[name]
@@ -162,6 +163,17 @@ module RailsRuby
     call[key] || call[key.to_sym]
   end
 
+  def self.constant_receiver(receiver)
+    return nil unless receiver
+
+    parts = receiver["Constant"] || receiver[:Constant]
+    return nil unless parts.is_a?(Array) && !parts.empty?
+    return nil if parts.any? { |part| !constant_name?(part) }
+    return nil unless parts.last.end_with?("Job")
+
+    parts
+  end
+
   def self.frame_arguments(call)
     (call_value(call, "arguments") || []).map { |argument| RubyFastLspExtension::Argument.new(argument) }
   end
@@ -216,6 +228,23 @@ module RailsRuby
 end
 
 extension "rails-ruby" do
+  RailsRuby::ACTIVE_JOB_ENTRY_POINTS.each do |entry_point|
+    on_call entry_point do |ctx|
+      job = RailsRuby.constant_receiver(ctx.receiver)
+      next [] unless job
+
+      [add_reference(
+        target: method_reference_target(
+          name: "perform",
+          namespace: job,
+          owner_kind: :instance
+        ),
+        location: ctx.message_range,
+        source: macro_source(ctx)
+      )]
+    end
+  end
+
   ["belongs_to", "has_one", "has_many"].each do |macro|
     on_call macro do |ctx|
       argument = ctx.arguments.first

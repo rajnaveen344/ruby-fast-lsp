@@ -273,4 +273,36 @@ class RailsRubyTest < Minitest::Test
 
     assert_empty extension.index_call(context("resources", "users", [], [unrelated_draw]))
   end
+
+  def test_active_job_enqueue_entry_points_reference_the_perform_method
+    %w[perform_later perform_now].each do |entry_point|
+      job_context = context(entry_point, "user")
+      job_context["receiver"] = {"Constant" => ["Billing", "EmailJob"]}
+      job_context["current_namespace"] = []
+
+      patches = extension.index_call(job_context)
+
+      assert_equal 1, patches.length
+      reference = patches.fetch(0).fetch("AddReference")
+      assert_equal(
+        {
+          "Method" => {
+            "namespace" => ["Billing", "EmailJob"],
+            "owner_kind" => "Instance",
+            "name" => "perform"
+          }
+        },
+        reference.fetch("target")
+      )
+      assert_equal RANGE, reference.fetch("location")
+    end
+  end
+
+  def test_active_job_entry_point_requires_a_constant_job_receiver
+    job_context = context("perform_later", "user")
+    job_context["receiver"] = {"LocalVariable" => "job_class"}
+    job_context["current_namespace"] = []
+
+    assert_empty extension.index_call(job_context)
+  end
 end

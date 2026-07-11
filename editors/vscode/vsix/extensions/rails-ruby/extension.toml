@@ -6,7 +6,7 @@ server_version = ">=0.2.6, <0.3.0"
 runtime = "mruby-wasm"
 entry = "extension.rb"
 wasm = "extension.wasm"
-checksum_sha256 = "67a18112a6b8afe7242ec74c70377fe06d4ff7928f80818ca912d1593e47b245"
+checksum_sha256 = "25a319c97cfa5aab49b2f242667bd1e5d65a6d4a97ef1a5db4c9846e51d13818"
 capabilities = ["index.call"]
 permissions = []
 
@@ -30,5 +30,6 @@ call_names = [
   "validates_exclusion_of", "validates_format_of", "validates_inclusion_of",
   "validates_length_of", "validates_numericality_of", "validates_presence_of",
   "validates_size_of", "validates_uniqueness_of", "validates_comparison_of",
-  "resources", "resource", "get", "post", "put", "patch", "delete", "match", "root"
+  "resources", "resource", "get", "post", "put", "patch", "delete", "match", "root",
+  "perform_later", "perform_now"
 ]

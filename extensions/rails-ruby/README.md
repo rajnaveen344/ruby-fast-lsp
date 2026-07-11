@@ -33,6 +33,19 @@ Nested `namespace` and `scope module:/as:` frames prefix controller targets and
 helper names; common irregular plurals such as `people` use explicit stable
 singular forms.
 
+Active Job enqueue calls on conventional constant receivers navigate from
+`MyJob.perform_later` and `MyJob.perform_now` to `MyJob#perform`. Dynamic
+receivers are deliberately ignored, and the receiver's terminal constant must
+end in `Job` so unrelated libraries with similarly named APIs are not
+reinterpreted as Rails jobs.
+
+Instance-side model DSL facts declared inside an `ActiveSupport::Concern`
+`included` block remain owned by the concern module and flow to including
+classes through the engine's ordinary mixin/MRO graph. This includes generated
+association navigation and types, with normal edit removal. Core concern
+handling also maps `class_methods` blocks through the generated `ClassMethods`
+module. Concern-specific dependency declarations are not modeled yet.
+
 Conventional target names use deterministic inflection: snake case is
 camelized and collection names use a small singularization rule. Options such
 as `through`, `source`, custom foreign keys, conditional validation semantics,

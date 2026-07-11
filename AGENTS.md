@@ -243,7 +243,13 @@ Record callbacks and custom `validate` symbols emit exact method references;
 the extension never performs method lookup itself. Route declarations use
 public frame arguments, generated method facts, and exact references for
 controller/action navigation; helper availability currently follows
-`ApplicationController` inheritance. The
+`ApplicationController` inheritance. Active Job `perform_later`/`perform_now`
+calls on conventional `*Job` constant receivers emit exact references to the
+job's instance `perform` method. Model DSL facts inside concern `included`
+blocks remain attached to the concern and flow through the existing engine
+mixin/MRO graph; do not duplicate include or method lookup policy in the Rails
+guest. Existing indexer/engine concern handling maps `class_methods` through a
+generated `ClassMethods` module and the simulator owns its semantic coverage. The
 deterministic WAT fixture and Ruby-authored Wasm black-box test must both prove
 navigation, hover/type behavior, and stale-fact removal after edits. Keep Rails
 inflection and DSL policy in this extension; do not add association names or
