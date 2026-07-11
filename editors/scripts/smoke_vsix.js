@@ -40,10 +40,12 @@ const binaryName = process.platform === 'win32' ? 'ruby-fast-lsp.exe' : 'ruby-fa
 const binary = path.join(extensionRoot, 'bin', platform, binaryName);
 const rspecPackage = path.join(extensionRoot, 'extensions', 'rspec-ruby');
 const railsPackage = path.join(extensionRoot, 'extensions', 'rails-ruby');
+const minitestPackage = path.join(extensionRoot, 'extensions', 'minitest-ruby');
 for (const required of [
     binary,
     path.join(rspecPackage, 'extension.toml'),
-    path.join(railsPackage, 'extension.toml')
+    path.join(railsPackage, 'extension.toml'),
+    path.join(minitestPackage, 'extension.toml')
 ]) {
     if (!fs.existsSync(required)) {
         fs.rmSync(temp, { recursive: true, force: true });
@@ -82,7 +84,7 @@ function finish(error) {
         process.stderr.write(`${error.message}\n${stderr}`);
         process.exitCode = 1;
     } else {
-        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec and Rails on ${platformKey}.\n`);
+        process.stdout.write(`VSIX initialized Ruby Fast LSP with bundled RSpec, Rails, and Minitest on ${platformKey}.\n`);
     }
 }
 
@@ -113,6 +115,10 @@ function handleResponse(response) {
     const rails = statuses.find(status => status.id === 'rails-ruby');
     if (!rails || rails.status !== 'loaded') {
         return finish(new Error(`Bundled Rails extension did not load: ${JSON.stringify(statuses)}`));
+    }
+    const minitest = statuses.find(status => status.id === 'minitest-ruby');
+    if (!minitest || minitest.status !== 'loaded') {
+        return finish(new Error(`Bundled Minitest extension did not load: ${JSON.stringify(statuses)}`));
     }
     finish();
 }
@@ -149,7 +155,7 @@ child.stdin.write(frame({
         capabilities: {},
         initializationOptions: {
             extensionPath: extensionRoot,
-            extensionPackages: [rspecPackage, railsPackage],
+            extensionPackages: [rspecPackage, railsPackage, minitestPackage],
             extensionDirs: [],
             extensionSettings: {},
             workspaceTrusted: false,

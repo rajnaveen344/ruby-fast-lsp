@@ -179,6 +179,21 @@ should send the same `indexing` object in initialization options and restart the
 server after changing it. Invalid glob patterns abort workspace indexing with an
 actionable error instead of silently applying a partial policy.
 
+## Test discovery and execution
+
+The packaged VS Code extension discovers RSpec and Minitest declarations as
+document symbols and adds Run and Debug code lenses. RSpec targets run through
+`bundle exec rspec file:line`. Minitest uses `bin/rails test file:line` when a
+Rails runner is present, otherwise it uses `bundle exec ruby -Itest` with an
+exact method filter. Debug lenses launch an `rdbg` configuration and require the
+`debug` gem plus a compatible VS Code Ruby debugger extension.
+
+Test commands use structured process argv without an implicit shell and reject
+malformed or non-file targets.
+Minitest discovery is intentionally limited to conventional `test/` or
+`*_test.rb` files, `*Test` classes, `def test_*`, and Rails-style `test "…"`
+declarations.
+
 ## Project-local extensions
 
 Trusted workspaces can discover manifest packages automatically from

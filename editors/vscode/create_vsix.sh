@@ -273,6 +273,10 @@ mkdir -p "$EXTENSION_DIR/extensions/rails-ruby"
 cp "$ROOT_DIR/extensions/rails-ruby/extension.toml" "$EXTENSION_DIR/extensions/rails-ruby/"
 cp "$ROOT_DIR/extensions/rails-ruby/README.md" "$EXTENSION_DIR/extensions/rails-ruby/"
 cp "$ROOT_DIR/extensions/rails-ruby/extension.wasm" "$EXTENSION_DIR/extensions/rails-ruby/"
+mkdir -p "$EXTENSION_DIR/extensions/minitest-ruby"
+cp "$ROOT_DIR/extensions/minitest-ruby/extension.toml" "$EXTENSION_DIR/extensions/minitest-ruby/"
+cp "$ROOT_DIR/extensions/minitest-ruby/README.md" "$EXTENSION_DIR/extensions/minitest-ruby/"
+cp "$ROOT_DIR/extensions/minitest-ruby/extension.wasm" "$EXTENSION_DIR/extensions/minitest-ruby/"
 
 # Navigate to extension directory and package
 cd "$EXTENSION_DIR"

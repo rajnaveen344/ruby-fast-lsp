@@ -227,6 +227,14 @@
       {
         "command": "ruby-fast-lsp.rspec.debug",
         "title": "Debug RSpec"
+      },
+      {
+        "command": "ruby-fast-lsp.minitest.run",
+        "title": "Run Minitest"
+      },
+      {
+        "command": "ruby-fast-lsp.minitest.debug",
+        "title": "Debug Minitest"
       }
     ],
     "menus": {
@@ -263,7 +271,8 @@
     ]
   },
   "scripts": {
-    "package": "vsce package"
+    "package": "vsce package",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

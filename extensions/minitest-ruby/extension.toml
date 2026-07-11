@@ -1,0 +1,14 @@
+id = "minitest-ruby"
+name = "Minitest Ruby"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.6, <0.3.0"
+runtime = "mruby-wasm"
+entry = "extension.rb"
+wasm = "extension.wasm"
+checksum_sha256 = "00b01ac658d478194eb1ced3b6cfa588ef6ad5b2e7f08cbe727054c6d863528f"
+capabilities = ["document_symbol", "code_lens"]
+permissions = []
+
+[build]
+output = "extension.wasm"

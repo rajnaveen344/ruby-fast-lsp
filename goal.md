@@ -237,14 +237,15 @@ Target rating: **8.1/10**.
 
 Build a first-class Rails extension supporting the highest-value workflows:
 
-1. Active Record associations.
-2. Validations and callbacks.
-3. Route and URL helpers.
-4. Controller-to-view and route-to-controller navigation.
-5. Active Support concerns.
-6. Active Job entry points.
-7. Minitest and RSpec discovery.
-8. Test code lenses and run/debug commands.
+1. Done: Active Record associations.
+2. Done: validations and callbacks.
+3. Done: route and URL helpers.
+4. Partial: route-to-controller navigation is done; controller-to-view remains.
+5. Done for ordinary composition: Active Support concern instance and
+   `class_methods` navigation; dependency declarations remain an enhancement.
+6. Done: Active Job enqueue entry points.
+7. Done: Minitest and RSpec discovery.
+8. Done: test code lenses and run/debug commands.
 
 Architecture requirements:
 
@@ -1159,3 +1160,35 @@ At the end of every goal session, record:
   8.1 milestone still lacks controller-to-view navigation and complete test
   workflows. The next highest-priority cohesive work is Minitest discovery plus
   run/debug commands, shared with the existing RSpec command surface.
+
+### July 2026: Bundled Minitest discovery and real test debugging
+
+- Minitest package: the independent bundled `minitest-ruby` Wasm guest uses only
+  public document-symbol and code-lens contracts. It discovers conventional
+  `*Test` classes, `def test_*` methods, and Rails `test "description"`
+  declarations only in `test/` or `*_test.rb` files.
+- Symbol ownership: ordinary class symbols remain core-owned; the guest adds
+  only synthetic test declarations, avoiding duplicate document symbols.
+- Execution: Rails targets use exact `bin/rails test file:line`; plain Minitest
+  uses `bundle exec ruby -Itest file` with an exact method filter when one is
+  available. RSpec continues to use `bundle exec rspec file:line`.
+- Debugging: RSpec and Minitest Debug lenses now call VS Code's debugger with an
+  `rdbg` launch configuration instead of displaying a placeholder notification.
+  The documented prerequisites are the `debug` gem and a compatible Ruby
+  debugger extension.
+- Safety: terminal execution uses VS Code's structured `ProcessExecution`
+  without an implicit shell; file URIs and line numbers are validated first.
+- Evidence: red-first Ruby source tests cover discovery, exact lens arguments,
+  and false-positive file filtering; a real-Wasm black-box LSP lifecycle test
+  covers symbols, commands, and `didChange` removal; Node tests cover Rails/plain
+  runner selection, class/method argv targets, and exact `rdbg`
+  configurations. The packaged VSIX smoke requires Minitest, Rails, and RSpec to
+  load from the extracted artifact.
+- Verification: 975 root tests, all workspace tests including the new real-Wasm
+  Minitest acceptance test, the 55-test release simulator, release build, Node
+  command tests, and packaged VSIX initialization with all three bundled guests
+  pass locally.
+- Rating remains **8.0/10**. Milestone 3 still has one material gap:
+  controller-to-view navigation, which should be designed with the ERB/source-
+  mapping work rather than as a Ruby-only path guess. The next priority is that
+  template/navigation seam, followed by Milestone 4 ERB support.

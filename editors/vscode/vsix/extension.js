@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+const { debugConfiguration, minitestInvocation, rspecInvocation } = require('./test_commands');
 
 // Create output channel for logging
 let outputChannel;
@@ -627,7 +628,7 @@ function getServerPath() {
 
 function getBundledExtensionPackages(extensionPath) {
     const packages = [];
-    for (const packageName of ['rspec-ruby', 'rails-ruby']) {
+    for (const packageName of ['rspec-ruby', 'rails-ruby', 'minitest-ruby']) {
         const extensionPackage = path.join(extensionPath, 'extensions', packageName);
         if (fs.existsSync(path.join(extensionPackage, 'extension.toml'))) {
             packages.push(extensionPackage);
@@ -636,25 +637,34 @@ function getBundledExtensionPackages(extensionPath) {
     return packages;
 }
 
-function rspecTargetToCommand(target) {
-    const index = target.lastIndexOf(':');
-    if (index === -1) {
-        return target;
-    }
-
-    const uri = vscode.Uri.parse(target.slice(0, index));
-    const line = target.slice(index + 1);
-    return `${uri.fsPath}:${line}`;
+function testWorkingDirectory(uriString) {
+    const uri = vscode.Uri.parse(uriString);
+    return vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath || path.dirname(uri.fsPath);
 }
 
-function runRspecInTerminal(target) {
-    const terminal = vscode.window.createTerminal('RSpec');
-    terminal.show(true);
-    terminal.sendText(`bundle exec rspec ${rspecTargetToCommand(target)}`);
+function runTestInTerminal(name, invocation, cwd) {
+    const execution = new vscode.ProcessExecution(
+        invocation.argv[0],
+        invocation.argv.slice(1),
+        { cwd }
+    );
+    const task = new vscode.Task(
+        { type: 'ruby-fast-lsp-test', target: name },
+        vscode.TaskScope.Workspace,
+        name,
+        'Ruby Fast LSP',
+        execution
+    );
+    task.presentationOptions = {
+        reveal: vscode.TaskRevealKind.Always,
+        panel: vscode.TaskPanelKind.Dedicated,
+        clear: true
+    };
+    return vscode.tasks.executeTask(task);
 }
 
-function debugRspecTarget(target) {
-    vscode.window.showInformationMessage(`RSpec debug target: ${rspecTargetToCommand(target)}`);
+function debugTest(name, invocation, cwd) {
+    return vscode.debug.startDebugging(undefined, debugConfiguration(name, invocation, cwd));
 }
 
 function activate(context) {
@@ -995,14 +1005,55 @@ function activate(context) {
     );
 
     const runRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.run',
-        (_uriStr, _line, target) => {
-            runRspecInTerminal(target);
+        (uriStr, _line, target) => {
+            try {
+                runTestInTerminal('RSpec', rspecInvocation(target), testWorkingDirectory(uriStr));
+            } catch (error) {
+                vscode.window.showErrorMessage(`Unable to run RSpec: ${error.message}`);
+            }
         }
     );
 
     const debugRspecCommand = vscode.commands.registerCommand('ruby-fast-lsp.rspec.debug',
-        (_uriStr, _line, target) => {
-            debugRspecTarget(target);
+        (uriStr, _line, target) => {
+            try {
+                return debugTest('Debug RSpec', rspecInvocation(target), testWorkingDirectory(uriStr));
+            } catch (error) {
+                vscode.window.showErrorMessage(`Unable to debug RSpec: ${error.message}`);
+                return undefined;
+            }
+        }
+    );
+
+    const minitestTarget = (uriStr, line, testName) => {
+        const cwd = testWorkingDirectory(uriStr);
+        const rails = path.join(cwd, 'bin', process.platform === 'win32' ? 'rails.bat' : 'rails');
+        return {
+            cwd,
+            invocation: minitestInvocation(uriStr, line, testName, fs.existsSync(rails) ? rails : null)
+        };
+    };
+
+    const runMinitestCommand = vscode.commands.registerCommand('ruby-fast-lsp.minitest.run',
+        (uriStr, line, testName) => {
+            try {
+                const target = minitestTarget(uriStr, line, testName);
+                runTestInTerminal('Minitest', target.invocation, target.cwd);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Unable to run Minitest: ${error.message}`);
+            }
+        }
+    );
+
+    const debugMinitestCommand = vscode.commands.registerCommand('ruby-fast-lsp.minitest.debug',
+        (uriStr, line, testName) => {
+            try {
+                const target = minitestTarget(uriStr, line, testName);
+                return debugTest('Debug Minitest', target.invocation, target.cwd);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Unable to debug Minitest: ${error.message}`);
+                return undefined;
+            }
         }
     );
 
@@ -1020,7 +1071,7 @@ function activate(context) {
         indexProvider.refresh();
     });
 
-    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, searchCommand, toggleExternalTypesCommand);
+    context.subscriptions.push(treeView, refreshCommand, exportCommand, gotoDefinitionCommand, showLocationsCommand, showReferencesCommand, runRspecCommand, debugRspecCommand, runMinitestCommand, debugMinitestCommand, searchCommand, toggleExternalTypesCommand);
 
     // Start the client and initialize index tree when ready
     client.start().then(() => {

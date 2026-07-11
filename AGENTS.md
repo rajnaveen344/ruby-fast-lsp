@@ -162,8 +162,8 @@ installed wrapper can complete a real LSP initialize handshake.
 Current-platform VSIX packaging must run `editors/scripts/smoke_vsix.js` on the
 produced archive before moving it to `target/`. The smoke test extracts the
 actual VSIX, executes its packaged platform binary, initializes it with the
-bundled RSpec and Rails package paths from that same extraction, and requires
-both extension statuses to be `loaded`. It clears developer extension-path
+bundled RSpec, Rails, and Minitest package paths from that same extraction, and
+requires all extension statuses to be `loaded`. It clears developer extension-path
 environment variables so a local package cannot mask a missing, invalid, or
 checksum-broken bundled copy.
 
@@ -254,6 +254,14 @@ deterministic WAT fixture and Ruby-authored Wasm black-box test must both prove
 navigation, hover/type behavior, and stale-fact removal after edits. Keep Rails
 inflection and DSL policy in this extension; do not add association names or
 framework-specific resolution to `ruby-analysis` or the server indexer.
+
+`extensions/minitest-ruby` is the bundled public-contract test discovery guest.
+It contributes synthetic `def test_*` and Rails-style `test "…"` document
+symbols plus class/test Run and Debug code lenses, while core indexing remains
+the owner of ordinary class/method symbols. VS Code owns terminal argv shaping,
+workspace runner selection, structured process execution, and `rdbg` launch configuration.
+RSpec and Minitest debug lenses must start a debugger; a notification-only
+placeholder is not a completed debug workflow.
 
 Extension call arguments expose literal positional values plus flattened
 keyword pairs. `Argument.keyword` carries the keyword name and its exact range;
