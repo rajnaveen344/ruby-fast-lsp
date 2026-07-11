@@ -883,3 +883,28 @@ At the end of every goal session, record:
 - Rating remains **7.4/10**. Rich generated signatures materially improve the
   extension foundation, but generated references/relationships and complete
   lifecycle/package evidence remain before the 7.7 milestone is justified.
+
+### July 2026: Extension-generated declaration references
+
+- Public contract: additive `AddReferencePatch` targets exact generated
+  namespaces or value constants using domain names and source ranges. The
+  mruby SDK provides reference and target helpers; guests never return LSP
+  locations or access the reference store.
+- Engine ownership: accepted patches create ordinary resolved
+  `ReferenceCandidate` values during collection. Existing engine replacement,
+  reference storage, and query policy handle them alongside parser candidates.
+  A reusable exact-target query powers go-to-definition from the DSL token and
+  refuses to guess when overlapping candidates disagree.
+- Determinism and safety: targets and ranges are validated at the guest
+  boundary. The same source token cannot resolve to incompatible extension
+  targets based on package order; every conflicting guest is rejected through
+  the established observable conflict path.
+- Public acceptance evidence: find-references on the example's generated class
+  includes the DSL argument, and go-to-definition from that argument reaches
+  the generated class. Removing the declaration through `didChange` removes
+  that generated reference while retaining ordinary source references.
+  Boundary and engine tests cover invalid targets, deterministic incompatible-
+  target rejection, exact lookup, and ambiguity refusal.
+- Rating remains **7.4/10**. Declaration relationships now participate in core
+  reference queries; complete lifecycle replacement/package evidence and the
+  remaining Rails-oriented relationship vocabulary are still needed for 7.7.

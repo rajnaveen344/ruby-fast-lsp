@@ -163,6 +163,7 @@ pub enum ArgumentValue {
 pub enum IndexPatch {
     DefineNamespace(DefineNamespacePatch),
     DefineConstant(DefineConstantPatch),
+    AddReference(ReferencePatch),
     DefineMethod(DefineMethodPatch),
     ApplyMixin(ApplyMixinPatch),
 }
@@ -280,6 +281,22 @@ pub struct DefineConstantPatch {
     pub location: SourceRange,
     pub ruby_type: Option<RubyType>,
     pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReferencePatch {
+    pub target: ReferenceTarget,
+    pub location: SourceRange,
+    pub source: PatchSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReferenceTarget {
+    Namespace(Vec<String>),
+    Constant {
+        namespace: Vec<String>,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

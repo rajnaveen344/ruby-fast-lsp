@@ -240,6 +240,17 @@ existing `ruby-analysis::core::RubyType`. Composite member order is normalized
 before conflict comparison so equivalent unions, arrays, and hashes merge
 deterministically. The mruby SDK exposes constructors including `nilable_type`.
 
+`AddReferencePatch` lets an extension mark a source range as an exact semantic
+reference to a namespace or value constant. The guest boundary validates the
+target and range and conflicts patches by source range, rejecting incompatible
+targets deterministically. Application creates a normal resolved
+`ReferenceCandidate` in `FactCollector`; engine replacement resolves and stores
+it with parser candidates, so references/highlights use existing query policy
+and edits remove stale generated references. `AnalysisQuery` owns exact-target
+definition lookup at a reference range and returns no result for ambiguity; the
+LSP adapter only converts its definition ranges to locations. Do not return LSP
+locations or write directly to the engine reference store.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

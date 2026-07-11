@@ -6,8 +6,9 @@ use tower_lsp::lsp_types::{
     CodeLens, CodeLensParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, InitializeParams, Location, PartialResultParams,
-    Position, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    Position, ReferenceContext, ReferenceParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 use tower_lsp::LanguageServer;
 
@@ -184,6 +185,26 @@ impl FakeEditor {
             })
             .await
             .expect("INVARIANT VIOLATED: hover request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+    }
+
+    pub async fn references(&self, filename: &str, line: u32, character: u32) -> Vec<Location> {
+        self.assert_open(filename, "references");
+        let uri = filename_to_uri(filename);
+        self.server
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: ReferenceContext {
+                    include_declaration: true,
+                },
+            })
+            .await
+            .expect("INVARIANT VIOLATED: references request failed. This is a bug because FakeEditor expects in-process LSP calls to return JSON-RPC success. Fix: inspect request handler error path.")
+            .unwrap_or_default()
     }
 
     pub async fn extension_status(&self) -> Vec<ExtensionStatusReport> {

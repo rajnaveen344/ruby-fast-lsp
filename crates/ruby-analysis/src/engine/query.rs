@@ -3,7 +3,8 @@ use std::path::Path;
 use crate::core::method_store::MethodVisibilityOverrideFact;
 use crate::core::{
     DiagnosticFact, FullyQualifiedName, GraphEdgeFact, GraphNodeFact, MethodFact, ReferenceFact,
-    SourceFileId, SymbolFact, TypeFact, TypeResolution, TypeSubject,
+    SourceFileId, StoredReferenceCandidateKind, SymbolFact, TextRange, TypeFact, TypeResolution,
+    TypeSubject,
 };
 
 use crate::{AnalysisEngine, SourceFile};
@@ -79,6 +80,49 @@ impl<'a> AnalysisQuery<'a> {
 
     pub fn references_in_file(&self, file_id: SourceFileId) -> Vec<ReferenceFact> {
         self.engine.reference_store().facts_in_file(file_id)
+    }
+
+    pub fn resolved_reference_definition_ranges_at(
+        &self,
+        file_id: SourceFileId,
+        byte_offset: u32,
+    ) -> Vec<TextRange> {
+        let mut targets = self
+            .engine
+            .reference_candidate_store()
+            .candidates_in_file(file_id)
+            .into_iter()
+            .filter_map(|candidate| {
+                let contains_offset = candidate.range.file_id == file_id
+                    && candidate.range.start_byte <= byte_offset
+                    && byte_offset < candidate.range.end_byte;
+                if !contains_offset {
+                    return None;
+                }
+                match candidate.kind {
+                    StoredReferenceCandidateKind::Resolved { target, .. } => {
+                        self.engine.fqn_for_id(target).cloned()
+                    }
+                    StoredReferenceCandidateKind::Constant { .. }
+                    | StoredReferenceCandidateKind::Method { .. } => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        targets.sort_by_key(ToString::to_string);
+        targets.dedup();
+        if targets.len() != 1 {
+            return Vec::new();
+        }
+
+        let mut ranges = self
+            .engine
+            .symbol_facts_for(&targets[0])
+            .into_iter()
+            .map(|fact| fact.range)
+            .collect::<Vec<_>>();
+        ranges.sort_by_key(|range| (range.file_id, range.start_byte, range.end_byte));
+        ranges.dedup();
+        ranges
     }
 
     pub fn graph_nodes_for(&self, fqn: &FullyQualifiedName) -> Vec<GraphNodeFact> {

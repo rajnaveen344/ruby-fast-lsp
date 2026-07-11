@@ -204,6 +204,75 @@ fn reference_candidate_resolves_when_definition_arrives_later() {
 }
 
 #[test]
+fn resolved_reference_definition_query_requires_one_exact_target() {
+    let mut engine = AnalysisEngine::new();
+    let source_file = register_project_file(&mut engine, "app/model.rb", "field :user");
+    let user_file = register_project_file(&mut engine, "app/user.rb", "class User; end");
+    let account_file = register_project_file(&mut engine, "app/account.rb", "class Account; end");
+    let user = FullyQualifiedName::namespace(vec![RubyConstant::new("User").unwrap()]);
+    let account = FullyQualifiedName::namespace(vec![RubyConstant::new("Account").unwrap()]);
+    let user_range = TextRange::new(user_file, 0, 10);
+    let account_range = TextRange::new(account_file, 0, 13);
+
+    engine.replace_facts(
+        user_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(user.clone(), SymbolKind::Class, user_range)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    engine.replace_facts(
+        account_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                account.clone(),
+                SymbolKind::Class,
+                account_range,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    let reference_range = TextRange::new(source_file, 7, 12);
+    engine.replace_facts(
+        source_file,
+        FileFacts {
+            reference_candidates: vec![ReferenceCandidate::resolved(
+                reference_range,
+                user.clone(),
+                None,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    assert_eq!(
+        AnalysisQuery::new(&engine).resolved_reference_definition_ranges_at(source_file, 8),
+        vec![user_range]
+    );
+
+    engine.replace_facts(
+        source_file,
+        FileFacts {
+            reference_candidates: vec![
+                ReferenceCandidate::resolved(reference_range, user, None),
+                ReferenceCandidate::resolved(reference_range, account, None),
+            ],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+    assert!(
+        AnalysisQuery::new(&engine)
+            .resolved_reference_definition_ranges_at(source_file, 8)
+            .is_empty(),
+        "ambiguous resolved reference targets must not guess a definition"
+    );
+}
+
+#[test]
 fn method_candidate_resolves_when_method_definition_arrives_later() {
     let mut engine = AnalysisEngine::new();
     let ref_file = register_project_file(&mut engine, "app/use_user.rb", "user.name");

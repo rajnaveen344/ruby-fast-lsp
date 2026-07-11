@@ -46,6 +46,11 @@ extension "example-dsl" do
     next [] unless name
 
     [
+      add_reference(
+        target: namespace_reference_target(["GeneratedRecord"]),
+        location: argument.range,
+        source: macro_source(ctx)
+      ),
       define_namespace(
         namespace: ["GeneratedRecord"],
         kind: :class,

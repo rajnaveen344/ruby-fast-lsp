@@ -21,6 +21,9 @@ are `define_namespace`, `define_constant`, `define_method`, and `apply_mixin`.
 Generated method returns and constants can use `named_type`, `array_type`,
 `hash_type`, `union_type`, and `nilable_type`; these produce structured ABI
 types rather than strings that the server would need to parse.
+DSL tokens can become semantic references through `add_reference` with either
+`namespace_reference_target` or `constant_reference_target`. The server owns
+the resulting reference index and query behavior.
 
 Every package contains `extension.toml`, `extension.rb`, `runtime.rb`, and the
 built Wasm path declared by its manifest.

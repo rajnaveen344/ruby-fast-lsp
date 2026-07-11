@@ -439,6 +439,24 @@ module RubyFastLspExtension
       union_type(ruby_type, named_type("NilClass"))
     end
 
+    def add_reference(target:, location:, source:)
+      {
+        "AddReference" => {
+          "target" => target,
+          "location" => location,
+          "source" => source
+        }
+      }
+    end
+
+    def namespace_reference_target(namespace)
+      {"Namespace" => namespace}
+    end
+
+    def constant_reference_target(name:, namespace: [])
+      {"Constant" => {"namespace" => namespace, "name" => name.to_s}}
+    end
+
     def method_param(param)
       {
         "name" => (param[:name] || param["name"]).to_s,

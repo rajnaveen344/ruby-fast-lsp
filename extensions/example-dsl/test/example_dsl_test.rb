@@ -25,11 +25,17 @@ class ExampleDslTest < Minitest::Test
       "enclosing_calls" => []
     }
     patches = extension.index_call(call)
-    namespace_patch = patches.fetch(0).fetch("DefineNamespace")
+    reference_patch = patches.fetch(0).fetch("AddReference")
+    assert_equal(
+      {"Namespace" => ["GeneratedRecord"]},
+      reference_patch.fetch("target")
+    )
+
+    namespace_patch = patches.fetch(1).fetch("DefineNamespace")
     assert_equal ["GeneratedRecord"], namespace_patch.fetch("namespace")
     assert_equal "Class", namespace_patch.fetch("kind")
 
-    constant_patch = patches.fetch(1).fetch("DefineConstant")
+    constant_patch = patches.fetch(2).fetch("DefineConstant")
     assert_equal "DEFAULT_NAME", constant_patch.fetch("name")
     assert_equal ["GeneratedRecord"], constant_patch.fetch("namespace")
     assert_equal(
@@ -40,7 +46,7 @@ class ExampleDslTest < Minitest::Test
       constant_patch.fetch("ruby_type")
     )
 
-    method_patch = patches.fetch(2).fetch("DefineMethod")
+    method_patch = patches.fetch(3).fetch("DefineMethod")
     assert_equal "name", method_patch.fetch("name")
     assert_equal ["ExampleModel"], method_patch.fetch("namespace")
     assert_equal "Private", method_patch.fetch("visibility")

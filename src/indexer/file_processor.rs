@@ -646,6 +646,11 @@ fn add_extension_analysis_facts(
                     }
                 }
             }
+            IndexPatch::AddReference(_) => {
+                // Resolved reference candidates are applied to FactCollector during
+                // extension call traversal and flow through FileFacts separately
+                // from direct parser/index facts.
+            }
             IndexPatch::DefineMethod(method) => {
                 let namespace = ruby_constants(&method.namespace, "DefineMethod namespace");
                 let ruby_method = RubyMethod::new(&method.name).unwrap_or_else(|err| {

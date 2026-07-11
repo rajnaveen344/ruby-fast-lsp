@@ -575,6 +575,7 @@ mod tests {
                 IndexPatch::DefineMethod(method) if method.name == "user" => Some(method),
                 IndexPatch::DefineNamespace(_)
                 | IndexPatch::DefineConstant(_)
+                | IndexPatch::AddReference(_)
                 | IndexPatch::DefineMethod(_)
                 | IndexPatch::ApplyMixin(_) => None,
             })

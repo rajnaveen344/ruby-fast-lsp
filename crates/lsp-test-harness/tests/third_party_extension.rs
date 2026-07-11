@@ -117,6 +117,21 @@ async fn independent_extension_package_uses_only_public_contracts() {
     );
     assert_eq!(namespace_definitions[0].range.start.line, 1);
     assert_eq!(namespace_definitions[0].range.start.character, 8);
+    let namespace_references = editor.references("app/example_model.rb", 5, 6).await;
+    assert!(
+        namespace_references.iter().any(|location| {
+            location.range.start.line == 1 && location.range.start.character == 8
+        }),
+        "the DSL argument must be an extension-generated reference to GeneratedRecord, got {namespace_references:?}"
+    );
+    let dsl_target = editor.goto_definition("app/example_model.rb", 1, 10).await;
+    assert_eq!(
+        dsl_target.len(),
+        1,
+        "go-to-definition from the generated DSL reference must resolve its target"
+    );
+    assert_eq!(dsl_target[0].range.start.line, 1);
+    assert_eq!(dsl_target[0].range.start.character, 8);
 
     let constant_definitions = editor.goto_definition("app/example_model.rb", 6, 23).await;
     assert_eq!(
@@ -156,6 +171,13 @@ async fn independent_extension_package_uses_only_public_contracts() {
     assert!(
         stale_namespace.is_empty(),
         "removing the DSL declaration must remove its generated namespace, got {stale_namespace:?}"
+    );
+    let stale_namespace_references = editor.references("app/example_model.rb", 3, 6).await;
+    assert!(
+        stale_namespace_references
+            .iter()
+            .all(|location| location.range.start.line != 1),
+        "removing the DSL declaration must remove its generated reference, got {stale_namespace_references:?}"
     );
     let stale_constant = editor.goto_definition("app/example_model.rb", 4, 23).await;
     assert!(

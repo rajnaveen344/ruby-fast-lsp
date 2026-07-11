@@ -38,6 +38,10 @@ impl EngineQuery {
             return self.find_yard_type_definitions(&yard_type.type_name, &ancestors);
         }
 
+        if let Some(locations) = self.resolved_reference_definition_locations(position) {
+            return Some(locations);
+        }
+
         let analyzer = RubyPrismAnalyzer::new(uri.clone(), content.to_string());
         let (identifier, _, ancestors, _scope_stack, namespace_kind) =
             analyzer.get_identifier(position);
@@ -63,6 +67,16 @@ impl EngineQuery {
             position,
             content,
         )
+    }
+
+    fn resolved_reference_definition_locations(&self, position: Position) -> Option<Vec<Location>> {
+        let document = self.doc.as_ref()?.read();
+        let file_id = document.analysis_file_id();
+        let byte_offset = document.position_to_analysis_offset(position);
+        let engine = self.analysis_engine()?.read();
+        let ranges = AnalysisQuery::new(&engine)
+            .resolved_reference_definition_ranges_at(file_id, byte_offset);
+        non_empty_locations(locations_for_ranges(&engine, ranges))
     }
 
     /// Find definitions for a local variable using VariableScopes (position-based lookup)

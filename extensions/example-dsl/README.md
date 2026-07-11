@@ -13,6 +13,9 @@ contracts without importing Ruby Fast LSP server or engine internals:
 - fields receive an editor code lens;
 - the generated namespace, constant, and method participate in ordinary
   engine-owned navigation and type hover, and disappear on reindex.
+- the `field` argument is an engine-owned semantic reference to the generated
+  class, so find-references includes the DSL declaration and removes it after
+  an edit.
 
 Run the source-level SDK test:
 

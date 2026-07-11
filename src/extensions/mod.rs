@@ -30,8 +30,8 @@ use walkdir::WalkDir;
 use crate::config::RubyFastLspConfig;
 use ruby_analysis::core::{
     FullyQualifiedName, GraphNodeKind, MethodCalleeResolution, MethodFact, NamespaceKind,
-    RubyConstant, RubyMethod, RubyType as AnalysisRubyType, SourceKind, SymbolFact,
-    SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
+    ReferenceCandidate, RubyConstant, RubyMethod, RubyType as AnalysisRubyType, SourceKind,
+    SymbolFact, SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
 };
 use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer as utils;
@@ -1525,6 +1525,12 @@ enum IndexPatchIdentity {
     Declaration {
         path: Vec<String>,
     },
+    Reference {
+        start_line: u32,
+        start_character: u32,
+        end_line: u32,
+        end_character: u32,
+    },
     Method {
         namespace: Vec<String>,
         owner_kind: String,
@@ -1542,6 +1548,12 @@ impl IndexPatchIdentity {
     fn display(&self) -> String {
         match self {
             Self::Declaration { path } => path.join("::"),
+            Self::Reference {
+                start_line,
+                start_character,
+                end_line,
+                end_character,
+            } => format!("reference at {start_line}:{start_character}-{end_line}:{end_character}"),
             Self::Method {
                 namespace,
                 owner_kind,
@@ -1624,6 +1636,12 @@ fn index_patch_identity(patch: &IndexPatch) -> IndexPatchIdentity {
             path.push(constant.name.clone());
             IndexPatchIdentity::Declaration { path }
         }
+        IndexPatch::AddReference(reference) => IndexPatchIdentity::Reference {
+            start_line: reference.location.start.line,
+            start_character: reference.location.start.character,
+            end_line: reference.location.end.line,
+            end_character: reference.location.end.character,
+        },
         IndexPatch::DefineMethod(method) => IndexPatchIdentity::Method {
             namespace: method.namespace.clone(),
             owner_kind: namespace_kind_name(method.owner_kind).to_string(),
@@ -1654,6 +1672,7 @@ fn index_patch_extension_id(patch: &IndexPatch) -> &str {
     match patch {
         IndexPatch::DefineNamespace(namespace) => &namespace.source.extension_id,
         IndexPatch::DefineConstant(constant) => &constant.source.extension_id,
+        IndexPatch::AddReference(reference) => &reference.source.extension_id,
         IndexPatch::DefineMethod(method) => &method.source.extension_id,
         IndexPatch::ApplyMixin(mixin) => &mixin.source.extension_id,
     }
@@ -1689,6 +1708,10 @@ fn validate_index_patch_payloads(patches: &[IndexPatch]) -> Result<(), String> {
                 validate_source_range(constant.location, "constant location")?;
                 analysis_ruby_type_from_extension(constant.ruby_type.as_ref())?;
             }
+            IndexPatch::AddReference(reference) => {
+                validate_reference_target(&reference.target)?;
+                validate_source_range(reference.location, "reference location")?;
+            }
             IndexPatch::DefineMethod(method) => {
                 RubyMethod::new(&method.name)
                     .map_err(|err| format!("invalid method name `{}`: {err}", method.name))?;
@@ -1715,6 +1738,25 @@ fn validate_extension_namespace(parts: &[String], label: &str) -> Result<(), Str
             .map_err(|err| format!("invalid {label} component `{part}`: {err}"))?;
     }
     Ok(())
+}
+
+fn validate_reference_target(
+    target: &ruby_fast_lsp_extension_api::ReferenceTarget,
+) -> Result<(), String> {
+    match target {
+        ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(namespace) => {
+            if namespace.is_empty() {
+                return Err("reference namespace target must not be empty".to_string());
+            }
+            validate_extension_namespace(namespace, "reference namespace target")
+        }
+        ruby_fast_lsp_extension_api::ReferenceTarget::Constant { namespace, name } => {
+            validate_extension_namespace(namespace, "reference constant namespace")?;
+            RubyConstant::new(name)
+                .map(|_| ())
+                .map_err(|err| format!("invalid reference constant name `{name}`: {err}"))
+        }
+    }
 }
 
 fn validate_source_range(range: SourceRange, label: &str) -> Result<(), String> {
@@ -1835,6 +1877,9 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
                     right.ruby_type.as_ref(),
                 )
         }
+        (IndexPatch::AddReference(left), IndexPatch::AddReference(right)) => {
+            left.target == right.target && left.location == right.location
+        }
         (IndexPatch::DefineMethod(left), IndexPatch::DefineMethod(right)) => {
             left.name == right.name
                 && left.namespace == right.namespace
@@ -1856,16 +1901,24 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
                 && left.location == right.location
         }
         (IndexPatch::DefineNamespace(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::DefineNamespace(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineNamespace(_), IndexPatch::DefineMethod(_))
         | (IndexPatch::DefineNamespace(_), IndexPatch::ApplyMixin(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::DefineConstant(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::DefineMethod(_))
         | (IndexPatch::DefineConstant(_), IndexPatch::ApplyMixin(_))
+        | (IndexPatch::AddReference(_), IndexPatch::DefineNamespace(_))
+        | (IndexPatch::AddReference(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::AddReference(_), IndexPatch::DefineMethod(_))
+        | (IndexPatch::AddReference(_), IndexPatch::ApplyMixin(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::DefineMethod(_), IndexPatch::AddReference(_))
         | (IndexPatch::DefineMethod(_), IndexPatch::ApplyMixin(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineNamespace(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineConstant(_))
+        | (IndexPatch::ApplyMixin(_), IndexPatch::AddReference(_))
         | (IndexPatch::ApplyMixin(_), IndexPatch::DefineMethod(_)) => false,
     }
 }
@@ -2827,6 +2880,38 @@ fn apply_patch(visitor: &mut FactCollector, patch: IndexPatch) {
                 visitor.type_store.add(fact.clone());
                 visitor.direct_facts.types.push(fact);
             }
+        }
+        IndexPatch::AddReference(reference) => {
+            let target = match &reference.target {
+                ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(namespace) => {
+                    FullyQualifiedName::namespace(
+                        namespace
+                            .iter()
+                            .map(|part| RubyConstant::new(part).expect(
+                                "INVARIANT VIOLATED: extension reference namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                            ))
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                ruby_fast_lsp_extension_api::ReferenceTarget::Constant { namespace, name } => {
+                    let mut parts = namespace
+                        .iter()
+                        .map(|part| RubyConstant::new(part).expect(
+                            "INVARIANT VIOLATED: extension reference constant namespace reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                        ))
+                        .collect::<Vec<_>>();
+                    parts.push(RubyConstant::new(name).expect(
+                        "INVARIANT VIOLATED: extension reference constant name reached application without validation. This is a bug because guest patches must be validated before conflict resolution. Fix: keep validate_index_patch_payloads before emitted patch collection.",
+                    ));
+                    FullyQualifiedName::constant(parts)
+                }
+            };
+            let range = visitor
+                .document
+                .lsp_range_to_text_range(range_from_abi(reference.location));
+            visitor
+                .reference_candidates
+                .push(ReferenceCandidate::resolved(range, target, None));
         }
         IndexPatch::DefineMethod(method) => {
             let return_type = analysis_ruby_type_from_extension(method.return_type.as_ref())
@@ -4129,6 +4214,71 @@ commands = ["standardrb"]
 
         assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
         assert!(err.message.contains("GeneratedRecord"));
+    }
+
+    #[test]
+    fn incompatible_generated_reference_targets_are_rejected_deterministically() {
+        let patch = |extension_id: &str, target| {
+            IndexPatch::AddReference(ruby_fast_lsp_extension_api::ReferencePatch {
+                target,
+                location: SourceRange {
+                    start: SourcePosition {
+                        line: 1,
+                        character: 8,
+                    },
+                    end: SourcePosition {
+                        line: 1,
+                        character: 13,
+                    },
+                },
+                source: ruby_fast_lsp_extension_api::PatchSource {
+                    extension_id: extension_id.to_string(),
+                    macro_name: "association".to_string(),
+                },
+            })
+        };
+
+        let err = resolve_index_patch_conflicts(vec![
+            patch(
+                "z-extension",
+                ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(vec!["User".to_string()]),
+            ),
+            patch(
+                "a-extension",
+                ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(
+                    vec!["Account".to_string()],
+                ),
+            ),
+        ])
+        .expect_err("one source range must not resolve to incompatible generated targets");
+
+        assert_eq!(err.extension_ids, vec!["a-extension", "z-extension"]);
+        assert!(err.message.contains("reference at 1:8-1:13"));
+    }
+
+    #[test]
+    fn invalid_generated_reference_target_is_rejected_before_fact_conversion() {
+        let patch = IndexPatch::AddReference(ruby_fast_lsp_extension_api::ReferencePatch {
+            target: ruby_fast_lsp_extension_api::ReferenceTarget::Namespace(Vec::new()),
+            location: SourceRange {
+                start: SourcePosition {
+                    line: 1,
+                    character: 8,
+                },
+                end: SourcePosition {
+                    line: 1,
+                    character: 13,
+                },
+            },
+            source: ruby_fast_lsp_extension_api::PatchSource {
+                extension_id: "reference-test".to_string(),
+                macro_name: "association".to_string(),
+            },
+        });
+
+        let err = validate_index_patch_payloads(&[patch])
+            .expect_err("empty generated reference targets must be rejected");
+        assert!(err.contains("must not be empty"), "got: {err}");
     }
 
     #[test]
