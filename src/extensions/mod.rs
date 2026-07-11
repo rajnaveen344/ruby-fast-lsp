@@ -68,6 +68,7 @@ struct ExtensionRegistry {
     tracked_call_names: BTreeSet<String>,
     semantic_seeded: Mutex<bool>,
     load_config: ExtensionLoadConfig,
+    discovery_fingerprint: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,13 +528,16 @@ impl fmt::Display for ExtensionLoadError {
 
 impl ExtensionRegistry {
     fn load(config: &ExtensionLoadConfig) -> Self {
-        let extensions = load_wasm_extensions(config);
+        let packages = discover_extension_packages(config);
+        let discovery_fingerprint = extension_packages_fingerprint(&packages);
+        let extensions = load_wasm_extensions_from_packages(packages);
         let tracked_call_names = tracked_call_names(&extensions);
         let registry = Self {
             extensions,
             tracked_call_names,
             semantic_seeded: Mutex::new(false),
             load_config: config.clone(),
+            discovery_fingerprint,
         };
         registry.activate();
         registry
@@ -543,6 +547,8 @@ impl ExtensionRegistry {
         self.load_config.package_paths == config.package_paths
             && self.load_config.directory_paths == config.directory_paths
             && self.load_config.project_package_paths == config.project_package_paths
+            && self.discovery_fingerprint
+                == extension_packages_fingerprint(&discover_extension_packages(config))
     }
 
     fn all_extensions_loaded(&self) -> bool {
@@ -1923,7 +1929,7 @@ fn index_patch_payload_eq(left: &IndexPatch, right: &IndexPatch) -> bool {
     }
 }
 
-fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExtension>> {
+fn discover_extension_packages(config: &ExtensionLoadConfig) -> Vec<ExtensionPackage> {
     let mut packages = Vec::new();
     for configured_path in &config.package_paths {
         if let Err(err) = collect_extension_package(configured_path, true, &mut packages) {
@@ -1949,7 +1955,50 @@ fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExten
             .then_with(|| left.wasm_path.cmp(&right.wasm_path))
     });
     packages.dedup_by(|left, right| left.wasm_path == right.wasm_path);
+    packages
+}
 
+fn extension_packages_fingerprint(packages: &[ExtensionPackage]) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(b"ruby-fast-lsp-extension-discovery-v1\0");
+    for package in packages {
+        digest.update([match package.source {
+            ExtensionPathSource::Environment => 0,
+            ExtensionPathSource::ProjectLocal => 1,
+            ExtensionPathSource::InitializationOptions => 2,
+        }]);
+        digest.update([u8::from(package.explicit_package)]);
+        let path = package.wasm_path.to_string_lossy();
+        digest.update((path.len() as u64).to_le_bytes());
+        digest.update(path.as_bytes());
+        let manifest = format!("{:?}", package.manifest);
+        digest.update((manifest.len() as u64).to_le_bytes());
+        digest.update(manifest.as_bytes());
+        match fs::read(&package.wasm_path) {
+            Ok(bytes) => {
+                digest.update([1]);
+                digest.update((bytes.len() as u64).to_le_bytes());
+                digest.update(bytes);
+            }
+            Err(err) => {
+                digest.update([0]);
+                let error = err.to_string();
+                digest.update((error.len() as u64).to_le_bytes());
+                digest.update(error.as_bytes());
+            }
+        }
+    }
+    digest.finalize().into()
+}
+
+#[cfg(test)]
+fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExtension>> {
+    load_wasm_extensions_from_packages(discover_extension_packages(config))
+}
+
+fn load_wasm_extensions_from_packages(
+    packages: Vec<ExtensionPackage>,
+) -> Vec<Arc<LoadedWasmExtension>> {
     let mut extension_ids = BTreeSet::new();
     packages
         .into_iter()
@@ -1970,6 +2019,7 @@ fn load_wasm_extensions(config: &ExtensionLoadConfig) -> Vec<Arc<LoadedWasmExten
         .collect::<Vec<_>>()
 }
 
+#[derive(Debug)]
 struct ExtensionPackage {
     wasm_path: PathBuf,
     manifest: Option<ExtensionManifest>,
@@ -3335,6 +3385,40 @@ globs = ["config/routes.rb"]
             registry.status_reports()[0].status,
             "loaded",
             "a failed extension must be recreated so corrected settings can recover it"
+        );
+    }
+
+    #[test]
+    fn in_place_package_change_reloads_same_configured_path() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("rspec-ruby");
+        copy_rspec_package(&package, "0.1.0");
+        let config = RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        };
+        let registry = ExtensionRegistryHandle::from_config(&config);
+        let previous = registry.extensions()[0].clone();
+        assert_eq!(
+            registry.status_reports()[0].version.as_deref(),
+            Some("0.1.0")
+        );
+
+        copy_rspec_package(&package, "0.2.0");
+        registry.configure_from_config(&config);
+
+        let reports = registry.status_reports();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].status, "loaded");
+        assert_eq!(
+            reports[0].version.as_deref(),
+            Some("0.2.0"),
+            "changing a package in place must reload it even when configured paths are unchanged"
+        );
+        assert_eq!(
+            previous.status_report().status,
+            "deactivated",
+            "the replaced guest must receive lifecycle.deactivate after the replacement is active"
         );
     }
 

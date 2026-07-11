@@ -928,3 +928,24 @@ At the end of every goal session, record:
   several stable semantic patch families now have direct evidence. Milestone 2
   still needs explicit safe reload/replacement coverage and the remaining
   Rails-oriented relationship hooks before its 7.7 target is justified.
+
+### July 2026: Content-aware transactional extension reload
+
+- Correctness: extension discovery now fingerprints the ordered package source,
+  precedence, path, parsed manifest, and Wasm bytes. A package replaced in
+  place can no longer be mistaken for a settings-only update merely because its
+  configured path is unchanged.
+- Lifecycle: changed content is loaded and activated in a replacement registry
+  before the atomic swap; the previous guest receives `lifecycle.deactivate`
+  afterward. Unchanged content retains the cheaper `settings.changed` path and
+  preserves guest state.
+- Determinism: reload identity is content-based rather than filesystem
+  timestamps, so identical package inputs behave consistently across machines
+  and coarse timestamp filesystems.
+- Focused evidence: a regression replaces the bundled RSpec fixture in place
+  with a new manifest version at the same path, reuses the identical config,
+  observes the new version as loaded, and observes the previous guest as
+  deactivated.
+- Rating remains **7.5/10**. Safe reload/replacement is now evidenced; remaining
+  Milestone 2 work is the Rails-oriented relationship vocabulary and a final
+  criterion-by-criterion extension-platform audit before considering 7.7.

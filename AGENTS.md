@@ -178,6 +178,12 @@ send `settings.changed` without recreating healthy guests. Discovery changes
 transactionally replace the registry and deactivate the old guests, while LSP
 shutdown deactivates the active registry. Lifecycle output may update private
 guest state but must not contain semantic, response, or command patches.
+Registry discovery stores a deterministic fingerprint of each discovered
+package's parsed manifest, Wasm bytes, path, source, and explicit/discovered
+precedence. Reconfiguration with unchanged paths uses the settings-only path
+only when that fingerprint is also unchanged. In-place package updates activate
+a replacement registry first, swap atomically, then deactivate the previous
+guests; do not use timestamps as semantic reload identity.
 
 Project-local extension discovery is fail-closed on workspace trust. Trusted
 roots may contribute manifest packages from `.ruby-fast-lsp/extensions/*` and
