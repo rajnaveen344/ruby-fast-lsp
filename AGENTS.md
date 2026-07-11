@@ -165,6 +165,13 @@ call boundary resets its fuel and 500 ms epoch deadline, including allocation
 and deallocation exports. Deadline traps disable only that extension and appear
 as `slow` through `ruby-fast-lsp/extensions/status`.
 
+Extension guests activate before becoming eligible for indexing/request events.
+Activation receives the extension's `extensionSettings`; settings-only changes
+send `settings.changed` without recreating healthy guests. Discovery changes
+transactionally replace the registry and deactivate the old guests, while LSP
+shutdown deactivates the active registry. Lifecycle output may update private
+guest state but must not contain semantic, response, or command patches.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

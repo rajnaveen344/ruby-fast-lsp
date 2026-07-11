@@ -2113,6 +2113,7 @@ dependencies = [
  "unicode-ident",
  "ustr",
  "walkdir",
+ "wat",
  "windows-sys 0.59.0",
  "zstd",
 ]
@@ -2122,6 +2123,7 @@ name = "ruby-fast-lsp-extension-api"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

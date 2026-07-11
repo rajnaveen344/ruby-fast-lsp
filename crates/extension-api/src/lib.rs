@@ -16,6 +16,8 @@ pub struct ExtensionEvent {
     pub event: String,
     pub call: Option<CallContext>,
     pub document: Option<DocumentContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

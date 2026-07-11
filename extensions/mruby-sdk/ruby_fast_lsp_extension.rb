@@ -238,6 +238,8 @@ module RubyFastLspExtension
   end
 
   class Extension
+    attr_reader :settings
+
     attr_reader :id
 
     def initialize(id)
@@ -249,6 +251,18 @@ module RubyFastLspExtension
 
     def on_call(*names, &block)
       names.each { |name| @handlers[name] = block }
+    end
+
+    def on_activate(&block)
+      @activation_handler = block
+    end
+
+    def on_settings_changed(&block)
+      @settings_handler = block
+    end
+
+    def on_deactivate(&block)
+      @deactivation_handler = block
     end
 
     def on_document_symbols(&block)
@@ -275,6 +289,17 @@ module RubyFastLspExtension
     def handle_event(raw_event)
       event_name = raw_event["event"] || raw_event[:event]
       case event_name
+      when "lifecycle.activate"
+        @settings = raw_event["settings"] || raw_event[:settings]
+        @activation_handler.call(@settings) if @activation_handler
+        empty_output
+      when "settings.changed"
+        @settings = raw_event["settings"] || raw_event[:settings]
+        @settings_handler.call(@settings) if @settings_handler
+        empty_output
+      when "lifecycle.deactivate"
+        @deactivation_handler.call if @deactivation_handler
+        empty_output
       when "index.call.enter"
         {
           "index_patches" => index_call(raw_event["call"] || raw_event[:call]),
@@ -300,6 +325,14 @@ module RubyFastLspExtension
           "command_patches" => []
         }
       end
+    end
+
+    def empty_output
+      {
+        "index_patches" => [],
+        "response_patches" => [],
+        "command_patches" => []
+      }
     end
 
     def document_symbols(raw_document)

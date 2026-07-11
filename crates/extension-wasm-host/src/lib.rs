@@ -287,6 +287,7 @@ impl WasmExtension {
                 event: "index.call.enter".to_string(),
                 call: Some(ctx.clone()),
                 document: None,
+                settings: None,
             };
             return self.handle_event(&event).map(|output| output.index_patches);
         }
@@ -516,6 +517,7 @@ mod tests {
                 event: "index.call.enter".to_string(),
                 call: Some(let_context()),
                 document: None,
+                settings: None,
             })
             .unwrap();
         assert_eq!(output.index_patches.len(), 1);
@@ -600,6 +602,7 @@ mod tests {
                     text: "\nRSpec.describe User do\n  it \"returns name\" do\n  end\nend\n"
                         .to_string(),
                 }),
+                settings: None,
             })
             .unwrap();
 

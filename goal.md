@@ -624,3 +624,27 @@ At the end of every goal session, record:
   Milestone 2 still requires complete lifecycle/settings/watchers/process
   contracts, project-local discovery, broader patch families, SDK stability,
   and a minimal third-party acceptance fixture.
+
+### July 2026: Extension activation, settings reload, and shutdown
+
+- Lifecycle: every discovered Wasm guest receives bounded
+  `lifecycle.activate` before it can handle indexing or request events. Guests
+  that fail activation remain observable but cannot execute.
+- Settings: activation receives the guest's value from `extensionSettings`;
+  settings-only changes send `settings.changed` to the existing healthy guest
+  without paying Wasm rebuild or ticker churn. A failed guest is recreated on
+  the next change so corrected settings can recover it.
+- Replacement and shutdown: discovery changes activate a replacement registry,
+  swap it atomically, and deactivate the previous registry. LSP shutdown sends
+  `lifecycle.deactivate` to every active guest.
+- Safety: lifecycle events run under the existing payload, memory, fuel, and
+  wall limits. Lifecycle callbacks may update private state but any returned
+  semantic, response, or command patches disable that extension rather than
+  silently mutating server state.
+- SDK evidence: the mruby SDK now exposes `on_activate`,
+  `on_settings_changed`, `on_deactivate`, and the current settings value.
+  Focused host tests prove activation failure isolation, settings notification
+  and recovery, and clean deactivation.
+- Rating remains **7.3/10**. Milestone 2 still requires watcher routing,
+  project-local discovery/trust, process hosting, broader patch families, SDK
+  stability, and a minimal third-party acceptance fixture.

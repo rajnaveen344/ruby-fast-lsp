@@ -425,7 +425,8 @@ fn preserve_initialization_only_config(
     }
 }
 
-pub async fn handle_shutdown(_: &RubyLanguageServer) -> LspResult<()> {
+pub async fn handle_shutdown(server: &RubyLanguageServer) -> LspResult<()> {
     info!("Shutting down Ruby LSP server");
+    server.extension_registry.shutdown();
     Ok(())
 }

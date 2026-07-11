@@ -141,6 +141,20 @@ Editor clients may pass per-extension settings during initialize:
 }
 ```
 
+The host sends `lifecycle.activate` after a guest is instantiated and before it
+can receive indexing or request events. The event includes that extension's
+entry from `extensionSettings`. Settings-only configuration changes preserve the
+guest and send `settings.changed`; a failed guest is recreated on the next
+configuration change so corrected settings can recover it. Package/discovery
+changes activate the replacement registry before swapping it in, then
+deactivate the old registry. LSP shutdown sends `lifecycle.deactivate` and waits
+for every loaded guest to finish within the normal Wasm execution limits.
+
+The mruby SDK exposes `on_activate`, `on_settings_changed`, `on_deactivate`, and
+the current `settings` value. Lifecycle callbacks maintain private extension
+state only; returning semantic, response, or command patches from lifecycle
+events disables the extension.
+
 The server validates manifests and exposes loaded state through:
 
 ```text
@@ -317,13 +331,11 @@ Current slice:
 - mruby SDK exposes `handle_event(raw_event)` and returns `ExtensionOutput`.
 - RSpec Ruby exports both `handle_event` and the compatibility `index_call`.
 
-Required exports:
+Lifecycle is currently carried through `handle_event`; future dedicated exports
+may optimize this without changing the event contract:
 
 - `extension_info()`
-- `activate(ctx)`
-- `deactivate()`
 - `handle_event(event_json)`
-- `settings_changed(json)`
 - `watched_files_changed(json)`
 
 Events:
@@ -380,8 +392,10 @@ mode. Server owns merge/conflict policy.
 
 ### Settings and Watchers
 
-- Add `rubyFastLsp.extensionSettings`.
-- Route per-extension settings to `activate` and `settings_changed`.
+- Done: `rubyFastLsp.extensionSettings` is routed through bounded
+  `lifecycle.activate` and `settings.changed` events.
+- Done: package reload and server shutdown send bounded
+  `lifecycle.deactivate` events, and lifecycle failures disable only that guest.
 - Let manifests declare watched file globs.
 - Register file watchers through LSP when the client supports them.
 - Route changes for files such as `.rubocop.yml`, `.standard.yml`,

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,6 +48,7 @@ struct ExtensionRegistry {
     extensions: Vec<Arc<LoadedWasmExtension>>,
     tracked_call_names: BTreeSet<String>,
     semantic_seeded: Mutex<bool>,
+    load_config: ExtensionLoadConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +102,9 @@ struct ExtensionMetadata {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ExtensionStatus {
+    Discovered,
     Loaded,
+    Deactivated,
     Slow { reason: String },
     Failed { reason: String },
 }
@@ -117,10 +120,11 @@ impl ExtensionStatus {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct ExtensionLoadConfig {
     package_paths: Vec<ConfiguredExtensionPath>,
     directory_paths: Vec<ConfiguredExtensionPath>,
+    settings: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +133,7 @@ enum ExtensionPathSource {
     InitializationOptions,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredExtensionPath {
     path: PathBuf,
     source: ExtensionPathSource,
@@ -211,6 +215,7 @@ impl ExtensionLoadConfig {
                         source: ExtensionPathSource::InitializationOptions,
                     }),
             );
+        load_config.settings = config.extension_settings.clone();
         load_config
             .directory_paths
             .extend(
@@ -266,7 +271,21 @@ impl ExtensionRegistryHandle {
 
     pub fn configure_from_config(&self, config: &RubyFastLspConfig) {
         let load_config = ExtensionLoadConfig::from_config(config);
-        *self.inner.write() = ExtensionRegistry::load(&load_config);
+        let mut registry = self.inner.write();
+        if registry.same_discovery(&load_config) && registry.all_extensions_loaded() {
+            registry.update_settings(load_config.settings.clone());
+            registry.load_config.settings = load_config.settings;
+            return;
+        }
+
+        let replacement = ExtensionRegistry::load(&load_config);
+        let previous = std::mem::replace(&mut *registry, replacement);
+        drop(registry);
+        previous.deactivate();
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.read().deactivate();
     }
 
     pub fn status_reports(&self) -> Vec<ExtensionStatusReport> {
@@ -329,10 +348,59 @@ impl ExtensionRegistry {
     fn load(config: &ExtensionLoadConfig) -> Self {
         let extensions = load_wasm_extensions(config);
         let tracked_call_names = tracked_call_names(&extensions);
-        Self {
+        let registry = Self {
             extensions,
             tracked_call_names,
             semantic_seeded: Mutex::new(false),
+            load_config: config.clone(),
+        };
+        registry.activate();
+        registry
+    }
+
+    fn same_discovery(&self, config: &ExtensionLoadConfig) -> bool {
+        self.load_config.package_paths == config.package_paths
+            && self.load_config.directory_paths == config.directory_paths
+    }
+
+    fn all_extensions_loaded(&self) -> bool {
+        self.extensions
+            .iter()
+            .all(|extension| extension.is_loaded())
+    }
+
+    fn activate(&self) {
+        for extension in &self.extensions {
+            let settings = self
+                .load_config
+                .settings
+                .get(&extension.metadata.id)
+                .cloned();
+            extension.handle_lifecycle_event("lifecycle.activate", settings);
+        }
+    }
+
+    fn update_settings(&self, settings: BTreeMap<String, serde_json::Value>) {
+        if self.load_config.settings == settings {
+            return;
+        }
+        for extension in &self.extensions {
+            if !extension.is_loaded() {
+                continue;
+            }
+            let previous = self.load_config.settings.get(&extension.metadata.id);
+            let current = settings.get(&extension.metadata.id);
+            if previous != current {
+                extension.handle_lifecycle_event("settings.changed", current.cloned());
+            }
+        }
+    }
+
+    fn deactivate(&self) {
+        for extension in &self.extensions {
+            if extension.is_loaded() {
+                extension.handle_lifecycle_event("lifecycle.deactivate", None);
+            }
         }
     }
 
@@ -438,7 +506,7 @@ impl LoadedWasmExtension {
         Self {
             metadata,
             extension: Mutex::new(extension),
-            status: Mutex::new(ExtensionStatus::Loaded),
+            status: Mutex::new(ExtensionStatus::Discovered),
             indexed_call_names,
             semantic_targets,
         }
@@ -448,6 +516,40 @@ impl LoadedWasmExtension {
         *self.status.lock() == ExtensionStatus::Loaded
     }
 
+    fn handle_lifecycle_event(&self, event_name: &str, settings: Option<serde_json::Value>) {
+        let event = ExtensionEvent {
+            event: event_name.to_string(),
+            call: None,
+            document: None,
+            settings,
+        };
+        let mut extension = self.extension.lock();
+        match extension.handle_event(&event) {
+            Ok(output)
+                if output.index_patches.is_empty()
+                    && output.response_patches.is_empty()
+                    && output.command_patches.is_empty() =>
+            {
+                let mut status = self.status.lock();
+                *status = match event_name {
+                    "lifecycle.activate" | "settings.changed" => ExtensionStatus::Loaded,
+                    "lifecycle.deactivate" => ExtensionStatus::Deactivated,
+                    other => panic!(
+                        "INVARIANT VIOLATED: unsupported extension lifecycle event `{other}`. This is a bug because lifecycle state transitions must be explicit. Fix: add the event and its resulting state to handle_lifecycle_event."
+                    ),
+                };
+            }
+            Ok(_) => self.fail(format!(
+                "extension `{}` returned patches from `{event_name}`; lifecycle events must not mutate semantic or editor state",
+                self.metadata.id
+            )),
+            Err(err) => self.fail(format!(
+                "extension `{}` {event_name} failed: {err}",
+                self.metadata.id
+            )),
+        }
+    }
+
     fn fail(&self, reason: impl Into<String>) {
         *self.status.lock() = ExtensionStatus::from_failure(reason);
     }
@@ -455,7 +557,9 @@ impl LoadedWasmExtension {
     fn status_report(&self) -> ExtensionStatusReport {
         let status_guard = self.status.lock();
         let (status, last_error) = match &*status_guard {
+            ExtensionStatus::Discovered => ("discovered", None),
             ExtensionStatus::Loaded => ("loaded", None),
+            ExtensionStatus::Deactivated => ("deactivated", None),
             ExtensionStatus::Slow { reason } => ("slow", Some(reason.clone())),
             ExtensionStatus::Failed { reason } => ("failed", Some(reason.clone())),
         };
@@ -674,6 +778,7 @@ fn handle_response_event(
             uri: uri.to_string(),
             text: text.to_string(),
         }),
+        settings: None,
     };
     let extensions = registry.extensions();
 
@@ -1713,6 +1818,194 @@ mod tests {
             .expect("bundled RSpec wasm must be copied");
     }
 
+    fn write_activation_failure_package(destination: &Path) {
+        fs::create_dir_all(destination).expect("test package directory must be created");
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "[]")
+              (func (export "alloc") (param $len i32) (result i32)
+                i32.const 4096)
+              (func (export "dealloc") (param $ptr i32) (param $len i32))
+              (func (export "abi_version") (result i32)
+                i32.const 1)
+              (func (export "indexed_call_names") (result i64)
+                i64.const 4398046511106)
+              (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 4398046511106)
+              (func (export "handle_event") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 0)
+            )
+            "#,
+        )
+        .expect("test lifecycle Wasm must compile");
+        fs::write(destination.join("extension.wasm"), wasm)
+            .expect("test lifecycle Wasm must be written");
+        fs::write(
+            destination.join("extension.toml"),
+            r#"
+id = "activation-failure"
+name = "Activation Failure"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.0, <0.3.0"
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+capabilities = []
+permissions = []
+
+[indexing]
+call_names = []
+"#,
+        )
+        .expect("test lifecycle manifest must be written");
+    }
+
+    fn write_settings_failure_package(destination: &Path) {
+        fs::create_dir_all(destination).expect("test package directory must be created");
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "[]")
+              (data (i32.const 2048) "{\"index_patches\":[],\"response_patches\":[],\"command_patches\":[]}")
+              (func (export "alloc") (param $len i32) (result i32)
+                i32.const 4096)
+              (func (export "dealloc") (param $ptr i32) (param $len i32))
+              (func (export "abi_version") (result i32)
+                i32.const 1)
+              (func (export "indexed_call_names") (result i64)
+                i64.const 4398046511106)
+              (func (export "index_call") (param $ptr i32) (param $len i32) (result i64)
+                i64.const 4398046511106)
+              (func (export "handle_event") (param $ptr i32) (param $len i32) (result i64)
+                local.get $ptr
+                i32.const 10
+                i32.add
+                i32.load8_u
+                i32.const 115
+                i32.eq
+                if (result i64)
+                  i64.const 0
+                else
+                  i64.const 8796093022271
+                end)
+            )
+            "#,
+        )
+        .expect("test settings Wasm must compile");
+        fs::write(destination.join("extension.wasm"), wasm)
+            .expect("test settings Wasm must be written");
+        fs::write(
+            destination.join("extension.toml"),
+            r#"
+id = "settings-failure"
+name = "Settings Failure"
+version = "0.1.0"
+abi_version = 1
+server_version = ">=0.2.0, <0.3.0"
+runtime = "mruby-wasm"
+wasm = "extension.wasm"
+capabilities = []
+permissions = []
+
+[indexing]
+call_names = []
+"#,
+        )
+        .expect("test settings manifest must be written");
+    }
+
+    #[test]
+    fn activation_failure_disables_extension_before_use() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("activation-failure");
+        write_activation_failure_package(&package);
+
+        let registry = ExtensionRegistry::load(&ExtensionLoadConfig {
+            package_paths: vec![ConfiguredExtensionPath {
+                path: package,
+                source: ExtensionPathSource::InitializationOptions,
+            }],
+            directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
+        });
+
+        let reports = registry.status_reports();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].id, "activation-failure");
+        assert_eq!(reports[0].status, "failed");
+        assert!(
+            reports[0]
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("activation")),
+            "INVARIANT VIOLATED: activation failure was not reported with lifecycle context. \
+             This is a bug because users cannot diagnose why an extension was disabled. \
+             Fix: retain the activation error in extension status."
+        );
+    }
+
+    #[test]
+    fn settings_only_reconfiguration_notifies_existing_extension() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("settings-failure");
+        write_settings_failure_package(&package);
+        let mut config = RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        };
+        let registry = ExtensionRegistryHandle::from_config(&config);
+        assert_eq!(registry.status_reports()[0].status, "loaded");
+
+        config.extension_settings.insert(
+            "settings-failure".to_string(),
+            serde_json::json!({"mode": "strict"}),
+        );
+        registry.configure_from_config(&config);
+
+        let reports = registry.status_reports();
+        assert_eq!(reports[0].status, "failed");
+        assert!(
+            reports[0]
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("settings.changed")),
+            "INVARIANT VIOLATED: settings event failure lacks event context. \
+             This is a bug because settings-only reload failures must be diagnosable. \
+             Fix: report the settings.changed event in extension status."
+        );
+
+        config.extension_settings.insert(
+            "settings-failure".to_string(),
+            serde_json::json!({"mode": "relaxed"}),
+        );
+        registry.configure_from_config(&config);
+        assert_eq!(
+            registry.status_reports()[0].status,
+            "loaded",
+            "a failed extension must be recreated so corrected settings can recover it"
+        );
+    }
+
+    #[test]
+    fn shutdown_deactivates_loaded_extensions() {
+        let temp_dir = TempDir::new().expect("test temp dir must be created");
+        let package = temp_dir.path().join("rspec-ruby");
+        copy_rspec_package(&package, "0.1.0");
+        let config = RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        };
+        let registry = ExtensionRegistryHandle::from_config(&config);
+        assert_eq!(registry.status_reports()[0].status, "loaded");
+
+        registry.shutdown();
+
+        assert_eq!(registry.status_reports()[0].status, "deactivated");
+    }
+
     #[test]
     fn initialization_package_wins_duplicate_id_independent_of_path_order() {
         let temp_dir = TempDir::new().expect("test temp dir must be created");
@@ -1732,6 +2025,7 @@ mod tests {
                 },
             ],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         });
 
         let reports = registry.status_reports();
@@ -1766,6 +2060,7 @@ mod tests {
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -1837,6 +2132,7 @@ wasm = "missing.wasm"
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -1860,6 +2156,7 @@ wasm = "missing.wasm"
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -1900,6 +2197,7 @@ permissions = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -1941,6 +2239,7 @@ permissions = []
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -1984,6 +2283,7 @@ commands = ["standardrb"]
                 source: ExtensionPathSource::InitializationOptions,
             }],
             directory_paths: Vec::new(),
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);
@@ -2007,6 +2307,7 @@ commands = ["standardrb"]
                 path: temp_dir.path().to_path_buf(),
                 source: ExtensionPathSource::InitializationOptions,
             }],
+            settings: BTreeMap::new(),
         };
 
         let extensions = load_wasm_extensions(&config);

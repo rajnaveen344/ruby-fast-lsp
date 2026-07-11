@@ -7,3 +7,4 @@ description = "Stable extension ABI types for Ruby Fast LSP"
 
 [dependencies]
 serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0"
