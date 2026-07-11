@@ -159,6 +159,12 @@ before packaging when versions drift. The npm install smoke test packs the local
 CLI and current-platform package into a clean temporary project and proves the
 installed wrapper can complete a real LSP initialize handshake.
 
+Wasm extensions are bounded by payload, memory, fuel, and wall-clock limits.
+Each loaded extension owns one cancellable Wasmtime epoch ticker; every guest
+call boundary resets its fuel and 500 ms epoch deadline, including allocation
+and deallocation exports. Deadline traps disable only that extension and appear
+as `slow` through `ruby-fast-lsp/extensions/status`.
+
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 
 Long-term goal: `ruby-fast-lsp` should be a thin editor/LSP adapter over reusable

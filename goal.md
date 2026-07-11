@@ -602,3 +602,25 @@ At the end of every goal session, record:
   invariant, but Milestone 2 still lacks complete lifecycle events, project-
   local discovery, settings/watchers/process hosting, wall-clock isolation,
   broader patch families, and a third-party acceptance fixture.
+
+### July 2026: Wasm wall-clock isolation and slow status
+
+- Isolation: every Wasm guest boundary is now protected by both deterministic
+  fuel and a 500 ms wall-clock deadline, including module instantiation,
+  allocation, ABI queries, event/index calls, and deallocation.
+- Runtime design: each loaded extension owns one cancellable Wasmtime epoch
+  ticker instead of spawning a thread for every DSL call on the indexing path.
+  Dropping or reconfiguring the registry stops and joins those tickers.
+- Failure behavior: an epoch interruption returns a recoverable error, disables
+  only the offending extension, and leaves unrelated extensions and core editor
+  features available.
+- Observability: deadline failures are classified as `slow` with their error in
+  `ruby-fast-lsp/extensions/status`; other guest failures remain `failed`.
+- Focused evidence: an infinite-loop guest with a deliberately huge fuel budget
+  is interrupted by the wall deadline in well under one second, alongside the
+  existing ABI, payload, fuel, memory, RSpec Wasm, and status-classification
+  tests.
+- Rating remains **7.3/10**. Execution isolation is materially stronger, but
+  Milestone 2 still requires complete lifecycle/settings/watchers/process
+  contracts, project-local discovery, broader patch families, SDK stability,
+  and a minimal third-party acceptance fixture.

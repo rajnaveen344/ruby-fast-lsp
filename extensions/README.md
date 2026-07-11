@@ -249,8 +249,9 @@ What is done:
 - Extension hook context uses the same core method-resolution path as
   definitions, including exact and receiver-only callee options.
 - Wasm host enforces input/output payload limits, memory growth limits, and
-  per-call fuel budgets; failures are recoverable and disable only that
-  extension.
+  per-call fuel budgets. A 500 ms Wasmtime epoch deadline independently bounds
+  wall-clock execution at every guest call boundary. Failures are recoverable
+  and disable only that extension; deadline failures are observable as `slow`.
 - Recoverable failure path for bad response patches and guest failures.
 - Full test suite green for current scope.
 
@@ -260,8 +261,8 @@ What remains to reach 9.5+/10:
   carry local lookup variants.
 - Expand ABI beyond current patch set: hover, completion, diagnostics, code
   actions, test items, formatting, definition locations, and references.
-- Add wall-clock timeout and slow-extension status on top of deterministic fuel
-  budgets.
+- Add configurable per-capability timeout budgets and performance reporting on
+  top of the enforced 500 ms wall-clock ceiling.
 - Publish stable Ruby SDK docs with versioning/migration rules for third-party
   extension authors.
 - Add perf benchmarks for many loaded extensions and large projects.

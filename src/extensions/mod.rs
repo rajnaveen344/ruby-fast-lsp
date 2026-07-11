@@ -102,7 +102,19 @@ struct ExtensionMetadata {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ExtensionStatus {
     Loaded,
+    Slow { reason: String },
     Failed { reason: String },
+}
+
+impl ExtensionStatus {
+    fn from_failure(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        if reason.contains("wall-clock deadline") {
+            Self::Slow { reason }
+        } else {
+            Self::Failed { reason }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -437,15 +449,14 @@ impl LoadedWasmExtension {
     }
 
     fn fail(&self, reason: impl Into<String>) {
-        *self.status.lock() = ExtensionStatus::Failed {
-            reason: reason.into(),
-        };
+        *self.status.lock() = ExtensionStatus::from_failure(reason);
     }
 
     fn status_report(&self) -> ExtensionStatusReport {
         let status_guard = self.status.lock();
         let (status, last_error) = match &*status_guard {
             ExtensionStatus::Loaded => ("loaded", None),
+            ExtensionStatus::Slow { reason } => ("slow", Some(reason.clone())),
             ExtensionStatus::Failed { reason } => ("failed", Some(reason.clone())),
         };
         ExtensionStatusReport {
@@ -1732,6 +1743,15 @@ mod tests {
         );
         assert_eq!(reports[0].id, "rspec-ruby");
         assert_eq!(reports[0].version.as_deref(), Some("0.1.0-initialization"));
+    }
+
+    #[test]
+    fn wall_clock_deadline_is_reported_as_slow_status() {
+        let status = ExtensionStatus::from_failure(
+            "failed to call extension: extension wall-clock deadline exceeded",
+        );
+
+        assert!(matches!(status, ExtensionStatus::Slow { .. }));
     }
 
     #[test]

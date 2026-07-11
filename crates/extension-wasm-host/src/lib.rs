@@ -1,4 +1,8 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use ruby_fast_lsp_extension_api::{
@@ -13,6 +17,8 @@ const DEFAULT_MAX_INPUT_BYTES: usize = 64 * 1024;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const DEFAULT_MAX_MEMORY_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_FUEL_PER_CALL: u64 = 100_000_000;
+const DEFAULT_WALL_TIMEOUT: Duration = Duration::from_millis(500);
+const EPOCH_TICK: Duration = Duration::from_millis(5);
 
 #[derive(Clone, Copy, Debug)]
 pub struct WasmExtensionConfig {
@@ -20,6 +26,7 @@ pub struct WasmExtensionConfig {
     pub max_output_bytes: usize,
     pub max_memory_bytes: usize,
     pub fuel_per_call: u64,
+    pub wall_timeout: Duration,
 }
 
 impl Default for WasmExtensionConfig {
@@ -29,6 +36,7 @@ impl Default for WasmExtensionConfig {
             max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
             max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
             fuel_per_call: DEFAULT_FUEL_PER_CALL,
+            wall_timeout: DEFAULT_WALL_TIMEOUT,
         }
     }
 }
@@ -36,6 +44,39 @@ impl Default for WasmExtensionConfig {
 struct ExtensionStore {
     wasi: p1::WasiP1Ctx,
     limits: StoreLimits,
+}
+
+struct EpochTicker {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl EpochTicker {
+    fn start(engine: Engine) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let thread = thread::spawn(move || {
+            while !thread_stop.load(Ordering::Acquire) {
+                thread::sleep(EPOCH_TICK);
+                engine.increment_epoch();
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for EpochTicker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            thread.join().expect(
+                "INVARIANT VIOLATED: extension epoch ticker thread panicked. This is a bug because the ticker only sleeps and increments a Wasmtime engine epoch. Fix: remove panicking work from the ticker loop.",
+            );
+        }
+    }
 }
 
 pub struct WasmExtension {
@@ -50,6 +91,7 @@ pub struct WasmExtension {
     id: String,
     indexed_call_names_cache: Vec<String>,
     config: WasmExtensionConfig,
+    _epoch_ticker: EpochTicker,
 }
 
 impl WasmExtension {
@@ -96,6 +138,12 @@ impl WasmExtension {
         module: Module,
         host_config: WasmExtensionConfig,
     ) -> Result<Self> {
+        if host_config.wall_timeout.is_zero() {
+            return Err(anyhow!(
+                "extension wall-clock timeout must be greater than zero"
+            ));
+        }
+        let epoch_ticker = EpochTicker::start(engine.clone());
         let state = ExtensionStore {
             wasi: WasiCtxBuilder::new().build_p1(),
             limits: StoreLimitsBuilder::new()
@@ -108,17 +156,14 @@ impl WasmExtension {
         };
         let mut store = Store::new(engine, state);
         store.limiter(|state| &mut state.limits);
-        map_wasmtime(
-            store.set_fuel(host_config.fuel_per_call),
-            "failed to set extension fuel before instantiate",
-        )?;
+        prepare_store(&mut store, host_config, "instantiate")?;
 
         let mut linker = Linker::new(engine);
         map_wasmtime(
             p1::add_to_linker_sync(&mut linker, |state: &mut ExtensionStore| &mut state.wasi),
             "failed to add WASI preview1 imports to extension linker",
         )?;
-        let instance = map_wasmtime(
+        let instance = map_guest_call(
             linker.instantiate(&mut store, &module),
             "failed to instantiate extension",
         )?;
@@ -150,16 +195,11 @@ impl WasmExtension {
             .get_typed_func::<(i32, i32), i64>(&mut store, "handle_event")
             .ok();
 
-        let actual_abi = map_wasmtime(
-            store.set_fuel(host_config.fuel_per_call),
-            "failed to set extension fuel before abi_version",
-        )
-        .and_then(|()| {
-            map_wasmtime(
-                abi_version.call(&mut store, ()),
-                "failed to call extension abi_version",
-            )
-        })?;
+        prepare_store(&mut store, host_config, "abi_version")?;
+        let actual_abi = map_guest_call(
+            abi_version.call(&mut store, ()),
+            "failed to call extension abi_version",
+        )?;
         if actual_abi != ABI_VERSION as i32 {
             return Err(anyhow!(
                 "Wasm extension ABI version {} != host ABI version {}",
@@ -168,11 +208,8 @@ impl WasmExtension {
             ));
         }
 
-        map_wasmtime(
-            store.set_fuel(host_config.fuel_per_call),
-            "failed to set extension fuel before indexed_call_names",
-        )?;
-        let names_packed = map_wasmtime(
+        prepare_store(&mut store, host_config, "indexed_call_names")?;
+        let names_packed = map_guest_call(
             indexed_call_names.call(&mut store, ()),
             "failed to call extension indexed_call_names",
         )?;
@@ -182,6 +219,7 @@ impl WasmExtension {
             names_packed,
             host_config.max_output_bytes,
         )?;
+        prepare_store(&mut store, host_config, "free indexed_call_names output")?;
         free_guest_bytes(
             &dealloc,
             &mut store,
@@ -204,6 +242,7 @@ impl WasmExtension {
             id: id.into(),
             indexed_call_names_cache,
             config: host_config,
+            _epoch_ticker: epoch_ticker,
         })
     }
 
@@ -213,7 +252,7 @@ impl WasmExtension {
 
     pub fn abi_version(&mut self) -> Result<u32> {
         self.refuel("abi_version")?;
-        let version = map_wasmtime(
+        let version = map_guest_call(
             self.abi_version.call(&mut self.store, ()),
             "failed to call extension abi_version",
         )?;
@@ -226,7 +265,7 @@ impl WasmExtension {
 
     pub fn refresh_indexed_call_names(&mut self) -> Result<()> {
         self.refuel("indexed_call_names")?;
-        let packed = map_wasmtime(
+        let packed = map_guest_call(
             self.indexed_call_names.call(&mut self.store, ()),
             "failed to call extension indexed_call_names",
         )?;
@@ -262,7 +301,7 @@ impl WasmExtension {
         }
         let ptr = self.write_guest_bytes(&input)?;
         self.refuel("index_call")?;
-        let packed = map_wasmtime(
+        let packed = map_guest_call(
             self.index_call
                 .call(&mut self.store, (ptr, input.len() as i32)),
             "failed to call extension index_call",
@@ -299,7 +338,7 @@ impl WasmExtension {
         }
         let ptr = self.write_guest_bytes(&input)?;
         self.refuel("handle_event")?;
-        let packed = map_wasmtime(
+        let packed = map_guest_call(
             handle_event.call(&mut self.store, (ptr, input.len() as i32)),
             "failed to call extension handle_event",
         )?;
@@ -323,7 +362,8 @@ impl WasmExtension {
             ));
         }
 
-        let ptr = map_wasmtime(
+        self.refuel("alloc")?;
+        let ptr = map_guest_call(
             self.alloc.call(&mut self.store, bytes.len() as i32),
             "failed to allocate guest memory",
         )?;
@@ -337,13 +377,11 @@ impl WasmExtension {
     }
 
     fn refuel(&mut self, label: &str) -> Result<()> {
-        map_wasmtime(
-            self.store.set_fuel(self.config.fuel_per_call),
-            &format!("failed to set extension fuel before {label}"),
-        )
+        prepare_store(&mut self.store, self.config, label)
     }
 
     fn free_guest_bytes(&mut self, ptr: u32, len: u32, label: &str) -> Result<()> {
+        self.refuel(&format!("free {label}"))?;
         free_guest_bytes(&self.dealloc, &mut self.store, ptr, len, label)
     }
 }
@@ -351,11 +389,34 @@ impl WasmExtension {
 fn engine() -> Result<Engine> {
     let mut config = Config::new();
     config.consume_fuel(true);
+    config.epoch_interruption(true);
     config.wasm_exceptions(true);
     map_wasmtime(
         Engine::new(&config),
         "failed to create Wasm extension engine",
     )
+}
+
+fn prepare_store(
+    store: &mut Store<ExtensionStore>,
+    config: WasmExtensionConfig,
+    label: &str,
+) -> Result<()> {
+    map_wasmtime(
+        store.set_fuel(config.fuel_per_call),
+        &format!("failed to set extension fuel before {label}"),
+    )?;
+    let tick_nanos = EPOCH_TICK.as_nanos();
+    let timeout_nanos = config.wall_timeout.as_nanos();
+    let ticks = timeout_nanos.div_ceil(tick_nanos).max(1);
+    let ticks = u64::try_from(ticks).map_err(|_| {
+        anyhow!(
+            "extension wall-clock timeout {} ms exceeds supported epoch range",
+            config.wall_timeout.as_millis()
+        )
+    })?;
+    store.set_epoch_deadline(ticks);
+    Ok(())
 }
 
 fn read_packed_bytes(
@@ -397,6 +458,17 @@ fn free_guest_bytes(
 
 fn map_wasmtime<T>(result: std::result::Result<T, wasmtime::Error>, context: &str) -> Result<T> {
     result.map_err(|err| anyhow!("{context}: {err:?}"))
+}
+
+fn map_guest_call<T>(result: std::result::Result<T, wasmtime::Error>, context: &str) -> Result<T> {
+    result.map_err(|error| {
+        let detail = format!("{error:?}");
+        if detail.to_ascii_lowercase().contains("interrupt") {
+            anyhow!("{context}: extension wall-clock deadline exceeded: {detail}")
+        } else {
+            anyhow!("{context}: {detail}")
+        }
+    })
 }
 
 fn unpack_ptr_len(packed: i64) -> Result<(u32, u32)> {
@@ -631,6 +703,30 @@ mod tests {
              This is a bug because runaway extensions must not freeze indexing. \
              Fix: keep consume_fuel enabled and refuel each guest call."
         );
+    }
+
+    #[test]
+    fn wall_clock_deadline_interrupts_runaway_guest() {
+        let wasm = wat::parse_str(fuel_hog_extension_wat()).unwrap();
+        let mut ext = WasmExtension::from_bytes_with_config(
+            "deadline-hog",
+            &wasm,
+            WasmExtensionConfig {
+                fuel_per_call: 1_000_000_000,
+                wall_timeout: std::time::Duration::from_millis(10),
+                ..WasmExtensionConfig::default()
+            },
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        let error = ext.index_call(&let_context()).unwrap_err();
+
+        assert!(
+            error.to_string().contains("wall-clock deadline"),
+            "expected wall-clock deadline error, got: {error:#}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[test]
