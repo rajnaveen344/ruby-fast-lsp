@@ -8,10 +8,15 @@ association contributes a public reader and writer, a structured return type,
 and navigation from the association name to its conventional target class.
 Removing the declaration removes those facts during normal file reindexing.
 
-Target names currently use deterministic convention-only inflection: snake
-case is camelized and collection names use a small singularization rule. Rails
-options such as `class_name`, `through`, `source`, `polymorphic`, and custom
-foreign keys are intentionally not inferred yet.
+Literal `class_name` options override the conventional target, including
+namespaced constants, and navigation uses the exact option-value range.
+Polymorphic `belongs_to` declarations still create readers and writers but
+intentionally use an unknown type and do not invent a constant target.
+
+Conventional target names use deterministic inflection: snake case is
+camelized and collection names use a small singularization rule. Options such
+as `through`, `source`, custom foreign keys, and dynamic `class_name` values are
+not inferred yet.
 
 Run the source contract tests with:
 

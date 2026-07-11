@@ -13,11 +13,14 @@ class RailsRubyTest < Minitest::Test
     RubyFastLspExtensionEntrypoint.ruby_fast_lsp_extension
   end
 
-  def context(method_name, association)
+  def context(method_name, association, keywords = [])
     {
       "method_name" => method_name,
       "receiver" => "None",
-      "arguments" => [{"value" => {"Symbol" => association}, "range" => RANGE}],
+      "arguments" => [
+        {"value" => {"Symbol" => association}, "range" => RANGE},
+        *keywords
+      ],
       "current_namespace" => ["User"],
       "namespace_kind" => "Instance",
       "call_range" => RANGE,
@@ -61,5 +64,36 @@ class RailsRubyTest < Minitest::Test
       {"Union" => [{"Named" => "Profile"}, {"Named" => "NilClass"}]},
       reader.fetch("return_type")
     )
+  end
+
+  def test_class_name_overrides_conventional_target
+    keywords = [{
+      "keyword" => {"name" => "class_name", "range" => RANGE},
+      "value" => {"String" => "Billing::Account"},
+      "range" => RANGE
+    }]
+    patches = extension.index_call(context("belongs_to", "account", keywords))
+
+    reference = patches.fetch(0).fetch("AddReference")
+    assert_equal({"Namespace" => ["Billing", "Account"]}, reference.fetch("target"))
+    reader = patches.fetch(1).fetch("DefineMethod")
+    assert_equal(
+      {"Union" => [{"Named" => "Billing::Account"}, {"Named" => "NilClass"}]},
+      reader.fetch("return_type")
+    )
+  end
+
+  def test_polymorphic_association_does_not_guess_a_target_class
+    keywords = [{
+      "keyword" => {"name" => "polymorphic", "range" => RANGE},
+      "value" => {"Boolean" => true},
+      "range" => RANGE
+    }]
+    patches = extension.index_call(context("belongs_to", "subject", keywords))
+
+    assert_equal 2, patches.length
+    assert patches.all? { |patch| !patch.key?("AddReference") }
+    reader = patches.fetch(0).fetch("DefineMethod")
+    assert_equal "Unknown", reader.fetch("return_type")
   end
 end

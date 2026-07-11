@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CallContext, DocumentContext, Extension, ExtensionEvent, IndexPatch,
-    NamespaceKind as AbiNamespaceKind, ProcessRequest, ProcessResult, ProcessResultStatus,
+    Keyword, NamespaceKind as AbiNamespaceKind, ProcessRequest, ProcessResult, ProcessResultStatus,
     Receiver, ResolvedCall, ResolvedCallee, ResponsePatch, SourcePosition, SourceRange,
     WatchedFileChange, WatchedFileChangeKind,
 };
@@ -2770,7 +2770,7 @@ fn call_context(visitor: &FactCollector, node: &CallNode) -> CallContext {
             .map(|args| {
                 args.arguments()
                     .iter()
-                    .map(|arg| argument_from_node(visitor, &arg))
+                    .flat_map(|arg| arguments_from_node(visitor, &arg))
                     .collect()
             })
             .unwrap_or_default(),
@@ -2974,40 +2974,55 @@ fn receiver_from_node(node: &Node) -> Receiver {
     }
 }
 
+fn arguments_from_node(visitor: &FactCollector, node: &Node) -> Vec<Argument> {
+    if let Some(keyword_hash) = node.as_keyword_hash_node() {
+        return keyword_hash
+            .elements()
+            .iter()
+            .filter_map(|element| {
+                let assoc = element.as_assoc_node()?;
+                let symbol = assoc.key().as_symbol_node()?;
+                Some(Argument {
+                    keyword: Some(Keyword {
+                        name: String::from_utf8_lossy(symbol.unescaped()).to_string(),
+                        range: source_range(visitor, &symbol.location()),
+                    }),
+                    value: argument_value_from_node(&assoc.value()),
+                    range: argument_value_range(visitor, &assoc.value()),
+                })
+            })
+            .collect();
+    }
+
+    vec![argument_from_node(visitor, node)]
+}
+
 fn argument_from_node(visitor: &FactCollector, node: &Node) -> Argument {
+    Argument {
+        keyword: None,
+        value: argument_value_from_node(node),
+        range: argument_value_range(visitor, node),
+    }
+}
+
+fn argument_value_from_node(node: &Node) -> ArgumentValue {
     if let Some(symbol) = node.as_symbol_node() {
-        return Argument {
-            value: ArgumentValue::Symbol(String::from_utf8_lossy(symbol.unescaped()).to_string()),
-            range: source_range(visitor, &symbol.location()),
-        };
+        return ArgumentValue::Symbol(String::from_utf8_lossy(symbol.unescaped()).to_string());
     }
-
     if let Some(string) = node.as_string_node() {
-        return Argument {
-            value: ArgumentValue::String(String::from_utf8_lossy(string.unescaped()).to_string()),
-            range: source_range(visitor, &string.content_loc()),
-        };
+        return ArgumentValue::String(String::from_utf8_lossy(string.unescaped()).to_string());
     }
-
     if let Some(constant) = node.as_constant_read_node() {
-        return Argument {
-            value: ArgumentValue::Constant(vec![
-                utils::utf8_str(constant.name().as_slice()).to_string()
-            ]),
-            range: source_range(visitor, &constant.location()),
-        };
+        return ArgumentValue::Constant(vec![
+            utils::utf8_str(constant.name().as_slice()).to_string()
+        ]);
     }
-
     if let Some(path) = node.as_constant_path_node() {
         let mut parts = Vec::new();
         utils::collect_namespaces(&path, &mut parts);
-        return Argument {
-            value: ArgumentValue::Constant(parts.iter().map(ToString::to_string).collect()),
-            range: source_range(visitor, &path.location()),
-        };
+        return ArgumentValue::Constant(parts.iter().map(ToString::to_string).collect());
     }
-
-    let value = if node.as_true_node().is_some() {
+    if node.as_true_node().is_some() {
         ArgumentValue::Boolean(true)
     } else if node.as_false_node().is_some() {
         ArgumentValue::Boolean(false)
@@ -3015,11 +3030,14 @@ fn argument_from_node(visitor: &FactCollector, node: &Node) -> Argument {
         ArgumentValue::Nil
     } else {
         ArgumentValue::Unsupported
-    };
+    }
+}
 
-    Argument {
-        value,
-        range: source_range(visitor, &node.location()),
+fn argument_value_range(visitor: &FactCollector, node: &Node) -> SourceRange {
+    if let Some(string) = node.as_string_node() {
+        source_range(visitor, &string.content_loc())
+    } else {
+        source_range(visitor, &node.location())
     }
 }
 

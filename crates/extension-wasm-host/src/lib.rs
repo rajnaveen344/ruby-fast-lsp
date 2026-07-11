@@ -771,6 +771,7 @@ mod tests {
             method_name: "let".to_string(),
             receiver: Receiver::None,
             arguments: vec![Argument {
+                keyword: None,
                 value: ArgumentValue::Symbol("user".to_string()),
                 range: range(),
             }],

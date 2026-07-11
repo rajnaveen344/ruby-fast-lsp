@@ -1040,3 +1040,31 @@ At the end of every goal session, record:
   slice. Reaching 8.1 still requires validations/callbacks, route helpers, and
   stronger Rails naming/options coverage; the next highest-value increment is
   association options followed by validations and callbacks.
+
+### July 2026: Precise association options through the public ABI
+
+- Generic contract: extension `Argument` values now carry optional keyword
+  name/range metadata while retaining a distinct exact value range. Prism
+  keyword hashes are flattened deterministically; positional and legacy ABI v1
+  JSON remains compatible. The mruby SDK exposes `keyword_argument`, keyword
+  accessors, boolean values, and an explicit unknown structured type.
+- `class_name`: literal string or constant targets override convention-based
+  inference, including namespaced models. The Rails guest emits its semantic
+  reference at the option value, and generated reader/writer types use the
+  exact fully qualified class.
+- Polymorphism: `belongs_to ..., polymorphic: true` still generates reader and
+  writer methods but emits no invented constant reference and uses `Unknown`
+  return types. Unsupported explicit targets similarly avoid silently falling
+  back to an unrelated conventional class.
+- Architecture: keyword syntax extraction is framework-neutral at the server
+  guest boundary. All Rails option interpretation remains in
+  `extensions/rails-ruby`; engine method, reference, and type ownership is
+  unchanged.
+- Evidence: red-first Rails source tests cover both options; ABI tests cover
+  exact metadata and legacy deserialization. Deterministic WAT and rebuilt
+  Ruby-authored Wasm black-box tests prove namespaced navigation, typed hover,
+  polymorphic non-navigation, generated methods, and edit lifecycle behavior.
+- Rating increases to **7.9/10**. High-value association targeting is now
+  credible without guessing. The next Milestone 3 priority is static
+  validations and callbacks, followed by route/url helpers; `through`/`source`
+  relationship enrichment remains an association follow-up.

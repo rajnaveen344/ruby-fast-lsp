@@ -425,6 +425,10 @@ module RubyFastLspExtension
       {"Named" => name.to_s}
     end
 
+    def unknown_type
+      "Unknown"
+    end
+
     def array_type(*element_types)
       {"Array" => element_types}
     end
@@ -555,6 +559,10 @@ module RubyFastLspExtension
       fetch("arguments").map { |arg| Argument.new(arg) }
     end
 
+    def keyword_argument(name)
+      arguments.find { |argument| argument.keyword_name == name }
+    end
+
     def current_namespace
       fetch("current_namespace")
     end
@@ -619,6 +627,22 @@ module RubyFastLspExtension
       @raw["range"] || @raw[:range]
     end
 
+    def keyword
+      @raw["keyword"] || @raw[:keyword]
+    end
+
+    def keyword_name
+      return nil unless keyword
+
+      keyword["name"] || keyword[:name]
+    end
+
+    def keyword_range
+      return nil unless keyword
+
+      keyword["range"] || keyword[:range]
+    end
+
     def symbol?
       value.is_a?(Hash) && value.key?("Symbol")
     end
@@ -640,6 +664,16 @@ module RubyFastLspExtension
 
     def constant_path
       return value["Constant"] if constant?
+
+      nil
+    end
+
+    def boolean?
+      value.is_a?(Hash) && value.key?("Boolean")
+    end
+
+    def boolean_value
+      return value["Boolean"] if boolean?
 
       nil
     end

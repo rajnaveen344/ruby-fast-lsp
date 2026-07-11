@@ -154,7 +154,15 @@ pub enum Receiver {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Argument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<Keyword>,
     pub value: ArgumentValue,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Keyword {
+    pub name: String,
     pub range: SourceRange,
 }
 
@@ -324,6 +332,43 @@ pub enum MethodParamKind {
     OptionalKeyword,
     KeywordRest,
     Block,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyword_argument_round_trips_with_key_and_value_ranges() {
+        let json = r#"{
+            "keyword":{"name":"class_name","range":{"start":{"line":1,"character":21},"end":{"line":1,"character":32}}},
+            "value":{"String":"Billing::Account"},
+            "range":{"start":{"line":1,"character":33},"end":{"line":1,"character":49}}
+        }"#;
+        let argument: Argument = serde_json::from_str(json).expect("keyword argument must parse");
+        let keyword = argument
+            .keyword
+            .as_ref()
+            .expect("keyword metadata must be retained");
+        assert_eq!(keyword.name, "class_name");
+        assert_eq!(keyword.range.start.character, 21);
+        assert_eq!(argument.range.start.character, 33);
+        assert_eq!(
+            serde_json::from_str::<Argument>(&serde_json::to_string(&argument).unwrap()).unwrap(),
+            argument
+        );
+
+        let legacy = r#"{
+            "value":{"Symbol":"account"},
+            "range":{"start":{"line":1,"character":11},"end":{"line":1,"character":19}}
+        }"#;
+        assert_eq!(
+            serde_json::from_str::<Argument>(legacy)
+                .expect("pre-keyword ABI argument must remain compatible")
+                .keyword,
+            None
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -24,9 +24,17 @@ override parser-owned inheritance.
 Generated method returns and constants can use `named_type`, `array_type`,
 `hash_type`, `union_type`, and `nilable_type`; these produce structured ABI
 types rather than strings that the server would need to parse.
+Use `unknown_type` when a framework declaration intentionally cannot identify
+a concrete Ruby type.
 DSL tokens can become semantic references through `add_reference` with either
 `namespace_reference_target` or `constant_reference_target`. The server owns
 the resulting reference index and query behavior.
+
+Call arguments preserve literal values and source ranges. Ruby keyword pairs
+are flattened into ordinary `Argument` objects with `keyword_name`,
+`keyword_range`, and the value `range`; use `ctx.keyword_argument("name")` for
+exact option lookup. This is additive to the ABI: positional arguments and
+older guest payloads continue to omit keyword metadata.
 
 Runtime-backed extensions may return `reindex_files` from
 `on_process_completed`. Each entry names an event-related `workspace_root` and
