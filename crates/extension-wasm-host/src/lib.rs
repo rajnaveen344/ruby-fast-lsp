@@ -289,6 +289,7 @@ impl WasmExtension {
                 document: None,
                 settings: None,
                 files: None,
+                process_results: None,
             };
             return self.handle_event(&event).map(|output| output.index_patches);
         }
@@ -328,6 +329,7 @@ impl WasmExtension {
                 index_patches: Vec::new(),
                 response_patches: Vec::new(),
                 command_patches: Vec::new(),
+                process_requests: Vec::new(),
             });
         };
         let input = serde_json::to_vec(event).context("failed to encode ExtensionEvent JSON")?;
@@ -520,6 +522,7 @@ mod tests {
                 document: None,
                 settings: None,
                 files: None,
+                process_results: None,
             })
             .unwrap();
         assert_eq!(output.index_patches.len(), 1);
@@ -606,6 +609,7 @@ mod tests {
                 }),
                 settings: None,
                 files: None,
+                process_results: None,
             })
             .unwrap();
 

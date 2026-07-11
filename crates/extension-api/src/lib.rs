@@ -20,6 +20,8 @@ pub struct ExtensionEvent {
     pub settings: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<WatchedFileChange>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_results: Option<Vec<ProcessResult>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -42,6 +44,8 @@ pub struct ExtensionOutput {
     pub index_patches: Vec<IndexPatch>,
     pub response_patches: Vec<ResponsePatch>,
     pub command_patches: Vec<CommandPatch>,
+    #[serde(default)]
+    pub process_requests: Vec<ProcessRequest>,
 }
 
 impl ExtensionOutput {
@@ -50,8 +54,37 @@ impl ExtensionOutput {
             index_patches,
             response_patches: Vec::new(),
             command_patches: Vec::new(),
+            process_requests: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessRequest {
+    pub request_id: String,
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub stdin: Option<String>,
+    pub workspace_root: Option<String>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessResult {
+    pub request_id: String,
+    pub status: ProcessResultStatus,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProcessResultStatus {
+    Exited,
+    TimedOut,
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

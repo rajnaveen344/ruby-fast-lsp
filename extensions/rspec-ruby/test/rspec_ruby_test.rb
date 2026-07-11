@@ -256,4 +256,28 @@ class RSpecRubyExtensionTest < Minitest::Test
     assert_equal [], output.fetch("response_patches")
     assert_equal [], output.fetch("command_patches")
   end
+
+  def test_process_request_and_completion_callbacks
+    received = nil
+    extension.on_watched_files_changed do |_files|
+      [extension.process_request(
+        request_id: "routes",
+        command: "bundle",
+        arguments: ["exec", "rails", "routes"],
+        timeout_ms: 2_000
+      )]
+    end
+    extension.on_process_completed { |results| received = results }
+
+    output = extension.handle_event("event" => "files.changed", "files" => [])
+    request = output.fetch("process_requests").fetch(0)
+    assert_equal "routes", request.fetch("request_id")
+    assert_equal "bundle", request.fetch("command")
+    assert_equal ["exec", "rails", "routes"], request.fetch("arguments")
+
+    results = [{"request_id" => "routes", "status" => "Exited", "exit_code" => 0}]
+    completion = extension.handle_event("event" => "process.completed", "process_results" => results)
+    assert_equal results, received
+    assert_equal [], completion.fetch("process_requests")
+  end
 end

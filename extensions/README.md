@@ -136,7 +136,7 @@ call_names = ["let", "let!", "subject", "subject!"]
 Optional file watcher and process declarations:
 
 ```toml
-capabilities = ["watching"]
+capabilities = ["watching", "process"]
 permissions = ["process.exec"]
 
 [watching]
@@ -158,8 +158,8 @@ Each loaded extension receives only its matching, in-workspace changes through
 `uri`, and `kind` (`Created`, `Changed`, or `Deleted`); nested workspaces use the
 deepest root, and duplicate events are removed deterministically. The mruby SDK
 exposes `on_watched_files_changed`. The callback may update private extension
-state, but watcher patches are rejected until they have a dedicated
-engine-owned ingestion contract.
+state or return bounded `process_request` values. Other watcher patches are
+rejected until they have a dedicated engine-owned ingestion contract.
 
 Editor clients may pass per-extension settings during initialize:
 
@@ -440,11 +440,17 @@ mode. Server owns merge/conflict policy.
 Some major Ruby integrations need external processes: Rails, Standard, rubyfmt,
 Reek, and RuboCop-style tools.
 
-- Manifest permissions must declare `process.exec`.
-- Commands must be allowlisted by manifest.
-- Host runs processes; wasm receives capped stdout/stderr/status.
-- No arbitrary shell by default.
-- Apply timeout, output, and working-directory limits.
+- Done: manifests must declare the `process` capability, `process.exec`
+  permission, and an exact command allowlist.
+- Done: process requests are accepted only for trusted workspaces and the
+  workspace roots related to the triggering event.
+- Done: the host launches commands directly without an implicit shell, caps
+  argument/stdin sizes and request count, applies a 10-second maximum timeout,
+  drains output while retaining at most 256 KiB per stream, and kills timed-out
+  children.
+- Done: wasm guests receive `process.completed` with exit status, bounded
+  stdout/stderr, and truncation flags; spawn failures and nonzero exits remain
+  isolated results while policy violations disable the requesting guest.
 
 ### Discovery and Installation
 

@@ -184,8 +184,16 @@ workspace-relative patterns without parent traversal. Supporting clients receive
 a dynamically refreshed, sorted registration. Incoming file changes are scoped
 to the deepest workspace root, normalized, sorted/deduplicated, matched per
 extension, and delivered through bounded `files.changed` events. Watch callbacks
-may update private guest state but cannot directly return patches into engine or
-editor state.
+may update private guest state or request an external process, but cannot
+directly return patches into engine or editor state. External process requests
+require a trusted workspace, the `process` capability, `process.exec`
+permission, and an exact manifest command allowlist. The server launches
+commands directly without an implicit shell, scopes working directories to the
+event's registered workspace roots, limits request/argument/stdin/output sizes,
+caps timeouts at 10 seconds, and returns results through `process.completed`.
+Policy violations disable only the requesting extension; spawn failures,
+nonzero exits, and timeouts are isolated results and do not mutate analysis
+state.
 
 ## Architecture Direction: LSP Wrapper Over Engine + Inference
 

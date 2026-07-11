@@ -699,3 +699,26 @@ At the end of every goal session, record:
 - Rating remains **7.3/10**. Milestone 2 still requires process hosting,
   broader patch families/conflict policy, SDK/package-template stability, and a
   minimal third-party acceptance fixture.
+
+### July 2026: Permission-enforced extension process host
+
+- Public contract: the additive ABI v1 JSON contract now includes typed,
+  bounded process requests and `process.completed` results; older guests remain
+  compatible because the new output field defaults to an empty list.
+- Trust and permissions: requests execute only in trusted workspaces, require
+  the `process` capability and `process.exec` permission, must exactly match a
+  manifest command allowlist, and may select only a workspace root related to
+  the triggering file event.
+- Isolation: the host launches commands directly without an implicit shell,
+  limits request count, argv, stdin, timeout, and retained stdout/stderr, drains
+  both streams to avoid pipe deadlock, and kills timed-out children. Policy
+  violations disable only the requesting guest; process startup failures,
+  nonzero exits, and timeouts return isolated results.
+- SDK and evidence: the mruby SDK exposes `process_request` and
+  `on_process_completed`. Focused Rust tests prove trust/permission/allowlist
+  denial, successful bounded execution, and timeout termination; SDK tests
+  prove request/result callback mapping.
+- Rating remains **7.3/10**. This closes the external-process execution gap,
+  while Milestone 2 still requires broader deterministic patch families and
+  conflict policy, SDK/package-template stability, and a minimal third-party
+  acceptance fixture.

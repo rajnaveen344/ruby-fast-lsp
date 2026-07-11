@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use log::warn;
@@ -10,13 +12,16 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use ruby_fast_lsp_extension_api::{
     Argument, ArgumentValue, CallContext, DocumentContext, Extension, ExtensionEvent, IndexPatch,
-    NamespaceKind as AbiNamespaceKind, Receiver, ResolvedCall, ResolvedCallee, ResponsePatch,
-    SourcePosition, SourceRange, WatchedFileChange, WatchedFileChangeKind,
+    NamespaceKind as AbiNamespaceKind, ProcessRequest, ProcessResult, ProcessResultStatus,
+    Receiver, ResolvedCall, ResolvedCallee, ResponsePatch, SourcePosition, SourceRange,
+    WatchedFileChange, WatchedFileChangeKind,
 };
 use ruby_prism::{CallNode, Node};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command as ProcessCommand;
 use tower_lsp::lsp_types::{
     CodeLens, Command, DocumentSymbol, FileChangeType, FileEvent, Position, Range, SymbolKind,
 };
@@ -34,6 +39,14 @@ use ruby_analysis::indexer::MethodReceiver as CoreMethodReceiver;
 
 static EXTENSION_REGISTRY: Lazy<ExtensionRegistryHandle> =
     Lazy::new(ExtensionRegistryHandle::from_environment);
+
+const MAX_PROCESS_REQUESTS_PER_EVENT: usize = 16;
+const MAX_PROCESS_ARGUMENTS: usize = 64;
+const MAX_PROCESS_ARGUMENT_BYTES: usize = 8 * 1024;
+const MAX_PROCESS_STDIN_BYTES: usize = 64 * 1024;
+const MAX_PROCESS_OUTPUT_BYTES: usize = 256 * 1024;
+const DEFAULT_PROCESS_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct ExtensionRegistryHandle {
@@ -417,8 +430,64 @@ impl ExtensionRegistryHandle {
         self.inner.read().watcher_globs()
     }
 
-    pub fn handle_watched_file_changes(&self, workspace_roots: &[PathBuf], changes: &[FileEvent]) {
-        handle_watched_file_changes_with_registry(self, workspace_roots, changes);
+    pub async fn handle_watched_file_changes(
+        &self,
+        workspace_trusted: bool,
+        workspace_roots: &[PathBuf],
+        changes: &[FileEvent],
+    ) {
+        let pending = handle_watched_file_changes_with_registry(self, workspace_roots, changes);
+        for pending in pending {
+            if !pending.loaded.is_loaded() {
+                continue;
+            }
+            let validated = match validate_extension_process_request(
+                &pending.loaded.metadata.id,
+                workspace_trusted,
+                &pending.loaded.metadata.permissions,
+                &pending.loaded.metadata.process_commands,
+                workspace_roots,
+                &pending.event_roots,
+                &pending.request,
+            ) {
+                Ok(validated) => validated,
+                Err(err) => {
+                    pending.loaded.fail(err.to_string());
+                    continue;
+                }
+            };
+            let result = run_extension_process(validated).await;
+            let event = ExtensionEvent {
+                event: "process.completed".to_string(),
+                call: None,
+                document: None,
+                settings: None,
+                files: None,
+                process_results: Some(vec![result]),
+            };
+            let mut extension = pending.loaded.extension.lock();
+            match extension.handle_event(&event) {
+                Ok(output)
+                    if output.index_patches.is_empty()
+                        && output.response_patches.is_empty()
+                        && output.command_patches.is_empty()
+                        && output.process_requests.is_empty() => {}
+                Ok(_) => {
+                    drop(extension);
+                    pending.loaded.fail(format!(
+                        "extension `{}` returned output from `process.completed`; process completion callbacks may update private extension state only",
+                        pending.loaded.metadata.id
+                    ));
+                }
+                Err(err) => {
+                    drop(extension);
+                    pending.loaded.fail(format!(
+                        "extension `{}` process.completed failed: {err}",
+                        pending.loaded.metadata.id
+                    ));
+                }
+            }
+        }
     }
 
     fn extensions(&self) -> Vec<Arc<LoadedWasmExtension>> {
@@ -650,6 +719,7 @@ impl LoadedWasmExtension {
             document: None,
             settings,
             files: None,
+            process_results: None,
         };
         let mut extension = self.extension.lock();
         match extension.handle_event(&event) {
@@ -908,6 +978,7 @@ fn handle_response_event(
         }),
         settings: None,
         files: None,
+        process_results: None,
     };
     let extensions = registry.extensions();
 
@@ -950,10 +1021,11 @@ fn handle_watched_file_changes_with_registry(
     registry: &ExtensionRegistryHandle,
     workspace_roots: &[PathBuf],
     changes: &[FileEvent],
-) {
+) -> Vec<PendingExtensionProcessRequest> {
+    let mut pending = Vec::new();
     let candidates = watched_file_candidates(workspace_roots, changes);
     if candidates.is_empty() {
-        return;
+        return pending;
     }
 
     for loaded in registry.extensions() {
@@ -968,6 +1040,12 @@ fn handle_watched_file_changes_with_registry(
         if matched.is_empty() {
             continue;
         }
+        let event_roots = matched
+            .iter()
+            .map(|change| PathBuf::from(&change.workspace_root))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
 
         let event = ExtensionEvent {
             event: "files.changed".to_string(),
@@ -975,13 +1053,45 @@ fn handle_watched_file_changes_with_registry(
             document: None,
             settings: None,
             files: Some(matched),
+            process_results: None,
         };
         let mut extension = loaded.extension.lock();
         match extension.handle_event(&event) {
             Ok(output)
                 if output.index_patches.is_empty()
                     && output.response_patches.is_empty()
-                    && output.command_patches.is_empty() => {}
+                    && output.command_patches.is_empty() =>
+            {
+                if output.process_requests.len() > MAX_PROCESS_REQUESTS_PER_EVENT {
+                    drop(extension);
+                    loaded.fail(format!(
+                        "extension `{}` returned {} process requests from `files.changed`, exceeding the limit of {MAX_PROCESS_REQUESTS_PER_EVENT}",
+                        loaded.metadata.id,
+                        output.process_requests.len()
+                    ));
+                    continue;
+                }
+                let mut request_ids = BTreeSet::new();
+                if output
+                    .process_requests
+                    .iter()
+                    .any(|request| !request_ids.insert(request.request_id.clone()))
+                {
+                    drop(extension);
+                    loaded.fail(format!(
+                        "extension `{}` returned duplicate process request ids from `files.changed`",
+                        loaded.metadata.id
+                    ));
+                    continue;
+                }
+                pending.extend(output.process_requests.into_iter().map(|request| {
+                    PendingExtensionProcessRequest {
+                        loaded: Arc::clone(&loaded),
+                        event_roots: event_roots.clone(),
+                        request,
+                    }
+                }));
+            }
             Ok(_) => {
                 drop(extension);
                 loaded.fail(format!(
@@ -998,6 +1108,13 @@ fn handle_watched_file_changes_with_registry(
             }
         }
     }
+    pending
+}
+
+struct PendingExtensionProcessRequest {
+    loaded: Arc<LoadedWasmExtension>,
+    event_roots: Vec<PathBuf>,
+    request: ProcessRequest,
 }
 
 fn watched_file_candidates(
@@ -1050,6 +1167,256 @@ fn watched_file_candidates(
         });
     }
     candidates.into_iter().collect()
+}
+
+#[derive(Debug)]
+struct ValidatedExtensionProcessRequest {
+    request_id: String,
+    program: PathBuf,
+    arguments: Vec<String>,
+    stdin: Option<String>,
+    workspace_root: PathBuf,
+    timeout: Duration,
+}
+
+fn validate_extension_process_request(
+    extension_id: &str,
+    workspace_trusted: bool,
+    permissions: &[String],
+    allowed_commands: &[String],
+    workspace_roots: &[PathBuf],
+    event_roots: &[PathBuf],
+    request: &ProcessRequest,
+) -> Result<ValidatedExtensionProcessRequest, ExtensionLoadError> {
+    if !workspace_trusted {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` requested a process outside a trusted workspace"
+        )));
+    }
+    if !permissions
+        .iter()
+        .any(|permission| permission == "process.exec")
+    {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` requested a process without `process.exec` permission"
+        )));
+    }
+    if !allowed_commands
+        .iter()
+        .any(|command| command == &request.command)
+    {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` requested command `{}` which is not allowlisted by its manifest",
+            request.command
+        )));
+    }
+    if request.request_id.is_empty() || request.request_id.len() > 128 {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` process request id must contain 1..=128 bytes"
+        )));
+    }
+    if request.arguments.len() > MAX_PROCESS_ARGUMENTS
+        || request
+            .arguments
+            .iter()
+            .any(|argument| argument.len() > MAX_PROCESS_ARGUMENT_BYTES)
+    {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` process request exceeds argument count or size limits"
+        )));
+    }
+    if request
+        .stdin
+        .as_ref()
+        .is_some_and(|stdin| stdin.len() > MAX_PROCESS_STDIN_BYTES)
+    {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` process stdin exceeds {MAX_PROCESS_STDIN_BYTES} bytes"
+        )));
+    }
+
+    let mut roots = workspace_roots.to_vec();
+    roots.sort();
+    roots.dedup();
+    let mut allowed_event_roots = event_roots.to_vec();
+    allowed_event_roots.sort();
+    allowed_event_roots.dedup();
+    let workspace_root = match &request.workspace_root {
+        Some(requested) => roots
+            .iter()
+            .find(|root| normalized_path(root) == *requested)
+            .cloned()
+            .filter(|root| allowed_event_roots.contains(root))
+            .ok_or_else(|| {
+                ExtensionLoadError::new(format!(
+                    "extension `{extension_id}` requested unregistered or unrelated workspace root `{requested}`"
+                ))
+            })?,
+        None if allowed_event_roots.len() == 1 => allowed_event_roots[0].clone(),
+        None => {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{extension_id}` process request must select one workspace root when an event spans multiple roots"
+            )))
+        }
+    };
+    if !roots.contains(&workspace_root) {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` process request resolved outside registered workspace roots"
+        )));
+    }
+
+    let command_path = Path::new(&request.command);
+    let program = if command_path.components().count() == 1 {
+        command_path.to_path_buf()
+    } else {
+        if command_path.is_absolute()
+            || command_path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{extension_id}` process command `{}` must be a bare executable or workspace-relative path without traversal",
+                request.command
+            )));
+        }
+        workspace_root.join(command_path)
+    };
+    let requested_timeout = Duration::from_millis(
+        request
+            .timeout_ms
+            .unwrap_or(DEFAULT_PROCESS_TIMEOUT.as_millis() as u64),
+    );
+    let timeout = requested_timeout.min(MAX_PROCESS_TIMEOUT);
+    if timeout.is_zero() {
+        return Err(ExtensionLoadError::new(format!(
+            "extension `{extension_id}` process timeout must be greater than zero"
+        )));
+    }
+
+    Ok(ValidatedExtensionProcessRequest {
+        request_id: request.request_id.clone(),
+        program,
+        arguments: request.arguments.clone(),
+        stdin: request.stdin.clone(),
+        workspace_root,
+        timeout,
+    })
+}
+
+fn normalized_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+async fn run_extension_process(request: ValidatedExtensionProcessRequest) -> ProcessResult {
+    let mut command = ProcessCommand::new(&request.program);
+    command
+        .args(&request.arguments)
+        .current_dir(&request.workspace_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return ProcessResult {
+                request_id: request.request_id,
+                status: ProcessResultStatus::Failed,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: format!(
+                    "failed to start extension process `{}` in {}: {err}",
+                    request.program.display(),
+                    request.workspace_root.display()
+                ),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }
+        }
+    };
+    let stdout = child.stdout.take().expect(
+        "INVARIANT VIOLATED: extension process has no piped stdout. This is a bug because stdout is configured before spawning. Fix: keep stdout piped before taking the child handle.",
+    );
+    let stderr = child.stderr.take().expect(
+        "INVARIANT VIOLATED: extension process has no piped stderr. This is a bug because stderr is configured before spawning. Fix: keep stderr piped before taking the child handle.",
+    );
+    let stdout_task = tokio::spawn(read_bounded_process_output(stdout));
+    let stderr_task = tokio::spawn(read_bounded_process_output(stderr));
+    let mut stdin = child.stdin.take().expect(
+        "INVARIANT VIOLATED: extension process has no piped stdin. This is a bug because stdin is configured before spawning. Fix: keep stdin piped before taking the child handle.",
+    );
+    let stdin_content = request.stdin.unwrap_or_default();
+    let stdin_task = tokio::spawn(async move {
+        let result = stdin.write_all(stdin_content.as_bytes()).await;
+        drop(stdin);
+        result
+    });
+
+    let (status, exit_code, wait_error) =
+        match tokio::time::timeout(request.timeout, child.wait()).await {
+            Ok(Ok(status)) => (ProcessResultStatus::Exited, status.code(), None),
+            Ok(Err(err)) => (ProcessResultStatus::Failed, None, Some(err.to_string())),
+            Err(_) => {
+                let kill_error = child.kill().await.err().map(|err| err.to_string());
+                let _ = child.wait().await;
+                (ProcessResultStatus::TimedOut, None, kill_error)
+            }
+        };
+    let stdin_error = stdin_task
+        .await
+        .expect("INVARIANT VIOLATED: extension process stdin task panicked. This is a bug because the task only writes bounded bytes. Fix: keep panicking work out of the stdin task.")
+        .err()
+        .map(|err| err.to_string());
+    let (stdout, stdout_truncated) = stdout_task.await.expect(
+        "INVARIANT VIOLATED: extension process stdout task panicked. This is a bug because the task only drains bounded process output. Fix: keep panicking work out of the output task.",
+    );
+    let (mut stderr, stderr_truncated) = stderr_task.await.expect(
+        "INVARIANT VIOLATED: extension process stderr task panicked. This is a bug because the task only drains bounded process output. Fix: keep panicking work out of the output task.",
+    );
+    for error in [wait_error, stdin_error].into_iter().flatten() {
+        if !stderr.is_empty() {
+            stderr.push(b'\n');
+        }
+        stderr.extend_from_slice(error.as_bytes());
+    }
+
+    ProcessResult {
+        request_id: request.request_id,
+        status,
+        exit_code,
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        stdout_truncated,
+        stderr_truncated,
+    }
+}
+
+async fn read_bounded_process_output(mut reader: impl AsyncRead + Unpin) -> (Vec<u8>, bool) {
+    let mut retained = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    loop {
+        let read = match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) => {
+                let message = format!("failed to read extension process output: {err}");
+                let remaining = MAX_PROCESS_OUTPUT_BYTES.saturating_sub(retained.len());
+                retained.extend_from_slice(&message.as_bytes()[..message.len().min(remaining)]);
+                truncated |= message.len() > remaining;
+                break;
+            }
+        };
+        let remaining = MAX_PROCESS_OUTPUT_BYTES.saturating_sub(retained.len());
+        let keep = read.min(remaining);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    (retained, truncated)
 }
 
 fn process_wasm_call_node(
@@ -1431,6 +1798,16 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
     if let Some(process) = &manifest.process {
         validate_manifest_list("process command", &manifest.id, &process.commands)?;
         if !manifest
+            .capabilities
+            .iter()
+            .any(|capability| capability == "process")
+        {
+            return Err(ExtensionLoadError::new(format!(
+                "extension `{}` declares process commands without `process` capability",
+                manifest.id
+            )));
+        }
+        if !manifest
             .permissions
             .iter()
             .any(|permission| permission == "process.exec")
@@ -1439,6 +1816,22 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), ExtensionLoadEr
                 "extension `{}` declares process commands without `process.exec` permission",
                 manifest.id
             )));
+        }
+        for command in &process.commands {
+            let path = Path::new(command);
+            if path.is_absolute()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                })
+            {
+                return Err(ExtensionLoadError::new(format!(
+                    "extension `{}` process command `{command}` must be a bare executable or workspace-relative path without traversal",
+                    manifest.id
+                )));
+            }
         }
     }
     Ok(())
@@ -2975,7 +3368,7 @@ abi_version = 1
 server_version = ">=0.2.3, <0.3.0"
 runtime = "mruby-wasm"
 wasm = "extension.wasm"
-capabilities = ["diagnostics"]
+capabilities = ["process"]
 permissions = []
 
 [process]
@@ -3001,6 +3394,113 @@ commands = ["standardrb"]
              This is a bug because external process permissions must be explicit. \
              Fix: require process.exec when [process].commands is present."
         );
+    }
+
+    #[test]
+    fn extension_process_request_requires_trust_permission_and_allowlist() {
+        let root = PathBuf::from("/workspace");
+        let request = ruby_fast_lsp_extension_api::ProcessRequest {
+            request_id: "routes".to_string(),
+            command: "bundle".to_string(),
+            arguments: vec![
+                "exec".to_string(),
+                "rails".to_string(),
+                "routes".to_string(),
+            ],
+            stdin: None,
+            workspace_root: None,
+            timeout_ms: None,
+        };
+
+        for (trusted, permissions, commands, expected) in [
+            (
+                false,
+                vec!["process.exec"],
+                vec!["bundle"],
+                "trusted workspace",
+            ),
+            (true, Vec::new(), vec!["bundle"], "process.exec"),
+            (true, vec!["process.exec"], vec!["ruby"], "allowlisted"),
+        ] {
+            let err = validate_extension_process_request(
+                "process-test",
+                trusted,
+                &permissions
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+                &commands.into_iter().map(str::to_string).collect::<Vec<_>>(),
+                &[root.clone()],
+                &[root.clone()],
+                &request,
+            )
+            .expect_err("unsafe extension process request must be denied");
+            assert!(
+                err.to_string().contains(expected),
+                "process denial must explain the violated policy: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn extension_process_host_captures_bounded_result() {
+        let root = TempDir::new().expect("test workspace must be created");
+        let request = ProcessRequest {
+            request_id: "version".to_string(),
+            command: "rustc".to_string(),
+            arguments: vec!["--version".to_string()],
+            stdin: None,
+            workspace_root: None,
+            timeout_ms: Some(5_000),
+        };
+        let validated = validate_extension_process_request(
+            "process-test",
+            true,
+            &["process.exec".to_string()],
+            &["rustc".to_string()],
+            &[root.path().to_path_buf()],
+            &[root.path().to_path_buf()],
+            &request,
+        )
+        .expect("trusted allowlisted process request must validate");
+
+        let result = run_extension_process(validated).await;
+
+        assert_eq!(result.request_id, "version");
+        assert_eq!(result.status, ProcessResultStatus::Exited);
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.stdout.starts_with("rustc "));
+        assert!(!result.stdout_truncated);
+        assert!(!result.stderr_truncated);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extension_process_host_kills_timed_out_process() {
+        let root = TempDir::new().expect("test workspace must be created");
+        let request = ProcessRequest {
+            request_id: "timeout".to_string(),
+            command: "sh".to_string(),
+            arguments: vec!["-c".to_string(), "sleep 5".to_string()],
+            stdin: None,
+            workspace_root: None,
+            timeout_ms: Some(10),
+        };
+        let validated = validate_extension_process_request(
+            "process-test",
+            true,
+            &["process.exec".to_string()],
+            &["sh".to_string()],
+            &[root.path().to_path_buf()],
+            &[root.path().to_path_buf()],
+            &request,
+        )
+        .expect("explicitly allowlisted shell process must validate");
+
+        let result = run_extension_process(validated).await;
+
+        assert_eq!(result.status, ProcessResultStatus::TimedOut);
+        assert_eq!(result.exit_code, None);
     }
 
     #[test]

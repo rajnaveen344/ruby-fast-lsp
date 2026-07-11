@@ -327,9 +327,15 @@ pub async fn handle_did_change_watched_files(
     server: &RubyLanguageServer,
     params: DidChangeWatchedFilesParams,
 ) {
+    let workspace_trusted = server.config.lock().workspace_trusted;
     server
         .extension_registry
-        .handle_watched_file_changes(&server.workspace_root_paths(), &params.changes);
+        .handle_watched_file_changes(
+            workspace_trusted,
+            &server.workspace_root_paths(),
+            &params.changes,
+        )
+        .await;
     refresh_extension_watch_registration(server).await;
     indexing::handle_watched_files_changed(server, params).await;
 }

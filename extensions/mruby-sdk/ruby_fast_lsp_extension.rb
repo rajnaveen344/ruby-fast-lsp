@@ -269,6 +269,21 @@ module RubyFastLspExtension
       @watched_files_handler = block
     end
 
+    def on_process_completed(&block)
+      @process_completed_handler = block
+    end
+
+    def process_request(request_id:, command:, arguments: [], stdin: nil, workspace_root: nil, timeout_ms: nil)
+      {
+        "request_id" => request_id,
+        "command" => command,
+        "arguments" => arguments,
+        "stdin" => stdin,
+        "workspace_root" => workspace_root,
+        "timeout_ms" => timeout_ms
+      }
+    end
+
     def on_document_symbols(&block)
       @document_symbol_handler = block
     end
@@ -306,31 +321,39 @@ module RubyFastLspExtension
         empty_output
       when "files.changed"
         files = raw_event["files"] || raw_event[:files] || []
-        @watched_files_handler.call(files) if @watched_files_handler
+        requests = @watched_files_handler ? (@watched_files_handler.call(files) || []) : []
+        empty_output.merge("process_requests" => requests)
+      when "process.completed"
+        results = raw_event["process_results"] || raw_event[:process_results] || []
+        @process_completed_handler.call(results) if @process_completed_handler
         empty_output
       when "index.call.enter"
         {
           "index_patches" => index_call(raw_event["call"] || raw_event[:call]),
           "response_patches" => [],
-          "command_patches" => []
+          "command_patches" => [],
+          "process_requests" => []
         }
       when "request.document_symbol"
         {
           "index_patches" => [],
           "response_patches" => document_symbols(raw_event["document"] || raw_event[:document]),
-          "command_patches" => []
+          "command_patches" => [],
+          "process_requests" => []
         }
       when "request.code_lens"
         {
           "index_patches" => [],
           "response_patches" => code_lens(raw_event["document"] || raw_event[:document]),
-          "command_patches" => []
+          "command_patches" => [],
+          "process_requests" => []
         }
       else
         {
           "index_patches" => [],
           "response_patches" => [],
-          "command_patches" => []
+          "command_patches" => [],
+          "process_requests" => []
         }
       end
     end
@@ -339,7 +362,8 @@ module RubyFastLspExtension
       {
         "index_patches" => [],
         "response_patches" => [],
-        "command_patches" => []
+        "command_patches" => [],
+        "process_requests" => []
       }
     end
 
