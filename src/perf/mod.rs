@@ -4,3 +4,4 @@
 //!   `bench_references` and `#[ignore]` perf tests.
 
 pub mod corpus;
+pub mod metrics;

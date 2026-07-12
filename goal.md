@@ -1417,3 +1417,30 @@ At the end of every goal session, record:
   scope. The next milestone is measured production confidence: establish
   repeatable latency/memory budgets and semantic export fingerprints before
   making typing-path refresh changes.
+
+### July 2026: Deterministic production latency and memory budgets
+
+- Repeatable harness: the release `profiler` now has a production-benchmark
+  mode over its deterministic generated corpus. It cold-indexes 172 analysis
+  files / 2.4 MB of source, opens a representative controller through the real
+  lifecycle handler, and measures full-buffer body-only edits plus completion,
+  hover, definition, references, and semantic diagnostic projection.
+- Evidence quality: query samples are accepted only when completion includes
+  the expected method and hover/navigation return useful results. Percentiles
+  use a tested nearest-rank calculation; `--check-budgets` fails when any cold,
+  p95, or estimated-engine-heap budget is exceeded.
+- Recorded budgets: 2 s cold indexing; 100 ms edit p95; 50 ms completion and
+  references p95; 25 ms hover, definition, and diagnostics p95; 32 MiB
+  estimated engine heap. `PERFORMANCE.md` records the command, corpus scope,
+  measurement semantics, reference hardware, and change policy.
+- Reference result: on an Apple M4 Pro with 24 GiB RAM and macOS 26.2, 100
+  release iterations measured 695.8 ms cold indexing; 1.121 ms edit p95;
+  0.074 ms completion; 0.081 ms hover; 0.062 ms definition; 7.606 ms
+  references; 0.001 ms diagnostics; and 5.7 MiB estimated engine heap. Every
+  budget passed.
+- Rating remains **8.6/10**. This closes the repeatable budget and core p95
+  measurement gap, but Milestone 5 still requires semantic export fingerprints,
+  bounded visible/open-file diagnostic refresh, a reviewed diagnostic
+  false-positive budget, simulator coverage audit, and release smoke evidence.
+  The next priority is semantic export fingerprints so body-only edits can be
+  proven distinct from API changes before refresh behavior changes.

@@ -20,6 +20,8 @@
 //!   --phase <name>       Profile specific phase: index, infer, all (default: all)
 //!   --extension-path <p>  VS Code extension path for bundled stubs
 //!   --hold-seconds <n>   Keep process alive after profiling for external memory tools
+//!   --benchmark-iterations <n>  Measure editor operations after indexing
+//!   --check-budgets      Fail when a production budget is exceeded
 //!   --help               Show help
 
 mod sample_project;
@@ -32,13 +34,22 @@ use ruby_analysis::core::{
     SymbolFact, TypeFact, TypeSubject,
 };
 use ruby_fast_lsp::capabilities::indexing;
+use ruby_fast_lsp::capabilities::{completion, definitions, hover, references};
 use ruby_fast_lsp::config::RubyFastLspConfig;
+use ruby_fast_lsp::perf::metrics::{LatencySummary, ProductionBudget, ProductionMeasurements};
+use ruby_fast_lsp::query::EngineQuery;
 use ruby_fast_lsp::server::RubyLanguageServer;
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{
+    CompletionContext, CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, HoverParams, Position, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+};
 
 // Conditionally use dhat for memory profiling
 #[cfg(feature = "memory-profiling")]
@@ -58,6 +69,8 @@ struct Config {
     memory_profiling: bool,
     phase: Phase,
     hold_seconds: u64,
+    benchmark_iterations: Option<usize>,
+    check_budgets: bool,
 }
 
 fn parse_args() -> Config {
@@ -68,6 +81,8 @@ fn parse_args() -> Config {
         memory_profiling: false,
         phase: Phase::All,
         hold_seconds: 0,
+        benchmark_iterations: None,
+        check_budgets: false,
     };
 
     let mut i = 1;
@@ -114,6 +129,24 @@ fn parse_args() -> Config {
                     i += 1;
                 }
             }
+            "--benchmark-iterations" => {
+                if i + 1 < args.len() {
+                    let iterations = args[i + 1].parse().unwrap_or_else(|error| {
+                        panic!(
+                            "INVARIANT VIOLATED: --benchmark-iterations must be a positive integer. This is a bug because p95 measurement requires a fixed nonzero sample count. Fix: pass a numeric value like --benchmark-iterations 100. Error: {error}"
+                        )
+                    });
+                    assert!(
+                        iterations > 0,
+                        "INVARIANT VIOLATED: --benchmark-iterations is zero. This is a bug because p95 measurement requires observations. Fix: pass a positive iteration count."
+                    );
+                    config.benchmark_iterations = Some(iterations);
+                    i += 1;
+                }
+            }
+            "--check-budgets" => {
+                config.check_budgets = true;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -144,6 +177,9 @@ OPTIONS:
     -p, --phase <PHASE>      Profile specific phase: index, infer, all (default: all)
     --extension-path <PATH>  VS Code extension path for bundled stubs
     --hold-seconds <N>       Keep process alive after profiling for external memory tools
+    --benchmark-iterations <N>
+                             Measure edit and query p95 latency after indexing
+    --check-budgets          Exit unsuccessfully when a production budget is exceeded
     -h, --help               Show this help message
 
 EXAMPLES:
@@ -158,8 +194,8 @@ EXAMPLES:
     cargo build --release --bin profiler --features memory-profiling
     ./target/release/profiler --memory /path/to/project
 
-    # Use built-in sample project
-    samply record ./target/release/profiler
+    # Check deterministic built-in production budgets
+    ./target/release/profiler --benchmark-iterations 100 --check-budgets
 "#
     );
 }
@@ -177,7 +213,11 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize logger
     env_logger::Builder::new()
-        .filter_level(LevelFilter::Info)
+        .filter_level(if config.benchmark_iterations.is_some() {
+            LevelFilter::Warn
+        } else {
+            LevelFilter::Info
+        })
         .init();
 
     // Determine workspace path
@@ -199,39 +239,58 @@ fn main() -> anyhow::Result<()> {
     // Create runtime
     let rt = Runtime::new()?;
 
-    rt.block_on(async {
+    let benchmark_result = rt.block_on(async {
         let server = RubyLanguageServer::default();
         server.add_workspace(workspace_uri.clone());
         configure_server(&server, config.extension_path.as_ref());
 
         let total_start = Instant::now();
 
-        match config.phase {
+        let cold_indexing = match config.phase {
             Phase::All => {
                 // Full indexing (includes type inference)
                 info!("=== PROFILING: Full Indexing (with type inference) ===");
-                run_full_indexing(&server, workspace_uri).await;
+                run_full_indexing(&server, workspace_uri).await
             }
             Phase::Index => {
                 // Index only (no type inference)
                 info!("=== PROFILING: Indexing Only (no type inference) ===");
-                run_indexing_only(&server, workspace_uri).await;
+                run_indexing_only(&server, workspace_uri).await
             }
             Phase::Infer => {
                 // Index first, then profile inference separately
                 info!("=== PROFILING: Type Inference Only ===");
                 info!("Step 1: Indexing (not profiled focus)...");
-                run_indexing_only(&server, workspace_uri.clone()).await;
+                let indexing = run_indexing_only(&server, workspace_uri.clone()).await;
 
                 info!("Step 2: Type Inference (profiled)...");
                 run_type_inference_only(&server).await;
+                indexing
             }
-        }
+        };
 
         info!("=== TOTAL TIME: {:?} ===", total_start.elapsed());
 
         // Print stats
         print_stats(&server);
+
+        let benchmark_result = if let Some(iterations) = config.benchmark_iterations {
+            assert!(
+                config.phase == Phase::All,
+                "INVARIANT VIOLATED: production benchmark requested with a partial profiler phase. This is a bug because editor latency budgets require a fully indexed workspace. Fix: use --phase all or omit --phase."
+            );
+            let measurements = run_production_benchmark(
+                &server,
+                &workspace_path,
+                cold_indexing,
+                iterations,
+            )
+            .await?;
+            print_production_measurements(&measurements);
+            Some(measurements)
+        } else {
+            None
+        };
 
         #[cfg(feature = "memory-profiling")]
         if config.memory_profiling {
@@ -255,12 +314,24 @@ fn main() -> anyhow::Result<()> {
             );
             tokio::time::sleep(Duration::from_secs(config.hold_seconds)).await;
         }
-    });
+        anyhow::Ok(benchmark_result)
+    })?;
 
     // Cleanup sample project if we created it
     if use_sample_project {
         info!("Cleaning up sample project...");
         let _ = sample_project::cleanup_sample_project();
+    }
+
+    if config.check_budgets {
+        let measurements = benchmark_result.ok_or_else(|| {
+            anyhow::anyhow!("--check-budgets requires --benchmark-iterations <N>")
+        })?;
+        let exceeded = ProductionBudget::default().exceeded_by(&measurements);
+        if !exceeded.is_empty() {
+            anyhow::bail!("production budgets exceeded: {}", exceeded.join(", "));
+        }
+        println!("production budgets: PASS");
     }
 
     Ok(())
@@ -284,7 +355,7 @@ fn configure_server(server: &RubyLanguageServer, extension_path: Option<&PathBuf
     *server.config.lock() = lsp_config;
 }
 
-async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) {
+async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) -> Duration {
     let start = Instant::now();
 
     match indexing::init_workspace(server, workspace_uri).await {
@@ -292,12 +363,15 @@ async fn run_full_indexing(server: &RubyLanguageServer, workspace_uri: Url) {
             info!("Full indexing completed in {:?}", start.elapsed());
         }
         Err(e) => {
-            info!("Indexing failed: {}", e);
+            panic!(
+                "INVARIANT VIOLATED: profiler workspace indexing failed. This is a bug because performance measurements require a complete semantic workspace. Fix: repair the corpus or indexing failure before benchmarking. Error: {e}"
+            );
         }
     }
+    start.elapsed()
 }
 
-async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) {
+async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) -> Duration {
     let start = Instant::now();
 
     // We need to run indexing without type inference
@@ -307,9 +381,12 @@ async fn run_indexing_only(server: &RubyLanguageServer, workspace_uri: Url) {
             info!("Indexing completed in {:?}", start.elapsed());
         }
         Err(e) => {
-            info!("Indexing failed: {}", e);
+            panic!(
+                "INVARIANT VIOLATED: profiler workspace indexing failed. This is a bug because performance measurements require a complete semantic workspace. Fix: repair the corpus or indexing failure before benchmarking. Error: {e}"
+            );
         }
     }
+    start.elapsed()
 }
 
 async fn run_type_inference_only(server: &RubyLanguageServer) {
@@ -326,6 +403,221 @@ async fn run_type_inference_only(server: &RubyLanguageServer) {
     info!(
         "Analysis engine has {} method return type facts",
         inferred_count
+    );
+}
+
+async fn run_production_benchmark(
+    server: &RubyLanguageServer,
+    workspace_path: &std::path::Path,
+    cold_indexing: Duration,
+    iterations: usize,
+) -> anyhow::Result<ProductionMeasurements> {
+    let file_path = workspace_path.join("app/controllers/users_controller.rb");
+    let original = fs::read_to_string(&file_path).map_err(|error| {
+        anyhow::anyhow!(
+            "production benchmark requires {} from the deterministic sample corpus: {error}",
+            file_path.display()
+        )
+    })?;
+    let uri = Url::from_file_path(&file_path)
+        .map_err(|_| anyhow::anyhow!("invalid benchmark file path: {}", file_path.display()))?;
+
+    indexing::handle_did_open(
+        server,
+        DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "ruby".to_string(),
+                version: 1,
+                text: original.clone(),
+            },
+        },
+    )
+    .await;
+
+    let completion_position = position_after(&original, "@service.")?;
+    let method_position = position_inside(&original, "list_users")?;
+    let completion_context = Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+        trigger_character: Some(".".to_string()),
+    });
+
+    for _ in 0..5 {
+        let _ = completion::find_completion_at_position(
+            server,
+            uri.clone(),
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        let _ =
+            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
+    }
+
+    let mut completion_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        let result = completion::find_completion_at_position(
+            server,
+            uri.clone(),
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        completion_samples.push(start.elapsed());
+        assert!(
+            matches!(result, CompletionResponse::Array(ref items) if items.iter().any(|item| item.label == "list_users")),
+            "INVARIANT VIOLATED: benchmark completion did not include list_users. This is a bug because timing an empty or semantically broken query would produce misleading evidence. Fix: repair the deterministic corpus or completion query position."
+        );
+    }
+
+    let hover_params = || HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: method_position,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    let mut hover_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        let result = hover::handle_hover(server, hover_params()).await;
+        hover_samples.push(start.elapsed());
+        assert!(
+            result.is_some(),
+            "INVARIANT VIOLATED: benchmark hover returned no result. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or hover position."
+        );
+    }
+
+    let mut definition_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        let result =
+            definitions::find_definition_at_position(server, uri.clone(), method_position).await;
+        definition_samples.push(start.elapsed());
+        assert!(
+            result.as_ref().is_some_and(|locations| !locations.is_empty()),
+            "INVARIANT VIOLATED: benchmark definition returned no locations. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or definition position."
+        );
+    }
+
+    let mut reference_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        let result = references::find_references_at_position(server, &uri, method_position).await;
+        reference_samples.push(start.elapsed());
+        assert!(
+            result.as_ref().is_some_and(|locations| !locations.is_empty()),
+            "INVARIANT VIOLATED: benchmark references returned no locations. This is a bug because timing an empty query would produce misleading evidence. Fix: repair the deterministic corpus or reference position."
+        );
+    }
+
+    let diagnostic_query = EngineQuery::with_engine(server.analysis_engine.clone());
+    let mut diagnostic_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        let _ = diagnostic_query.get_unresolved_diagnostics(&uri);
+        diagnostic_samples.push(start.elapsed());
+    }
+
+    let variants = [
+        format!("{original}\n# benchmark body edit a\n"),
+        format!("{original}\n# benchmark body edit b\n"),
+    ];
+    let mut edit_samples = Vec::with_capacity(iterations);
+    for iteration in 0..iterations {
+        let start = Instant::now();
+        indexing::handle_did_change(
+            server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: i32::try_from(iteration + 2).expect(
+                        "INVARIANT VIOLATED: benchmark iteration count exceeds LSP document versions. This is a bug because the benchmark cannot represent that many edits. Fix: use fewer than i32::MAX iterations.",
+                    ),
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: variants[iteration % variants.len()].clone(),
+                }],
+            },
+        )
+        .await;
+        edit_samples.push(start.elapsed());
+    }
+
+    Ok(ProductionMeasurements {
+        cold_indexing,
+        edit: LatencySummary::from_samples(&edit_samples),
+        completion: LatencySummary::from_samples(&completion_samples),
+        hover: LatencySummary::from_samples(&hover_samples),
+        definition: LatencySummary::from_samples(&definition_samples),
+        references: LatencySummary::from_samples(&reference_samples),
+        diagnostics: LatencySummary::from_samples(&diagnostic_samples),
+        engine_heap_bytes: server
+            .analysis_engine
+            .read()
+            .estimated_memory_stats()
+            .total(),
+    })
+}
+
+fn position_after(content: &str, needle: &str) -> anyhow::Result<Position> {
+    let offset = content
+        .find(needle)
+        .map(|start| start + needle.len())
+        .ok_or_else(|| anyhow::anyhow!("benchmark corpus is missing {needle:?}"))?;
+    Ok(position_at_byte_offset(content, offset))
+}
+
+fn position_inside(content: &str, needle: &str) -> anyhow::Result<Position> {
+    let offset = content
+        .find(needle)
+        .map(|start| start + 1)
+        .ok_or_else(|| anyhow::anyhow!("benchmark corpus is missing {needle:?}"))?;
+    Ok(position_at_byte_offset(content, offset))
+}
+
+fn position_at_byte_offset(content: &str, offset: usize) -> Position {
+    assert!(
+        content.is_char_boundary(offset),
+        "INVARIANT VIOLATED: benchmark byte offset {offset} is not a UTF-8 character boundary. This is a bug because LSP positions must be derived from valid source boundaries. Fix: choose a complete source token."
+    );
+    let prefix = &content[..offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count();
+    let line_start = prefix.rfind('\n').map_or(0, |newline| newline + 1);
+    let character = content[line_start..offset].encode_utf16().count();
+    Position::new(
+        u32::try_from(line).expect("INVARIANT VIOLATED: benchmark line count exceeds u32"),
+        u32::try_from(character).expect("INVARIANT VIOLATED: benchmark UTF-16 column exceeds u32"),
+    )
+}
+
+fn print_production_measurements(measurements: &ProductionMeasurements) {
+    let budget = ProductionBudget::default();
+    println!("\n=== PRODUCTION BENCHMARK ===");
+    println!(
+        "cold_indexing: {:?} (budget {:?})",
+        measurements.cold_indexing, budget.cold_indexing
+    );
+    print_latency("edit", measurements.edit, budget.edit);
+    print_latency("completion", measurements.completion, budget.completion);
+    print_latency("hover", measurements.hover, budget.hover);
+    print_latency("definition", measurements.definition, budget.definition);
+    print_latency("references", measurements.references, budget.references);
+    print_latency("diagnostics", measurements.diagnostics, budget.diagnostics);
+    println!(
+        "engine_heap: {:.1} MB (budget {:.1} MB)",
+        bytes_to_mb(measurements.engine_heap_bytes),
+        bytes_to_mb(budget.engine_heap_bytes)
+    );
+}
+
+fn print_latency(name: &str, summary: LatencySummary, budget: Duration) {
+    println!(
+        "{name}: n={} min={:?} p50={:?} p95={:?} max={:?} (p95 budget {:?})",
+        summary.samples, summary.min, summary.p50, summary.p95, summary.max, budget
     );
 }
 
