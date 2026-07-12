@@ -113,6 +113,12 @@ with semantic diagnostics, and stay out of the `didChange` typing path. The
 server accepts a structured command argv and isolates startup failures, invalid
 output, abnormal exits, and timeouts from analysis state.
 
+Cold workspace indexing retains semantic diagnostic facts for all project files
+but publishes only documents currently open in the client. Opening/changing a
+file publishes its syntax and semantic diagnostics normally. Do not flood the
+LSP client with closed-file diagnostics or weaken the engine's reusable
+diagnostic store to implement this projection policy.
+
 Safe linter code actions are implemented as preferred `quickfix` actions for
 correctable RuboCop/Standard diagnostics. They run against the current buffer,
 use RuboCop `--autocorrect` or Standard `--fix`, and return a full-document

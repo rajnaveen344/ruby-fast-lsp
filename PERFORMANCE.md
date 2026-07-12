@@ -78,6 +78,8 @@ target/release/profiler --workspace /path/to/project
 Diagnostic volume remains a production blocker rather than a successful
 quality measurement: Sinatra produced 1,891 engine diagnostics and Discourse
 76,192. These counts are not classified false-positive rates, but they are too
-large to claim real-project diagnostic precision. The simulator separately
-enforces zero engine semantic false positives at its oracle-reviewed valid
-sites.
+large to claim real-project diagnostic precision. The LSP adapter therefore
+publishes cold-index diagnostics only for currently open documents; closed-file
+facts remain queryable in the engine without flooding the editor. The simulator
+separately enforces zero engine semantic false positives at its oracle-reviewed
+valid sites. Representative open-file precision still requires review.

@@ -1499,7 +1499,7 @@ At the end of every goal session, record:
 - Smoke results: Sinatra completes 618 analysis files / 5.0 MB in 1.34 s using
   15.2 MiB estimated engine heap. Discourse completes 11,159 files / 44.8 MB in
   9.47 s using 176.3 MiB. Neither has a known crash after the fix.
-- Verification: 996 root tests, all workspace tests including 343
+- Verification: 997 root tests, all workspace tests including 343
   `ruby-analysis` tests, the 56-test release simulator, release build, and the
   packaged VSIX initialize/extension/ERB smoke pass locally.
 - Production risk discovered: Sinatra produces 1,891 engine diagnostics and
@@ -1512,3 +1512,21 @@ At the end of every goal session, record:
   simulator completeness, two real-project crash smokes, and a production crash
   fix justify a small confidence increase. The 9.0 milestone remains blocked by
   real-world diagnostic noise and the final clean/package release audit.
+
+### July 2026: Open-document diagnostic publication policy
+
+- User-visible policy: cold indexing no longer publishes semantic diagnostics
+  for every closed project file. The reusable engine still retains every
+  diagnostic fact for agent queries and future resolution, while `didOpen` and
+  `didChange` publish current syntax/semantic diagnostics for active files.
+- Scale impact: the 76,192 Discourse and 1,891 Sinatra engine facts no longer
+  become an immediate Problems-panel flood. This is an LSP projection policy,
+  not a semantic suppression heuristic, so it does not make false-positive
+  evidence disappear or weaken engine correctness.
+- Red/green lifecycle evidence: a focused coordinator test first proved cold
+  indexing published a closed file's unresolved diagnostic. It now proves the
+  fact remains in the engine, nothing is published while closed, and opening
+  the file publishes the diagnostic normally.
+- Rating remains **8.7/10**. Representative real-project open-file diagnostic
+  precision is still unreviewed; the next step is to sample active Sinatra and
+  Discourse files and harden only demonstrated false-positive classes.

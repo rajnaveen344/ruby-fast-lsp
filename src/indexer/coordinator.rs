@@ -354,11 +354,18 @@ impl IndexingCoordinator {
         Ok(())
     }
 
-    /// Publish diagnostics for unresolved entries across all indexed files.
+    /// Publish diagnostics for unresolved entries in currently open files.
     async fn publish_unresolved_diagnostics(&self, server: &RubyLanguageServer) {
+        let open_uris = server.docs.lock().keys().cloned().collect::<HashSet<_>>();
         let file_ids = {
             let engine = server.analysis_engine.read();
             let mut file_ids = engine.diagnostic_store().file_ids();
+            file_ids.retain(|file_id| {
+                engine
+                    .file(*file_id)
+                    .and_then(|file| Url::from_file_path(&file.path).ok())
+                    .is_some_and(|uri| open_uris.contains(&uri))
+            });
             file_ids.sort_by(|left, right| {
                 let left_path = engine
                     .file(*left)
@@ -371,8 +378,9 @@ impl IndexingCoordinator {
                 left_path.cmp(right_path)
             });
             info!(
-                "Publishing diagnostics for {} files with analysis diagnostics",
-                file_ids.len()
+                "Publishing diagnostics for {} open files with analysis diagnostics ({} open documents)",
+                file_ids.len(),
+                open_uris.len()
             );
             file_ids
         };
@@ -623,6 +631,7 @@ mod coordinator_integration_tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem};
 
     /// Test fixture that creates a realistic Ruby project structure
     struct TestProjectFixture {
@@ -1452,6 +1461,49 @@ end
         assert!(
             !non_vendor_files.is_empty(),
             "Non-vendor Ruby files should also be collected"
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_indexing_retains_but_does_not_publish_closed_file_diagnostics() {
+        let workspace = TempDir::new().unwrap();
+        let file_path = workspace.path().join("app/service.rb");
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        let source = "MissingService.call\n";
+        fs::write(&file_path, source).unwrap();
+        let uri = Url::from_file_path(&file_path).unwrap();
+        let workspace_uri = Url::from_directory_path(workspace.path()).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(workspace_uri);
+        let mut coordinator =
+            IndexingCoordinator::new(workspace.path().to_path_buf(), RubyFastLspConfig::default());
+
+        coordinator.run_complete_indexing(&server).await.unwrap();
+
+        assert!(
+            server.analysis_engine.read().stats().diagnostics > 0,
+            "cold indexing must retain workspace diagnostics in the engine"
+        );
+        assert!(
+            server.last_published_diagnostics(&uri).is_empty(),
+            "closed-file engine diagnostics must not flood the LSP client"
+        );
+
+        crate::capabilities::indexing::handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: source.to_string(),
+                },
+            },
+        )
+        .await;
+        assert!(
+            !server.last_published_diagnostics(&uri).is_empty(),
+            "opening the file must publish its current diagnostics"
         );
     }
 }

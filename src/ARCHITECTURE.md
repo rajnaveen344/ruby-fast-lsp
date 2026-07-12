@@ -192,6 +192,9 @@ Ruby version detection and version-manager integration.
    body-only edit stops there; an exported declaration/signature/type/graph
    change may reprocess at most eight sorted, project-owned open documents so
    active cross-file diagnostics refresh without project-wide typing fanout.
+5. Cold indexing retains workspace diagnostic facts in the engine but projects
+   them to the LSP client only for open documents. Closed-file diagnostics are
+   available to agent/engine queries and are published if that file is opened.
 
 ## Component Interactions
 
