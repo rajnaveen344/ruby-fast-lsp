@@ -343,6 +343,64 @@ impl FileProcessor {
         self.collect_file_facts_as_with_resolution(uri, content, server, source_kind, false, None)
     }
 
+    pub fn collect_rbs_facts_as_deferred_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        self.collect_rbs_facts_with_resolution(uri, content, server, FileResolution::Deferred)
+    }
+
+    pub fn collect_rbs_facts(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+    ) -> Result<()> {
+        self.collect_rbs_facts_with_resolution(uri, content, server, FileResolution::Full)
+    }
+
+    fn collect_rbs_facts_with_resolution(
+        &self,
+        uri: &Url,
+        content: &str,
+        server: &RubyLanguageServer,
+        resolution: FileResolution,
+    ) -> Result<()> {
+        let analysis_file_id = server.open_or_update_analysis_file_with_kind(
+            uri,
+            content.to_string(),
+            SourceKind::Signature,
+        );
+        let facts = match ruby_analysis::indexer::index_rbs(analysis_file_id, content) {
+            Ok(facts) => facts,
+            Err(error) => {
+                replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
+                return Err(anyhow::anyhow!(
+                    "Failed to parse RBS {}: {error}",
+                    uri.path()
+                ));
+            }
+        };
+        replace_file_analysis(
+            server,
+            analysis_file_id,
+            FileFacts {
+                symbols: facts.symbols,
+                methods: facts.methods,
+                method_visibility_overrides: facts.method_visibility_overrides,
+                types: facts.types,
+                graph_nodes: facts.graph_nodes,
+                graph_edges: facts.graph_edges,
+                unresolved_graph_edges: facts.unresolved_graph_edges,
+                ..Default::default()
+            },
+            resolution,
+        );
+        Ok(())
+    }
+
     pub fn collect_file_facts_as_deferred_resolution_with_known_namespaces(
         &self,
         uri: &Url,

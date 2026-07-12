@@ -538,3 +538,94 @@ fn constant_rename_rejects_external_only_definition() {
         .constant_rename_target(&[RubyConstant::new("User").unwrap()], &[])
         .is_none());
 }
+
+#[test]
+fn method_navigation_prefers_implementation_over_matching_rbs_declaration() {
+    let mut engine = AnalysisEngine::new();
+    let signature_file = engine.register_file(SourceFileInput {
+        path: "sig/widget.rbs".into(),
+        content: "class Widget\n  def encode: () -> String\nend\n".to_string(),
+        kind: SourceKind::Signature,
+    });
+    let implementation_file = register_project_file(
+        &mut engine,
+        "lib/widget.rb",
+        "class Widget\n  def encode = 'ok'\nend\n",
+    );
+    let owner = FullyQualifiedName::namespace(vec![RubyConstant::new("Widget").unwrap()]);
+    let method_name = RubyMethod::new("encode").unwrap();
+    let method = FullyQualifiedName::method(owner.namespace_parts(), method_name);
+    let signature_range = TextRange::new(signature_file, 15, 39);
+    let implementation_range = TextRange::new(implementation_file, 15, 32);
+
+    engine.replace_facts(
+        signature_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                owner.clone(),
+                SymbolKind::Class,
+                TextRange::new(signature_file, 0, 47),
+            )],
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(signature_file, 0, 47),
+            )],
+            methods: vec![
+                MethodFact::new(method.clone(), owner.clone(), signature_range)
+                    .with_signature_metadata(None, Some("String".to_string())),
+            ],
+            types: vec![TypeFact::new(
+                TypeSubject::MethodReturn(method.clone()),
+                RubyType::string(),
+                signature_range,
+                TypeProvenance::Rbs,
+            )],
+            ..Default::default()
+        },
+        ResolveMode::Deferred,
+    );
+    engine.replace_facts(
+        implementation_file,
+        FileFacts {
+            symbols: vec![SymbolFact::new(
+                owner.clone(),
+                SymbolKind::Class,
+                TextRange::new(implementation_file, 0, 37),
+            )],
+            graph_nodes: vec![GraphNodeFact::new(
+                owner.clone(),
+                GraphNodeKind::Class,
+                TextRange::new(implementation_file, 0, 37),
+            )],
+            methods: vec![MethodFact::new(method, owner.clone(), implementation_range)],
+            ..Default::default()
+        },
+        ResolveMode::Immediate,
+    );
+
+    let callees = engine
+        .query()
+        .resolve_method_callees(&owner, &method_name)
+        .expect("method owner must resolve");
+    assert_eq!(callees.len(), 1);
+    assert_eq!(callees[0].definition_ranges, vec![implementation_range]);
+    let signatures = engine
+        .query()
+        .resolve_method_signature_facts(&owner, &method_name);
+    assert_eq!(signatures.len(), 1);
+    assert_eq!(signatures[0].range, signature_range);
+    assert_eq!(signatures[0].return_type_label.as_deref(), Some("String"));
+    assert_eq!(
+        engine
+            .query()
+            .method_return_type_for_receiver(&owner, &method_name),
+        Some(RubyType::string())
+    );
+    assert_eq!(
+        engine
+            .query()
+            .constant_definition_ranges(&[RubyConstant::new("Widget").unwrap()], &[],),
+        vec![TextRange::new(implementation_file, 0, 37)]
+    );
+}

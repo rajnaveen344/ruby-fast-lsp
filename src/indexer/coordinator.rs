@@ -1023,6 +1023,86 @@ end
     }
 
     #[tokio::test]
+    async fn project_rbs_declarations_enter_engine_method_facts() {
+        let temp_dir = TempDir::new().expect("test workspace must be created");
+        let sig_dir = temp_dir.path().join("sig");
+        fs::create_dir_all(&sig_dir).expect("sig directory must be created");
+        let signature_path = sig_dir.join("native_widget.rbs");
+        fs::write(
+            &signature_path,
+            "class NativeWidget\n  def encode: (String value) -> String\nend\n",
+        )
+        .expect("RBS fixture must be written");
+        let usage_path = temp_dir.path().join("native_usage.rb");
+        let usage = "widget = NativeWidget.new\nwidget.encode(\"value\")\n";
+        fs::write(&usage_path, usage).expect("Ruby usage fixture must be written");
+
+        let mut coordinator =
+            IndexingCoordinator::new(temp_dir.path().to_path_buf(), RubyFastLspConfig::default());
+        let server = create_test_server();
+        coordinator
+            .run_complete_indexing(&server)
+            .await
+            .expect("workspace indexing must succeed");
+
+        let engine = server.analysis_engine.read();
+        let query = ruby_analysis::engine::AnalysisQuery::new(&engine);
+        assert!(
+            query.file_id(&signature_path).is_some(),
+            "conventional sig/**/*.rbs files must be registered"
+        );
+        let method = ruby_analysis::core::FullyQualifiedName::method(
+            vec![ruby_analysis::core::RubyConstant::new("NativeWidget")
+                .expect("test class name must be valid")],
+            ruby_analysis::core::RubyMethod::new("encode").expect("test method name must be valid"),
+        );
+        let facts = query.methods_for_fqn(&method);
+        assert_eq!(facts.len(), 1, "RBS method must become one engine fact");
+        assert_eq!(facts[0].return_type_label.as_deref(), Some("String"));
+        drop(engine);
+
+        let usage_uri = Url::from_file_path(&usage_path).expect("usage URI must be valid");
+        crate::capabilities::indexing::handle_did_open(
+            &server,
+            tower_lsp::lsp_types::DidOpenTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentItem {
+                    uri: usage_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: usage.to_string(),
+                },
+            },
+        )
+        .await;
+        let document = server
+            .docs
+            .lock()
+            .get(&usage_uri)
+            .cloned()
+            .expect("opened usage document must exist");
+        let query = crate::query::EngineQuery::with_doc_and_engine(
+            document,
+            server.analysis_engine.clone(),
+        );
+        let definitions = query
+            .find_definitions_at_position(
+                &usage_uri,
+                tower_lsp::lsp_types::Position::new(1, 9),
+                usage,
+            )
+            .expect("native RBS method call must resolve");
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(
+            definitions[0].uri,
+            Url::from_file_path(signature_path).unwrap()
+        );
+        let hover = query
+            .get_hover_at_position(&usage_uri, tower_lsp::lsp_types::Position::new(1, 9), usage)
+            .expect("RBS method return must produce hover information");
+        assert!(hover.content.contains("String"));
+    }
+
+    #[tokio::test]
     async fn test_coordinator_ruby_file_detection() {
         let fixture = TestProjectFixture::new();
         let config = RubyFastLspConfig::default();

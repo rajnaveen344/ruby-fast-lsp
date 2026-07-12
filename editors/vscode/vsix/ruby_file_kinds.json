@@ -11,5 +11,6 @@
     "Guardfile", "Jarfile", "Mavenfile", "Podfile", "Puppetfile", "Rakefile",
     "Snapfile", "Steepfile", "Thorfile", "Vagrantfile"
   ],
-  "erbExtensions": [".erb", ".rhtml", ".rhtm"]
+  "erbExtensions": [".erb", ".rhtml", ".rhtm"],
+  "signatureExtensions": [".rbs"]
 }

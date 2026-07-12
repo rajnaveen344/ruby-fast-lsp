@@ -49,8 +49,16 @@ impl IndexerProject {
 
         // Collect all Ruby files in the project
         let ruby_files = self.collect_project_files()?;
+        let signature_files =
+            utils::collect_project_signature_files(&self.workspace_root, &self.indexing_config)?;
         let total_files = ruby_files.len();
-        info!("Found {} Ruby files in project", total_files);
+        info!(
+            "Found {} Ruby files and {} RBS signature files in project",
+            total_files,
+            signature_files.len()
+        );
+
+        self.collect_signature_facts(&signature_files, server);
 
         // Collect facts from project files and track dependencies
         self.collect_facts_and_track_dependencies(&ruby_files, server, total_files)
@@ -64,6 +72,31 @@ impl IndexerProject {
         );
 
         Ok(())
+    }
+
+    fn collect_signature_facts(&self, files: &[PathBuf], server: &RubyLanguageServer) {
+        files.par_iter().for_each(|path| {
+            let content = match std::fs::read_to_string(path) {
+                Ok(content) => content,
+                Err(error) => {
+                    warn!("Failed to read RBS signature {:?}: {}", path, error);
+                    return;
+                }
+            };
+            let Ok(uri) = Url::from_file_path(path) else {
+                warn!("Failed to convert RBS signature path to URI: {:?}", path);
+                return;
+            };
+            if let Err(error) = self
+                .file_processor
+                .collect_rbs_facts_as_deferred_resolution(&uri, &content, server)
+            {
+                warn!(
+                    "Failed to collect RBS signature facts {:?}: {}",
+                    path, error
+                );
+            }
+        });
     }
 
     /// Collect all Ruby files in the project

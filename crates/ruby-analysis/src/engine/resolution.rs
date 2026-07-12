@@ -96,10 +96,34 @@ impl<'a> AnalysisQuery<'a> {
             .into_iter()
             .filter(|callee| callee.resolution == MethodCalleeResolution::Exact)
             .flat_map(|callee| {
-                self.engine
+                let matching = self
+                    .engine
                     .method_facts_matching_owner_name(&callee.owner, method)
                     .into_iter()
-                    .filter(move |fact| callee.definition_ranges.contains(&fact.range))
+                    .collect::<Vec<_>>();
+                let signatures = matching
+                    .iter()
+                    .filter(|fact| {
+                        self.engine
+                            .file(fact.range.file_id)
+                            .expect(
+                                "INVARIANT VIOLATED: signature fact references an unregistered file. \
+                                 This is a bug because signature selection requires source metadata. \
+                                 Fix: replace signature facts only after registering their source file.",
+                            )
+                            .kind
+                            == crate::core::SourceKind::Signature
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if signatures.is_empty() {
+                    matching
+                        .into_iter()
+                        .filter(|fact| callee.definition_ranges.contains(&fact.range))
+                        .collect::<Vec<_>>()
+                } else {
+                    signatures
+                }
             })
             .collect::<Vec<_>>();
         facts.sort_by_key(|fact| {
@@ -885,12 +909,36 @@ impl<'a> AnalysisQuery<'a> {
         fqn: &FullyQualifiedName,
         allowed_kinds: &[SymbolKind],
     ) -> Vec<TextRange> {
-        self.engine
+        let mut facts = self
+            .engine
             .symbol_facts_for(fqn)
-            .iter()
+            .into_iter()
             .filter(|fact| allowed_kinds.contains(&fact.kind))
-            .map(|fact| fact.range)
-            .collect()
+            .collect::<Vec<_>>();
+        if facts.iter().any(|fact| {
+            self.engine
+                .file(fact.range.file_id)
+                .expect(
+                    "INVARIANT VIOLATED: symbol fact references an unregistered source file. \
+                     This is a bug because definition precedence requires stable source metadata. \
+                     Fix: remove symbol facts through per-file replacement.",
+                )
+                .kind
+                != crate::core::SourceKind::Signature
+        }) {
+            facts.retain(|fact| {
+                self.engine
+                    .file(fact.range.file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: symbol fact references an unregistered source file. \
+                         This is a bug because RBS overlay filtering requires valid file metadata. \
+                         Fix: register sources before inserting symbol facts.",
+                    )
+                    .kind
+                    != crate::core::SourceKind::Signature
+            });
+        }
+        facts.into_iter().map(|fact| fact.range).collect()
     }
 
     fn resolve_constant_reference_target(
@@ -1296,6 +1344,30 @@ pub(super) fn method_facts_in_chain(
                 }
             })
             .collect::<Vec<_>>();
+
+        if facts.iter().any(|fact| {
+            engine
+                .file(fact.range.file_id)
+                .expect(
+                    "INVARIANT VIOLATED: method fact references an unregistered source file. \
+                     This is a bug because engine facts must never outlive their file metadata. \
+                     Fix: register the file before replacing method facts.",
+                )
+                .kind
+                != crate::core::SourceKind::Signature
+        }) {
+            facts.retain(|fact| {
+                engine
+                    .file(fact.range.file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: method fact references an unregistered source file. \
+                         This is a bug because source precedence requires valid file metadata. \
+                         Fix: remove facts through the per-file replacement lifecycle.",
+                    )
+                    .kind
+                    != crate::core::SourceKind::Signature
+            });
+        }
 
         if !facts.is_empty() {
             facts.sort_by_key(|fact| {

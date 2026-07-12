@@ -199,6 +199,19 @@ their interactive-only facts. Closed-file watcher
 create/change/delete events must use the same policy and the normal per-file
 engine replacement lifecycle. Open buffers remain under didOpen/didChange/didClose.
 
+Native/generated declarations use existing semantic write paths. Ruby and RBI
+stubs are ordinary indexed Ruby. Project `sig/**/*.rbs` files, plus additional
+`.rbs` paths selected by `includedPatterns`, are converted in
+`ruby-analysis::indexer::index_rbs` into ordinary symbols, methods, graph edges,
+signature metadata, and RBS-provenance type facts, then enter the engine through
+per-file replacement as `SourceKind::Signature`. Signature files are
+non-editable and diagnostic-free. Engine method/constant navigation must prefer
+matching Ruby implementations while signature help and missing implementation
+types may use the RBS overlay. Watched RBS create/change/delete and parse failure
+must replace or clear facts deterministically. DSL/runtime-generated APIs must
+continue through public extension patches and optional bounded reindex requests;
+never add binary introspection or a second semantic store.
+
 Distribution versions are checked by `editors/check_package_versions.js` and
 must match the root Cargo package across the VSIX, npm CLI, platform packages,
 optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail

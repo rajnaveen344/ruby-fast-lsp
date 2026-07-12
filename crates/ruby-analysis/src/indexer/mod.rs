@@ -16,6 +16,7 @@ pub mod hover;
 pub mod identifier;
 pub mod identifier_visitor;
 pub mod inlay_hints;
+mod rbs_indexer;
 pub mod receiver_resolution;
 pub mod rename;
 mod ruby_document;
@@ -34,6 +35,7 @@ pub use erb::{is_erb_path, mask_erb, EmbeddedRuby};
 pub use hover::{identifier_to_hover_target, HoverTarget};
 pub use identifier::{Identifier, MethodReceiver};
 pub use identifier_visitor::{IdentifierType, IdentifierVisitor};
+pub use rbs_indexer::index_rbs;
 pub use receiver_resolution::{
     resolve_receiver_to_namespace, resolve_receiver_type, ReceiverResolutionContext,
 };

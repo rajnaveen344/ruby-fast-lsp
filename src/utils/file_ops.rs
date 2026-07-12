@@ -101,15 +101,27 @@ impl ProjectFilePolicy {
         let Ok(relative) = path.strip_prefix(workspace_root) else {
             return false;
         };
-        if relative
-            .components()
-            .any(|component| component.as_os_str() == ".git")
-        {
+        if is_git_path(relative) || is_rbs_file(path) {
             return false;
         }
         let explicitly_included = self.included.is_match(relative);
         let is_owned_default = should_index_file(path) && !is_default_external_path(relative);
         (explicitly_included || is_owned_default) && !self.excluded.is_match(relative)
+    }
+
+    pub fn includes_signature(&self, workspace_root: &Path, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(workspace_root) else {
+            return false;
+        };
+        if is_git_path(relative) || !is_rbs_file(path) {
+            return false;
+        }
+        let conventional = relative
+            .components()
+            .next()
+            .is_some_and(|component| component.as_os_str() == "sig")
+            && !is_default_external_path(relative);
+        (conventional || self.included.is_match(relative)) && !self.excluded.is_match(relative)
     }
 }
 
@@ -181,6 +193,42 @@ pub fn collect_project_files(dir: &Path, config: &IndexingConfig) -> Result<Vec<
 
     files.sort();
     Ok(files)
+}
+
+pub fn collect_project_signature_files(
+    dir: &Path,
+    config: &IndexingConfig,
+) -> Result<Vec<PathBuf>> {
+    let policy = ProjectFilePolicy::new(config)?;
+    let mut files = Vec::new();
+    for entry in WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(is_not_git_directory)
+    {
+        let entry = entry.map_err(|error| {
+            anyhow::anyhow!(
+                "Failed to walk project signature directory {}: {}",
+                dir.display(),
+                error
+            )
+        })?;
+        if entry.file_type().is_file() && policy.includes_signature(dir, entry.path()) {
+            files.push(entry.into_path());
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn is_rbs_file(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "rbs")
+}
+
+fn is_git_path(relative: &Path) -> bool {
+    relative
+        .components()
+        .any(|component| component.as_os_str() == ".git")
 }
 
 fn is_default_external_path(relative: &Path) -> bool {
@@ -324,7 +372,49 @@ mod tests {
 
         assert_eq!(extensions("rubyExtensions"), RUBY_EXTENSIONS);
         assert_eq!(extensions("erbExtensions"), ERB_EXTENSIONS);
+        assert_eq!(extensions("signatureExtensions"), ["rbs"]);
         assert_eq!(filenames, RUBY_FILENAMES);
+    }
+
+    #[test]
+    fn project_signature_files_use_conventional_sig_and_pattern_precedence() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        for directory in ["sig", "types", "vendor/sig", ".git/sig"] {
+            std::fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        for file in [
+            "sig/native.rbs",
+            "sig/excluded.rbs",
+            "types/generated.rbs",
+            "vendor/sig/hidden.rbs",
+            ".git/sig/hidden.rbs",
+        ] {
+            std::fs::write(root.join(file), "class Native\nend\n").unwrap();
+        }
+        let config = IndexingConfig {
+            included_patterns: vec!["types/*.rbs".to_string(), "vendor/sig/*.rbs".to_string()],
+            excluded_patterns: vec!["sig/excluded.rbs".to_string()],
+            ..IndexingConfig::default()
+        };
+
+        let files = collect_project_signature_files(root, &config).unwrap();
+        let relative = files
+            .iter()
+            .map(|path| path.strip_prefix(root).unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            relative,
+            vec![
+                PathBuf::from("sig/native.rbs"),
+                PathBuf::from("types/generated.rbs"),
+                PathBuf::from("vendor/sig/hidden.rbs"),
+            ]
+        );
+        assert!(collect_project_files(root, &config)
+            .unwrap()
+            .iter()
+            .all(|path| path.extension().is_none_or(|extension| extension != "rbs")));
     }
 
     #[test]

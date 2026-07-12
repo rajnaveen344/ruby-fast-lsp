@@ -8,6 +8,8 @@ pub enum SourceKind {
     Project,
     /// Workspace source outside the project file policy, analyzed only while open.
     Excluded,
+    /// RBS declaration source used for navigation and type facts, never Ruby diagnostics.
+    Signature,
     /// Bundled language/runtime declarations.
     Stub,
     /// Ruby standard-library source.
@@ -40,7 +42,7 @@ impl SourceKind {
     pub fn is_dependency_source(self) -> bool {
         matches!(
             self,
-            SourceKind::Stub | SourceKind::Stdlib | SourceKind::Gem
+            SourceKind::Signature | SourceKind::Stub | SourceKind::Stdlib | SourceKind::Gem
         )
     }
 }

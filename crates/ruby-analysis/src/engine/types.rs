@@ -447,6 +447,46 @@ impl<'a> AnalysisQuery<'a> {
             TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => {}
         }
 
+        let FullyQualifiedName::Method(_, method) = &fact.fqn else {
+            panic!(
+                "INVARIANT VIOLATED: method return lookup received a non-method fact {}. \
+                 This is a bug because MethodFact FQNs must always use the Method variant. \
+                 Fix: validate method facts before engine insertion.",
+                fact.fqn
+            );
+        };
+        let mut signature_types = self
+            .engine
+            .method_facts_matching_owner_name(&fact.owner, method)
+            .into_iter()
+            .filter(|signature| {
+                self.engine
+                    .file(signature.range.file_id)
+                    .expect(
+                        "INVARIANT VIOLATED: RBS method fact references an unregistered source file. \
+                         This is a bug because type overlay requires stable signature metadata. \
+                         Fix: remove signature facts through per-file replacement.",
+                    )
+                    .kind
+                    == crate::core::SourceKind::Signature
+            })
+            .filter_map(|signature| {
+                match self.engine.type_at(
+                    &TypeSubject::MethodReturn(signature.fqn),
+                    signature.range.file_id,
+                    signature.range.end_byte,
+                ) {
+                    TypeResolution::Resolved(type_fact) => Some(type_fact.ruby_type),
+                    TypeResolution::Ambiguous(_) | TypeResolution::Unresolved => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        signature_types.sort_by_key(|ruby_type| ruby_type.to_string());
+        signature_types.dedup();
+        if !signature_types.is_empty() {
+            return Some(RubyType::union(signature_types));
+        }
+
         self.delegate_method_return_type(fact, seen)
     }
 

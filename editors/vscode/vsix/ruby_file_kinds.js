@@ -2,9 +2,10 @@ const policy = require('./ruby_file_kinds.json');
 const RUBY_EXTENSIONS = policy.rubyExtensions;
 const RUBY_FILENAMES = policy.rubyFilenames;
 const ERB_EXTENSIONS = policy.erbExtensions;
+const SIGNATURE_EXTENSIONS = policy.signatureExtensions;
 
 function fileWatcherPatterns(includedPatterns = []) {
-    const extensions = [...RUBY_EXTENSIONS, ...ERB_EXTENSIONS]
+    const extensions = [...RUBY_EXTENSIONS, ...ERB_EXTENSIONS, ...SIGNATURE_EXTENSIONS]
         .map((extension) => extension.slice(1));
     return [
         `**/*.{${extensions.join(',')}}`,
@@ -17,5 +18,6 @@ module.exports = {
     ERB_EXTENSIONS,
     RUBY_EXTENSIONS,
     RUBY_FILENAMES,
+    SIGNATURE_EXTENSIONS,
     fileWatcherPatterns
 };

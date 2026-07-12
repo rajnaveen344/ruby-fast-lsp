@@ -319,7 +319,9 @@ Implement:
    handling across discovery, VS Code association, watchers, and packaging.
 5. Done: explicit generated, vendored, dependency, included/excluded, trust,
    workspace-query, rename, diagnostics, and watched-file lifecycle policy.
-6. A strategy for declarations from native extensions or generated APIs.
+6. Done: Ruby/RBI declarations, project RBS signature ingestion and overlay
+   precedence, and public extension patches form the explicit strategy for
+   native-extension and generated API declarations.
 
 Completion criteria:
 
@@ -1377,3 +1379,41 @@ At the end of every goal session, record:
   cold, watched, and interactive lifecycle evidence. The next highest-priority
   incomplete item is Milestone 4 item 6: define and prove the strategy for
   declarations supplied by native extensions or generated APIs.
+
+### July 2026: Native and generated declaration strategy with project RBS overlays
+
+- Static strategy: Ruby and RBI stubs remain ordinary parser-owned project
+  declarations. Conventional `sig/**/*.rbs` files are now auto-discovered;
+  additional RBS paths can use `includedPatterns`, exclusions still win, and
+  `.git` remains impossible to opt in.
+- Domain ingestion: `ruby-analysis::indexer::index_rbs` converts RBS classes,
+  modules, methods, normalized `initialize` constructors, attributes,
+  constants, visibility, mixins, inheritance, parameter metadata, composite
+  return types, and source locations into ordinary analysis facts. The server
+  registers `SourceKind::Signature` files and uses the single per-file engine
+  replacement path; RBS never becomes an LSP-shaped or parallel semantic store.
+- Overlay policy: native-only declarations participate in normal definition,
+  completion, signature, type, MRO, and hover queries. When Ruby and RBS declare
+  the same class or method, navigation prefers the executable Ruby definition,
+  while signature help and otherwise-missing method return types use the RBS
+  overlay. This avoids false ambiguity without discarding typed contracts.
+- Generated lifecycle: VS Code watches `.rbs` without treating it as Ruby
+  syntax. Closed signature create/change/delete events replace or remove facts;
+  malformed regenerated RBS clears stale facts. DSL/runtime-generated APIs
+  continue to use versioned public extension patches and bounded reindex
+  requests, never direct engine writes.
+- Evidence: red-first tests proved project RBS was previously undiscovered,
+  watched RBS never entered the engine, and matching Ruby/RBS declarations
+  produced ambiguous navigation with no type overlay. The completed tests prove
+  cold discovery, include/exclude precedence, constructor normalization,
+  definition and `String` hover from a real Ruby call, implementation-first
+  navigation, RBS signature/type overlay, watcher replacement/deletion, and
+  malformed-output cleanup.
+- Verification: 987 root tests, all workspace tests including 341
+  `ruby-analysis` tests, the 55-test release simulator, 12 Node adapter tests,
+  release build, zero npm audit findings, and the packaged VSIX initialize and
+  bundled-extension smoke pass locally.
+- Rating increases to **8.6/10**. Milestone 4 is complete for its declared
+  scope. The next milestone is measured production confidence: establish
+  repeatable latency/memory budgets and semantic export fingerprints before
+  making typing-path refresh changes.

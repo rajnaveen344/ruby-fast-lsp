@@ -471,6 +471,42 @@ pub async fn handle_watched_files_changed(
             continue;
         }
 
+        if path.extension().is_some_and(|extension| extension == "rbs") {
+            if change.typ == FileChangeType::DELETED
+                || !policy.includes_signature(&workspace.root_path, &path)
+            {
+                analysis_changed |=
+                    clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                continue;
+            }
+            match tokio::fs::read_to_string(&path).await {
+                Ok(content) => match processor.collect_rbs_facts(&change.uri, &content, server) {
+                    Ok(()) => analysis_changed = true,
+                    Err(error) => {
+                        log::error!(
+                            "Failed to index watched RBS file {}: {error}",
+                            path.display()
+                        );
+                        analysis_changed |=
+                            clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                    }
+                },
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    analysis_changed |=
+                        clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                }
+                Err(error) => {
+                    log::error!(
+                        "Failed to read watched RBS file {}: {error}",
+                        path.display()
+                    );
+                    analysis_changed |=
+                        clear_file_facts_if_kind(server, &change.uri, SourceKind::Signature);
+                }
+            }
+            continue;
+        }
+
         if change.typ == FileChangeType::DELETED || !policy.includes(&workspace.root_path, &path) {
             analysis_changed |= clear_project_file_facts(server, &change.uri);
             if change.typ == FileChangeType::DELETED {
@@ -635,6 +671,80 @@ mod tests {
         )
         .await;
         assert!(has_namespace(&server, "VendorOwned"));
+    }
+
+    #[tokio::test]
+    async fn watched_project_rbs_files_replace_and_remove_signature_facts() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let path = workspace.path().join("sig/native_widget.rbs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let uri = Url::from_file_path(&path).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+        std::fs::write(
+            &path,
+            "class NativeWidget\n  def encode: () -> String\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ: FileChangeType::CREATED,
+                }],
+            },
+        )
+        .await;
+        assert!(has_namespace(&server, "NativeWidget"));
+
+        std::fs::write(
+            &path,
+            "class GeneratedWidget\n  def encode: () -> Integer\nend\n",
+        )
+        .unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        assert!(!has_namespace(&server, "NativeWidget"));
+        assert!(has_namespace(&server, "GeneratedWidget"));
+
+        std::fs::write(&path, "class GeneratedWidget\n  def broken: (\n").unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        assert!(
+            !has_namespace(&server, "GeneratedWidget"),
+            "malformed regenerated RBS must clear stale signature facts"
+        );
+
+        std::fs::remove_file(&path).unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri,
+                    typ: FileChangeType::DELETED,
+                }],
+            },
+        )
+        .await;
+        assert!(!has_namespace(&server, "GeneratedWidget"));
     }
 
     #[tokio::test]

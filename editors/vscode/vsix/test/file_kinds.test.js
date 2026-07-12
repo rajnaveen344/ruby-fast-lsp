@@ -25,5 +25,6 @@ test('file watcher patterns cover extension and conventional filename changes', 
     assert(patterns.some((pattern) => pattern.includes('Thorfile')));
     assert(patterns.some((pattern) => pattern.includes('Fastfile')));
     assert(patterns.some((pattern) => pattern.includes('rhtml')));
+    assert(patterns.some((pattern) => pattern.includes('rbs')));
     assert(patterns.includes('bin/*'));
 });
