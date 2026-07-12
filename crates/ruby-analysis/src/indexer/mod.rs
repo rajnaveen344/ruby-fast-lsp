@@ -47,7 +47,7 @@ pub use scope_tracker::{
 };
 pub use selection_ranges::selection_range_chains;
 pub use semantic_tokens::{TokenVisitor, TOKEN_MODIFIERS, TOKEN_TYPES};
-pub use source_document::SourceDocument;
+pub use source_document::{mask_shebang, SourceDocument};
 pub use variable_scopes::{
     CaptureRef, LVScopeId, LVScopeKind, RenameTarget, RenameTargetKind, ScopeNode, TypeAssignment,
     VariableNode, VariableScopes,

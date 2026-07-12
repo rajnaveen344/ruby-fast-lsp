@@ -1477,3 +1477,38 @@ At the end of every goal session, record:
 - Rating remains **8.6/10**. Milestone 5 still needs the diagnostic
   false-positive budget, simulator-bucket audit, and release smoke-project
   evidence before the 9.0 rating can be considered.
+
+### July 2026: Simulator diagnostic budget and real-project crash smoke
+
+- Simulator completeness: the release simulator now runs 56 tests. Its explicit
+  required-shape list has zero missing buckets, its navigation gap set is empty,
+  and a new aggregate audit enforces zero engine semantic false positives over
+  at least 50 oracle-owned valid call, constant, and macro sites. Code-less
+  Prism syntax/style warnings remain a separate diagnostic class.
+- Release smoke corpus: disposable local checkouts of Sinatra at
+  `946812bdec8faf6598fed154a8d611ead612b6fd` and Discourse at
+  `ca7f32c972e9f8b18c6ea47736e00787c3c5e0e2` exercise real dependency,
+  stdlib, project discovery, fact collection, resolution, diagnostics, and
+  memory paths without duplicating semantic assertions.
+- Crash found and fixed: optimized indexing segfaulted on Discourse's Rakefile.
+  A 146-byte regression proved `ruby-prism` 1.4.0's comment iterator crashes on
+  raw leading `#!`. `mask_shebang` now changes only that `!` byte to `#` for
+  every Prism analysis/comment parse, preserving all source offsets while the
+  original document remains authoritative. Core and full file-processor tests
+  reproduce the former crash and pass in release mode.
+- Smoke results: Sinatra completes 618 analysis files / 5.0 MB in 1.34 s using
+  15.2 MiB estimated engine heap. Discourse completes 11,159 files / 44.8 MB in
+  9.47 s using 176.3 MiB. Neither has a known crash after the fix.
+- Verification: 996 root tests, all workspace tests including 343
+  `ruby-analysis` tests, the 56-test release simulator, release build, and the
+  packaged VSIX initialize/extension/ERB smoke pass locally.
+- Production risk discovered: Sinatra produces 1,891 engine diagnostics and
+  Discourse 76,192. These raw counts are not a reviewed false-positive rate,
+  but their scale contradicts any claim that real-project diagnostic precision
+  is production-ready. The next priority is a conservative publication and
+  precision policy measured against these projects; do not hide this evidence
+  behind the simulator's narrower zero-false-positive budget.
+- Rating is provisionally **8.7/10**: repeatable performance, bounded typing,
+  simulator completeness, two real-project crash smokes, and a production crash
+  fix justify a small confidence increase. The 9.0 milestone remains blocked by
+  real-world diagnostic noise and the final clean/package release audit.

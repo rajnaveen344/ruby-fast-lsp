@@ -1,4 +1,5 @@
 use crate::core::{SourceFileId, TextRange};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub struct SourceDocument {
@@ -131,13 +132,30 @@ fn compute_line_offsets(content: &str) -> Vec<usize> {
 }
 
 fn parse_comments(content: &str) -> Vec<(usize, usize)> {
-    let parse_result = ruby_prism::parse(content.as_bytes());
+    // ruby-prism 1.4.0's comment iterator dereferences invalid state for a
+    // leading shebang (`#!`) even though ordinary AST parsing succeeds. Mask
+    // only the `!` byte as `#`; this preserves every byte offset and keeps the
+    // shebang represented as a normal full-line comment.
+    let parse_content = mask_shebang(content);
+    let parse_result = ruby_prism::parse(parse_content.as_bytes());
     let mut comments = Vec::new();
     for comment in parse_result.comments() {
         let loc = comment.location();
         comments.push((loc.start_offset(), loc.end_offset()));
     }
     comments
+}
+
+/// Mask a leading Ruby shebang without changing any source byte offset.
+pub fn mask_shebang(content: &str) -> Cow<'_, str> {
+    if !content.starts_with("#!") {
+        return Cow::Borrowed(content);
+    }
+    let mut bytes = content.as_bytes().to_vec();
+    bytes[1] = b'#';
+    Cow::Owned(String::from_utf8(bytes).expect(
+        "INVARIANT VIOLATED: masking an ASCII shebang byte produced invalid UTF-8. This is a bug because replacing `!` with `#` cannot invalidate UTF-8. Fix: preserve the original byte length while masking the shebang.",
+    ))
 }
 
 fn u32_offset(offset: usize) -> u32 {
@@ -196,5 +214,13 @@ mod tests {
         let doc = SourceDocument::new("# hello\nclass User\nend\n".to_string(), SourceFileId(0));
 
         assert_eq!(doc.comments(), &[(0, 7)]);
+    }
+
+    #[test]
+    fn parses_shebang_as_a_comment_without_crashing() {
+        let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nputs 'ok'\n";
+        let doc = SourceDocument::new(source.to_string(), SourceFileId(0));
+
+        assert_eq!(doc.comments(), &[(0, 19), (20, 49)]);
     }
 }

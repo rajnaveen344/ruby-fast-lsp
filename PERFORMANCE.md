@@ -58,3 +58,26 @@ measured iterations:
 The benchmark currently measures the deterministic medium fixture. Release
 smoke projects and larger optional corpora remain separate checks; they must not
 become a redundant semantic test suite.
+
+## July 2026 Release Smoke Projects
+
+These checkouts are disposable local evidence, not a second semantic suite:
+
+| Project | Revision | Analysis shape | Cold result | Engine heap |
+| --- | --- | ---: | ---: | ---: |
+| Sinatra | `946812bdec8faf6598fed154a8d611ead612b6fd` | 618 files / 5.0 MB | 1.34 s | 15.2 MiB |
+| Discourse | `ca7f32c972e9f8b18c6ea47736e00787c3c5e0e2` | 11,159 files / 44.8 MB | 9.47 s | 176.3 MiB |
+
+Both completed with the release profiler after the shebang/comment-parser crash
+fix. Run the same smoke with:
+
+```bash
+target/release/profiler --workspace /path/to/project
+```
+
+Diagnostic volume remains a production blocker rather than a successful
+quality measurement: Sinatra produced 1,891 engine diagnostics and Discourse
+76,192. These counts are not classified false-positive rates, but they are too
+large to claim real-project diagnostic precision. The simulator separately
+enforces zero engine semantic false positives at its oracle-reviewed valid
+sites.

@@ -58,9 +58,13 @@ enum FileResolution {
 
 fn analysis_source<'a>(uri: &Url, content: &'a str) -> Cow<'a, str> {
     if is_erb_path(uri.path()) {
-        Cow::Owned(mask_erb(content).source().to_string())
+        let mut source = mask_erb(content).source().to_string();
+        if source.starts_with("#!") {
+            source.replace_range(1..2, "#");
+        }
+        Cow::Owned(source)
     } else {
-        Cow::Borrowed(content)
+        ruby_analysis::indexer::mask_shebang(content)
     }
 }
 
@@ -682,6 +686,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(api.semantic_change, SemanticChange::ExportsChanged);
+    }
+
+    #[test]
+    fn file_processor_handles_shebang_source_without_crashing() {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let uri = Url::parse("file:///project/Rakefile").unwrap();
+        let source = "#!/usr/bin/env rake\n# frozen_string_literal: true\nrequire File.expand_path('../config/application', __FILE__)\nDiscourse::Application.load_tasks\n";
+
+        let result = processor
+            .process_file_current_file_resolution_forced(&uri, source, &server)
+            .expect("shebang-bearing Ruby entry points must index successfully");
+
+        assert_eq!(result.semantic_change, SemanticChange::InitialIndex);
     }
 }
 

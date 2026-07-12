@@ -1261,6 +1261,12 @@ fn generated_project_shape_coverage_tracks_required_buckets() {
     coverage.require(REQUIRED_BUCKETS);
 }
 
+#[tokio::test]
+async fn generated_project_semantic_diagnostic_false_positive_budget_is_zero() {
+    let runner = SimulationRunner::start(phase1_project()).await;
+    runner.assert_semantic_false_positive_budget(0).await;
+}
+
 #[test]
 fn generated_project_emits_complex_ruby_graph() {
     let project = phase1_project();

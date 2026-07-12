@@ -212,6 +212,13 @@ must replace or clear facts deterministically. DSL/runtime-generated APIs must
 continue through public extension patches and optional bounded reindex requests;
 never add binary introspection or a second semantic store.
 
+Ruby source may begin with a shebang. `ruby-prism` 1.4.0's comment iterator can
+segfault on raw leading `#!` input in optimized builds. All server/indexer Prism
+parses and `SourceDocument` comment parses must use the offset-preserving
+`ruby_analysis::indexer::mask_shebang` projection (`#!` -> `##`); never parse a
+raw shebang through the comment iterator. The original document remains the
+source for content and LSP position conversion.
+
 Distribution versions are checked by `editors/check_package_versions.js` and
 must match the root Cargo package across the VSIX, npm CLI, platform packages,
 optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail

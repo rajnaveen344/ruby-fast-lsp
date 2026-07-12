@@ -165,6 +165,102 @@ impl SimulationRunner {
         self.assert_direct_macro_calls_do_not_warn().await;
     }
 
+    pub async fn assert_semantic_false_positive_budget(&self, maximum: usize) {
+        let oracle = OracleState::with_indexed_files(
+            &self.project,
+            &self.render.map,
+            self.indexed_files.clone(),
+        );
+        let reviewed_sites = self
+            .render
+            .map
+            .calls
+            .iter()
+            .filter(|call| {
+                self.open_files.contains(&call.pos.file) && oracle.resolve_call(call).is_some()
+            })
+            .count()
+            + self
+                .render
+                .map
+                .constant_refs
+                .iter()
+                .filter(|constant_ref| {
+                    self.open_files.contains(&constant_ref.pos.file)
+                        && oracle.resolve_constant_ref(constant_ref).is_some()
+                })
+                .count()
+            + self
+                .render
+                .map
+                .direct_macro_calls
+                .iter()
+                .filter(|macro_call| self.open_files.contains(&macro_call.pos.file))
+                .count();
+        assert!(
+            reviewed_sites >= 50,
+            "INVARIANT VIOLATED: semantic diagnostic review corpus has only {reviewed_sites} oracle-owned valid sites. This is a bug because a zero false-positive budget needs material coverage. Fix: expand the generated project before claiming the budget."
+        );
+        let mut false_positives = Vec::new();
+        for file in &self.open_files {
+            for diagnostic in self.editor.diagnostics(file).await {
+                if diagnostic.severity != Some(DiagnosticSeverity::ERROR)
+                    && diagnostic.severity != Some(DiagnosticSeverity::WARNING)
+                {
+                    continue;
+                }
+                if diagnostic.code.is_none() {
+                    // Prism syntax/style diagnostics are covered separately and
+                    // are not engine semantic false positives.
+                    continue;
+                }
+                if !self.diagnostic_targets_reviewed_valid_site(file, &diagnostic, &oracle) {
+                    continue;
+                }
+                false_positives.push(format!(
+                    "{}:{}:{} code={:?} text={:?} message={}",
+                    file,
+                    diagnostic.range.start.line,
+                    diagnostic.range.start.character,
+                    diagnostic.code,
+                    diagnostic_text(self.editor.content(file), &diagnostic),
+                    diagnostic.message
+                ));
+            }
+        }
+        false_positives.sort();
+        assert!(
+            false_positives.len() <= maximum,
+            "INVARIANT VIOLATED: semantic diagnostic false-positive budget exceeded: {} > {}. This is a bug because the deterministic simulator oracle marks every intentional negative site. Fix: correct the diagnostic policy or explicitly model a genuinely invalid generated site.\n{}",
+            false_positives.len(),
+            maximum,
+            false_positives.join("\n")
+        );
+    }
+
+    fn diagnostic_targets_reviewed_valid_site(
+        &self,
+        file: &str,
+        diagnostic: &Diagnostic,
+        oracle: &OracleState<'_>,
+    ) -> bool {
+        self.render.map.calls.iter().any(|call| {
+            call.pos.file == file
+                && call.pos.line == diagnostic.range.start.line
+                && call.pos.character == diagnostic.range.start.character
+                && oracle.resolve_call(call).is_some()
+        }) || self.render.map.constant_refs.iter().any(|constant_ref| {
+            constant_ref.pos.file == file
+                && constant_ref.pos.line == diagnostic.range.start.line
+                && constant_ref.pos.character == diagnostic.range.start.character
+                && oracle.resolve_constant_ref(constant_ref).is_some()
+        }) || self.render.map.direct_macro_calls.iter().any(|macro_call| {
+            macro_call.pos.file == file
+                && macro_call.pos.line == diagnostic.range.start.line
+                && macro_call.pos.character == diagnostic.range.start.character
+        })
+    }
+
     pub async fn open_file(&mut self, file: &str) {
         assert!(
             !self.open_files.contains(file),
