@@ -94,6 +94,62 @@ impl<'a> OracleState<'a> {
         }
     }
 
+    pub fn method_lookup_is_conclusive(&self, call: &CallSite) -> bool {
+        let owners = match &call.shape {
+            CallShape::Bare
+            | CallShape::BareInDoBlock
+            | CallShape::BareInBraceBlock
+            | CallShape::BareInLambda
+            | CallShape::BareInProc
+            | CallShape::FrameworkRouteBlock
+            | CallShape::Super => vec![call.caller.owner.as_str()],
+            CallShape::ClassReceiver { receiver_owner } => vec![receiver_owner.as_str()],
+            CallShape::OneHopChain { receiver_owner, .. } => {
+                vec![receiver_owner.as_str(), call.target.owner.as_str()]
+            }
+            CallShape::LocalVar { .. }
+            | CallShape::Ivar { .. }
+            | CallShape::ConstructorSend
+            | CallShape::StaticSend
+            | CallShape::ClassSend
+            | CallShape::MethodObject
+            | CallShape::InstanceMethodObject
+            | CallShape::ReceiverLocalVar { .. }
+            | CallShape::ArrayBlockParam { .. }
+            | CallShape::YieldBlockParam { .. } => vec![call.target.owner.as_str()],
+        };
+        let mut seen = BTreeSet::new();
+        owners
+            .into_iter()
+            .all(|owner| self.namespace_lookup_chain_is_complete(owner, &mut seen))
+    }
+
+    fn namespace_lookup_chain_is_complete(&self, owner: &str, seen: &mut BTreeSet<String>) -> bool {
+        if !seen.insert(owner.to_string()) {
+            return true;
+        }
+        let namespaces = self.visible_namespaces(owner);
+        if namespaces.is_empty() {
+            return false;
+        }
+        namespaces.into_iter().all(|namespace| {
+            let superclass_complete = namespace
+                .superclass
+                .as_deref()
+                .is_none_or(|target| self.namespace_lookup_chain_is_complete(target, seen));
+            let mixins_complete = namespace
+                .prepends
+                .iter()
+                .chain(namespace.includes.iter())
+                .chain(namespace.extends.iter())
+                .chain(namespace.singleton_prepends.iter())
+                .chain(namespace.singleton_includes.iter())
+                .filter(|mixin| mixin.enabled)
+                .all(|mixin| self.namespace_lookup_chain_is_complete(&mixin.fqn, seen));
+            superclass_complete && mixins_complete
+        })
+    }
+
     pub fn resolve_instance_method(
         &self,
         receiver_owner: &str,

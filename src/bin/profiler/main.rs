@@ -22,6 +22,7 @@
 //!   --hold-seconds <n>   Keep process alive after profiling for external memory tools
 //!   --benchmark-iterations <n>  Measure editor operations after indexing
 //!   --check-budgets      Fail when a production budget is exceeded
+//!   --diagnostics-file <relative-path>  Open a file and print its user-visible diagnostics
 //!   --help               Show help
 
 mod sample_project;
@@ -71,10 +72,19 @@ struct Config {
     hold_seconds: u64,
     benchmark_iterations: Option<usize>,
     check_budgets: bool,
+    diagnostics_files: Vec<PathBuf>,
 }
 
 fn parse_args() -> Config {
-    let args: Vec<String> = env::args().collect();
+    parse_args_from(env::args())
+}
+
+fn parse_args_from<I, S>(args: I) -> Config
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     let mut config = Config {
         workspace: None,
         extension_path: None,
@@ -83,6 +93,7 @@ fn parse_args() -> Config {
         hold_seconds: 0,
         benchmark_iterations: None,
         check_budgets: false,
+        diagnostics_files: Vec::new(),
     };
 
     let mut i = 1;
@@ -147,6 +158,14 @@ fn parse_args() -> Config {
             "--check-budgets" => {
                 config.check_budgets = true;
             }
+            "--diagnostics-file" => {
+                assert!(
+                    i + 1 < args.len(),
+                    "INVARIANT VIOLATED: --diagnostics-file has no path. This is a bug because diagnostic sampling requires an explicit workspace-relative file. Fix: pass --diagnostics-file path/to/file.rb."
+                );
+                config.diagnostics_files.push(PathBuf::from(&args[i + 1]));
+                i += 1;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -180,6 +199,8 @@ OPTIONS:
     --benchmark-iterations <N>
                              Measure edit and query p95 latency after indexing
     --check-budgets          Exit unsuccessfully when a production budget is exceeded
+    --diagnostics-file <PATH>
+                             Open a workspace-relative file through didOpen and print diagnostics as JSON; repeatable
     -h, --help               Show this help message
 
 EXAMPLES:
@@ -274,6 +295,8 @@ fn main() -> anyhow::Result<()> {
         // Print stats
         print_stats(&server);
 
+        sample_open_file_diagnostics(&server, &workspace_path, &config.diagnostics_files).await?;
+
         let benchmark_result = if let Some(iterations) = config.benchmark_iterations {
             assert!(
                 config.phase == Phase::All,
@@ -334,6 +357,52 @@ fn main() -> anyhow::Result<()> {
         println!("production budgets: PASS");
     }
 
+    Ok(())
+}
+
+async fn sample_open_file_diagnostics(
+    server: &RubyLanguageServer,
+    workspace_path: &std::path::Path,
+    relative_paths: &[PathBuf],
+) -> anyhow::Result<()> {
+    for relative_path in relative_paths {
+        anyhow::ensure!(
+            relative_path.is_relative(),
+            "--diagnostics-file must be workspace-relative: {}",
+            relative_path.display()
+        );
+        let path = std::fs::canonicalize(workspace_path.join(relative_path))?;
+        anyhow::ensure!(
+            path.starts_with(workspace_path),
+            "--diagnostics-file escapes the workspace: {}",
+            relative_path.display()
+        );
+        let uri = Url::from_file_path(&path)
+            .map_err(|()| anyhow::anyhow!("invalid diagnostics file path: {}", path.display()))?;
+        let content = fs::read_to_string(&path)?;
+        indexing::handle_did_open(
+            server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: content,
+                },
+            },
+        )
+        .await;
+        let diagnostics = EngineQuery::with_engine(server.analysis_engine.clone())
+            .get_unresolved_diagnostics(&uri);
+
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "diagnostics_file": relative_path,
+                "semantic_diagnostics": diagnostics,
+            }))?
+        );
+    }
     Ok(())
 }
 
@@ -722,6 +791,29 @@ fn log_memory_bucket(name: &str, bytes: usize, total: usize) {
         bytes as f64 * 100.0 / total as f64
     };
     info!("{name}: {:.1} MB ({percent:.1}%)", bytes_to_mb(bytes));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_files_are_collected_in_command_line_order() {
+        let config = parse_args_from([
+            "profiler",
+            "--workspace",
+            "/tmp/project",
+            "--diagnostics-file",
+            "lib/app.rb",
+            "--diagnostics-file",
+            "routes.rb",
+        ]);
+
+        assert_eq!(
+            config.diagnostics_files,
+            vec![PathBuf::from("lib/app.rb"), PathBuf::from("routes.rb")]
+        );
+    }
 }
 
 fn bytes_to_mb(bytes: usize) -> f64 {

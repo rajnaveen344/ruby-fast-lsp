@@ -103,6 +103,10 @@ impl MethodArity {
                 }
                 MethodParamKind::KeywordRest => arity.has_kwrest = true,
                 MethodParamKind::Block => {}
+                MethodParamKind::Forwarding => {
+                    arity.has_rest = true;
+                    arity.has_kwrest = true;
+                }
             }
         }
         arity

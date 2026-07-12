@@ -304,14 +304,26 @@ impl AnalysisIndexer {
         method: RubyMethod,
         range: TextRange,
     ) {
+        self.push_method_fact_with_params(namespace, owner_kind, method, range, Vec::new());
+    }
+
+    fn push_method_fact_with_params(
+        &mut self,
+        namespace: Vec<RubyConstant>,
+        owner_kind: crate::core::NamespaceKind,
+        method: RubyMethod,
+        range: TextRange,
+        params: Vec<MethodParamFact>,
+    ) {
         let fqn = FullyQualifiedName::method(namespace.clone(), method);
         let owner = FullyQualifiedName::namespace_with_kind(namespace, owner_kind);
         self.facts
             .symbols
             .push(SymbolFact::new(fqn.clone(), SymbolKind::Method, range));
-        self.facts
-            .methods
-            .push(MethodFact::new(fqn, owner, range).with_visibility(self.current_visibility()));
+        self.facts.methods.push(
+            MethodFact::with_param_facts(fqn, owner, range, params)
+                .with_visibility(self.current_visibility()),
+        );
     }
 
     fn push_attr_method_facts(&mut self, node: &CallNode<'_>, reader: bool, writer: bool) {
@@ -337,7 +349,13 @@ impl AnalysisIndexer {
 
             if writer {
                 if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
-                    self.push_method_fact(self.namespace_stack.clone(), owner_kind, method, range);
+                    self.push_method_fact_with_params(
+                        self.namespace_stack.clone(),
+                        owner_kind,
+                        method,
+                        range,
+                        vec![MethodParamFact::new("value", MethodParamKind::Required)],
+                    );
                 }
             }
         }
@@ -374,17 +392,20 @@ impl AnalysisIndexer {
             }
 
             if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
-                self.push_method_fact(
+                let params = vec![MethodParamFact::new("value", MethodParamKind::Required)];
+                self.push_method_fact_with_params(
                     namespace.clone(),
                     crate::core::NamespaceKind::Singleton,
                     method,
                     range,
+                    params.clone(),
                 );
-                self.push_method_fact(
+                self.push_method_fact_with_params(
                     namespace.clone(),
                     crate::core::NamespaceKind::Instance,
                     method,
                     range,
+                    params,
                 );
             }
         }
@@ -1603,6 +1624,8 @@ fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
                     MethodParamKind::Rest,
                 ));
             }
+        } else if rest.as_forwarding_parameter_node().is_some() {
+            params.push(MethodParamFact::new("...", MethodParamKind::Forwarding));
         }
     }
 
@@ -1632,6 +1655,8 @@ fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
                     MethodParamKind::KeywordRest,
                 ));
             }
+        } else if kwrest.as_forwarding_parameter_node().is_some() {
+            params.push(MethodParamFact::new("...", MethodParamKind::Forwarding));
         }
     }
 

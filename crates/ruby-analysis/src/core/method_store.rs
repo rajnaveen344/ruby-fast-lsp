@@ -12,6 +12,7 @@ pub enum MethodParamKind {
     OptionalKeyword,
     KeywordRest,
     Block,
+    Forwarding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

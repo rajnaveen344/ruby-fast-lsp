@@ -119,6 +119,18 @@ file publishes its syntax and semantic diagnostics normally. Do not flood the
 LSP client with closed-file diagnostics or weaken the engine's reusable
 diagnostic store to implement this projection policy.
 
+Missing-method diagnostics require a complete engine-owned lookup chain. If a
+superclass, include, prepend, or extend edge is unresolved anywhere in the
+candidate chain, navigation may retain its diagnostic-free reference candidate
+but the engine must not claim the method is missing. The implicit Ruby
+`Object` superclass is a known language root, not an explicitly unresolved
+dependency edge. Ruby `def name(...)`
+forwarding is a semantic parameter kind accepting positional and keyword
+shapes. Attribute writer facts (`attr_writer`, `attr_accessor`, and
+`class_attribute`) have one required value parameter. Calls using keyword
+syntax satisfy a positional options-hash parameter when the method declares no
+keyword parameters; keep these Ruby call-shape rules in engine diagnostics.
+
 Safe linter code actions are implemented as preferred `quickfix` actions for
 correctable RuboCop/Standard diagnostics. They run against the current buffer,
 use RuboCop `--autocorrect` or Standard `--fix`, and return a full-document

@@ -82,4 +82,30 @@ large to claim real-project diagnostic precision. The LSP adapter therefore
 publishes cold-index diagnostics only for currently open documents; closed-file
 facts remain queryable in the engine without flooding the editor. The simulator
 separately enforces zero engine semantic false positives at its oracle-reviewed
-valid sites. Representative open-file precision still requires review.
+valid sites.
+
+Representative open-file diagnostics can be sampled through the real didOpen
+lifecycle without adding a project-specific test suite:
+
+```bash
+cargo build --release --bin profiler
+target/release/profiler --workspace /path/to/project \
+  --diagnostics-file app/models/user.rb
+```
+
+`--diagnostics-file` is repeatable, workspace-relative, and emits one JSON line
+per file containing the semantic diagnostics visible after opening it. A July
+2026 sample of Sinatra `base.rb`/`main.rb` and Discourse `user.rb`/
+`application_controller.rb` exposed general false-positive classes in
+forwarding definitions, incomplete ancestor/mixin chains, positional options
+hashes, and generated writers. Fixing the first three reduced the sampled
+Discourse files from 314/221 diagnostics to 12/40 after the writer correction,
+and the sampled Sinatra files from more than 120/11 to 59/10. Most remaining
+errors are missing dependency constants in disposable checkouts without
+installed bundles; do not use that environment to claim dependency-aware
+precision.
+
+The post-fix deterministic 100-iteration benchmark remained within every
+budget: 706.2 ms cold indexing, 1.069 ms edit p95, 0.080 ms completion,
+0.077 ms hover, 0.078 ms definition, 8.243 ms references, sub-microsecond
+diagnostic projection, and 5.8 MiB estimated engine heap.

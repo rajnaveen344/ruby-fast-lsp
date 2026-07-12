@@ -130,11 +130,71 @@ end
 }
 
 #[tokio::test]
+async fn forwarding_parameter_accepts_any_call_shape() {
+    check(
+        r#"
+def target(...)
+end
+
+<warn none code="wrong-arity">target</warn>
+<warn none code="wrong-arity">target(1, 2, option: true)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn generated_attribute_writer_accepts_its_assigned_value() {
+    check(
+        r#"
+class User
+  attr_accessor :name
+
+  def rename
+    <warn none code="wrong-arity">self.name = "Ada"</warn>
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn generated_class_attribute_writer_accepts_its_assigned_value() {
+    check(
+        r#"
+class Config
+  class_attribute :mode
+
+  def configure
+    <warn none code="wrong-arity">self.mode = :strict</warn>
+  end
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn unresolved_method_no_arity_warn() {
     // Method doesn't exist → unresolved-method handles it; no double-warn.
     check(
         r#"
 <warn none code="wrong-arity">does_not_exist("a", "b")</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn unresolved_superclass_makes_missing_inherited_method_inconclusive() {
+    check(
+        r#"
+class User < ActiveRecord::Base
+  def save_record
+    <warn none code="unresolved-method">save!</warn>
+  end
+end
 "#,
     )
     .await;

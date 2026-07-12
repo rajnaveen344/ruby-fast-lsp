@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::{
     ConstLookupId, DiagnosticCandidate, DiagnosticCandidateKind, DiagnosticFact, FqnId,
@@ -33,6 +33,8 @@ impl AnalysisEngine {
             HashMap::new();
         let mut constant_target_cache: HashMap<ConstLookupId, Option<FqnId>> = HashMap::new();
         let mut method_lookup_chain_cache: MethodLookupChainCache = HashMap::new();
+        let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
+        let mut incomplete_method_chain_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         self.facts.references.resolved.clear();
         for candidate in reference_candidate_store.iter_candidates() {
             match candidate {
@@ -183,6 +185,17 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
+                            if *incomplete_method_chain_cache
+                                .entry(owner_fqn.clone())
+                                .or_insert_with(|| {
+                                    self.method_lookup_chain_is_incomplete(
+                                        &owner_fqn,
+                                        &unresolved_method_edge_sources,
+                                    )
+                                })
+                            {
+                                continue;
+                            }
                             let suggestion = namespace_exists
                                 .then(|| {
                                     method_suggestion_cache
@@ -261,6 +274,8 @@ impl AnalysisEngine {
         let mut method_suggestion_cache: HashMap<(FullyQualifiedName, RubyMethod), Option<String>> =
             HashMap::new();
         let mut method_lookup_chain_cache: MethodLookupChainCache = HashMap::new();
+        let unresolved_method_edge_sources = self.unresolved_method_edge_sources();
+        let mut incomplete_method_chain_cache: HashMap<FullyQualifiedName, bool> = HashMap::new();
         let mut resolved_refs = Vec::new();
 
         for candidate in reference_candidates {
@@ -376,6 +391,17 @@ impl AnalysisEngine {
                             if !diagnostics.diagnose_unresolved {
                                 continue;
                             }
+                            if *incomplete_method_chain_cache
+                                .entry(owner_fqn.clone())
+                                .or_insert_with(|| {
+                                    self.method_lookup_chain_is_incomplete(
+                                        &owner_fqn,
+                                        &unresolved_method_edge_sources,
+                                    )
+                                })
+                            {
+                                continue;
+                            }
                             let suggestion = namespace_exists
                                 .then(|| {
                                     method_suggestion_cache
@@ -439,6 +465,59 @@ impl AnalysisEngine {
             .replace_file(file_id, diagnostics);
     }
 
+    fn unresolved_method_edge_sources(&self) -> HashSet<Vec<RubyConstant>> {
+        self.graph
+            .unresolved_edges()
+            .into_iter()
+            .filter(|edge| {
+                let lookup = self.names.const_lookup(edge.target).expect(
+                    "INVARIANT VIOLATED: unresolved graph edge points to a missing constant lookup. This is a bug because graph edges must retain valid interned targets. Fix: intern and retain every unresolved graph target for the edge lifetime.",
+                );
+                !(edge.kind == GraphEdgeKind::Superclass
+                    && lookup.absolute
+                    && lookup.path.len() == 1
+                    && lookup.path[0].as_str() == "Object")
+            })
+            .filter_map(|edge| {
+                self.names
+                    .fqn(edge.source)
+                    .map(FullyQualifiedName::namespace_parts)
+            })
+            .collect()
+    }
+
+    fn method_lookup_chain_is_incomplete(
+        &self,
+        owner: &FullyQualifiedName,
+        unresolved_sources: &HashSet<Vec<RubyConstant>>,
+    ) -> bool {
+        let mut pending = vec![owner.clone()];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            if unresolved_sources.contains(&current.namespace_parts()) {
+                return true;
+            }
+            pending.extend(
+                self.graph_edges_from(&current)
+                    .into_iter()
+                    .filter(|edge| {
+                        matches!(
+                            edge.kind,
+                            GraphEdgeKind::Superclass
+                                | GraphEdgeKind::Include
+                                | GraphEdgeKind::Prepend
+                                | GraphEdgeKind::Extend
+                        )
+                    })
+                    .map(|edge| edge.target),
+            );
+        }
+        false
+    }
+
     fn push_signature_diagnostics(
         &self,
         fact: &MethodFact,
@@ -448,7 +527,16 @@ impl AnalysisEngine {
         diagnostics_by_file: &mut HashMap<SourceFileId, Vec<DiagnosticFact>>,
     ) {
         let arity = MethodArity::from_params(&fact.param_facts);
-        if let Some((min, max, actual)) = arity_mismatch(signature, &arity) {
+        let declares_keywords = arity.has_kwrest
+            || !arity.required_keywords.is_empty()
+            || !arity.optional_keywords.is_empty();
+        let keywords_form_options_hash = !declares_keywords
+            && (!signature.keyword_args.is_empty() || signature.has_keyword_splat);
+        let mut effective_signature = signature.clone();
+        if keywords_form_options_hash {
+            effective_signature.positional_count += 1;
+        }
+        if let Some((min, max, actual)) = arity_mismatch(&effective_signature, &arity) {
             let expected = match max {
                 Some(max) if max == min => format!("{}", min),
                 Some(max) => format!("{}..{}", min, max),
@@ -470,7 +558,7 @@ impl AnalysisEngine {
                 ));
         }
 
-        if !arity.has_kwrest && !signature.has_keyword_splat {
+        if declares_keywords && !arity.has_kwrest && !signature.has_keyword_splat {
             let declared = arity
                 .required_keywords
                 .iter()

@@ -195,6 +195,10 @@ Ruby version detection and version-manager integration.
 5. Cold indexing retains workspace diagnostic facts in the engine but projects
    them to the LSP client only for open documents. Closed-file diagnostics are
    available to agent/engine queries and are published if that file is opened.
+6. Missing-method publication is conservative when graph resolution is
+   incomplete: an unresolved superclass/mixin edge makes absence inconclusive.
+   The reference candidate remains available, while diagnostic and signature
+   policy stay single-sourced in the engine.
 
 ## Component Interactions
 

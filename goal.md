@@ -1530,3 +1530,41 @@ At the end of every goal session, record:
 - Rating remains **8.7/10**. Representative real-project open-file diagnostic
   precision is still unreviewed; the next step is to sample active Sinatra and
   Discourse files and harden only demonstrated false-positive classes.
+
+### July 2026: Representative open-file diagnostic precision
+
+- Added a repeatable release-profiler `--diagnostics-file` mode. It accepts
+  workspace-relative paths, opens each file through the real `didOpen`
+  lifecycle, and prints semantic diagnostics as JSON lines. This is measurement
+  tooling, not a redundant project-specific semantic suite.
+- Reviewed central files from both disposable smoke repositories: Sinatra's
+  `lib/sinatra/base.rb` and `lib/sinatra/main.rb`, plus Discourse's
+  `app/models/user.rb` and `app/controllers/application_controller.rb`.
+- Red-first fixes cover four demonstrated general Ruby rules: `def name(...)`
+  preserves forwarding rather than becoming zero-arity; unresolved superclass
+  or mixin chains make missing inherited methods inconclusive; keyword syntax
+  supplies a positional options hash when no keyword parameters are declared;
+  and generated attribute/class-attribute writers retain their required value
+  parameter.
+- The full gate initially caught an over-broad version that treated a missing
+  implicit `Object` stub like explicit unresolved inheritance. The final engine
+  rule excludes that known Ruby root, and the simulator oracle now models
+  inconclusive lookup chains across edit sequences instead of demanding a
+  false missing-method diagnostic.
+- Before/after evidence: Discourse's sampled model/controller fell from 314/221
+  diagnostics to 12/40 after the writer correction; all 472 sampled
+  unresolved-method warnings disappeared. Sinatra's sampled files fell from
+  more than 120/11 to 59/10. Remaining sampled errors are dominated by external
+  constants absent because the disposable clones intentionally have no bundle;
+  that is not evidence for suppressing valid unresolved-constant diagnostics.
+- Performance evidence: the post-fix deterministic 100-iteration release
+  benchmark passes every budget at 706.2 ms cold indexing, 1.069 ms edit p95,
+  0.080 ms completion, 0.077 ms hover, 0.078 ms definition, 8.243 ms
+  references, sub-microsecond diagnostic projection, and 5.8 MiB engine heap.
+- Verification: 1,003 root tests, all workspace tests including 343
+  `ruby-analysis` tests, the 56-test release simulator, release build, version
+  and audit checks, and packaged VSIX initialization with bundled RSpec, Rails,
+  Minitest, and ERB HTML behavior all pass locally.
+- Rating remains **8.7/10** pending a dependency-complete Rails precision
+  sample. This work materially improves daily editor signal, but incomplete
+  smoke dependencies cannot prove the 9.0 precision threshold.

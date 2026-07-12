@@ -1,9 +1,9 @@
 use crate::core::method_store::MethodVisibility;
 use crate::core::{
     DiagnosticCandidate, DiagnosticCandidateKind, FullyQualifiedName, GraphEdgeKind,
-    KeywordArgCandidate, MethodCallSignatureCandidate, MethodFact, MethodReferenceAccess,
-    NamespaceKind, RaiseArgCandidate, ReferenceCandidate, RubyConstant, RubyMethod, TypeFact,
-    TypeProvenance, TypeSubject,
+    KeywordArgCandidate, MethodCallSignatureCandidate, MethodFact, MethodParamFact,
+    MethodParamKind, MethodReferenceAccess, NamespaceKind, RaiseArgCandidate, ReferenceCandidate,
+    RubyConstant, RubyMethod, TypeFact, TypeProvenance, TypeSubject,
 };
 use crate::engine::{AnalysisQuery, VariableTypeKind};
 use crate::{build_constant_path_name, mixin_ref_from_node, utf8_str};
@@ -522,7 +522,7 @@ impl FactCollector {
                         owner_kind,
                         method,
                         range,
-                        Vec::new(),
+                        vec![MethodParamFact::new("value", MethodParamKind::Required)],
                     );
                 }
             }
@@ -562,19 +562,20 @@ impl FactCollector {
             }
 
             if let Ok(method) = RubyMethod::new(&format!("{name}=")) {
+                let params = vec![MethodParamFact::new("value", MethodParamKind::Required)];
                 self.direct_push_method_fact(
                     namespace.clone(),
                     NamespaceKind::Singleton,
                     method,
                     range,
-                    Vec::new(),
+                    params.clone(),
                 );
                 self.direct_push_method_fact(
                     namespace.clone(),
                     NamespaceKind::Instance,
                     method,
                     range,
-                    Vec::new(),
+                    params,
                 );
             }
         }

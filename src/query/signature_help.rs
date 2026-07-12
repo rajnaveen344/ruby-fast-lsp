@@ -264,7 +264,10 @@ fn active_positional_parameter(
         .filter(|(_, kind)| {
             matches!(
                 kind,
-                MethodParamKind::Required | MethodParamKind::Optional | MethodParamKind::Rest
+                MethodParamKind::Required
+                    | MethodParamKind::Optional
+                    | MethodParamKind::Rest
+                    | MethodParamKind::Forwarding
             )
         })
         .collect::<Vec<_>>();
@@ -273,7 +276,7 @@ fn active_positional_parameter(
     }
     if let Some((index, _)) = positional
         .iter()
-        .find(|(_, kind)| **kind == MethodParamKind::Rest)
+        .find(|(_, kind)| matches!(kind, MethodParamKind::Rest | MethodParamKind::Forwarding))
     {
         return *index as u32;
     }
@@ -299,6 +302,7 @@ fn parameter_label(parameter: &MethodParamFact, type_label: Option<&str>) -> Str
             .unwrap_or_else(|| format!("{}: ...", parameter.name)),
         MethodParamKind::KeywordRest => format!("**{}", typed_name),
         MethodParamKind::Block => format!("&{}", typed_name),
+        MethodParamKind::Forwarding => "...".to_string(),
     }
 }
 
@@ -317,5 +321,6 @@ fn rbs_parameter_label(parameter: &RbsSignatureParameter) -> String {
         }
         MethodParamKind::KeywordRest => format!("**{}: {}", parameter.name, parameter.type_label),
         MethodParamKind::Block => format!("&{}: {}", parameter.name, parameter.type_label),
+        MethodParamKind::Forwarding => "...".to_string(),
     }
 }

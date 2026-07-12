@@ -392,6 +392,11 @@ impl SimulationRunner {
 
         self.render = next_render;
         self.assert_index_shape();
+        let oracle = OracleState::with_indexed_files(
+            &self.project,
+            &self.render.map,
+            self.indexed_files.clone(),
+        );
 
         for expected in &step.expected {
             match expected {
@@ -399,7 +404,18 @@ impl SimulationRunner {
                     if !self.open_files.contains(file) {
                         continue;
                     }
-                    self.assert_unresolved_method(file, method).await;
+                    let lookup_is_conclusive = self
+                        .render
+                        .map
+                        .calls
+                        .iter()
+                        .filter(|call| call.pos.file == *file && call.target.name == *method)
+                        .all(|call| oracle.method_lookup_is_conclusive(call));
+                    if lookup_is_conclusive {
+                        self.assert_unresolved_method(file, method).await;
+                    } else {
+                        self.assert_no_unresolved_method(file, method).await;
+                    }
                 }
                 ExpectedCheck::NoUnresolvedMethod { file, method } => {
                     if !self.open_files.contains(file) {

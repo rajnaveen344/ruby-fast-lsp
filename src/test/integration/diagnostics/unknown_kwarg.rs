@@ -112,3 +112,32 @@ u.update(<warn code="unknown-kwarg">naem</warn>: "x")
     )
     .await;
 }
+
+#[tokio::test]
+async fn keyword_syntax_can_supply_a_positional_options_hash() {
+    check(
+        r#"
+def update(options = {})
+  options
+end
+
+<warn none code="wrong-arity">update(active: false)</warn>
+<warn none code="unknown-kwarg">update(active: false)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn positional_options_hash_still_participates_in_arity() {
+    check(
+        r#"
+def update(name, options)
+end
+
+<warn code="wrong-arity">update</warn>(active: false)
+<warn none code="unknown-kwarg">update(active: false)</warn>
+"#,
+    )
+    .await;
+}
