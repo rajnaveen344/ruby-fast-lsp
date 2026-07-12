@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 
+const MAX_OPEN_DIAGNOSTIC_REFRESH_FILES: usize = 8;
+
 fn process_interactive_file(
     indexer: &FileProcessor,
     server: &RubyLanguageServer,
@@ -265,10 +267,18 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
 
     let process_start = Instant::now();
-    let (affected_uris, mut diagnostics) =
+    let (affected_uris, mut diagnostics, semantic_change) =
         match process_interactive_file(&indexer, server, &uri, &final_content) {
-            Ok(result) => (result.affected_uris, result.diagnostics),
-            Err(_) => (std::collections::HashSet::new(), Vec::new()),
+            Ok(result) => (
+                result.affected_uris,
+                result.diagnostics,
+                result.semantic_change,
+            ),
+            Err(_) => (
+                std::collections::HashSet::new(),
+                Vec::new(),
+                ruby_analysis::engine::SemanticChange::BodyOnly,
+            ),
         };
     let process_elapsed = process_start.elapsed();
 
@@ -287,6 +297,15 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     let publish_start = Instant::now();
     server.publish_diagnostics(uri.clone(), diagnostics).await;
     let publish_elapsed = publish_start.elapsed();
+
+    let open_refresh_start = Instant::now();
+    let open_refresh_count =
+        if semantic_change == ruby_analysis::engine::SemanticChange::ExportsChanged {
+            refresh_bounded_open_diagnostics(server, &indexer, &uri).await
+        } else {
+            0
+        };
+    let open_refresh_elapsed = open_refresh_start.elapsed();
 
     let cache_start = Instant::now();
     // Invalidate namespace tree cache with debouncing
@@ -308,7 +327,7 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
     }
     let affected_elapsed = affected_start.elapsed();
     info!(
-        "[PERF][didChange waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} diag_query={}@{:?} publish={:?} cache_invalidate={:?} affected_publish={}@{:?}",
+        "[PERF][didChange waterfall] file={} total={:?} register={:?} doc_cache={:?} process={:?} diag_query={}@{:?} publish={:?} open_refresh={}@{:?} cache_invalidate={:?} affected_publish={}@{:?}",
         uri.path(),
         total_start.elapsed(),
         register_elapsed,
@@ -317,10 +336,59 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         diag_count,
         diag_elapsed,
         publish_elapsed,
+        open_refresh_count,
+        open_refresh_elapsed,
         cache_elapsed,
         affected_count,
         affected_elapsed
     );
+}
+
+async fn refresh_bounded_open_diagnostics(
+    server: &RubyLanguageServer,
+    indexer: &FileProcessor,
+    changed_uri: &Url,
+) -> usize {
+    let open_documents = bounded_open_diagnostic_refresh_targets(server, changed_uri);
+
+    let mut refreshed = 0;
+    for (uri, content) in open_documents {
+        let Ok(result) =
+            indexer.process_file_current_file_resolution_forced(&uri, &content, server)
+        else {
+            log::warn!("Failed to refresh open-file diagnostics for {}", uri.path());
+            continue;
+        };
+        let query = EngineQuery::with_engine(server.analysis_engine.clone());
+        let mut diagnostics = result.diagnostics;
+        diagnostics.extend(query.get_unresolved_diagnostics(&uri));
+        server.publish_diagnostics(uri, diagnostics).await;
+        refreshed += 1;
+    }
+    refreshed
+}
+
+fn bounded_open_diagnostic_refresh_targets(
+    server: &RubyLanguageServer,
+    changed_uri: &Url,
+) -> Vec<(Url, String)> {
+    let mut open_documents = {
+        let docs = server.docs.lock();
+        docs.iter()
+            .filter_map(|(uri, document)| {
+                if uri == changed_uri {
+                    return None;
+                }
+                Some((uri.clone(), document.read().content.clone()))
+            })
+            .collect::<Vec<_>>()
+    };
+    open_documents.retain(|(uri, _)| {
+        analysis_file_kind(server, uri).is_some_and(SourceKind::contributes_project_diagnostics)
+    });
+    open_documents.sort_unstable_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+    open_documents.truncate(MAX_OPEN_DIAGNOSTIC_REFRESH_FILES);
+    open_documents
 }
 
 pub async fn handle_did_save(server: &RubyLanguageServer, params: DidSaveTextDocumentParams) {
@@ -1002,6 +1070,158 @@ mod tests {
         let account_facts = engine.symbol_facts_for(&account_fqn);
         assert_eq!(account_facts.len(), 1);
         assert_eq!(account_facts[0].kind, SymbolKind::Class);
+    }
+
+    #[tokio::test]
+    async fn exported_api_change_refreshes_open_consumer_diagnostics() {
+        let server = RubyLanguageServer::default();
+        let definition_uri = Url::parse("file:///tmp/user.rb").unwrap();
+        let consumer_uri = Url::parse("file:///tmp/use_user.rb").unwrap();
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: definition_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\n  def name\n    'A'\n  end\nend\n".to_string(),
+                },
+            },
+        )
+        .await;
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: consumer_uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class User\n  def show\n    name\n  end\nend\n".to_string(),
+                },
+            },
+        )
+        .await;
+        assert!(
+            server
+                .last_published_diagnostics(&consumer_uri)
+                .iter()
+                .all(|diagnostic| diagnostic.code
+                    != Some(NumberOrString::String("unresolved-method".to_string()))),
+            "existing exported method must keep the open consumer diagnostic-free"
+        );
+
+        handle_did_change(
+            &server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: definition_uri,
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "class User\nend\n".to_string(),
+                }],
+            },
+        )
+        .await;
+
+        assert!(
+            server
+                .last_published_diagnostics(&consumer_uri)
+                .iter()
+                .any(|diagnostic| diagnostic.code
+                    == Some(NumberOrString::String("unresolved-method".to_string()))),
+            "removing an exported method must refresh diagnostics for its open consumer"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_only_change_does_not_refresh_other_open_files() {
+        let server = RubyLanguageServer::default();
+        let definition_uri = Url::parse("file:///tmp/user.rb").unwrap();
+        let consumer_uri = Url::parse("file:///tmp/use_user.rb").unwrap();
+        for (uri, text) in [
+            (
+                definition_uri.clone(),
+                "class User\n  def name\n    'A'\n  end\nend\n",
+            ),
+            (consumer_uri.clone(), "class User\n  name\nend\n"),
+        ] {
+            handle_did_open(
+                &server,
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri,
+                        language_id: "ruby".to_string(),
+                        version: 1,
+                        text: text.to_string(),
+                    },
+                },
+            )
+            .await;
+        }
+        server
+            .publish_diagnostics(
+                consumer_uri.clone(),
+                vec![Diagnostic::new_simple(
+                    Range::default(),
+                    "sentinel".to_string(),
+                )],
+            )
+            .await;
+
+        handle_did_change(
+            &server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: definition_uri,
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "class User\n  def name\n    'B'\n  end\nend\n".to_string(),
+                }],
+            },
+        )
+        .await;
+
+        assert_eq!(
+            server.last_published_diagnostics(&consumer_uri),
+            vec![Diagnostic::new_simple(
+                Range::default(),
+                "sentinel".to_string(),
+            )],
+            "body-only typing must not reprocess unrelated open documents"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_diagnostic_refresh_targets_are_sorted_and_capped() {
+        let server = RubyLanguageServer::default();
+        let changed_uri = Url::parse("file:///tmp/changed.rb").unwrap();
+        for index in (0..12).rev() {
+            let uri = Url::parse(&format!("file:///tmp/consumer_{index:02}.rb")).unwrap();
+            handle_did_open(
+                &server,
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri,
+                        language_id: "ruby".to_string(),
+                        version: 1,
+                        text: format!("VALUE_{index} = {index}\n"),
+                    },
+                },
+            )
+            .await;
+        }
+
+        let targets = bounded_open_diagnostic_refresh_targets(&server, &changed_uri);
+        assert_eq!(targets.len(), MAX_OPEN_DIAGNOSTIC_REFRESH_FILES);
+        assert_eq!(targets[0].0.path(), "/tmp/consumer_00.rb");
+        assert_eq!(targets[7].0.path(), "/tmp/consumer_07.rb");
     }
 
     #[tokio::test]

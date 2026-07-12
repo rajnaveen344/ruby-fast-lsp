@@ -26,7 +26,7 @@ use ruby_analysis::core::{
     SymbolKind as AnalysisSymbolKind, TextRange, TypeFact, TypeProvenance, TypeSubject,
     UnresolvedGraphEdgeFact,
 };
-use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
+use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode, SemanticChange};
 use ruby_analysis::indexer::fact_collector::FactCollector;
 use ruby_analysis::indexer::RubyDocument;
 use ruby_analysis::indexer::{is_erb_path, mask_erb, AnalysisIndexer};
@@ -45,6 +45,8 @@ pub struct ProcessResult {
     pub affected_uris: HashSet<Url>,
     /// Syntax and early validation diagnostics
     pub diagnostics: Vec<Diagnostic>,
+    /// Whether this pass changed declarations visible to other files.
+    pub semantic_change: SemanticChange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +182,7 @@ impl FileProcessor {
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
+                semantic_change: SemanticChange::BodyOnly,
             });
         }
 
@@ -190,22 +193,34 @@ impl FileProcessor {
         let source_kind = self.analysis_source_kind_for_uri(server, uri);
         let analysis_file_id =
             server.open_or_update_analysis_file_with_kind(uri, content.to_string(), source_kind);
+        let document_version = server
+            .docs
+            .lock()
+            .get(uri)
+            .map(|document| document.read().version)
+            .unwrap_or(0);
         let document = RubyDocument::with_analysis_file_id(
             uri.clone(),
             content.to_string(),
-            0,
+            document_version,
             analysis_file_id,
         );
+        let previous_export_fingerprint = server
+            .analysis_engine
+            .read()
+            .semantic_export_fingerprint(analysis_file_id);
 
         // 2. Generate Syntax Diagnostics
         let diagnostics = generate_diagnostics(&parse_result, &document);
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
-            replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
+            let semantic_change =
+                replace_file_analysis(server, analysis_file_id, FileFacts::default(), resolution);
             return Ok(ProcessResult {
                 affected_uris: HashSet::new(),
                 diagnostics,
+                semantic_change,
             });
         }
 
@@ -287,6 +302,15 @@ impl FileProcessor {
             },
             resolution,
         );
+        let current_export_fingerprint = server
+            .analysis_engine
+            .read()
+            .semantic_export_fingerprint(analysis_file_id)
+            .expect(
+                "INVARIANT VIOLATED: processed file has no semantic export fingerprint. This is a bug because every engine fact replacement must record its exported API. Fix: route final file facts through AnalysisEngine::replace_facts.",
+            );
+        let semantic_change =
+            SemanticChange::classify(previous_export_fingerprint, current_export_fingerprint);
 
         {
             let mut docs = server.docs.lock();
@@ -307,6 +331,7 @@ impl FileProcessor {
         Ok(ProcessResult {
             affected_uris,
             diagnostics,
+            semantic_change,
         })
     }
 
@@ -593,20 +618,17 @@ fn replace_file_analysis(
     file_id: ruby_analysis::core::SourceFileId,
     facts: FileFacts,
     resolution: FileResolution,
-) {
+) -> SemanticChange {
     let mut engine = server.analysis_engine.write();
     match resolution {
-        FileResolution::Full => {
-            engine.replace_facts(file_id, facts, ResolveMode::Immediate);
-        }
+        FileResolution::Full => engine.replace_facts(file_id, facts, ResolveMode::Immediate),
         FileResolution::CurrentFile => {
-            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
+            let semantic_change = engine.replace_facts(file_id, facts, ResolveMode::Deferred);
             engine.resolve_file(file_id);
+            semantic_change
         }
-        FileResolution::Deferred => {
-            engine.replace_facts(file_id, facts, ResolveMode::Deferred);
-        }
-    };
+        FileResolution::Deferred => engine.replace_facts(file_id, facts, ResolveMode::Deferred),
+    }
 }
 
 fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex) -> FileFacts {
@@ -621,6 +643,45 @@ fn file_analysis_facts_from_index(facts: &ruby_analysis::indexer::AnalysisIndex)
         reference_candidates: Vec::new(),
         diagnostic_candidates: Vec::new(),
         diagnostics: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_processor_reports_body_only_and_exported_api_changes() {
+        let server = RubyLanguageServer::default();
+        let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+        let uri = Url::parse("file:///app/user.rb").unwrap();
+
+        let initial = processor
+            .process_file_current_file_resolution_forced(
+                &uri,
+                "class User\n  def name\n    'A'\n  end\nend\n",
+                &server,
+            )
+            .unwrap();
+        assert_eq!(initial.semantic_change, SemanticChange::InitialIndex);
+
+        let body = processor
+            .process_file_current_file_resolution_forced(
+                &uri,
+                "class User\n  def name\n    'B'\n  end\nend\n",
+                &server,
+            )
+            .unwrap();
+        assert_eq!(body.semantic_change, SemanticChange::BodyOnly);
+
+        let api = processor
+            .process_file_current_file_resolution_forced(
+                &uri,
+                "class User\n  def name(prefix)\n    prefix\n  end\nend\n",
+                &server,
+            )
+            .unwrap();
+        assert_eq!(api.semantic_change, SemanticChange::ExportsChanged);
     }
 }
 

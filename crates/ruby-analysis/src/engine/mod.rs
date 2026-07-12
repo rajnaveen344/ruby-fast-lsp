@@ -43,6 +43,7 @@ pub use namespace_tree_types::{
 pub use query::AnalysisQuery;
 pub use resolution::{ConstantRenameTarget, MethodLookupResult};
 pub use state::{
-    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SourceFile, SourceFileInput,
+    AnalysisEngine, AnalysisStats, FileFacts, ResolveMode, SemanticChange,
+    SemanticExportFingerprint, SourceFile, SourceFileInput,
 };
 pub use workspace_symbol_types::WorkspaceSymbolMatch;

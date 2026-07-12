@@ -1444,3 +1444,36 @@ At the end of every goal session, record:
   false-positive budget, simulator coverage audit, and release smoke evidence.
   The next priority is semantic export fingerprints so body-only edits can be
   proven distinct from API changes before refresh behavior changes.
+
+### July 2026: Semantic export fingerprints and bounded typing refresh
+
+- Engine contract: every per-file `replace_facts` computes a stable,
+  order/range-independent fingerprint of exported classes/modules/constants,
+  method signatures and visibility, exported constant/method/parameter types,
+  and inheritance/mixin relationships. References, diagnostics, locals,
+  expression types, method bodies, and declaration offsets cannot create a
+  false API change.
+- Lifecycle classification: the engine reports `InitialIndex`, `BodyOnly`, or
+  `ExportsChanged`. `FileProcessor` compares the pre-pass and final fingerprints
+  so its intermediate direct-fact seed cannot hide a real exported change.
+- Typing path: body-only `didChange` work remains limited to the edited file.
+  Exported API changes reprocess and publish diagnostics for at most eight
+  deterministically sorted, project-owned open documents; closed project files
+  never enter this path. This directly prevents the prior 2,186-file affected
+  fanout failure mode.
+- Correctness evidence: red-first engine and lifecycle tests prove declaration
+  movement/body changes preserve the fingerprint, parameter changes alter it,
+  removal of an exported method refreshes an open consumer's unresolved-method
+  diagnostic, body-only edits do not touch another open file, and refresh
+  selection is sorted and capped.
+- Performance evidence: the post-change 100-iteration release benchmark passes
+  every budget at 709.9 ms cold indexing, 1.511 ms body-only edit p95, 0.080 ms
+  completion, 0.083 ms hover, 0.073 ms definition, 7.776 ms references,
+  0.001 ms diagnostics, and 5.7 MiB estimated engine heap.
+- Verification: 994 root tests, all workspace tests including 342
+  `ruby-analysis` tests, release build, version/audit checks, and packaged VSIX
+  initialization with bundled RSpec, Rails, Minitest, and ERB HTML features all
+  pass locally.
+- Rating remains **8.6/10**. Milestone 5 still needs the diagnostic
+  false-positive budget, simulator-bucket audit, and release smoke-project
+  evidence before the 9.0 rating can be considered.

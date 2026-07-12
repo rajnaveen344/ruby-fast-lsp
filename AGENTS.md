@@ -779,6 +779,15 @@ Moved non-LSP logic out of `src/`:
   changes from body-only changes. Future direction: semantic export fingerprints
   plus bounded/visible-file diagnostic refresh, with project-wide refresh outside
   the typing critical path.
+- Current implementation: `AnalysisEngine::replace_facts` records a
+  range/order-independent semantic export fingerprint over declarations,
+  method signatures/visibility, exported types, and graph relationships.
+  `ProcessResult::semantic_change` distinguishes initial indexing, body-only
+  edits, and exported API changes even though collection uses an intermediate
+  direct-fact seed. During `didChange`, body-only edits publish only the current
+  file; exported changes reprocess and publish at most eight deterministically
+  sorted, project-owned open documents. Do not raise that bound or add closed
+  workspace files to the typing path without a measured lifecycle benchmark.
 
 Rule of thumb: anything returning or consuming `tower_lsp::lsp_types::*`,
 `Url`, editor commands, or publish diagnostics can stay in `ruby-fast-lsp`.

@@ -52,6 +52,44 @@ fn source_kind_updates_with_file() {
 }
 
 #[test]
+fn semantic_export_fingerprint_distinguishes_body_and_api_edits() {
+    let mut engine = AnalysisEngine::new();
+    let file_id = register_project_file(&mut engine, "app/user.rb", "def name; 'A'; end");
+    let owner = FullyQualifiedName::try_from("Object").unwrap();
+    let method_fqn =
+        FullyQualifiedName::method(owner.namespace_parts(), RubyMethod::new("name").unwrap());
+    let facts = |params: Vec<String>, start_byte: u32| FileFacts {
+        methods: vec![MethodFact::with_params(
+            method_fqn.clone(),
+            owner.clone(),
+            crate::core::TextRange::new(file_id, start_byte, start_byte + 4),
+            params,
+        )],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        engine.replace_facts(file_id, facts(Vec::new(), 0), ResolveMode::Immediate),
+        SemanticChange::InitialIndex
+    );
+
+    register_project_file(&mut engine, "app/user.rb", "\n\ndef name; 'B'; end");
+    assert_eq!(
+        engine.replace_facts(file_id, facts(Vec::new(), 2), ResolveMode::Immediate),
+        SemanticChange::BodyOnly
+    );
+
+    assert_eq!(
+        engine.replace_facts(
+            file_id,
+            facts(vec!["prefix".to_string()], 2),
+            ResolveMode::Immediate,
+        ),
+        SemanticChange::ExportsChanged
+    );
+}
+
+#[test]
 fn type_at_reads_engine_owned_store() {
     let mut engine = AnalysisEngine::new();
     let file_id = register_project_file(&mut engine, "app/user.rb", "A = 1");

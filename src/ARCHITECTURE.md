@@ -186,6 +186,12 @@ Ruby version detection and version-manager integration.
    - Parses the updated content
    - Replaces that file's facts in `AnalysisEngine`
    - Recomputes engine diagnostics
+   - Compares an engine-owned semantic export fingerprint that excludes method
+     bodies, source ranges, references, locals, and diagnostics
+4. The LSP lifecycle adapter publishes the changed file immediately. A
+   body-only edit stops there; an exported declaration/signature/type/graph
+   change may reprocess at most eight sorted, project-owned open documents so
+   active cross-file diagnostics refresh without project-wide typing fanout.
 
 ## Component Interactions
 
@@ -233,3 +239,10 @@ The modular architecture facilitates extending the server with new capabilities:
 - The Indexer builds an in-memory index for fast lookups
 - Document changes trigger targeted reindexing
 - Analysis is performed on-demand rather than eagerly
+- `AnalysisEngine::replace_facts` records a deterministic per-file semantic
+  export fingerprint and reports initial, body-only, or exported-API change.
+- `didChange` never performs project-wide affected-file propagation. Export
+  changes refresh at most eight open project documents; body-only changes
+  refresh only the edited document.
+- Repeatable cold, edit, query-p95, and estimated-engine-memory budgets live in
+  `PERFORMANCE.md` and are checked by the release profiler.

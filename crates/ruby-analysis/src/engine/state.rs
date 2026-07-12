@@ -11,8 +11,8 @@ use crate::core::{
     ReferenceCandidateKind, ReferenceCandidateStore, ReferenceFact, ReferenceStore, RubyConstant,
     SemanticGraph, SourceFileId, SourceKind, StoredGraphEdgeFact, StoredGraphNodeFact,
     StoredMethodFact, StoredReferenceCandidate, StoredSymbolFact, StoredUnresolvedGraphEdgeFact,
-    SymbolFact, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore, TypeSubject,
-    UnresolvedGraphEdgeFact,
+    SymbolFact, SymbolKind, SymbolStore, TextRange, TypeFact, TypeResolution, TypeStore,
+    TypeSubject, UnresolvedGraphEdgeFact,
 };
 
 use crate::engine::AnalysisQuery;
@@ -126,6 +126,148 @@ pub struct FileFacts {
     pub diagnostics: Vec<DiagnosticFact>,
 }
 
+impl SemanticExportFingerprint {
+    fn from_facts(facts: &FileFacts) -> Self {
+        let mut exports = Vec::new();
+
+        for fact in &facts.symbols {
+            if matches!(
+                fact.kind,
+                SymbolKind::Class | SymbolKind::Module | SymbolKind::Constant
+            ) {
+                exports.push(export_hash(|hasher| {
+                    1u8.hash(hasher);
+                    fact.fqn.hash(hasher);
+                    fact.kind.hash(hasher);
+                }));
+            }
+        }
+        for fact in &facts.methods {
+            exports.push(export_hash(|hasher| {
+                2u8.hash(hasher);
+                fact.fqn.hash(hasher);
+                fact.owner.hash(hasher);
+                fact.params.hash(hasher);
+                fact.param_facts.len().hash(hasher);
+                for parameter in &fact.param_facts {
+                    parameter.name.hash(hasher);
+                    parameter.kind.hash(hasher);
+                    parameter.type_label.hash(hasher);
+                    parameter.documentation.hash(hasher);
+                }
+                fact.delegate_receiver.hash(hasher);
+                fact.visibility.hash(hasher);
+                fact.documentation.hash(hasher);
+                fact.return_type_label.hash(hasher);
+            }));
+        }
+        for fact in &facts.method_visibility_overrides {
+            exports.push(export_hash(|hasher| {
+                3u8.hash(hasher);
+                fact.owner.hash(hasher);
+                fact.method.hash(hasher);
+                fact.visibility.hash(hasher);
+            }));
+        }
+        for fact in &facts.types {
+            if matches!(
+                fact.subject,
+                TypeSubject::Constant(_)
+                    | TypeSubject::MethodReturn(_)
+                    | TypeSubject::Parameter { .. }
+            ) {
+                exports.push(export_hash(|hasher| {
+                    4u8.hash(hasher);
+                    fact.subject.hash(hasher);
+                    fact.ruby_type.hash(hasher);
+                    fact.provenance.hash(hasher);
+                }));
+            }
+        }
+        for fact in &facts.graph_nodes {
+            exports.push(export_hash(|hasher| {
+                5u8.hash(hasher);
+                fact.fqn.hash(hasher);
+                fact.kind.hash(hasher);
+            }));
+        }
+        for fact in &facts.graph_edges {
+            exports.push(export_hash(|hasher| {
+                6u8.hash(hasher);
+                fact.source.hash(hasher);
+                fact.target.hash(hasher);
+                fact.kind.hash(hasher);
+            }));
+        }
+        for fact in &facts.unresolved_graph_edges {
+            exports.push(export_hash(|hasher| {
+                7u8.hash(hasher);
+                fact.source.hash(hasher);
+                fact.target_parts.hash(hasher);
+                fact.absolute.hash(hasher);
+                fact.context.hash(hasher);
+                fact.kind.hash(hasher);
+            }));
+        }
+
+        exports.sort_unstable_by_key(|fingerprint| (fingerprint.high, fingerprint.low));
+        export_hash(|hasher| {
+            exports.len().hash(hasher);
+            for fingerprint in &exports {
+                fingerprint.high.hash(hasher);
+                fingerprint.low.hash(hasher);
+            }
+        })
+    }
+}
+
+impl SemanticChange {
+    pub fn classify(
+        previous: Option<SemanticExportFingerprint>,
+        current: SemanticExportFingerprint,
+    ) -> Self {
+        match previous {
+            None => Self::InitialIndex,
+            Some(previous) if previous == current => Self::BodyOnly,
+            Some(_) => Self::ExportsChanged,
+        }
+    }
+}
+
+fn export_hash(mut hash_fields: impl FnMut(&mut StableExportHasher)) -> SemanticExportFingerprint {
+    let mut high = StableExportHasher::new(0xcbf2_9ce4_8422_2325);
+    hash_fields(&mut high);
+    let mut low = StableExportHasher::new(0x8422_2325_cbf2_9ce4);
+    hash_fields(&mut low);
+    SemanticExportFingerprint {
+        high: high.finish(),
+        low: low.finish(),
+    }
+}
+
+struct StableExportHasher {
+    state: u64,
+}
+
+impl StableExportHasher {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+}
+
+impl Hasher for StableExportHasher {
+    fn finish(&self) -> u64 {
+        self.state
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.state ^= u64::from(*byte);
+            self.state = self.state.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFileInput {
     pub path: PathBuf,
@@ -137,6 +279,19 @@ pub struct SourceFileInput {
 pub enum ResolveMode {
     Immediate,
     Deferred,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticExportFingerprint {
+    high: u64,
+    low: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticChange {
+    InitialIndex,
+    BodyOnly,
+    ExportsChanged,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -313,6 +468,7 @@ pub struct AnalysisEngine {
     pub(super) facts: FactArena,
     pub(super) graph: SemanticGraph,
     pub(super) method_visibility_overrides: Vec<MethodVisibilityOverrideFact>,
+    semantic_export_fingerprints: HashMap<SourceFileId, SemanticExportFingerprint>,
 }
 
 impl AnalysisEngine {
@@ -343,12 +499,23 @@ impl AnalysisEngine {
         id
     }
 
-    pub fn replace_facts(&mut self, file_id: SourceFileId, facts: FileFacts, mode: ResolveMode) {
+    pub fn replace_facts(
+        &mut self,
+        file_id: SourceFileId,
+        facts: FileFacts,
+        mode: ResolveMode,
+    ) -> SemanticChange {
+        let fingerprint = SemanticExportFingerprint::from_facts(&facts);
+        let previous = self
+            .semantic_export_fingerprints
+            .insert(file_id, fingerprint);
+        let change = SemanticChange::classify(previous, fingerprint);
         self.replace_facts_deferred(file_id, facts);
         match mode {
             ResolveMode::Immediate => self.resolve(),
             ResolveMode::Deferred => {}
         }
+        change
     }
 
     pub fn resolve(&mut self) {
@@ -451,6 +618,8 @@ impl AnalysisEngine {
                         + vec_payload_bytes(&file.line_index.line_offsets)
                 })
                 .sum::<usize>()
+            + self.semantic_export_fingerprints.capacity()
+                * (size_of::<SourceFileId>() + size_of::<SemanticExportFingerprint>() + 1)
     }
 
     pub fn file_id(&self, path: impl AsRef<Path>) -> Option<SourceFileId> {
@@ -459,6 +628,13 @@ impl AnalysisEngine {
 
     pub fn file(&self, id: SourceFileId) -> Option<&SourceFile> {
         self.sources.files.get(&id)
+    }
+
+    pub fn semantic_export_fingerprint(
+        &self,
+        file_id: SourceFileId,
+    ) -> Option<SemanticExportFingerprint> {
+        self.semantic_export_fingerprints.get(&file_id).copied()
     }
 
     pub fn files(&self) -> impl Iterator<Item = &SourceFile> {
