@@ -7,6 +7,9 @@ impl<'a> AnalysisQuery<'a> {
         let mut symbols = Vec::new();
 
         for fact in self.engine.all_symbol_facts() {
+            if !fact_is_project(self, &fact) {
+                continue;
+            }
             if symbols.len() >= limit {
                 break;
             }
@@ -34,6 +37,9 @@ impl<'a> AnalysisQuery<'a> {
         let mut results = Vec::new();
 
         for fact in self.engine.all_symbol_facts() {
+            if !fact_is_project(self, &fact) {
+                continue;
+            }
             let name = display_name(&fact.fqn);
             let match_name = match &fact.fqn {
                 FullyQualifiedName::Method(_, method) => method.get_name(),
@@ -59,6 +65,13 @@ impl<'a> AnalysisQuery<'a> {
         results.truncate(limit);
         results
     }
+}
+
+fn fact_is_project(query: &AnalysisQuery<'_>, fact: &SymbolFact) -> bool {
+    query
+        .engine
+        .file(fact.range.file_id)
+        .is_some_and(|file| file.kind.is_workspace_owned())
 }
 
 fn workspace_symbol_match(fact: SymbolFact, relevance: f64) -> Option<WorkspaceSymbolMatch> {
@@ -324,6 +337,39 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "User");
         assert_eq!(symbols[0].kind, SymbolKind::Class);
+    }
+
+    #[test]
+    fn workspace_symbols_exclude_external_source_kinds() {
+        let (mut engine, _) = query_with_symbols();
+        let gem_file = engine.register_file(SourceFileInput {
+            path: "/gems/external.rb".into(),
+            content: "class ExternalGem\nend".into(),
+            kind: SourceKind::Gem,
+        });
+        engine.replace_facts(
+            gem_file,
+            FileFacts {
+                symbols: vec![SymbolFact::new(
+                    FullyQualifiedName::namespace(vec![
+                        RubyConstant::new("ExternalGem").expect("test name must be valid")
+                    ]),
+                    SymbolKind::Class,
+                    TextRange::new(gem_file, 6, 17),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Immediate,
+        );
+        let query = AnalysisQuery::new(&engine);
+
+        assert!(query
+            .search_workspace_symbols("ExternalGem", 100)
+            .is_empty());
+        assert!(query
+            .top_level_symbols(50)
+            .iter()
+            .all(|symbol| symbol.name != "ExternalGem"));
     }
 
     #[test]

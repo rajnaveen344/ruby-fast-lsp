@@ -184,6 +184,21 @@ Rust policy, manifest, watcher tests, and packaged smoke together; do not add a
 file kind to only one surface. `.erb`, `.rhtml`, and `.rhtm` all use embedded
 Ruby mapping and must retain formatter/linter safeguards.
 
+Project source ownership is selected only by `ProjectFilePolicy` plus the
+indexer's explicit `SourceKind`; path heuristics outside that policy are
+forbidden. Default-external directory components are `vendor`, `.bundle`,
+`.ruby-lsp`, `.ruby-fast-lsp`, `node_modules`, `tmp`, `log`, and `coverage`.
+`includedPatterns` may opt them in, `excludedPatterns` always wins, and `.git`
+never participates. Opted-in/generated ordinary files are workspace-owned;
+Gem/Stdlib/Stub files remain navigation inputs but are not editable, diagnostic,
+or workspace-symbol sources and are hidden from the project-only namespace-tree
+projection. Policy-excluded workspace files use `SourceKind::Excluded`: opening
+them provides interactive facts/references without promoting them to editable
+project truth, `didChange` must preserve that kind, and `didClose` must remove
+their interactive-only facts. Closed-file watcher
+create/change/delete events must use the same policy and the normal per-file
+engine replacement lifecycle. Open buffers remain under didOpen/didChange/didClose.
+
 Distribution versions are checked by `editors/check_package_versions.js` and
 must match the root Cargo package across the VSIX, npm CLI, platform packages,
 optional dependencies, and VSIX lockfile. VSIX creation and npm publishing fail

@@ -274,7 +274,7 @@ fn analysis_namespace_is_project(engine: &AnalysisEngine, fqn: &FullyQualifiedNa
 fn analysis_range_is_project(engine: &AnalysisEngine, range: TextRange) -> bool {
     engine
         .file(range.file_id)
-        .is_some_and(|file| file.kind.is_project())
+        .is_some_and(|file| file.kind.is_workspace_owned())
 }
 
 fn analysis_namespace_locations(

@@ -269,9 +269,21 @@ impl FileProcessor {
                 graph_nodes: direct_facts.graph_nodes,
                 graph_edges: direct_facts.graph_edges,
                 unresolved_graph_edges: direct_facts.unresolved_graph_edges,
-                reference_candidates: visitor.reference_candidates,
-                diagnostic_candidates: visitor.diagnostic_candidates,
-                diagnostics: visitor.analysis_diagnostics,
+                reference_candidates: if source_kind.contributes_references() {
+                    visitor.reference_candidates
+                } else {
+                    Vec::new()
+                },
+                diagnostic_candidates: if source_kind.contributes_project_diagnostics() {
+                    visitor.diagnostic_candidates
+                } else {
+                    Vec::new()
+                },
+                diagnostics: if source_kind.contributes_project_diagnostics() {
+                    visitor.analysis_diagnostics
+                } else {
+                    Vec::new()
+                },
             },
             resolution,
         );
@@ -419,15 +431,19 @@ impl FileProcessor {
             &fact_collector.extension_index_patches,
             &mut direct_facts,
         );
-        let (reference_candidates, diagnostic_candidates, diagnostics) = if source_kind.is_project()
+        let reference_candidates = if source_kind.contributes_references() {
+            fact_collector.reference_candidates
+        } else {
+            Vec::new()
+        };
+        let (diagnostic_candidates, diagnostics) = if source_kind.contributes_project_diagnostics()
         {
             (
-                fact_collector.reference_candidates,
                 fact_collector.diagnostic_candidates,
                 fact_collector.analysis_diagnostics,
             )
         } else {
-            (Vec::new(), Vec::new(), Vec::new())
+            (Vec::new(), Vec::new())
         };
         replace_file_analysis(
             server,

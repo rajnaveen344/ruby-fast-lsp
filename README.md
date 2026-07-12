@@ -189,6 +189,28 @@ always win, and `.git` is never traversed. Explicitly included gems augment
 dependencies inferred from source, while excluded gems are omitted even when
 they are direct or transitive dependencies.
 
+Source ownership is explicit:
+
+- Workspace files selected by the project policy are editable project sources.
+  They contribute references and diagnostics and appear in workspace-symbol
+  search.
+- `vendor`, `.bundle`, `.ruby-lsp`, `.ruby-fast-lsp`, `node_modules`, `tmp`,
+  `log`, and `coverage` trees are external by default. An `includedPatterns`
+  entry can opt in a specific file or subtree; an `excludedPatterns` match still
+  wins. Opening one of these files provides interactive semantic analysis but
+  does not silently promote it into workspace symbols, rename edits, external
+  linting, or project semantic diagnostics; edits retain that ownership and
+  closing the file removes its interactive-only facts.
+- Generated Ruby in an ordinary project path is treated as project source
+  because path names cannot reliably prove ownership. Exclude it explicitly if
+  it must be read-only. Extension-generated declarations inherit the ownership
+  of their source file and are removed through that file's reindex lifecycle.
+- Bundler/RubyGems dependencies, stdlib, and bundled stubs remain available for
+  navigation and inference but do not contribute project diagnostics,
+  workspace-symbol results, or rename edits.
+- `.git` is never traversed or opt-in indexable. Workspace trust controls local
+  Wasm extensions, not ordinary static Ruby parsing.
+
 The default source policy covers the common Ruby entry points advertised by
 Shopify Ruby LSP: `.rb`, `.rake`, `.gemspec`, `.ru`, `.thor`, `.jbuilder`,
 `.rbi`, `.podspec`, and related Ruby DSL extensions; conventional files such as
@@ -212,7 +234,10 @@ The VS Code extension restarts the language server when this setting changes so
 that excluded files cannot leave stale semantic facts behind. Other LSP clients
 should send the same `indexing` object in initialization options and restart the
 server after changing it. Invalid glob patterns abort workspace indexing with an
-actionable error instead of silently applying a partial policy.
+actionable error instead of silently applying a partial policy. For closed
+files, watcher create/change events replace facts through the normal engine
+write path and delete events remove stale facts; open buffers remain owned by
+the document lifecycle.
 
 ## Test discovery and execution
 

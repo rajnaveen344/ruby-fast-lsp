@@ -317,7 +317,8 @@ Implement:
    formatting/diagnostics and edit-producing features remain intentionally out.
 4. Done: `.rake`, `.gemspec`, Thor, and common Ruby extension/filename
    handling across discovery, VS Code association, watchers, and packaging.
-5. Clear generated, vendored, dependency, and excluded-source policy.
+5. Done: explicit generated, vendored, dependency, included/excluded, trust,
+   workspace-query, rename, diagnostics, and watched-file lifecycle policy.
 6. A strategy for declarations from native extensions or generated APIs.
 
 Completion criteria:
@@ -1341,3 +1342,38 @@ At the end of every goal session, record:
   existing generated, vendored, dependency, included/excluded, and trust rules
   into one explicit source-ownership policy with lifecycle and packaging
   evidence, then address native/generated declarations in item 6.
+
+### July 2026: Explicit project source ownership and watched-file lifecycle
+
+- Ownership contract: `ProjectFilePolicy` is the sole workspace path policy.
+  Default Ruby sources are project-owned except beneath `vendor`, `.bundle`,
+  `.ruby-lsp`, `.ruby-fast-lsp`, `node_modules`, `tmp`, `log`, and `coverage`;
+  explicit includes can opt them in, explicit exclusions always win, and
+  `.git` cannot participate.
+- Semantic projection: `SourceKind` now exposes explicit workspace-owned,
+  editable, diagnostic, reference, and dependency behavior. Workspace symbols,
+  constant rename, the project-only namespace tree, and semantic diagnostic
+  collection use those domain predicates instead of path guesses.
+- Open-file safety: policy-excluded workspace files use
+  `SourceKind::Excluded`. They receive interactive symbols and references while
+  open, but do not become project-owned, editable, externally linted, or visible
+  in workspace-symbol search; `didChange` preserves that ownership instead of
+  silently promoting the file to `Project`, and `didClose` removes their
+  interactive-only facts.
+- Closed-file lifecycle: sorted create/change watcher events read and replace
+  facts through the ordinary per-file engine write path, deletion or exclusion
+  clears stale facts, and open documents remain owned by didOpen/didChange.
+  VS Code watches configured include patterns as well as canonical Ruby file
+  kinds and rebuilds those watchers when indexing configuration changes.
+- Evidence: red-first tests proved that default discovery previously admitted
+  vendored/cache/temp sources, workspace symbols exposed gem declarations,
+  watched-file creation did not index facts, and opening or changing a vendored
+  file promoted it to project ownership. The final gate passes with 984 root
+  tests, all workspace tests including 339 `ruby-analysis` tests, the 55-test
+  release simulator, 12 Node adapter tests, release build, zero npm audit
+  findings, and a packaged VSIX initialize/status smoke with all three bundled
+  extensions loaded.
+- Rating increases to **8.5/10**. Milestone 4 item 5 is complete with explicit
+  cold, watched, and interactive lifecycle evidence. The next highest-priority
+  incomplete item is Milestone 4 item 6: define and prove the strategy for
+  declarations supplied by native extensions or generated APIs.

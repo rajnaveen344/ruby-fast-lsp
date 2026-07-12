@@ -19,10 +19,11 @@ test('VS Code manifest advertises the complete common Ruby and ERB file set', ()
 });
 
 test('file watcher patterns cover extension and conventional filename changes', () => {
-    const patterns = fileWatcherPatterns();
+    const patterns = fileWatcherPatterns(['bin/*']);
     assert(patterns.some((pattern) => pattern.includes('thor')));
     assert(patterns.some((pattern) => pattern.includes('jbuilder')));
     assert(patterns.some((pattern) => pattern.includes('Thorfile')));
     assert(patterns.some((pattern) => pattern.includes('Fastfile')));
     assert(patterns.some((pattern) => pattern.includes('rhtml')));
+    assert(patterns.includes('bin/*'));
 });

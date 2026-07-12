@@ -465,7 +465,7 @@ impl<'a> AnalysisQuery<'a> {
                     && self
                         .engine
                         .file(fact.range.file_id)
-                        .is_some_and(|file| file.kind.is_project())
+                        .is_some_and(|file| file.kind.is_editable())
             })
             .collect::<Vec<_>>();
         if symbol_facts.is_empty() {
@@ -481,7 +481,7 @@ impl<'a> AnalysisQuery<'a> {
                     .filter(|fact| {
                         self.engine
                             .file(fact.range.file_id)
-                            .is_some_and(|file| file.kind.is_project())
+                            .is_some_and(|file| file.kind.is_editable())
                     })
                     .filter_map(|fact| {
                         constant_reference_name_range(self.engine, fact.range, current_name)

@@ -710,15 +710,18 @@ function activate(context) {
         transport: TransportKind.stdio
     };
 
+    let watchedFileEvents = fileWatcherPatterns(
+        initializationOptions.indexing.includedPatterns || []
+    ).map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));
+    context.subscriptions.push(...watchedFileEvents);
+
     const clientOptions = {
         documentSelector: [
             { scheme: 'file', language: 'ruby' },
             { scheme: 'file', language: 'erb' }
         ],
         synchronize: {
-            fileEvents: fileWatcherPatterns().map((pattern) =>
-                vscode.workspace.createFileSystemWatcher(pattern)
-            ),
+            fileEvents: watchedFileEvents,
             configurationSection: 'rubyFastLsp'
         },
         initializationOptions,
@@ -772,6 +775,11 @@ function activate(context) {
                     initializationOptions.projectExtensionsEnabled = newConfig.get('projectExtensionsEnabled', true);
                     if (event.affectsConfiguration('rubyFastLsp.indexing')) {
                         initializationOptions.indexing = indexing;
+                        watchedFileEvents.forEach((watcher) => watcher.dispose());
+                        watchedFileEvents = fileWatcherPatterns(indexing.includedPatterns || [])
+                            .map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));
+                        context.subscriptions.push(...watchedFileEvents);
+                        clientOptions.synchronize.fileEvents = watchedFileEvents;
                         await client.restart();
                         return;
                     }

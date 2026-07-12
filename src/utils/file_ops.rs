@@ -48,6 +48,17 @@ const RUBY_EXTENSIONS: &[&str] = &[
 
 const ERB_EXTENSIONS: &[&str] = &["erb", "rhtml", "rhtm"];
 
+const DEFAULT_EXTERNAL_DIRECTORIES: &[&str] = &[
+    ".bundle",
+    ".ruby-fast-lsp",
+    ".ruby-lsp",
+    "coverage",
+    "log",
+    "node_modules",
+    "tmp",
+    "vendor",
+];
+
 const RUBY_FILENAMES: &[&str] = &[
     ".irbrc",
     ".pryrc",
@@ -72,6 +83,35 @@ const RUBY_FILENAMES: &[&str] = &[
     "Thorfile",
     "Vagrantfile",
 ];
+
+pub struct ProjectFilePolicy {
+    included: GlobSet,
+    excluded: GlobSet,
+}
+
+impl ProjectFilePolicy {
+    pub fn new(config: &IndexingConfig) -> Result<Self> {
+        Ok(Self {
+            included: build_glob_set("includedPatterns", &config.included_patterns)?,
+            excluded: build_glob_set("excludedPatterns", &config.excluded_patterns)?,
+        })
+    }
+
+    pub fn includes(&self, workspace_root: &Path, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(workspace_root) else {
+            return false;
+        };
+        if relative
+            .components()
+            .any(|component| component.as_os_str() == ".git")
+        {
+            return false;
+        }
+        let explicitly_included = self.included.is_match(relative);
+        let is_owned_default = should_index_file(path) && !is_default_external_path(relative);
+        (explicitly_included || is_owned_default) && !self.excluded.is_match(relative)
+    }
+}
 
 /// Check if a file should be indexed based on its extension and name.
 ///
@@ -115,8 +155,7 @@ pub fn collect_ruby_files(dir: &Path) -> Vec<PathBuf> {
 /// nonstandard files such as `bin/console`. Excluded patterns are applied last
 /// and therefore always win. `.git` is never traversed.
 pub fn collect_project_files(dir: &Path, config: &IndexingConfig) -> Result<Vec<PathBuf>> {
-    let included = build_glob_set("includedPatterns", &config.included_patterns)?;
-    let excluded = build_glob_set("excludedPatterns", &config.excluded_patterns)?;
+    let policy = ProjectFilePolicy::new(config)?;
     let mut files = Vec::new();
 
     for entry in WalkDir::new(dir)
@@ -135,22 +174,22 @@ pub fn collect_project_files(dir: &Path, config: &IndexingConfig) -> Result<Vec<
             continue;
         }
 
-        let relative = entry.path().strip_prefix(dir).map_err(|error| {
-            anyhow::anyhow!(
-                "INVARIANT VIOLATED: walked path {} is outside workspace {}: {}. This is a bug because project globs must be workspace-relative. Fix: keep WalkDir rooted at the workspace.",
-                entry.path().display(),
-                dir.display(),
-                error
-            )
-        })?;
-        let is_included = should_index_file(entry.path()) || included.is_match(relative);
-        if is_included && !excluded.is_match(relative) {
+        if policy.includes(dir, entry.path()) {
             files.push(entry.into_path());
         }
     }
 
     files.sort();
     Ok(files)
+}
+
+fn is_default_external_path(relative: &Path) -> bool {
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| DEFAULT_EXTERNAL_DIRECTORIES.contains(&name))
+    })
 }
 
 fn build_glob_set(setting: &str, patterns: &[String]) -> Result<GlobSet> {
@@ -200,36 +239,6 @@ fn collect_ruby_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
                 files.push(path);
             }
         }
-    }
-}
-
-// ============================================================================
-// Path Classification
-// ============================================================================
-
-/// Check if a URI belongs to a project file (not stdlib, gem, or stubs)
-///
-/// Uses path-based heuristics; callers with analysis-engine source metadata
-/// should prefer that instead.
-pub fn is_project_file(uri: &Url) -> bool {
-    if let Ok(file_path) = uri.to_file_path() {
-        let path_str = file_path.to_string_lossy();
-
-        // Check for rubystubs (bundled with extension or system)
-        if path_str.contains("/rubystubs") {
-            return false;
-        }
-
-        // Check if the file is in common stdlib or gem paths
-        let is_stdlib_or_gem = path_str.contains("/ruby/")
-            && (path_str.contains("/lib/ruby/")
-                || path_str.contains("/gems/")
-                || path_str.contains("/site_ruby/")
-                || path_str.contains("/vendor_ruby/"));
-
-        !is_stdlib_or_gem
-    } else {
-        true
     }
 }
 
@@ -319,22 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn test_is_project_file() {
-        // Test project files
-        let project_uri = Url::parse("file:///home/user/project/app/models/user.rb").unwrap();
-        assert!(is_project_file(&project_uri));
-
-        // Test stdlib files (would return false)
-        let stdlib_uri = Url::parse("file:///usr/lib/ruby/3.0.0/json.rb").unwrap();
-        assert!(!is_project_file(&stdlib_uri));
-
-        // Test gem files (would return false)
-        let gem_uri =
-            Url::parse("file:///usr/lib/ruby/gems/3.0.0/gems/rails-7.0.0/lib/rails.rb").unwrap();
-        assert!(!is_project_file(&gem_uri));
-    }
-
-    #[test]
     fn test_collect_project_files_applies_patterns_with_exclusions_winning() {
         let workspace = TempDir::new().unwrap();
         let root = workspace.path();
@@ -369,6 +362,58 @@ mod tests {
                 PathBuf::from("bin/console")
             ]
         );
+    }
+
+    #[test]
+    fn test_collect_project_files_defaults_to_owned_sources_with_explicit_vendor_opt_in() {
+        let workspace = TempDir::new().unwrap();
+        let root = workspace.path();
+        for directory in [
+            "app",
+            "vendor/lib",
+            ".bundle/cache",
+            "node_modules/gem",
+            "tmp/generated",
+        ] {
+            std::fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        std::fs::write(root.join("app/user.rb"), "class User; end").unwrap();
+        std::fs::write(root.join("vendor/lib/owned.rb"), "class Owned; end").unwrap();
+        std::fs::write(root.join("vendor/lib/ignored.rb"), "class Ignored; end").unwrap();
+        std::fs::write(root.join(".bundle/cache/cached.rb"), "class Cached; end").unwrap();
+        std::fs::write(root.join("node_modules/gem/node.rb"), "class Node; end").unwrap();
+        std::fs::write(root.join("tmp/generated/temp.rb"), "class Temp; end").unwrap();
+
+        let defaults = collect_project_files(root, &IndexingConfig::default()).unwrap();
+        assert_eq!(
+            defaults,
+            vec![root.join("app/user.rb")],
+            "dependency, vendored, and temporary trees must not become editable project sources by default"
+        );
+
+        let explicitly_included = collect_project_files(
+            root,
+            &IndexingConfig {
+                included_patterns: vec!["vendor/lib/owned.rb".to_string()],
+                ..IndexingConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            explicitly_included,
+            vec![root.join("app/user.rb"), root.join("vendor/lib/owned.rb")]
+        );
+
+        let exclusion_wins = collect_project_files(
+            root,
+            &IndexingConfig {
+                included_patterns: vec!["vendor/lib/owned.rb".to_string()],
+                excluded_patterns: vec!["vendor/**/*".to_string()],
+                ..IndexingConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(exclusion_wins, vec![root.join("app/user.rb")]);
     }
 
     #[test]

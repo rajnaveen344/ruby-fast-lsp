@@ -215,13 +215,13 @@
               "type": "array",
               "items": { "type": "string" },
               "default": [],
-              "description": "Workspace-relative glob patterns to exclude from indexing. Exclusions override included patterns."
+              "description": "Workspace-relative glob patterns to exclude from indexing. Exclusions override explicit includes and the default project-source policy."
             },
             "includedPatterns": {
               "type": "array",
               "items": { "type": "string" },
               "default": [],
-              "description": "Workspace-relative glob patterns that add Ruby sources with nonstandard names or extensions."
+              "description": "Workspace-relative glob patterns that add nonstandard sources or explicitly opt files into default-external trees such as vendor."
             },
             "excludedGems": {
               "type": "array",

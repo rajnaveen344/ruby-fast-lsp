@@ -3,7 +3,9 @@ use crate::indexer::file_processor::FileProcessor;
 use crate::linter::lint_document;
 use crate::query::EngineQuery;
 use crate::server::RubyLanguageServer;
+use crate::utils::ProjectFilePolicy;
 use ruby_analysis::core::SourceKind;
+use ruby_analysis::engine::{FileFacts, ResolveMode, SourceFileInput};
 use ruby_analysis::indexer::RubyDocument;
 
 use log::{debug, info};
@@ -60,9 +62,9 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
     let existing_kind = analysis_file_kind(server, &uri);
-    let source_kind = existing_kind.unwrap_or(SourceKind::Project);
+    let source_kind = existing_kind.unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
     let skip_processing = existing_kind
-        .map(|kind| kind.is_external())
+        .map(|kind| kind.is_dependency_source())
         .unwrap_or(false);
     let register_start = Instant::now();
     let analysis_file_id =
@@ -158,6 +160,24 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     );
 }
 
+fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> SourceKind {
+    let Some(workspace) = server.workspace_for_uri(uri) else {
+        return SourceKind::Project;
+    };
+    let Ok(path) = uri.to_file_path() else {
+        return SourceKind::Excluded;
+    };
+    let config = server.config.lock().indexing.clone();
+    match ProjectFilePolicy::new(&config) {
+        Ok(policy) if policy.includes(&workspace.root_path, &path) => SourceKind::Project,
+        Ok(_) => SourceKind::Excluded,
+        Err(error) => {
+            log::error!("Cannot classify opened file with project source policy: {error}");
+            SourceKind::Excluded
+        }
+    }
+}
+
 fn refresh_open_project_files_after_dependency_open(
     indexer: &FileProcessor,
     server: &RubyLanguageServer,
@@ -213,7 +233,10 @@ pub async fn handle_did_change(server: &RubyLanguageServer, params: DidChangeTex
         None => return,
     };
     let register_start = Instant::now();
-    let analysis_file_id = server.open_or_update_analysis_file(&uri, final_content.clone());
+    let source_kind = analysis_file_kind(server, &uri)
+        .unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
+    let analysis_file_id =
+        server.open_or_update_analysis_file_with_kind(&uri, final_content.clone(), source_kind);
     let register_elapsed = register_start.elapsed();
 
     let doc_start = Instant::now();
@@ -355,6 +378,9 @@ async fn append_external_linter_diagnostics(
     content: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if !analysis_file_kind(server, uri).is_some_and(SourceKind::is_editable) {
+        return;
+    }
     if ruby_analysis::indexer::is_erb_path(uri.path()) {
         return;
     }
@@ -401,6 +427,12 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
     server.docs.lock().remove(&uri);
     debug!("Doc cache size: {}", server.docs.lock().len());
 
+    if clear_file_facts_if_kind(server, &uri, SourceKind::Excluded) {
+        server.publish_diagnostics(uri, Vec::new()).await;
+        server.invalidate_namespace_tree_cache_debounced();
+        return;
+    }
+
     // Keep unresolved entry diagnostics visible (project-wide diagnostics).
     // Use the file's workspace index so we don't surface diagnostics from
     // other workspaces.
@@ -411,19 +443,97 @@ pub async fn handle_did_close(server: &RubyLanguageServer, params: DidCloseTextD
 
 pub async fn handle_watched_files_changed(
     server: &RubyLanguageServer,
-    params: DidChangeWatchedFilesParams,
+    mut params: DidChangeWatchedFilesParams,
 ) {
     debug!("Watched files changed: {} files", params.changes.len());
-
-    let has_ruby_changes = params
+    params
         .changes
-        .iter()
-        .any(|change| change.uri.path().ends_with(".rb"));
+        .sort_by(|left, right| left.uri.as_str().cmp(right.uri.as_str()));
+    let config = server.config.lock().indexing.clone();
+    let policy = match ProjectFilePolicy::new(&config) {
+        Ok(policy) => policy,
+        Err(error) => {
+            log::error!("Cannot apply watched-file source policy: {error}");
+            return;
+        }
+    };
+    let processor = FileProcessor::with_extension_registry(server.extension_registry.clone());
+    let mut analysis_changed = false;
 
-    if has_ruby_changes {
-        server.invalidate_namespace_tree_cache_debounced();
-        debug!("Scheduled namespace tree cache invalidation for watched file changes");
+    for change in params.changes {
+        let Some(workspace) = server.workspace_for_uri(&change.uri) else {
+            continue;
+        };
+        let Ok(path) = change.uri.to_file_path() else {
+            continue;
+        };
+        if server.docs.lock().contains_key(&change.uri) {
+            continue;
+        }
+
+        if change.typ == FileChangeType::DELETED || !policy.includes(&workspace.root_path, &path) {
+            analysis_changed |= clear_project_file_facts(server, &change.uri);
+            if change.typ == FileChangeType::DELETED {
+                server
+                    .publish_diagnostics(change.uri.clone(), Vec::new())
+                    .await;
+            }
+            continue;
+        }
+
+        match tokio::fs::read_to_string(&path).await {
+            Ok(content) => match processor.collect_file_facts(&change.uri, &content, server) {
+                Ok(()) => analysis_changed = true,
+                Err(error) => {
+                    log::error!("Failed to index watched file {}: {error}", path.display());
+                    analysis_changed |= clear_project_file_facts(server, &change.uri);
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                analysis_changed |= clear_project_file_facts(server, &change.uri);
+            }
+            Err(error) => {
+                log::error!("Failed to read watched file {}: {error}", path.display());
+                analysis_changed |= clear_project_file_facts(server, &change.uri);
+            }
+        }
     }
+
+    if analysis_changed {
+        server.invalidate_namespace_tree_cache_debounced();
+        debug!("Reindexed watched project files and invalidated namespace tree cache");
+    }
+}
+
+fn clear_project_file_facts(server: &RubyLanguageServer, uri: &Url) -> bool {
+    clear_file_facts_if_kind(server, uri, SourceKind::Project)
+}
+
+fn clear_file_facts_if_kind(
+    server: &RubyLanguageServer,
+    uri: &Url,
+    expected_kind: SourceKind,
+) -> bool {
+    let path = uri
+        .to_file_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from(uri.to_string()));
+    let mut engine = server.analysis_engine.write();
+    let Some(file_id) = engine.file_id(&path) else {
+        return false;
+    };
+    if !engine
+        .file(file_id)
+        .is_some_and(|file| file.kind == expected_kind)
+    {
+        return false;
+    }
+    let file_id = engine.register_file(SourceFileInput {
+        path,
+        content: String::new(),
+        kind: expected_kind,
+    });
+    engine.replace_facts(file_id, FileFacts::default(), ResolveMode::Immediate);
+    true
 }
 
 #[cfg(test)]
@@ -435,6 +545,192 @@ mod tests {
     use ruby_analysis::engine::{AnalysisQuery, FileFacts, ResolveMode};
 
     use super::*;
+
+    fn namespace(name: &str) -> FullyQualifiedName {
+        FullyQualifiedName::namespace(vec![
+            RubyConstant::new(name).expect("test namespace must be valid")
+        ])
+    }
+
+    fn has_namespace(server: &RubyLanguageServer, name: &str) -> bool {
+        let engine = server.analysis_engine.read();
+        !AnalysisQuery::new(&engine)
+            .symbols_for_fqn(&namespace(name))
+            .is_empty()
+    }
+
+    #[tokio::test]
+    async fn watched_closed_project_files_replace_and_remove_engine_facts() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let path = workspace.path().join("watched.rb");
+        let uri = Url::from_file_path(&path).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+        std::fs::write(&path, "class WatchedOne\nend\n").unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ: FileChangeType::CREATED,
+                }],
+            },
+        )
+        .await;
+        assert!(has_namespace(&server, "WatchedOne"));
+
+        std::fs::write(&path, "class WatchedTwo\nend\n").unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: uri.clone(),
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        assert!(!has_namespace(&server, "WatchedOne"));
+        assert!(has_namespace(&server, "WatchedTwo"));
+
+        std::fs::remove_file(&path).unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri,
+                    typ: FileChangeType::DELETED,
+                }],
+            },
+        )
+        .await;
+        assert!(!has_namespace(&server, "WatchedTwo"));
+
+        let vendor_path = workspace.path().join("vendor/owned.rb");
+        std::fs::create_dir_all(vendor_path.parent().unwrap()).unwrap();
+        std::fs::write(&vendor_path, "class VendorOwned\nend\n").unwrap();
+        let vendor_uri = Url::from_file_path(&vendor_path).unwrap();
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: vendor_uri.clone(),
+                    typ: FileChangeType::CREATED,
+                }],
+            },
+        )
+        .await;
+        assert!(!has_namespace(&server, "VendorOwned"));
+
+        server.config.lock().indexing.included_patterns = vec!["vendor/owned.rb".to_string()];
+        handle_watched_files_changed(
+            &server,
+            DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: vendor_uri,
+                    typ: FileChangeType::CHANGED,
+                }],
+            },
+        )
+        .await;
+        assert!(has_namespace(&server, "VendorOwned"));
+    }
+
+    #[tokio::test]
+    async fn opening_default_external_workspace_file_does_not_make_it_project_owned() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let path = workspace.path().join("vendor/opened.rb");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let uri = Url::from_file_path(&path).unwrap();
+        let server = RubyLanguageServer::default();
+        server.add_workspace(Url::from_directory_path(workspace.path()).unwrap());
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: "class OpenedVendor\nend\n".to_string(),
+                },
+            },
+        )
+        .await;
+
+        let engine = server.analysis_engine.read();
+        let file_id = engine
+            .file_id(&path)
+            .expect("opened workspace file must be registered");
+        assert!(
+            !engine
+                .file(file_id)
+                .expect("registered file must exist")
+                .kind
+                .is_workspace_owned(),
+            "default-external workspace files must not become project-owned when opened"
+        );
+        assert!(
+            !AnalysisQuery::new(&engine)
+                .symbols_for_fqn(&namespace("OpenedVendor"))
+                .is_empty(),
+            "opened excluded files must still receive interactive semantic analysis"
+        );
+        assert!(
+            AnalysisQuery::new(&engine)
+                .search_workspace_symbols("OpenedVendor", 100)
+                .is_empty(),
+            "default-external workspace files must stay out of workspace symbols"
+        );
+        drop(engine);
+
+        handle_did_change(
+            &server,
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "class ChangedVendor\nend\n".to_string(),
+                }],
+            },
+        )
+        .await;
+
+        let engine = server.analysis_engine.read();
+        assert!(
+            !engine
+                .file(file_id)
+                .expect("changed file must retain its registration")
+                .kind
+                .is_workspace_owned(),
+            "didChange must preserve excluded workspace ownership"
+        );
+        assert!(
+            AnalysisQuery::new(&engine)
+                .search_workspace_symbols("ChangedVendor", 100)
+                .is_empty(),
+            "changed excluded workspace files must stay out of workspace symbols"
+        );
+        drop(engine);
+
+        handle_did_close(
+            &server,
+            DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri },
+            },
+        )
+        .await;
+
+        assert!(
+            !has_namespace(&server, "ChangedVendor"),
+            "closing an excluded workspace file must remove its interactive-only facts"
+        );
+    }
 
     #[tokio::test]
     async fn did_open_registers_source_in_analysis_engine() {
