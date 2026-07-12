@@ -1568,3 +1568,39 @@ At the end of every goal session, record:
 - Rating remains **8.7/10** pending a dependency-complete Rails precision
   sample. This work materially improves daily editor signal, but incomplete
   smoke dependencies cannot prove the 9.0 precision threshold.
+
+### July 2026: Dependency-complete Rails production audit
+
+- Production corpus: Lobsters at
+  `aebacf4a95dab1eace58cc2592249b137ec36268`, with an isolated production
+  bundle of 106 gems from 54 direct dependencies, exercises Rails 8 application
+  code against its actual dependency graph. The release profiler indexed 3,367
+  gem files and 469 project files in 4.81 s using 60.3 MiB estimated engine
+  heap.
+- Diagnostic evidence: opening `app/models/user.rb` and
+  `app/controllers/application_controller.rb` through the real lifecycle
+  produced zero semantic diagnostics. This closes the dependency-complete
+  representative Rails precision requirement without turning a real project
+  into a redundant semantic test suite.
+- Performance defect: RDoc's generated 398,786-byte Markdown parser exposed
+  exponential nested-loop stabilization. A red-first inference test proves
+  nested loops now receive one semantic pass per outer iteration; the formerly
+  nonterminating file completes release analysis in 655 ms.
+- Semantic corrections: red-first integration coverage proves anonymous `*`
+  and `**` parameters participate in arity/signature policy, and typed value
+  constants use ordinary instance-method resolution. A direct-fact regression
+  preserves literal type through zero-argument `freeze`, covering the common
+  frozen-constant declaration shape.
+- Performance evidence: the post-change 100-iteration benchmark passes every
+  budget at 786.751 ms cold indexing, 0.935 ms edit p95, 0.067 ms completion,
+  0.072 ms hover, 0.068 ms definition, 7.796 ms references, 0.001 ms
+  diagnostics, and 5.8 MiB engine heap.
+- Verification: 1,006 root tests, all workspace tests including 345
+  `ruby-analysis` tests, the release simulator, release build, version and npm
+  audit checks, and packaged VSIX initialization with bundled RSpec, Rails,
+  Minitest, and ERB HTML behavior all pass locally.
+- Rating reaches **9.0/10**. The explicit definition of done is satisfied:
+  daily replacement workflows and Rails/test paths exist, the public extension
+  platform is stable and failure-isolated, performance and memory are repeatably measured,
+  packaged artifacts are exercised, and remaining work such as project-wide
+  method rename is a narrow enhancement rather than a missing daily workflow.

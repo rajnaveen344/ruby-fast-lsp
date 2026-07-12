@@ -336,6 +336,11 @@ impl FactCollector {
                 if let Some(name) = param.name() {
                     let param_name = String::from_utf8_lossy(name.as_slice()).to_string();
                     params.push(MethodParamInfo::new(param_name, MethodParamKind::Rest));
+                } else {
+                    params.push(MethodParamInfo::new(
+                        "*".to_string(),
+                        MethodParamKind::AnonymousRest,
+                    ));
                 }
             } else if rest.as_forwarding_parameter_node().is_some() {
                 params.push(MethodParamInfo::new(
@@ -375,6 +380,11 @@ impl FactCollector {
                     params.push(MethodParamInfo::new(
                         param_name,
                         MethodParamKind::KeywordRest,
+                    ));
+                } else {
+                    params.push(MethodParamInfo::new(
+                        "**".to_string(),
+                        MethodParamKind::AnonymousKeywordRest,
                     ));
                 }
             } else if kwrest.as_forwarding_parameter_node().is_some() {

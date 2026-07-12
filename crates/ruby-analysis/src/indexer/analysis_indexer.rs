@@ -1623,6 +1623,8 @@ fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
                     String::from_utf8_lossy(name.as_slice()).to_string(),
                     MethodParamKind::Rest,
                 ));
+            } else {
+                params.push(MethodParamFact::new("*", MethodParamKind::AnonymousRest));
             }
         } else if rest.as_forwarding_parameter_node().is_some() {
             params.push(MethodParamFact::new("...", MethodParamKind::Forwarding));
@@ -1653,6 +1655,11 @@ fn method_param_facts(node: &DefNode<'_>) -> Vec<MethodParamFact> {
                 params.push(MethodParamFact::new(
                     String::from_utf8_lossy(name.as_slice()).to_string(),
                     MethodParamKind::KeywordRest,
+                ));
+            } else {
+                params.push(MethodParamFact::new(
+                    "**",
+                    MethodParamKind::AnonymousKeywordRest,
                 ));
             }
         } else if kwrest.as_forwarding_parameter_node().is_some() {
@@ -1693,6 +1700,9 @@ fn collect_constant_path_parts(path: &ConstantPathNode<'_>, parts: &mut Vec<Ruby
 
 fn literal_type(node: &Node<'_>) -> Option<RubyType> {
     if let Some(call) = node.as_call_node() {
+        if call.name().as_slice() == b"freeze" && call.arguments().is_none() {
+            return call.receiver().and_then(|receiver| literal_type(&receiver));
+        }
         if call.name().as_slice() == b"new" {
             let receiver = call.receiver()?;
             let parts = constant_parts(&receiver)?;
@@ -2098,5 +2108,20 @@ mod tests {
             (limit.name_range.start_byte, limit.name_range.end_byte),
             (29, 34)
         );
+    }
+
+    #[test]
+    fn frozen_literal_constant_retains_receiver_type_in_direct_facts() {
+        let index = AnalysisIndexer::new(file())
+            .index_source("class User\n  NAMES = [\"admin\", \"guest\"].freeze\nend\n");
+        let names = FullyQualifiedName::constant(vec![
+            RubyConstant::new("User").unwrap(),
+            RubyConstant::new("NAMES").unwrap(),
+        ]);
+
+        assert!(index.types.iter().any(|fact| {
+            fact.subject == TypeSubject::Constant(names.clone())
+                && matches!(fact.ruby_type, RubyType::Array(_))
+        }));
     }
 }

@@ -50,6 +50,19 @@ end
 }
 
 #[tokio::test]
+async fn anonymous_kwrest_accepts_anything_no_warn() {
+    check(
+        r#"
+def target(**)
+end
+
+<warn none code="unknown-kwarg">target(anything: 1)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn double_splat_at_callsite_skips_check() {
     check(
         r#"

@@ -144,6 +144,20 @@ end
 }
 
 #[tokio::test]
+async fn anonymous_rest_parameter_accepts_any_positional_shape() {
+    check(
+        r#"
+def target(*)
+end
+
+<warn none code="wrong-arity">target</warn>
+<warn none code="wrong-arity">target(1, 2)</warn>
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn generated_attribute_writer_accepts_its_assigned_value() {
     check(
         r#"

@@ -49,6 +49,24 @@ u = User.new
 }
 
 #[tokio::test]
+async fn typed_value_constants_use_instance_method_resolution() {
+    check(
+        r#"
+class User
+  validates_each :username do |record, attr, value|
+    <warn none code="unresolved-method">NAMES.include?("admin")</warn>
+    <warn none code="unresolved-method">PATTERN.to_s</warn>
+  end
+
+  NAMES = ["admin", "guest"].freeze
+  PATTERN = /user/
+end
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn method_missing_suppresses_unresolved_method_warn() {
     check(
         r#"

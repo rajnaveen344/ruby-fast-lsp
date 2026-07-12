@@ -666,6 +666,13 @@ impl FactCollector {
                 return RubyType::Unknown;
             }
 
+            // Object#freeze preserves the receiver identity and type. RBS
+            // expresses this as `self`, which is a substitution contract rather
+            // than a named return type.
+            if method_name == "freeze" {
+                return receiver_type;
+            }
+
             // Special case: `.new` on a ClassReference returns an instance
             if method_name == "new" {
                 if let RubyType::ClassReference(fqn) = &receiver_type {
@@ -1237,6 +1244,11 @@ impl FactCollector {
         self.direct_facts
             .types
             .iter()
+            .chain(
+                self.type_store
+                    .facts_for(&TypeSubject::Constant(constant_fqn.clone()))
+                    .iter(),
+            )
             .filter(|fact| {
                 fact.subject == TypeSubject::Constant(constant_fqn.clone())
                     && fact.ruby_type != RubyType::Unknown

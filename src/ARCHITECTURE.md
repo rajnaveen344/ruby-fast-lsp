@@ -253,3 +253,12 @@ The modular architecture facilitates extending the server with new capabilities:
   refresh only the edited document.
 - Repeatable cold, edit, query-p95, and estimated-engine-memory budgets live in
   `PERFORMANCE.md` and are checked by the release profiler.
+- Loop flow stabilization is bounded in `ruby-analysis::inference`: only the
+  outermost lexical loop repeats to the configured fixed-point limit, while
+  nested loops receive one pass per outer iteration. This prevents exponential
+  analysis of generated parsers without moving inference policy into the LSP.
+- Constant-call collection distinguishes namespace constants from typed value
+  constants. The collector asks the engine query API to map a value's
+  `RubyType` to its namespace, then uses the same engine-owned instance-method
+  resolution as every other receiver; zero-argument `freeze` preserves the
+  literal receiver type during the direct-fact seed pass.

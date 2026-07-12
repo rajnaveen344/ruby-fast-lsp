@@ -94,14 +94,16 @@ impl MethodArity {
             match param.kind {
                 MethodParamKind::Required => arity.required += 1,
                 MethodParamKind::Optional => arity.optional += 1,
-                MethodParamKind::Rest => arity.has_rest = true,
+                MethodParamKind::Rest | MethodParamKind::AnonymousRest => arity.has_rest = true,
                 MethodParamKind::RequiredKeyword => {
                     arity.required_keywords.push(param.name.clone())
                 }
                 MethodParamKind::OptionalKeyword => {
                     arity.optional_keywords.push(param.name.clone())
                 }
-                MethodParamKind::KeywordRest => arity.has_kwrest = true,
+                MethodParamKind::KeywordRest | MethodParamKind::AnonymousKeywordRest => {
+                    arity.has_kwrest = true
+                }
                 MethodParamKind::Block => {}
                 MethodParamKind::Forwarding => {
                     arity.has_rest = true;

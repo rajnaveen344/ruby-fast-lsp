@@ -109,3 +109,24 @@ The post-fix deterministic 100-iteration benchmark remained within every
 budget: 706.2 ms cold indexing, 1.069 ms edit p95, 0.080 ms completion,
 0.077 ms hover, 0.078 ms definition, 8.243 ms references, sub-microsecond
 diagnostic projection, and 5.8 MiB estimated engine heap.
+
+### Dependency-complete Rails smoke
+
+Lobsters at `aebacf4a95dab1eace58cc2592249b137ec36268` provides the
+dependency-complete Rails sample. Its isolated production bundle contains 106
+gems from 54 direct Gemfile dependencies. The release profiler indexed 3,367
+gem files and 469 project files in 4.81 s with 60.3 MiB estimated engine heap.
+Opening `app/models/user.rb` and
+`app/controllers/application_controller.rb` through the real lifecycle
+produced zero semantic diagnostics in both files.
+
+This smoke exposed exponential loop stabilization in RDoc's generated
+398,786-byte Markdown parser. Restricting repeated fixed-point passes to the
+outermost lexical loop reduced that formerly nonterminating file to 655 ms of
+release analysis. The same audit also established anonymous `*`/`**` parameter
+semantics and typed frozen value-constant receiver lookup.
+
+After these changes, the deterministic 100-iteration benchmark still passed
+every budget: 786.751 ms cold indexing, 0.935 ms edit p95, 0.067 ms completion,
+0.072 ms hover, 0.068 ms definition, 7.796 ms references, 0.001 ms diagnostics,
+and 5.8 MiB estimated engine heap.

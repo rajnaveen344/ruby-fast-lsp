@@ -267,6 +267,7 @@ fn active_positional_parameter(
                 MethodParamKind::Required
                     | MethodParamKind::Optional
                     | MethodParamKind::Rest
+                    | MethodParamKind::AnonymousRest
                     | MethodParamKind::Forwarding
             )
         })
@@ -274,10 +275,12 @@ fn active_positional_parameter(
     if let Some((index, _)) = positional.get(positional_index as usize) {
         return *index as u32;
     }
-    if let Some((index, _)) = positional
-        .iter()
-        .find(|(_, kind)| matches!(kind, MethodParamKind::Rest | MethodParamKind::Forwarding))
-    {
+    if let Some((index, _)) = positional.iter().find(|(_, kind)| {
+        matches!(
+            kind,
+            MethodParamKind::Rest | MethodParamKind::AnonymousRest | MethodParamKind::Forwarding
+        )
+    }) {
         return *index as u32;
     }
     positional
@@ -303,6 +306,8 @@ fn parameter_label(parameter: &MethodParamFact, type_label: Option<&str>) -> Str
         MethodParamKind::KeywordRest => format!("**{}", typed_name),
         MethodParamKind::Block => format!("&{}", typed_name),
         MethodParamKind::Forwarding => "...".to_string(),
+        MethodParamKind::AnonymousRest => "*".to_string(),
+        MethodParamKind::AnonymousKeywordRest => "**".to_string(),
     }
 }
 
@@ -322,5 +327,7 @@ fn rbs_parameter_label(parameter: &RbsSignatureParameter) -> String {
         MethodParamKind::KeywordRest => format!("**{}: {}", parameter.name, parameter.type_label),
         MethodParamKind::Block => format!("&{}: {}", parameter.name, parameter.type_label),
         MethodParamKind::Forwarding => "...".to_string(),
+        MethodParamKind::AnonymousRest => "*".to_string(),
+        MethodParamKind::AnonymousKeywordRest => "**".to_string(),
     }
 }

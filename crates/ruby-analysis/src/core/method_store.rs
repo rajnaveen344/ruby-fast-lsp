@@ -13,6 +13,8 @@ pub enum MethodParamKind {
     KeywordRest,
     Block,
     Forwarding,
+    AnonymousRest,
+    AnonymousKeywordRest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

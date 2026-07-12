@@ -908,8 +908,9 @@ impl FactCollector {
             )
         } else if let Some(constant_read) = receiver_node.as_constant_read_node() {
             let name = utf8_str(constant_read.name().as_slice()).to_string();
-            let (ns, kind) = self.handle_constant_read_receiver(&constant_read, current_namespace);
-            (ns, kind, ReceiverInfo::ConstantReceiver(name), None)
+            let (ns, kind, inferred) =
+                self.handle_constant_read_receiver(&constant_read, current_namespace);
+            (ns, kind, ReceiverInfo::ConstantReceiver(name), inferred)
         } else if let Some(constant_path) = receiver_node.as_constant_path_node() {
             if is_valid_constant_path_receiver(receiver_node) {
                 let receiver_name = build_constant_path_name(receiver_node);
@@ -940,14 +941,61 @@ impl FactCollector {
         &self,
         constant_read: &ruby_prism::ConstantReadNode,
         current_namespace: &[RubyConstant],
-    ) -> (Vec<RubyConstant>, NamespaceKind) {
+    ) -> (Vec<RubyConstant>, NamespaceKind, Option<RubyType>) {
         let name = utf8_str(constant_read.name().as_slice());
         if let Ok(constant) = RubyConstant::new(name) {
+            let mut lexical_namespace = current_namespace.to_vec();
+            let value_type = loop {
+                let mut parts = lexical_namespace.clone();
+                parts.push(constant.clone());
+                let constant_fqn = FullyQualifiedName::constant(parts);
+                let namespace_fqn = FullyQualifiedName::namespace(constant_fqn.namespace_parts());
+                let is_namespace = self
+                    .direct_facts
+                    .graph_nodes
+                    .iter()
+                    .any(|fact| fact.fqn == namespace_fqn)
+                    || {
+                        let engine = self.analysis_engine.read();
+                        !AnalysisQuery::new(&engine)
+                            .graph_nodes_for(&namespace_fqn)
+                            .is_empty()
+                    };
+                if is_namespace {
+                    return (
+                        constant_fqn.namespace_parts(),
+                        NamespaceKind::Singleton,
+                        None,
+                    );
+                }
+                if let Some(ruby_type) = self.direct_constant_value_type(&constant_fqn) {
+                    break Some(ruby_type);
+                }
+                if lexical_namespace.pop().is_none() {
+                    break None;
+                }
+            }
+            .or_else(|| {
+                let engine = self.analysis_engine.read();
+                let query = AnalysisQuery::new(&engine);
+                query
+                    .resolve_constant_in_context(std::slice::from_ref(&constant), current_namespace)
+                    .and_then(|resolved| {
+                        query.constant_value_type(&FullyQualifiedName::constant(
+                            resolved.namespace_parts(),
+                        ))
+                    })
+            });
+            if let Some(ref ruby_type) = value_type {
+                if let Some(namespace) = self.type_to_namespace_parts(ruby_type) {
+                    return (namespace, NamespaceKind::Instance, value_type);
+                }
+            }
             let mut receiver_namespace = current_namespace.to_vec();
             receiver_namespace.push(constant);
-            (receiver_namespace, NamespaceKind::Singleton)
+            (receiver_namespace, NamespaceKind::Singleton, None)
         } else {
-            (current_namespace.to_vec(), NamespaceKind::Instance)
+            (current_namespace.to_vec(), NamespaceKind::Instance, None)
         }
     }
 
@@ -1057,10 +1105,10 @@ impl FactCollector {
     }
 
     fn type_to_namespace_parts(&self, ruby_type: &RubyType) -> Option<Vec<RubyConstant>> {
-        match ruby_type {
-            RubyType::Class(fqn) | RubyType::Module(fqn) => Some(fqn.namespace_parts()),
-            _ => None,
-        }
+        let engine = self.analysis_engine.read();
+        AnalysisQuery::new(&engine)
+            .type_to_namespace(ruby_type)
+            .map(|namespace| namespace.namespace_parts())
     }
 
     fn resolve_constant_from_analysis(

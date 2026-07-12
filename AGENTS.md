@@ -1051,3 +1051,16 @@ driven rather than a polished code example:
 3. **Refactor** (if needed): Clean up while keeping tests green
 
 **Important**: Always verify the test fails before implementing the fix. This validates the test actually tests the new behavior.
+
+## Production Analysis Invariants
+
+- Flow inference stabilizes only the outermost lexical `while`/`until` loop.
+  Nested loops receive one semantic pass per outer iteration so generated
+  parsers cannot turn the configured iteration bound into exponential work.
+- Anonymous rest parameters (`*` and `**`) are explicit method-parameter
+  kinds. Preserve them through indexing, arity checks, and signature help;
+  absence of a parameter name does not mean absence of rest acceptance.
+- A constant receiver may be a typed value rather than a class/module. Resolve
+  its declared value type through `AnalysisQuery::type_to_namespace` and use
+  ordinary instance-method lookup. Zero-argument `freeze` preserves the
+  receiver's literal type so frozen constant declarations seed that fact.

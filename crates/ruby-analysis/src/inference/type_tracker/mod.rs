@@ -48,6 +48,13 @@ pub struct TypeTracker<'a> {
     /// Max loop iterations (to prevent infinite loops)
     max_loop_iterations: usize,
 
+    /// Current lexical loop nesting depth. Only the outer loop performs
+    /// stabilization iterations; nested loops receive one semantic pass.
+    loop_depth: usize,
+
+    #[cfg(test)]
+    loop_body_passes: usize,
+
     /// Current class/module context for resolving implicit self
     current_class: Option<FullyQualifiedName>,
 
@@ -77,6 +84,9 @@ impl<'a> TypeTracker<'a> {
             literal_analyzer: LiteralAnalyzer::new(),
             analysis_engine: None,
             max_loop_iterations: 10,
+            loop_depth: 0,
+            #[cfg(test)]
+            loop_body_passes: 0,
             current_class: None,
             current_method: None,
             local_method_returns: HashMap::new(),
@@ -704,13 +714,25 @@ impl<'a> TypeTracker<'a> {
         // Save pre-loop state
         let env_before = self.vars.clone();
 
-        // Iterate loop body a limited number of times
+        // Iterate only the outer loop to avoid exponential work for generated
+        // code containing deeply nested loops.
+        let iterations = if self.loop_depth == 0 {
+            self.max_loop_iterations
+        } else {
+            1
+        };
+        self.loop_depth += 1;
         let mut last_type = RubyType::nil_class();
-        for _iteration in 0..self.max_loop_iterations {
+        for _iteration in 0..iterations {
+            #[cfg(test)]
+            {
+                self.loop_body_passes += 1;
+            }
             if let Some(statements) = while_node.statements() {
                 last_type = self.track_node(&statements.as_node());
             }
         }
+        self.loop_depth -= 1;
 
         // Save post-loop state
         let loop_env = self.vars.clone();
@@ -731,13 +753,23 @@ impl<'a> TypeTracker<'a> {
         // Save pre-loop state
         let env_before = self.vars.clone();
 
-        // Iterate loop body a limited number of times
+        let iterations = if self.loop_depth == 0 {
+            self.max_loop_iterations
+        } else {
+            1
+        };
+        self.loop_depth += 1;
         let mut last_type = RubyType::nil_class();
-        for _iteration in 0..self.max_loop_iterations {
+        for _iteration in 0..iterations {
+            #[cfg(test)]
+            {
+                self.loop_body_passes += 1;
+            }
             if let Some(statements) = until_node.statements() {
                 last_type = self.track_node(&statements.as_node());
             }
         }
+        self.loop_depth -= 1;
 
         // Save post-loop state
         let loop_env = self.vars.clone();
@@ -1718,5 +1750,36 @@ end"#;
         assert!(x_type.is_some());
         let x_type = x_type.unwrap();
         assert!(matches!(x_type, RubyType::Union(_)));
+    }
+
+    #[test]
+    fn nested_loop_stabilization_is_linear_not_exponential() {
+        let source = r#"def parse
+  while outer
+    until middle
+      while inner
+        value = 1
+      end
+    end
+  end
+end"#;
+        let parse_result = ruby_prism::parse(source.as_bytes());
+        let root = parse_result.node();
+        let def_node = root
+            .as_program_node()
+            .unwrap()
+            .statements()
+            .body()
+            .iter()
+            .next()
+            .unwrap()
+            .as_def_node()
+            .unwrap();
+        let mut tracker = create_test_tracker(source);
+        tracker.max_loop_iterations = 3;
+
+        tracker.track_method(&def_node);
+
+        assert_eq!(tracker.loop_body_passes, 9);
     }
 }
