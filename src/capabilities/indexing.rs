@@ -1,3 +1,4 @@
+use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::indexer::coordinator::IndexingCoordinator;
 use crate::indexer::file_processor::FileProcessor;
 use crate::linter::lint_document;
@@ -64,10 +65,13 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     let uri = params.text_document.uri.clone();
     let content = params.text_document.text.clone();
     let existing_kind = analysis_file_kind(server, &uri);
+    let indexed_content_matches = existing_kind == Some(SourceKind::Project)
+        && indexed_disk_content_matches(server, &uri, &content);
     let source_kind = existing_kind.unwrap_or_else(|| source_kind_for_new_open_file(server, &uri));
     let skip_processing = existing_kind
         .map(|kind| kind.is_dependency_source())
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || indexed_content_matches;
     let register_start = Instant::now();
     let analysis_file_id =
         server.open_or_update_analysis_file_with_kind(&uri, content.clone(), source_kind);
@@ -99,12 +103,41 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
 
     let process_start = Instant::now();
     let (affected_uris, mut diagnostics) = if skip_processing {
+        let diagnostics = if source_kind.is_editable() {
+            let document = server
+                .docs
+                .lock()
+                .get(&uri)
+                .expect("INVARIANT VIOLATED: didOpen syntax-only path lost the document inserted into the cache. This is a bug because unchanged indexed files still require an open RubyDocument. Fix: keep cache insertion before skip processing.")
+                .read()
+                .clone();
+            let parse_result = document.parse();
+            let diagnostics = generate_diagnostics(&parse_result, &document);
+            diagnostics
+        } else {
+            Vec::new()
+        };
+        if indexed_content_matches {
+            server
+                .docs
+                .lock()
+                .get(&uri)
+                .expect("INVARIANT VIOLATED: unchanged didOpen document disappeared before indexed-version update. This is a bug because semantic facts were intentionally reused. Fix: keep the open document cached through didOpen.")
+                .write()
+                .indexed_version = Some(params.text_document.version);
+        }
+        let mode = if indexed_content_matches {
+            "unchanged-index-reuse"
+        } else {
+            "known-external-skip"
+        };
         info!(
-            "[PERF][interactive] file={} mode=known-external-skip elapsed={:?}",
+            "[PERF][interactive] file={} mode={} elapsed={:?}",
             uri.path(),
+            mode,
             process_start.elapsed()
         );
-        (std::collections::HashSet::new(), Vec::new())
+        (std::collections::HashSet::new(), diagnostics)
     } else {
         match process_interactive_file(&indexer, server, &uri, &content) {
             Ok(result) => (result.affected_uris, result.diagnostics),
@@ -165,26 +198,18 @@ pub async fn handle_did_open(server: &RubyLanguageServer, params: DidOpenTextDoc
     );
 }
 
-fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> SourceKind {
-    let Some(workspace) = server.workspace_for_uri(uri) else {
-        return if server.list_workspaces().is_empty() {
-            SourceKind::Project
-        } else {
-            SourceKind::Excluded
-        };
-    };
+fn indexed_disk_content_matches(server: &RubyLanguageServer, uri: &Url, content: &str) -> bool {
     let Ok(path) = uri.to_file_path() else {
-        return SourceKind::Excluded;
+        return false;
     };
-    let config = server.config.lock().indexing.clone();
-    match ProjectFilePolicy::new(&config) {
-        Ok(policy) if policy.includes(&workspace.root_path, &path) => SourceKind::Project,
-        Ok(_) => SourceKind::Excluded,
-        Err(error) => {
-            log::error!("Cannot classify opened file with project source policy: {error}");
-            SourceKind::Excluded
-        }
+    if !std::fs::read_to_string(&path).is_ok_and(|disk_content| disk_content == content) {
+        return false;
     }
+    let analysis_engine = server.analysis_engine_for_uri(uri);
+    let engine = analysis_engine.read();
+    engine
+        .file_id(&path)
+        .is_some_and(|file_id| engine.file_content_matches(file_id, content))
 }
 
 fn refresh_open_project_files_after_dependency_open(
@@ -216,6 +241,28 @@ fn refresh_open_project_files_after_dependency_open(
                 "Failed to refresh open file after dependency open: {}: {err}",
                 uri.path()
             );
+        }
+    }
+}
+
+fn source_kind_for_new_open_file(server: &RubyLanguageServer, uri: &Url) -> SourceKind {
+    let Some(workspace) = server.workspace_for_uri(uri) else {
+        return if server.list_workspaces().is_empty() {
+            SourceKind::Project
+        } else {
+            SourceKind::Excluded
+        };
+    };
+    let Ok(path) = uri.to_file_path() else {
+        return SourceKind::Excluded;
+    };
+    let config = server.config.lock().indexing.clone();
+    match ProjectFilePolicy::new(&config) {
+        Ok(policy) if policy.includes(&workspace.root_path, &path) => SourceKind::Project,
+        Ok(_) => SourceKind::Excluded,
+        Err(error) => {
+            log::error!("Cannot classify opened file with project source policy: {error}");
+            SourceKind::Excluded
         }
     }
 }
@@ -1005,6 +1052,67 @@ mod tests {
         assert!(
             query.methods_for_fqn(&generated_fqn).is_empty(),
             "known external didOpen must not reprocess and replace indexed stub facts"
+        );
+    }
+
+    #[tokio::test]
+    async fn did_open_reuses_cold_project_facts_when_buffer_matches_indexed_content() {
+        let server = RubyLanguageServer::default();
+        let workspace_dir = tempfile::tempdir().expect("temporary workspace must be created");
+        let workspace_uri = Url::from_directory_path(workspace_dir.path())
+            .expect("temporary workspace path must convert to URI");
+        let workspace = server.add_workspace(workspace_uri);
+        let path = workspace_dir.path().join("user.rb");
+        let uri = Url::from_file_path(&path).expect("test path must convert to URI");
+        let content = "class User\nend\n";
+        std::fs::write(&path, content).expect("cold-indexed test file must be written to disk");
+        let file_id = workspace
+            .analysis_engine
+            .write()
+            .register_file(SourceFileInput {
+                path,
+                content: content.to_string(),
+                kind: SourceKind::Project,
+            });
+        let user = RubyConstant::new("User").expect("test constant must be valid");
+        let generated =
+            RubyMethod::new("generated_by_extension").expect("test method name must be valid");
+        let owner = FullyQualifiedName::namespace(vec![user]);
+        let fqn = FullyQualifiedName::method(vec![user], generated);
+        workspace.analysis_engine.write().replace_facts(
+            file_id,
+            FileFacts {
+                methods: vec![MethodFact::new(
+                    fqn.clone(),
+                    owner,
+                    TextRange::new(file_id, 0, 5),
+                )],
+                ..Default::default()
+            },
+            ResolveMode::Deferred,
+        );
+
+        handle_did_open(
+            &server,
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "ruby".to_string(),
+                    version: 1,
+                    text: content.to_string(),
+                },
+            },
+        )
+        .await;
+
+        assert!(
+            workspace
+                .analysis_engine
+                .read()
+                .all_method_facts()
+                .iter()
+                .any(|fact| fact.fqn == fqn),
+            "unchanged didOpen must preserve cold-index and extension facts instead of traversing again"
         );
     }
 

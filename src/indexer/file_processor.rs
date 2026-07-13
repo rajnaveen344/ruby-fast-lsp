@@ -18,7 +18,7 @@ use crate::capabilities::diagnostics::generate_diagnostics;
 use crate::extensions::{analysis_ruby_type_from_extension, ExtensionRegistryHandle};
 use crate::server::RubyLanguageServer;
 use anyhow::Result;
-use log::debug;
+use log::{debug, info};
 use ruby_analysis::core::{
     FullyQualifiedName, GraphEdgeFact, GraphEdgeKind, GraphNodeFact, GraphNodeKind, MethodFact,
     MethodParamFact, MethodParamKind as AnalysisMethodParamKind,
@@ -39,6 +39,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 /// Result of processing a file
@@ -192,6 +193,8 @@ impl FileProcessor {
             });
         }
 
+        let total_start = Instant::now();
+        let parse_start = Instant::now();
         // 1. Parse ONLY ONCE
         let analysis_source = analysis_source(uri, content);
         let analysis_engine = server.analysis_engine_for_uri(uri);
@@ -218,6 +221,7 @@ impl FileProcessor {
 
         // 2. Generate Syntax Diagnostics
         let diagnostics = generate_diagnostics(&parse_result, &document);
+        let parse_elapsed = parse_start.elapsed();
 
         // If severe parse errors, skip indexing
         if parse_result.errors().count() > 10 {
@@ -237,6 +241,7 @@ impl FileProcessor {
         let affected_uris = HashSet::new();
 
         // 3. Collect facts.
+        let direct_start = Instant::now();
         let direct_facts_seed = collect_direct_facts(
             &analysis_engine,
             &node,
@@ -252,13 +257,16 @@ impl FileProcessor {
         );
         self.extension_registry
             .ensure_semantic_seed_facts(&analysis_engine);
+        let direct_elapsed = direct_start.elapsed();
 
+        let visitor_start = Instant::now();
         let mut visitor = FactCollector::analysis_only(
             document.clone(),
             Arc::new(self.extension_registry.clone()),
             analysis_engine.clone(),
         );
         visitor.visit(&node);
+        let visitor_elapsed = visitor_start.elapsed();
 
         let extension_index_patches = visitor.extension_index_patches.clone();
         let updated_document = visitor.document.clone();
@@ -283,6 +291,7 @@ impl FileProcessor {
                 .into_iter()
                 .filter(|fact| !existing_type_subjects.contains(&fact.subject)),
         );
+        let replace_start = Instant::now();
         replace_file_analysis(
             &analysis_engine,
             updated_document.analysis_file_id(),
@@ -312,6 +321,7 @@ impl FileProcessor {
             },
             resolution,
         );
+        let replace_elapsed = replace_start.elapsed();
         let current_export_fingerprint = analysis_engine
             .read()
             .semantic_export_fingerprint(analysis_file_id)
@@ -336,6 +346,15 @@ impl FileProcessor {
         }
 
         debug!("Processed file {:?}", uri);
+        info!(
+            "[PERF][file_processor] file={} total={:?} parse={:?} direct={:?} visitor={:?} replace_resolve={:?}",
+            uri.path(),
+            total_start.elapsed(),
+            parse_elapsed,
+            direct_elapsed,
+            visitor_elapsed,
+            replace_elapsed
+        );
 
         Ok(ProcessResult {
             affected_uris,

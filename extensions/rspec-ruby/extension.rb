@@ -127,16 +127,7 @@ end
 extension "rspec-ruby" do
   on_call "describe" do |ctx|
     if RSpecRuby.rspec_root_describe?(ctx)
-      next [
-        define_method(
-          name: ctx.method_name,
-          namespace: ["RSpec"],
-          owner_kind: :singleton,
-          location: ctx.message_range,
-          params: RSpecRuby.dsl_params(ctx.method_name),
-          source: macro_source(ctx)
-        )
-      ]
+      next []
     end
 
     next [] unless RSpecRuby.inside_rspec_scope?(ctx)
@@ -201,23 +192,25 @@ extension "rspec-ruby" do
     name = arg && arg.symbol_or_string
     location = arg ? arg.range : ctx.call_range
 
-    [
-      define_method(
+    patches = []
+    if name || ctx.method_name != "subject"
+      patches << define_method(
         name: ctx.method_name,
         namespace: ctx.current_namespace,
         owner_kind: ctx.namespace_kind,
         location: ctx.message_range,
         params: RSpecRuby.dsl_params(ctx.method_name),
         source: macro_source(ctx)
-      ),
-      define_method(
+      )
+    end
+    patches << define_method(
         name: name || "subject",
         namespace: ctx.current_namespace,
         owner_kind: :instance,
         location: location,
         source: macro_source(ctx)
       )
-    ]
+    patches
   end
 
   on_call "include", "prepend", "extend" do |ctx|

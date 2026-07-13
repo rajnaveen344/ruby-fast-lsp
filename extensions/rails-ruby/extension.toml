@@ -6,7 +6,7 @@ server_version = ">=0.2.6, <0.3.0"
 runtime = "mruby-wasm"
 entry = "extension.rb"
 wasm = "extension.wasm"
-checksum_sha256 = "f6bc183b7e5f6d13c48a206d2411f07de1528c86ddc879dbc3dd19556b5d94b6"
+checksum_sha256 = "0be95ad5fc5dd358fa674a58d531d728ec5f0f881a0bb8b2303e8c5efdeeb7fc"
 capabilities = ["index.call", "code_lens"]
 permissions = []
 

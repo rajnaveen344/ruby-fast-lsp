@@ -81,17 +81,10 @@ class RSpecRubyExtensionTest < Minitest::Test
     assert_equal ["describe", "context", "it", "example", "specify", "before", "after", "around", "let", "let!", "subject", "subject!", "include", "prepend", "extend"], extension.indexed_call_names
   end
 
-  def test_rspec_describe_defines_root_dsl_method
+  def test_rspec_describe_uses_manifest_semantic_target
     patches = extension.index_call(root_rspec_ctx("describe", [constant_arg("User")]))
 
-    method = patches.first.fetch("DefineMethod")
-    assert_equal "describe", method.fetch("name")
-    assert_equal ["RSpec"], method.fetch("namespace")
-    assert_equal "Singleton", method.fetch("owner_kind")
-    assert_equal [
-      { "name" => "args", "kind" => "Rest" },
-      { "name" => "block", "kind" => "Block" }
-    ], method.fetch("params")
+    assert_empty patches
   end
 
   def test_context_defines_nested_dsl_method
@@ -139,6 +132,7 @@ class RSpecRubyExtensionTest < Minitest::Test
   def test_unnamed_subject_defines_subject_method
     patches = extension.index_call(ctx("subject", []))
 
+    assert_equal 1, patches.length
     method = patches.map { |patch| patch.fetch("DefineMethod") }.find { |patch| patch.fetch("name") == "subject" }
     assert_equal "subject", method.fetch("name")
     assert_equal RANGE, method.fetch("location")

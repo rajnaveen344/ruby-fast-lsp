@@ -590,6 +590,13 @@ mod tests {
         assert_eq!(method.namespace, &["User".to_string()]);
         assert_eq!(method.source.extension_id, "rspec-ruby");
         assert_eq!(method.source.macro_name, "let");
+
+        for _ in 0..64 {
+            let repeated = ext.index_call(&let_context()).expect(
+                "INVARIANT VIOLATED: repeated mruby calls corrupted guest allocation state. This is a bug because the host owns and frees every returned output buffer. Fix: clear the shim's retained output pointer when dealloc receives it.",
+            );
+            assert_eq!(repeated.len(), 2);
+        }
     }
 
     #[test]
@@ -620,6 +627,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.response_patches.len(), 2);
+
+        let repeated = ext
+            .handle_event(&ExtensionEvent {
+                event: "request.document_symbol".to_string(),
+                call: None,
+                document: Some(DocumentContext {
+                    uri: "file:///spec/other_spec.rb".to_string(),
+                    text: "RSpec.describe Other do\nend\n".to_string(),
+                }),
+                settings: None,
+                files: None,
+                process_results: None,
+            })
+            .expect(
+                "INVARIANT VIOLATED: repeated mruby events corrupted guest allocation state. This is a bug because response hooks execute for every matching document. Fix: keep host/guest output ownership single-sourced.",
+            );
+        assert_eq!(repeated.response_patches.len(), 1);
     }
 
     #[test]

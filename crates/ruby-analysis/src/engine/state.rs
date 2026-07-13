@@ -630,6 +630,11 @@ impl AnalysisEngine {
         self.sources.files.get(&id)
     }
 
+    pub fn file_content_matches(&self, id: SourceFileId, content: &str) -> bool {
+        self.file(id)
+            .is_some_and(|file| file.content_hash == source_hash(content))
+    }
+
     pub fn semantic_export_fingerprint(
         &self,
         file_id: SourceFileId,

@@ -170,6 +170,13 @@ automatic discovery for umbrella repositories; entries must be relative,
 workspace-contained, existing, and non-overlapping. Git topology never defines
 Ruby semantic topology. Every discovered project owns an isolated
 `AnalysisEngine`, Bundler/stdlib inputs, diagnostics, and extension facts.
+Extension manifest semantic targets must therefore be seeded once per isolated
+engine, not once per shared extension registry. Opening an already cold-indexed
+project file with byte-identical content reuses its existing facts and runs only
+the open-document syntax/diagnostic projection; changed content still takes the
+ordinary per-file replacement path. This reuse path must not refresh other open
+documents; newly indexed files may still refresh open consumers until engine
+dependency tracking can replace that correctness-preserving fallback.
 Document queries and watchers route by longest project-root prefix;
 workspace-symbol search aggregates isolated engines deterministically. Dynamic
 folder add/remove must rehome open documents between project and orphan engines
@@ -292,6 +299,9 @@ Each loaded extension owns one cancellable Wasmtime epoch ticker; every guest
 call boundary resets its fuel and 500 ms epoch deadline, including allocation
 and deallocation exports. Deadline traps disable only that extension and appear
 as `slow` through `ruby-fast-lsp/extensions/status`.
+The mruby shim transfers returned output ownership to the host. When the host
+deallocates that output, the shim must clear its retained pointer and length so
+the next guest call cannot free the same allocation again.
 
 Extension guests activate before becoming eligible for indexing/request events.
 Activation receives the extension's `extensionSettings`; settings-only changes

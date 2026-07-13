@@ -134,7 +134,12 @@ fn main() {
 
             // Process file (collect facts/references)
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let _ = indexer.process_file(&file_uri, &content, &server);
+            let open_start = std::time::Instant::now();
+            let _ = indexer.process_file_current_file_resolution(&file_uri, &content, &server);
+            info!(
+                "Current-file semantic pass completed in {:?}",
+                open_start.elapsed()
+            );
         }
 
         let stats_after_open = dhat::HeapStats::get();
@@ -206,7 +211,12 @@ fn main() {
             drop(docs);
 
             let indexer = FileProcessor::with_extension_registry(server.extension_registry.clone());
-            let _ = indexer.process_file(&file_uri, &content, &server);
+            let reopen_start = std::time::Instant::now();
+            let _ = indexer.process_file_current_file_resolution(&file_uri, &content, &server);
+            info!(
+                "Current-file reopen pass completed in {:?}",
+                reopen_start.elapsed()
+            );
         }
 
         let stats_after_reopen = dhat::HeapStats::get();

@@ -71,3 +71,24 @@ end
     assert!(titles.contains(&"Run RSpec"), "got lenses: {titles:?}");
     assert!(titles.contains(&"Debug RSpec"), "got lenses: {titles:?}");
 }
+
+#[tokio::test]
+async fn rspec_root_describe_has_a_semantic_definition() {
+    let mut editor = FakeEditor::with_extension_package(rspec_package_dir()).await;
+    editor.open("lib/rspec.rb", "module RSpec\nend\n").await;
+    editor
+        .open("spec/user_spec.rb", "RSpec.describe User do\nend\n")
+        .await;
+
+    let definitions = editor.goto_definition("spec/user_spec.rb", 0, 8).await;
+
+    assert_eq!(
+        definitions.len(),
+        1,
+        "RSpec.describe must resolve only to its canonical semantic target, got {definitions:?}"
+    );
+    assert_eq!(
+        definitions[0].uri.path(),
+        "/__ruby_fast_lsp_extension__/semantic_targets.rb"
+    );
+}

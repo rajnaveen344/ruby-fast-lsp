@@ -262,6 +262,13 @@ Remaining extension-platform work toward 9/10 is evolutionary:
 5. Treat runtime introspection as optional, trusted, permission-bounded input;
    static analysis must remain useful and deterministic without a running app.
 
+Real-workspace acceptance is a release criterion, not optional polish. Each
+bundled framework guest must survive repeated calls across a large application,
+seed its semantic targets into every isolated project engine, and produce no
+conflicting patches. Opening an unchanged cold-indexed file must reuse existing
+semantic and extension facts; multi-second full traversal on ordinary didOpen is
+not production-ready behavior.
+
 Do not replace this architecture with direct framework logic in the indexer,
 public engine-store access, LSP-shaped guest contracts, or a second semantic
 write path. Any proposed change to these boundaries requires an explicit

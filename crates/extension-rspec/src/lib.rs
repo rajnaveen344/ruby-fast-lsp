@@ -24,11 +24,7 @@ impl Extension for RSpecExtension {
 
     fn index_call(&self, ctx: &CallContext) -> Vec<IndexPatch> {
         if is_rspec_root_describe(ctx) {
-            return vec![self.define_dsl_macro(
-                ctx,
-                vec!["RSpec".to_string()],
-                NamespaceKind::Singleton,
-            )];
+            return Vec::new();
         }
 
         if ctx.receiver != Receiver::None {
@@ -53,11 +49,14 @@ impl Extension for RSpecExtension {
                 patches
             }
             "subject" | "subject!" => {
-                let mut patches = vec![self.define_dsl_macro(
-                    ctx,
-                    ctx.current_namespace.clone(),
-                    ctx.namespace_kind,
-                )];
+                let mut patches = Vec::new();
+                if first_symbol_or_string(ctx).is_some() || ctx.method_name != "subject" {
+                    patches.push(self.define_dsl_macro(
+                        ctx,
+                        ctx.current_namespace.clone(),
+                        ctx.namespace_kind,
+                    ));
+                }
                 patches.extend(self.define_subject_helper(ctx));
                 patches
             }

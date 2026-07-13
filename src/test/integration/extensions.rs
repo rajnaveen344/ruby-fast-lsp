@@ -99,23 +99,6 @@ end</err>
 }
 
 #[tokio::test]
-async fn rspec_describe_has_generated_definition_location() {
-    check(
-        r#"
-class User
-end
-
-module RSpec
-end
-
-RSpec.<def>desc$0ribe</def> User do
-end
-"#,
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn rspec_dsl_macros_do_not_report_wrong_arity() {
     check(
         r#"

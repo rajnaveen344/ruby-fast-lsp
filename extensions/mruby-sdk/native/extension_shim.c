@@ -79,6 +79,10 @@ uint8_t *alloc(int32_t len) {
 
 void dealloc(uint8_t *ptr, int32_t len) {
   (void)len;
+  if (ptr == last_output) {
+    last_output = NULL;
+    last_output_len = 0;
+  }
   free(ptr);
 }
 

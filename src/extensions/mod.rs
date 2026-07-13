@@ -3,7 +3,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -66,7 +66,7 @@ impl std::fmt::Debug for ExtensionRegistryHandle {
 struct ExtensionRegistry {
     extensions: Vec<Arc<LoadedWasmExtension>>,
     tracked_call_names: BTreeSet<String>,
-    semantic_seeded: Mutex<bool>,
+    semantic_seeded_engines: Mutex<Vec<Weak<RwLock<ruby_analysis::engine::AnalysisEngine>>>>,
     load_config: ExtensionLoadConfig,
     discovery_fingerprint: [u8; 32],
 }
@@ -554,7 +554,7 @@ impl ExtensionRegistry {
         let registry = Self {
             extensions,
             tracked_call_names,
-            semantic_seeded: Mutex::new(false),
+            semantic_seeded_engines: Mutex::new(Vec::new()),
             load_config: config.clone(),
             discovery_fingerprint,
         };
@@ -679,13 +679,18 @@ impl ExtensionRegistry {
         &self,
         engine: &Arc<RwLock<ruby_analysis::engine::AnalysisEngine>>,
     ) {
-        let mut seeded = self.semantic_seeded.lock();
-        if *seeded {
+        let mut seeded_engines = self.semantic_seeded_engines.lock();
+        seeded_engines.retain(|seeded| seeded.strong_count() > 0);
+        if seeded_engines
+            .iter()
+            .filter_map(Weak::upgrade)
+            .any(|seeded| Arc::ptr_eq(&seeded, engine))
+        {
             return;
         }
 
-        let mut engine = engine.write();
-        let file_id = engine.register_file(SourceFileInput {
+        let mut engine_guard = engine.write();
+        let file_id = engine_guard.register_file(SourceFileInput {
             path: PathBuf::from("/__ruby_fast_lsp_extension__/semantic_targets.rb"),
             content: String::new(),
             kind: SourceKind::Stub,
@@ -710,8 +715,9 @@ impl ExtensionRegistry {
                 facts.methods.push(MethodFact::new(fqn, owner, range));
             }
         }
-        engine.replace_facts(file_id, facts, ResolveMode::Deferred);
-        *seeded = true;
+        engine_guard.replace_facts(file_id, facts, ResolveMode::Deferred);
+        drop(engine_guard);
+        seeded_engines.push(Arc::downgrade(engine));
     }
 }
 
@@ -4134,6 +4140,36 @@ frame = true
              This is a bug because extension dispatch must be gated by resolved method target. \
              Fix: preserve owner, owner_kind, method, and frame fields."
         );
+    }
+
+    #[test]
+    fn semantic_seed_facts_are_installed_in_every_isolated_project_engine() {
+        let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/rspec-ruby");
+        let config = RubyFastLspConfig {
+            extension_packages: vec![package.to_string_lossy().into_owned()],
+            ..RubyFastLspConfig::default()
+        };
+        let registry = ExtensionRegistryHandle::from_config(&config);
+        let first = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+        let second = Arc::new(RwLock::new(ruby_analysis::engine::AnalysisEngine::new()));
+
+        registry.ensure_semantic_seed_facts(&first);
+        registry.ensure_semantic_seed_facts(&second);
+
+        for engine in [first, second] {
+            let engine = engine.read();
+            assert!(
+                engine.all_method_facts().iter().any(|fact| {
+                    matches!(
+                        &fact.fqn,
+                        FullyQualifiedName::Method(namespace, method)
+                            if namespace.as_slice() == [RubyConstant::new("RSpec").expect("RSpec is a valid constant")]
+                                && method.as_str() == "describe"
+                    )
+                }),
+                "every isolated project engine must receive the RSpec.describe semantic target"
+            );
+        }
     }
 
     #[test]
